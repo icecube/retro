@@ -62,7 +62,7 @@ my_track = track(1.2, 3.0, -1.7, np.pi/3., 4.1)
 # this binning is in coordinates w.r.t the DOM!
 # which is sitting at this IC position (DOM coordinates origin)
 # and looking at a hit at this time w.r.t the global event time
-DOM_origin = (0., 4., 4., 0.)
+DOM_origin = (0., 3.3, -1.05, 0.)
 ax.plot(DOM_origin[1],DOM_origin[2],'+',markersize=10,c='b')
 ax.plot(DOM_origin[1],DOM_origin[2],'o',markersize=10,mfc='none',c='b')
 
@@ -86,17 +86,17 @@ def ic_to_dom_z(x):
     return x - DOM_origin[3]
 
 # binning
-DOM_x_bin_edges = np.linspace(-10,10,11)
-DOM_y_bin_edges = np.linspace(-10,10,11)
+DOM_x_bin_edges = np.linspace(-5,5,11)
+DOM_y_bin_edges = np.linspace(-6,6,11)
 
 
 # plot DOM grid
 for DOM_x in DOM_x_bin_edges:
     x = dom_to_ic_x(DOM_x)
-    ax.axhline(x,color='b', linestyle='-',alpha=0.2)
+    ax.axvline(x,color='b', linestyle='-',alpha=0.2)
 for DOM_y in DOM_y_bin_edges:
     y = dom_to_ic_y(DOM_y)
-    ax.axvline(y,color='b', linestyle='-',alpha=0.2)
+    ax.axhline(y,color='b', linestyle='-',alpha=0.2)
 
 # time bin
 time_bin = (0,10)
