@@ -62,7 +62,7 @@ my_track = track(1.2, 3.0, -1.7, np.pi/3., 4.1)
 # this binning is in coordinates w.r.t the DOM!
 # which is sitting at this IC position (DOM coordinates origin)
 # and looking at a hit at this time w.r.t the global event time
-DOM_origin = (0., 3.3, -1.05, 0.)
+DOM_origin = (3., 1.2, -1.05, 0.)
 ax.plot(DOM_origin[1],DOM_origin[2],'+',markersize=10,c='b')
 ax.plot(DOM_origin[1],DOM_origin[2],'o',markersize=10,mfc='none',c='b')
 
@@ -85,29 +85,57 @@ def ic_to_dom_y(x):
 def ic_to_dom_z(x):
     return x - DOM_origin[3]
 
+
+def dom_to_ic_r(x):
+    pass
+def dom_to_ic_phi(x):
+    pass
+
+def ic_to_dom_r(x,y):
+    return np.sqrt((x - DOM_origin[1])**2 + (y - DOM_origin[2])**2)
+def ic_to_dom_phi(x,y):
+    return np.atan2(y,x)
+
 # binning
 DOM_x_bin_edges = np.linspace(-5,5,11)
-DOM_y_bin_edges = np.linspace(-6,6,11)
+DOM_y_bin_edges = np.linspace(-5,5,11)
 
+# polar
+DOM_r_bin_edges = np.linspace(0,10,11)
+DOM_phi_bin_edges = np.linspace(0,2*np.pi,11)
 
-# plot DOM grid
+# plot DOM grids
+# cartesian
 for DOM_x in DOM_x_bin_edges:
     x = dom_to_ic_x(DOM_x)
     ax.axvline(x,color='b', linestyle='-',alpha=0.2)
 for DOM_y in DOM_y_bin_edges:
     y = dom_to_ic_y(DOM_y)
     ax.axhline(y,color='b', linestyle='-',alpha=0.2)
+# polar
+for DOM_r in DOM_r_bin_edges:
+    circle = plt.Circle((DOM_origin[1], DOM_origin[2]), DOM_r, color='g', alpha=0.2, fill=False)
+    ax.add_artist(circle)
+for DOM_phi in DOM_phi_bin_edges:
+    dx = 100 * np.cos(DOM_phi)
+    dy = 100 * np.sin(DOM_phi)
+    ax.plot([DOM_origin[1],DOM_origin[1] + dx],[DOM_origin[2],DOM_origin[2] + dy], ls='-', color='g', alpha=0.2)
 
 # time bin
-time_bin = (0,10)
+DOM_time_bin = (0,10)
+IC_time_bin = (dom_to_ic_t(DOM_time_bin[0]),dom_to_ic_t(DOM_time_bin[1]))
 
 # track interval in both dimensions
-extent = my_track.extent(*time_bin)
+extent = my_track.extent(*IC_time_bin)
 track_x_inter = sorted((extent[0][0], extent[1][0]))
 track_y_inter = sorted((extent[0][1], extent[1][1]))
 # go to DOM coords
 DOM_track_x_inter = (ic_to_dom_x(track_x_inter[0]), ic_to_dom_x(track_x_inter[1]))
 DOM_track_y_inter = (ic_to_dom_y(track_y_inter[0]), ic_to_dom_y(track_y_inter[1]))
+
+# ToDO: r can go smaller!
+DOM_track_r_inter = (ic_to_dom_r(track_x_inter[0],track_y_inter[0]), ic_to_dom_r(track_x_inter[1],track_y_inter[1]))
+DOM_track_phi_inter = (ic_to_dom_phi(track_x_inter[0],track_y_inter[0]), ic_to_dom_phi(track_x_inter[1],track_y_inter[1]))
 
 # for every dimension, get track interval in every bin
 x_inter = []
@@ -145,6 +173,25 @@ for i in range(len(DOM_y_bin_edges) - 1):
         else:
             r_l = my_track.r_of_y(dom_to_ic_y(y_l))
             r_h = my_track.r_of_y(dom_to_ic_y(y_h))
+            y_inter.append(sorted((r_l,r_h)))
+    else:
+        y_inter.append(None)
+print y_inter
+
+r_inter = []
+for i in range(len(DOM_y_bin_edges) - 1):
+    # get interval overlaps
+    # from these two intervals:
+    t = DOM_track_r_inter
+    b = (DOM_r_bin_edges[i],DOM_r_bin_edges[i+1])
+    if (b[0] <= t[1]) and (t[0] <= b[1]):
+        r_h = min(b[1], t[1])
+        r_l = max(b[0], t[0])
+        if r_l == r_h:
+            r_inter.append(track_r_inter)
+        else:
+            r_l = my_track.r_of_y(dom_to_ic_y(r_l))
+            r_h = my_track.r_of_y(dom_to_ic_y(r_h))
             y_inter.append(sorted((r_l,r_h)))
     else:
         y_inter.append(None)
