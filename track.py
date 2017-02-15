@@ -134,6 +134,10 @@ DOM_track_x_inter = (ic_to_dom_x(track_x_inter[0]), ic_to_dom_x(track_x_inter[1]
 DOM_track_y_inter = (ic_to_dom_y(track_y_inter[0]), ic_to_dom_y(track_y_inter[1]))
 
 # ToDO: r can go smaller!
+
+
+
+
 DOM_track_r_inter = (ic_to_dom_r(track_x_inter[0],track_y_inter[0]), ic_to_dom_r(track_x_inter[1],track_y_inter[1]))
 DOM_track_phi_inter = (ic_to_dom_phi(track_x_inter[0],track_y_inter[0]), ic_to_dom_phi(track_x_inter[1],track_y_inter[1]))
 
