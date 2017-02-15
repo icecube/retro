@@ -81,8 +81,12 @@ class track(object):
     def r_of_phi(self, phi):
         return (np.sin(phi)*self.x0 - np.cos(phi)*self.y0)/(np.cos(phi)*np.sin(self.phi) - np.sin(phi)*np.cos(self.phi))
 
-    def r_of_r(self, r):
-        pass
+    def r_of_r_neg(self, r):
+        A = np.sqrt(r**2 - self.x0**2*np.sin(self.phi)**2 - self.y0**2*np.cos(self.phi)**2 + 2*self.x0*self.y0*np.sin(self.phi)*np.cos(self.phi))
+        return - A - self.x0*np.cos(self.phi) - self.y0*np.sin(self.phi)
+    def r_of_r_pos(self, r):
+        A = np.sqrt(r**2 - self.x0**2*np.sin(self.phi)**2 - self.y0**2*np.cos(self.phi)**2 + 2*self.x0*self.y0*np.sin(self.phi)*np.cos(self.phi))
+        return A - self.x0*np.cos(self.phi) - self.y0*np.sin(self.phi)
  
 my_track = track(0, -4.0, -2.1, 0.03, 5.1)
 
@@ -217,6 +221,28 @@ for i in range(len(phi_bin_edges) - 1):
 print phi_inter
 
 
+r_inter_pos = []
+r_inter_neg = []
+
+for i in range(len(r_bin_edges) - 1):
+    # get interval overlaps
+    # from these two intervals:
+    t = track_r_extent
+    b = (r_bin_edges[i],r_bin_edges[i+1])
+    if (b[0] <= t[1]) and (t[0] <= b[1]):
+        ro_h = min(b[1], t[1])
+        ro_l = max(b[0], t[0])
+        r_l = my_track.r_of_r_pos(ro_l)
+        r_h = my_track.r_of_r_pos(ro_h)
+        r_inter_pos.append(sorted((r_l,r_h)))
+        r_l = my_track.r_of_r_neg(ro_l)
+        r_h = my_track.r_of_r_neg(ro_h)
+        r_inter_neg.append(sorted((r_l,r_h)))
+    else:
+        r_inter_neg.append(None)
+        r_inter_pos.append(None)
+print r_inter_pos
+print r_inter_neg
 
 # get bins with interval overlaps
 for i,x in enumerate(x_inter):
