@@ -96,8 +96,8 @@ class track(object):
             A = np.sqrt(S)
         return - A - self.x0*np.cos(self.phi) - self.y0*np.sin(self.phi)
  
-#my_track = track(0, -4.0, -2.1, 0.05, 5.5)
-my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
+my_track = track(0, -4.0, -2.1, 0.05, 5.5)
+#my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
 # plot the DOM
 ax.plot(0,0,'+',markersize=10,c='b')
@@ -164,16 +164,16 @@ track_y_extent = sorted((extent[0][1], extent[1][1]))
 track_phi_extent = sorted([cphi(*extent[0]), cphi(*extent[1])])
 if np.abs(track_phi_extent[1] - track_phi_extent[0])>np.pi:
     track_phi_extent.append(track_phi_extent.pop(0))
-track_r_extent = sorted((cr(*extent[0]), cr(*extent[1])))
-if tb <= t_extent[0]:
-    track_r_extent_neg = track_r_extent
+track_r_extent = (cr(*extent[0]), cr(*extent[1]))
+if tb <= t_extent[0] and tb <= t_extent[1]:
+    track_r_extent_neg = sorted(track_r_extent)
     track_r_extent_pos = [0,0]
-elif tb >= t_extent[1]:
-    track_r_extent_pos = track_r_extent
+elif tb >= t_extent[0] and tb >= t_extent[1]:
+    track_r_extent_pos = sorted(track_r_extent)
     track_r_extent_neg = [0,0]
 else:
-    track_r_extent_neg = sorted([track_r_extent[0], rb])
-    track_r_extent_pos = sorted([rb, track_r_extent[1]])
+    track_r_extent_pos = sorted([track_r_extent[0], rb])
+    track_r_extent_neg = sorted([rb, track_r_extent[1]])
 
 print 'phi ext ', track_phi_extent
 print 'r ext ', track_r_extent
@@ -273,8 +273,12 @@ for i in range(len(r_bin_edges) - 1):
     if (b[0] <= t[1]) and (t[0] <= b[1]):
         ro_h = min(b[1], t[1])
         ro_l = max(b[0], t[0])
-        r_l = my_track.r_of_r_neg(ro_l)
-        r_h = my_track.r_of_r_neg(ro_h)
+        if ro_l > ro_h:
+            r_l = my_track.r_of_r_neg(ro_l)
+            r_h = my_track.r_of_r_neg(ro_h)
+        else:
+            r_l = my_track.r_of_r_pos(ro_l)
+            r_h = my_track.r_of_r_pos(ro_h)
         r_inter_neg.append(sorted((r_l,r_h)))
     else:
         r_inter_neg.append(None)
@@ -287,8 +291,12 @@ for i in range(len(r_bin_edges) - 1):
     if (b[0] <= t[1]) and (t[0] <= b[1]):
         ro_h = min(b[1], t[1])
         ro_l = max(b[0], t[0])
-        r_l = my_track.r_of_r_pos(ro_l)
-        r_h = my_track.r_of_r_pos(ro_h)
+        if ro_l > ro_h:
+            r_l = my_track.r_of_r_pos(ro_l)
+            r_h = my_track.r_of_r_pos(ro_h)
+        else:
+            r_l = my_track.r_of_r_neg(ro_l)
+            r_h = my_track.r_of_r_neg(ro_h)
         r_inter_pos.append(sorted((r_l,r_h)))
     else:
         r_inter_pos.append(None)
