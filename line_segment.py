@@ -81,14 +81,23 @@ class track(object):
     def r_of_phi(self, phi):
         return (np.sin(phi)*self.x0 - np.cos(phi)*self.y0)/(np.cos(phi)*np.sin(self.phi) - np.sin(phi)*np.cos(self.phi))
 
-    def r_of_r_neg(self, r):
-        A = np.sqrt(r**2 - self.x0**2*np.sin(self.phi)**2 - self.y0**2*np.cos(self.phi)**2 + 2*self.x0*self.y0*np.sin(self.phi)*np.cos(self.phi))
-        return - A - self.x0*np.cos(self.phi) - self.y0*np.sin(self.phi)
     def r_of_r_pos(self, r):
-        A = np.sqrt(r**2 - self.x0**2*np.sin(self.phi)**2 - self.y0**2*np.cos(self.phi)**2 + 2*self.x0*self.y0*np.sin(self.phi)*np.cos(self.phi))
+        S = r**2 - self.x0**2*np.sin(self.phi)**2 - self.y0**2*np.cos(self.phi)**2 + 2*self.x0*self.y0*np.sin(self.phi)*np.cos(self.phi)
+        if S < 0:
+            A = 0
+        else:
+            A = np.sqrt(S)
         return A - self.x0*np.cos(self.phi) - self.y0*np.sin(self.phi)
+    def r_of_r_neg(self, r):
+        S = r**2 - self.x0**2*np.sin(self.phi)**2 - self.y0**2*np.cos(self.phi)**2 + 2*self.x0*self.y0*np.sin(self.phi)*np.cos(self.phi)
+        if S < 0:
+            A = 0
+        else:
+            A = np.sqrt(S)
+        return - A - self.x0*np.cos(self.phi) - self.y0*np.sin(self.phi)
  
-my_track = track(0, -4.0, -2.1, 0.03, 5.1)
+#my_track = track(0, -4.0, -2.1, 0.05, 5.5)
+my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
 # plot the DOM
 ax.plot(0,0,'+',markersize=10,c='b')
@@ -133,18 +142,6 @@ def cphi(x,y):
     if v < 0: v += 2*np.pi
     return v
 
-# maximum extent:
-t_extent = my_track.extent(*time_bin)
-r_extent = (my_track.c * t_extent[0], my_track.c * t_extent[1])
-extent = [my_track.point(t_extent[0]), my_track.point(t_extent[1])]
-track_x_extent = sorted((extent[0][0], extent[1][0]))
-track_y_extent = sorted((extent[0][1], extent[1][1]))
-track_phi_extent = sorted((cphi(*extent[0]), cphi(*extent[1])))
-track_r_extent = sorted((cr(*extent[0]), cr(*extent[1])))
-
-print 'phi ext ', track_phi_extent
-print 'r ext ', track_r_extent
-
 # closest point
 print 'impact time'
 tb = my_track.tb
@@ -154,6 +151,33 @@ if tb > my_track.t0 and tb < my_track.t0 + my_track.dt:
     xb, yb = my_track.point(my_track.tb)
     print xb, yb
     ax.scatter(xb, yb,c='r')
+    rb = cr(xb,yb)
+
+# maximum extent:
+t_extent = my_track.extent(*time_bin)
+r_extent = (my_track.c * t_extent[0], my_track.c * t_extent[1])
+print 'R ext', r_extent
+extent = [my_track.point(t_extent[0]), my_track.point(t_extent[1])]
+track_x_extent = sorted((extent[0][0], extent[1][0]))
+track_y_extent = sorted((extent[0][1], extent[1][1]))
+#track_phi_extent = sorted((cphi(*extent[0]), cphi(*extent[1])))
+track_phi_extent = sorted([cphi(*extent[0]), cphi(*extent[1])])
+if np.abs(track_phi_extent[1] - track_phi_extent[0])>np.pi:
+    track_phi_extent.append(track_phi_extent.pop(0))
+track_r_extent = sorted((cr(*extent[0]), cr(*extent[1])))
+if tb <= t_extent[0]:
+    track_r_extent_neg = track_r_extent
+    track_r_extent_pos = [0,0]
+elif tb >= t_extent[1]:
+    track_r_extent_pos = track_r_extent
+    track_r_extent_neg = [0,0]
+else:
+    track_r_extent_neg = sorted([track_r_extent[0], rb])
+    track_r_extent_pos = sorted([rb, track_r_extent[1]])
+
+print 'phi ext ', track_phi_extent
+print 'r ext ', track_r_extent
+
 
 
 # for every dimension, get track interval in every bin
@@ -163,12 +187,11 @@ for i in range(len(x_bin_edges) - 1):
     # from these two intervals:
     t = track_x_extent
     b = (x_bin_edges[i],x_bin_edges[i+1])
-    if (b[0] <= t[1]) and (t[0] <= b[1]):
+    if t[0] == t[1]:
+        print 'same same'
+        x_inter.append(r_extent)
+    elif (b[0] <= t[1]) and (t[0] <= b[1]):
         # along coordinate axis
-        if track_x_extent[0] == track_x_extent[1]:
-            # ToDo: shpuld e r extent!
-            x_inter.append(r_extent)
-            continue
         x_h = min(b[1], t[1])
         x_l = max(b[0], t[0])
         r_l = my_track.r_of_x(x_l)
@@ -176,7 +199,7 @@ for i in range(len(x_bin_edges) - 1):
         x_inter.append(sorted((r_l,r_h)))
     else:
         x_inter.append(None)
-print x_inter
+print 'X: ', x_inter
 
 
 y_inter = []
@@ -197,7 +220,7 @@ for i in range(len(y_bin_edges) - 1):
         y_inter.append(sorted((r_l,r_h)))
     else:
         y_inter.append(None)
-print y_inter
+print 'Y: ', y_inter
 
 
 phi_inter = []
@@ -205,29 +228,61 @@ for i in range(len(phi_bin_edges) - 1):
     # get interval overlaps
     # from these two intervals:
     t = track_phi_extent
+
     b = (phi_bin_edges[i],phi_bin_edges[i+1])
-    if (b[0] <= t[1]) and (t[0] <= b[1]):
+    if t[0] == t[1]:
         # along coordinate axis
-        if track_phi_extent[0] == track_phi_extent[1]:
-            phi_inter.append(r_extent)
-            continue
+        phi_inter.append(r_extent)
+    elif t[0] <= t[1] and (b[0] <= t[1]) and (t[0] <= b[1]):
         phi_h = min(b[1], t[1])
         phi_l = max(b[0], t[0])
         r_l = my_track.r_of_phi(phi_l)
         r_h = my_track.r_of_phi(phi_h)
         phi_inter.append(sorted((r_l,r_h)))
+    elif t[1] < t[0]:
+        if b[1] >= 0 and t[1] >= b[0]:
+            phi_h = min(b[1], t[1])
+            phi_l = max(b[0],0)
+        elif 2*np.pi > b[0] and b[1] >= t[0]:
+            phi_h = min(b[1], 2*np.pi)
+            phi_l = max(b[0],t[0])
+        elif b[0] <= t[1] and t[0] <= t[1]:
+            phi_h = min(b[1], t[1])
+            phi_l = max(b[0], t[0])
+        else:
+            phi_inter.append(None)
+            continue
+        r_l = my_track.r_of_phi(phi_l)
+        r_h = my_track.r_of_phi(phi_h)
+        phi_inter.append(sorted((r_l,r_h)))
     else:
         phi_inter.append(None)
-print phi_inter
+print 'Phi: ', phi_inter
 
+print 'R'
+print track_r_extent_pos
+print track_r_extent_neg
 
-r_inter_pos = []
+# also need two r extents!
 r_inter_neg = []
-
 for i in range(len(r_bin_edges) - 1):
     # get interval overlaps
     # from these two intervals:
-    t = track_r_extent
+    t = track_r_extent_neg
+    b = (r_bin_edges[i],r_bin_edges[i+1])
+    if (b[0] <= t[1]) and (t[0] <= b[1]):
+        ro_h = min(b[1], t[1])
+        ro_l = max(b[0], t[0])
+        r_l = my_track.r_of_r_neg(ro_l)
+        r_h = my_track.r_of_r_neg(ro_h)
+        r_inter_neg.append(sorted((r_l,r_h)))
+    else:
+        r_inter_neg.append(None)
+r_inter_pos = []
+for i in range(len(r_bin_edges) - 1):
+    # get interval overlaps
+    # from these two intervals:
+    t = track_r_extent_pos
     b = (r_bin_edges[i],r_bin_edges[i+1])
     if (b[0] <= t[1]) and (t[0] <= b[1]):
         ro_h = min(b[1], t[1])
@@ -235,15 +290,12 @@ for i in range(len(r_bin_edges) - 1):
         r_l = my_track.r_of_r_pos(ro_l)
         r_h = my_track.r_of_r_pos(ro_h)
         r_inter_pos.append(sorted((r_l,r_h)))
-        r_l = my_track.r_of_r_neg(ro_l)
-        r_h = my_track.r_of_r_neg(ro_h)
-        r_inter_neg.append(sorted((r_l,r_h)))
     else:
-        r_inter_neg.append(None)
         r_inter_pos.append(None)
 print r_inter_pos
 print r_inter_neg
 
+print 'cartesian\n'
 # get bins with interval overlaps
 for i,x in enumerate(x_inter):
     if x is None: continue
@@ -255,6 +307,24 @@ for i,x in enumerate(x_inter):
             print 'length r = %.2f'%length
             print 'at bin %i, %i'%(i,j)
 
+print 'polar\n'
+# get bins with interval overlaps
+for i,phi in enumerate(phi_inter):
+    if phi is None: continue
+    for j,r in enumerate(r_inter_neg):
+        if r is None: continue
+        if (r[0] < phi[1]) and (phi[0] < r[1]):
+            # we have oberlap
+            length = min(phi[1], r[1]) - max(phi[0], r[0])
+            print 'length r = %.2f'%length
+            print 'at bin %i, %i'%(i,j)
+    for j,r in enumerate(r_inter_pos):
+        if r is None: continue
+        if (r[0] < phi[1]) and (phi[0] < r[1]):
+            # we have oberlap
+            length = min(phi[1], r[1]) - max(phi[0], r[0])
+            print 'length r = %.2f'%length
+            print 'at bin %i, %i'%(i,j)
 # polt
 x_0, y_0 = my_track.point(my_track.t_v)
 x_e, y_e = my_track.point(my_track.t0 + my_track.dt)
