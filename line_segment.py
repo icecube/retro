@@ -4,8 +4,11 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 # plot setup
-fig = plt.figure(figsize=(10,10))
-ax = fig.add_subplot(111)
+fig = plt.figure(figsize=(20,10))
+#fig, (ax, ax2) = plt.subplots(ncols=2, subplot_kw=dict(projection='polar'))
+
+ax = fig.add_subplot(121,adjustable='box', aspect='equal')
+ax2 = fig.add_subplot(122, projection='polar')
 ax.set_xlim((-10,10))
 ax.set_ylim((-10,10))
 ax.grid(True)
@@ -107,16 +110,16 @@ ax.plot(0,0,'o',markersize=10,mfc='none',c='b')
 x_bin_edges = np.linspace(-5,5,11)
 y_bin_edges = np.linspace(-5,5,11)
 # polar
-r_bin_edges = np.linspace(0,10,11)
-phi_bin_edges = np.linspace(0,2*np.pi,11)
+r_bin_edges = np.linspace(0,10,101)
+phi_bin_edges = np.linspace(0,2*np.pi,101)
 # plot DOM grids
 # cartesian
-for x in x_bin_edges:
-    x = x
-    ax.axvline(x,color='b', linestyle='-',alpha=0.2)
-for y in y_bin_edges:
-    y = y
-    ax.axhline(y,color='b', linestyle='-',alpha=0.2)
+#for x in x_bin_edges:
+#    x = x
+#    ax.axvline(x,color='b', linestyle='-',alpha=0.2)
+#for y in y_bin_edges:
+#    y = y
+#    ax.axhline(y,color='b', linestyle='-',alpha=0.2)
 # polar
 for r in r_bin_edges:
     circle = plt.Circle((0,0), r, color='g', alpha=0.2, fill=False)
@@ -143,20 +146,20 @@ def cphi(x,y):
     return v
 
 # closest point
-print 'impact time'
+#print 'impact time'
 tb = my_track.tb
 
 if tb > my_track.t0 and tb < my_track.t0 + my_track.dt:
-    print 'need to split at'
+    #print 'need to split at'
     xb, yb = my_track.point(my_track.tb)
-    print xb, yb
-    ax.scatter(xb, yb,c='r')
+    #print xb, yb
+    #ax.scatter(xb, yb,c='r')
     rb = cr(xb,yb)
 
 # maximum extent:
 t_extent = my_track.extent(*time_bin)
 r_extent = (my_track.c * t_extent[0], my_track.c * t_extent[1])
-print 'R ext', r_extent
+#print 'R ext', r_extent
 extent = [my_track.point(t_extent[0]), my_track.point(t_extent[1])]
 track_x_extent = sorted((extent[0][0], extent[1][0]))
 track_y_extent = sorted((extent[0][1], extent[1][1]))
@@ -175,52 +178,52 @@ else:
     track_r_extent_pos = sorted([track_r_extent[0], rb])
     track_r_extent_neg = sorted([rb, track_r_extent[1]])
 
-print 'phi ext ', track_phi_extent
-print 'r ext ', track_r_extent
+#print 'phi ext ', track_phi_extent
+#print 'r ext ', track_r_extent
 
 
 
 # for every dimension, get track interval in every bin
-x_inter = []
-for i in range(len(x_bin_edges) - 1):
-    # get interval overlaps
-    # from these two intervals:
-    t = track_x_extent
-    b = (x_bin_edges[i],x_bin_edges[i+1])
-    if t[0] == t[1]:
-        print 'same same'
-        x_inter.append(r_extent)
-    elif (b[0] <= t[1]) and (t[0] <= b[1]):
-        # along coordinate axis
-        x_h = min(b[1], t[1])
-        x_l = max(b[0], t[0])
-        r_l = my_track.r_of_x(x_l)
-        r_h = my_track.r_of_x(x_h)
-        x_inter.append(sorted((r_l,r_h)))
-    else:
-        x_inter.append(None)
-print 'X: ', x_inter
-
-
-y_inter = []
-for i in range(len(y_bin_edges) - 1):
-    # get interval overlaps
-    # from these two intervals:
-    t = track_y_extent
-    b = (y_bin_edges[i],y_bin_edges[i+1])
-    if (b[0] <= t[1]) and (t[0] <= b[1]):
-        # along coordinate axis
-        if track_y_extent[0] == track_y_extent[1]:
-            y_inter.append(r_extent)
-            continue
-        y_h = min(b[1], t[1])
-        y_l = max(b[0], t[0])
-        r_l = my_track.r_of_y(y_l)
-        r_h = my_track.r_of_y(y_h)
-        y_inter.append(sorted((r_l,r_h)))
-    else:
-        y_inter.append(None)
-print 'Y: ', y_inter
+#x_inter = []
+#for i in range(len(x_bin_edges) - 1):
+#    # get interval overlaps
+#    # from these two intervals:
+#    t = track_x_extent
+#    b = (x_bin_edges[i],x_bin_edges[i+1])
+#    if t[0] == t[1]:
+#        print 'same same'
+#        x_inter.append(r_extent)
+#    elif (b[0] <= t[1]) and (t[0] <= b[1]):
+#        # along coordinate axis
+#        x_h = min(b[1], t[1])
+#        x_l = max(b[0], t[0])
+#        r_l = my_track.r_of_x(x_l)
+#        r_h = my_track.r_of_x(x_h)
+#        x_inter.append(sorted((r_l,r_h)))
+#    else:
+#        x_inter.append(None)
+#print 'X: ', x_inter
+#
+#
+#y_inter = []
+#for i in range(len(y_bin_edges) - 1):
+#    # get interval overlaps
+#    # from these two intervals:
+#    t = track_y_extent
+#    b = (y_bin_edges[i],y_bin_edges[i+1])
+#    if (b[0] <= t[1]) and (t[0] <= b[1]):
+#        # along coordinate axis
+#        if track_y_extent[0] == track_y_extent[1]:
+#            y_inter.append(r_extent)
+#            continue
+#        y_h = min(b[1], t[1])
+#        y_l = max(b[0], t[0])
+#        r_l = my_track.r_of_y(y_l)
+#        r_h = my_track.r_of_y(y_h)
+#        y_inter.append(sorted((r_l,r_h)))
+#    else:
+#        y_inter.append(None)
+#print 'Y: ', y_inter
 
 
 phi_inter = []
@@ -257,11 +260,11 @@ for i in range(len(phi_bin_edges) - 1):
         phi_inter.append(sorted((r_l,r_h)))
     else:
         phi_inter.append(None)
-print 'Phi: ', phi_inter
+#print 'Phi: ', phi_inter
 
-print 'R'
-print track_r_extent_pos
-print track_r_extent_neg
+#print 'R'
+#print track_r_extent_pos
+#print track_r_extent_neg
 
 # also need two r extents!
 r_inter_neg = []
@@ -300,22 +303,31 @@ for i in range(len(r_bin_edges) - 1):
         r_inter_pos.append(sorted((r_l,r_h)))
     else:
         r_inter_pos.append(None)
-print r_inter_pos
-print r_inter_neg
+#print r_inter_pos
+#print r_inter_neg
 
-print 'cartesian\n'
-# get bins with interval overlaps
-for i,x in enumerate(x_inter):
-    if x is None: continue
-    for j,y in enumerate(y_inter):
-        if y is None: continue
-        if (y[0] < x[1]) and (x[0] < y[1]):
-            # we have oberlap
-            length = min(x[1], y[1]) - max(x[0], y[0])
-            print 'length r = %.2f'%length
-            print 'at bin %i, %i'%(i,j)
+#print 'cartesian\n'
+## get bins with interval overlaps
+#for i,x in enumerate(x_inter):
+#    if x is None: continue
+#    for j,y in enumerate(y_inter):
+#        if y is None: continue
+#        if (y[0] < x[1]) and (x[0] < y[1]):
+#            # we have oberlap
+#            length = min(x[1], y[1]) - max(x[0], y[0])
+#            print 'length r = %.2f'%length
+#            print 'at bin %i, %i'%(i,j)
 
-print 'polar\n'
+
+#phi_midpoints = 0.5 * (phi_bin_edges[:-1] + phi_bin_edges[1:])
+#r_midpoints = 0.5 * (r_bin_edges[:-1] + r_bin_edges[1:])
+
+phiphi, rr = np.meshgrid(phi_bin_edges, r_bin_edges)
+#phiphi = phiphi[::-1]
+#rr = rr[::-1]
+z = np.zeros(phiphi.size).reshape(phiphi.shape)
+
+#print 'polar\n'
 # get bins with interval overlaps
 for i,phi in enumerate(phi_inter):
     if phi is None: continue
@@ -324,18 +336,24 @@ for i,phi in enumerate(phi_inter):
         if (r[0] < phi[1]) and (phi[0] < r[1]):
             # we have oberlap
             length = min(phi[1], r[1]) - max(phi[0], r[0])
-            print 'length r = %.2f'%length
-            print 'at bin %i, %i'%(i,j)
+            z[j][i] += length
+            #print 'length r = %.2f'%length
+            #print 'at bin %i, %i'%(i,j)
     for j,r in enumerate(r_inter_pos):
         if r is None: continue
         if (r[0] < phi[1]) and (phi[0] < r[1]):
             # we have oberlap
             length = min(phi[1], r[1]) - max(phi[0], r[0])
-            print 'length r = %.2f'%length
-            print 'at bin %i, %i'%(i,j)
-# polt
+            z[j][i] += length
+            #print 'length r = %.2f'%length
+            #print 'at bin %i, %i'%(i,j)
+# plot
 x_0, y_0 = my_track.point(my_track.t_v)
 x_e, y_e = my_track.point(my_track.t0 + my_track.dt)
 ax.arrow(x_0, y_0, x_e - x_0, y_e - y_0, head_width=0.05, head_length=0.1, fc='k', ec='k')
+
+ax2.pcolormesh(phiphi, rr, z,cmap='Purples')
+ax2.grid(True)
+
 plt.show()
-plt.savefig('test.png')
+plt.savefig('test.png',dpi=150)
