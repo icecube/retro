@@ -24,30 +24,30 @@ ax.grid(True)
 # set_origin is used to displace the track so it will be w.r.t. to DOM coordinate system
 
 class track(object):
-    def __init__(self, t_v, x_v, y_v, phi, length):
+    def __init__(self, t_v, x_v, y_v, z_v, phi, theta, length):
         # speed of light
         self.c = 1.
         # vertex position, angle and length
         self.t_v = t_v
         self.x_v = x_v
         self.y_v = y_v
+        self.z_v = z_v
         self.phi = phi
-        self.sin = np.sin(phi)
-        self.cos = np.cos(phi)
-        self.tan = np.tan(phi)
+        self.theta = theta
+        self.sinphi = np.sin(phi)
+        self.cosphi = np.cos(phi)
+        self.tanphi = np.tan(phi)
+        self.sintheta = np.sin(theta)
+        self.costheta = np.cos(theta)
         self.length = length
         self.dt = self.length / self.c
-        self.set_origin(0,0,0)
+        self.set_origin(0,0,0,0)
 
-    def set_origin(self, t, x, y):
+    def set_origin(self, t, x, y, z):
         self.t_o = t
         self.x_o = x
         self.y_o = y
-
-    @property
-    def tb(self):
-        # closest time to origin
-        return self.t0 - (self.x0*self.cos + self.y0*self.sin) / self.c
+        self.z_o = z
 
     @property
     def t0(self):
@@ -58,15 +58,19 @@ class track(object):
     @property
     def y0(self):
         return self.y_v - self.y_o
+    @property
+    def z0(self):
+        return self.z_v - self.z_o
 
     def point(self, t):
         # make sure time is valid
         assert (self.t0 <= t) and (t <= self.t0 + self.dt) 
         dt = (t - self.t0)
         dr = self.c * dt
-        x = self.x0 + dr * self.cos
-        y = self.y0 + dr * self.sin
-        return (x,y)
+        x = self.x0 + dr * self.sintheta * self.cosphi
+        y = self.y0 + dr * self.sintheta * self.sinphi
+        z = self.z0 + dr * self.costheta
+        return (x,y,z)
 
     def extent(self, t_low, t_high):
         # get full extend of track in time interval
@@ -78,16 +82,18 @@ class track(object):
         else:
             return None
 
-    def r_of_x(self, x):
-        return (x - self.x0)/self.cos
-
-    def r_of_y(self, y):
-        return (y - self.y0)/self.sin
+    @property
+    def tb(self):
+        # closest time to origin
+        return self.t0 - (self.x0*self.sintheta*self.cosphi + self.y0*self.sintheta*self.sinphi + self.z0*self.costheta) / self.c
 
     def r_of_phi(self, phi):
         sin = np.sin(phi)
         cos = np.cos(phi)
         return (sin*self.x0 - cos*self.y0)/(cos*self.sin - sin*self.cos)
+
+    def r_of_theta(self, theta):
+        pass
 
     def r_of_r_pos(self, r):
         S = r**2 - (self.x0*self.sin)**2 - (self.y0*self.cos)**2 + 2*self.x0*self.y0*self.sin*self.cos
@@ -96,6 +102,7 @@ class track(object):
         else:
             A = np.sqrt(S)
         return A - self.x0*self.cos - self.y0*self.sin
+
     def r_of_r_neg(self, r):
         S = r**2 - (self.x0*self.sin)**2 - (self.y0*self.cos)**2 + 2*self.x0*self.y0*self.sin*self.cos
         if S < 0:
@@ -111,8 +118,10 @@ my_track.set_origin(5,0,-1)
 #my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
 # plot
-x_0, y_0 = my_track.point(my_track.t0)
-x_e, y_e = my_track.point(my_track.t0 + my_track.dt)
+x_0, y_0, z_0 = my_track.point(my_track.t0)
+x_e, y_e, z_e  = my_track.point(my_track.t0 + my_track.dt)
+
+# projections?
 ax.arrow(x_0, y_0, x_e - x_0, y_e - y_0, head_width=0.05, head_length=0.1, fc='k', ec='k')
 
 
@@ -134,13 +143,14 @@ for phi in phi_bin_edges:
     ax.plot([0,0 + dx],[0,dy], ls='-', color='g', alpha=0.2)
 
 # coord. transforms
-def cr(x,y):
-    return np.sqrt(x**2 + y**2)
-def cphi(x,y):
+def cr(x,y,z):
+    return np.sqrt(x**2 + y**2 + z**2)
+def cphi(x,y,z):
     v = np.arctan2(y,x)
     if v < 0: v += 2*np.pi
     return v
-
+def ctheta(x,y,z):
+    return np.arccos(z,np.sqrt(x**2 + y**2 + z**2))
 
 # ---- the actual calculation:
 
@@ -149,8 +159,8 @@ def cphi(x,y):
 tb = my_track.tb
 
 if tb > my_track.t0 and tb < my_track.t0 + my_track.dt:
-    xb, yb = my_track.point(my_track.tb)
-    rb = cr(xb,yb)
+    xb, yb, zb = my_track.point(my_track.tb)
+    rb = cr(xb,yb,zb)
 
 ims = []
 for k in range(len(t_bin_edges) - 1):
