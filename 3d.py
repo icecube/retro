@@ -9,9 +9,12 @@ writer = Writer(fps=15, bitrate=20000)
 
 
 # plot setup
-fig = plt.figure(figsize=(20,10))
-ax = fig.add_subplot(121,adjustable='box', aspect='equal')
-ax2 = fig.add_subplot(122, projection='polar')
+fig = plt.figure(figsize=(10,10))
+ax = fig.add_subplot(221,adjustable='box', aspect='equal')
+ax2 = fig.add_subplot(222)
+ax3 = fig.add_subplot(223)
+ax4 = fig.add_subplot(224)
+#ax2 = fig.add_subplot(122, projection='polar')
 ax.set_xlim((-10,10))
 ax.set_ylim((-10,10))
 ax.grid(True)
@@ -108,32 +111,33 @@ class track(object):
         rho = ((x + y) - z*T2 - np.sqrt((x + y)**2 - st2*Pr2 + T2*(Pr2*ct2 + self.z0**2*st2 - z*(x + y))))/(-st2 + ct2*T2)
         return rho
 
-    def get_A(self,r):
-        S = R**2
-            + x0**2*(cos(p0)**2*sin(t0)**2 - 1)
-            + y0**2*(sin(p0)**2*sin(t0)**2 - 1)
-            + z0**2*(cos(t0)**2 - 1)
-
-            + 2*x0*y0*sin(p0)*sin(t0)**2*cos(p0)
-            + 2*x0*z0*cos(p0)*sin(t0)*cos(t0)
-            + 2*y0*z0*sin(p0)*sin(t0)*cos(t0)
+    def get_A(self,R):
+        S = R**2 \
+            + self.x0**2*(self.cosphi**2*self.sintheta**2 - 1) \
+            + self.y0**2*(self.sinphi**2*self.sintheta**2 - 1) \
+            + self.z0**2*(self.costheta**2 - 1) \
+            + 2*self.x0*self.y0*self.sinphi*self.sintheta**2*self.cosphi \
+            + 2*self.x0*self.z0*self.cosphi*self.sintheta*self.costheta \
+            + 2*self.y0*self.z0*self.sinphi*self.sintheta*self.costheta
         if S < 0:
             return 0.
         else:
             return np.sqrt(S)
 
-    def r_of_r_pos(self, r):
-        A = self.get_A(r)
-        return A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
-    def r_of_r_neg(self, r):
-        A = self.get_A(r)
-        return - A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
+    def r_of_r_pos(self, R):
+        A = self.get_A(R)
+        return A - self.x0*self.sintheta*self.cosphi - self.y0*self.sinphi*self.sintheta - self.z0*self.costheta 
+
+    def r_of_r_neg(self, R):
+        A = self.get_A(R)
+        return - A - self.x0*self.sintheta*self.cosphi - self.y0*self.sinphi*self.sintheta - self.z0*self.costheta 
 
 
 # T, X, Y, Z, Phi, Theta, L
 #my_track = track(0, -4.0, -2.1, 0.05, 5.5)
 #my_track = track(0, -8.0, -5.1, 0.3, 15.)
-my_track = track(5, -6.0, -5.1, 3.0, 0.45, 0.2, 15.)
+#my_track = track(5, -6.0, -5.1, 3.0, 0.45, 0.2, 15.)
+my_track = track(5, -6.0, -5.1, 5.0, 0.45, np.pi/2., 15.)
 #my_track.set_origin(5,0,-1)
 #my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
@@ -150,9 +154,10 @@ ax.plot(0,0,'+',markersize=10,c='b')
 ax.plot(0,0,'o',markersize=10,mfc='none',c='b')
 
 # binning
-t_bin_edges = np.linspace(0,20,41)
-r_bin_edges = np.linspace(0,10,21)
-phi_bin_edges = np.linspace(0,2*np.pi,41)
+t_bin_edges = np.linspace(0,20,101)
+r_bin_edges = np.linspace(0,10,101)
+phi_bin_edges = np.linspace(0,2*np.pi,101)
+theta_bin_edges = np.linspace(0,np.pi,101)
 
 for r in r_bin_edges:
     circle = plt.Circle((0,0), r, color='g', alpha=0.2, fill=False)
@@ -170,7 +175,7 @@ def cphi(x,y,z):
     if v < 0: v += 2*np.pi
     return v
 def ctheta(x,y,z):
-    return np.arccos(z,np.sqrt(x**2 + y**2 + z**2))
+    return np.arccos(z/np.sqrt(x**2 + y**2 + z**2))
 
 # ---- the actual calculation:
 
@@ -182,12 +187,12 @@ if tb > my_track.t0 and tb < my_track.t0 + my_track.dt:
     xb, yb, zb = my_track.point(my_track.tb)
     rb = cr(xb,yb,zb)
 
-ims = []
+#ims = []
+z = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1,len(theta_bin_edges) - 1,len(phi_bin_edges) - 1))
 for k in range(len(t_bin_edges) - 1):
     # time bin
     time_bin = (t_bin_edges[k], t_bin_edges[k+1])
-    phiphi, rr = np.meshgrid(phi_bin_edges, r_bin_edges)
-    z = np.zeros(phiphi.size).reshape(phiphi.shape)
+    #thetatheta, phiphi, rr = np.meshgrid(theta_bin_edges, phi_bin_edges, r_bin_edges)
 
     # maximum extent:
     t_extent = my_track.extent(*time_bin)
@@ -198,6 +203,7 @@ for k in range(len(t_bin_edges) - 1):
         track_phi_extent = sorted([cphi(*extent[0]), cphi(*extent[1])])
         if np.abs(track_phi_extent[1] - track_phi_extent[0])>np.pi:
             track_phi_extent.append(track_phi_extent.pop(0))
+        track_theta_extent = sorted([ctheta(*extent[0]), ctheta(*extent[1])])
         track_r_extent = (cr(*extent[0]), cr(*extent[1]))
         if tb <= t_extent[0]:
             track_r_extent_neg = sorted(track_r_extent)
@@ -222,33 +228,15 @@ for k in range(len(t_bin_edges) - 1):
             if t[0] == t[1]:
                 # along coordinate axis
                 theta_inter.append(r_extent)
-            elif t[0] <= t[1] and (b[0] <= t[1]) and (t[0] < b[1]):
+            elif (b[0] <= t[1]) and (t[0] < b[1]):
                 theta_h = min(b[1], t[1])
                 theta_l = max(b[0], t[0])
-                r_l = my_track.r_of_theta(theta_l)
-                r_h = my_track.r_of_theta(theta_h)
-                theta_inter.append(sorted((r_l,r_h)))
-            # crossing the 0/2pi point 
-            elif t[1] < t[0]:
-                if b[1] >= 0 and t[1] >= b[0]:
-                    theta_h = min(b[1], t[1])
-                    theta_l = max(b[0],0)
-                elif 2*np.pi > b[0] and b[1] >= t[0]:
-                    theta_h = min(b[1], 2*np.pi)
-                    theta_l = max(b[0],t[0])
-                elif b[0] <= t[1] and t[0] <= t[1]:
-                    theta_h = min(b[1], t[1])
-                    theta_l = max(b[0], t[0])
-                else:
-                    theta_inter.append(None)
-                    continue
                 r_l = my_track.r_of_theta(theta_l)
                 r_h = my_track.r_of_theta(theta_h)
                 theta_inter.append(sorted((r_l,r_h)))
             else:
                 theta_inter.append(None)
         
-
 
         # phi intervals
         phi_inter = []
@@ -325,26 +313,51 @@ for k in range(len(t_bin_edges) - 1):
                 r_inter_pos.append(None)
 
         # get bins with interval overlaps
-        for i,phi in enumerate(phi_inter):
-            if phi is None: continue
-            for j,r in enumerate(r_inter_neg):
-                if r is None: continue
-                if (r[0] < phi[1]) and (phi[0] < r[1]):
-                    # we have oberlap
-                    length = min(phi[1], r[1]) - max(phi[0], r[0])
-                    z[j][i] += length
-            for j,r in enumerate(r_inter_pos):
-                if r is None: continue
-                if (r[0] < phi[1]) and (phi[0] < r[1]):
-                    # we have oberlap
-                    length = min(phi[1], r[1]) - max(phi[0], r[0])
-                    z[j][i] += length
+        for m,theta in enumerate(theta_inter):
+            if theta is None: continue
+            for i,phi in enumerate(phi_inter):
+                if phi is None: continue
+                for j,r in enumerate(r_inter_neg):
+                    if r is None: continue
+                    if (r[0] < phi[1]) and (phi[0] < r[1]):
+                        # we have oberlap
+                        length = min(phi[1], r[1]) - max(phi[0], r[0])
+                        z[k][j][m][i] += length
+                for j,r in enumerate(r_inter_pos):
+                    if r is None: continue
+                    if (r[0] < phi[1]) and (phi[0] < r[1]):
+                        # we have oberlap
+                        length = min(phi[1], r[1]) - max(phi[0], r[0])
+                        z[k][j][m][i] += length
 
-    im = ax2.pcolormesh(phiphi, rr, z,cmap='Purples')
-    ax2.grid(True)
-    ims.append([im])
+    #p = phiphi[:,0,:]
+    #r = rr[:,0,:]
+    #nz = z.sum(axis=1)
 
-im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
-im_ani.save('im.mp4', writer=writer)
-#plt.show()
-#plt.savefig('test.png',dpi=150)
+    #im = ax2.pcolormesh(p, r, nz,cmap='Purples')
+    #ax2.grid(True)
+    #ims.append([im])
+
+#im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
+#im_ani.save('im.mp4', writer=writer)
+
+tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
+zz = z.sum(axis=(2,3))
+mg = ax2.pcolormesh(tt, yy, zz.T, cmap='Purples')
+ax2.set_xlabel('t')
+ax2.set_ylabel('r')
+
+tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
+zz = z.sum(axis=(1,3))
+mg = ax3.pcolormesh(tt, yy, zz.T, cmap='Purples')
+ax3.set_xlabel('t')
+ax3.set_ylabel(r'$\theta$')
+
+tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
+zz = z.sum(axis=(1,2))
+mg = ax4.pcolormesh(tt, yy, zz.T, cmap='Purples')
+ax4.set_xlabel('t')
+ax4.set_ylabel(r'$\phi$')
+
+plt.show()
+plt.savefig('3d.png',dpi=300)
