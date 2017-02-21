@@ -70,7 +70,7 @@ z2 = z.subs({P:P_solved[1]})
 z2 = trigsimp(z2)
 z2 = simplify(z2)
 #print z2
-z3 = z2.subs({R:R_solved[2]})
+z3 = z2.subs({R:R_solved[1]})
 z3 = trigsimp(z3)
 z3 = simplify(z3)
 print z3

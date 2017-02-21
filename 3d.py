@@ -104,56 +104,23 @@ class track(object):
         cos = np.cos(phi)
         return (sin*self.x0 - cos*self.y0)/(cos*self.sinphi*self.sintheta - sin*self.cosphi*self.sintheta)
 
-    def r_of_theta(self, theta):
-
-(
-    + x0*sin(t0)*cos(p0)
-    + y0*sin(p0)*sin(t0) 
-    - z0*cos(t0)*tan(T)**2 
-    - sqrt(
-        + x0**2*sin(t0)**2*cos(p0)**2 
-        - x0**2*sin(t0)**2 
-        + x0**2*cos(t0)**2*tan(T)**2 
-        + 2*x0*y0*sin(p0)*sin(t0)**2*cos(p0) 
-        - x0*z0*(-sin(p0 - 2*t0) + sin(p0 + 2*t0))*tan(T)**2/2 
-        + y0**2*sin(p0)**2*sin(t0)**2 
-        - y0**2*sin(t0)**2 
-        + y0**2*cos(t0)**2*tan(T)**2 
-        - y0*z0*(cos(p0 - 2*t0) - cos(p0 + 2*t0))*tan(T)**2/2 
-        + z0**2*sin(t0)**2*tan(T)**2)
-    )/
-(-sin(t0)**2 + cos(t0)**2*tan(T)**2)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-     
-        # wrooong
-        Px = self.x0*self.cosphi
-        Py = self.y0*self.sinphi
-        Pr2 = (self.x0**2 + self.y0**2)
-        x = Px*self.sintheta
-        y = Py*self.sintheta
-        st2 = self.sintheta**2
-        ct2 = self.costheta**2
-        z = self.z0*self.costheta
-        T2 = np.tan(theta)**2
-        S = (x + y)**2 - st2*Pr2 + T2*(Pr2*ct2 + self.z0**2*st2 - z*(x + y))
-        if S < 0:
-            A = 0.
-        else:
-            A = np.sqrt(S)
-        rho = ((x + y) - z*T2 - A)/(-st2 + ct2*T2)
+    def r_of_theta(self, T):
+        rho = ( \
+            + self.x0*self.sintheta*self.cosphi \
+            + self.y0*self.sinphi*self.sintheta \
+            - self.z0*self.costheta*np.tan(T)**2 \
+            + np.sqrt( \
+                - self.x0**2*self.sintheta**2*self.sinphi**2 \
+                - self.y0**2*self.cosphi**2*self.sintheta**2 \
+                + 2*self.x0*self.y0*self.sinphi*self.sintheta**2*self.cosphi \
+                + np.tan(T)**2*( \
+                    + (self.x0**2 + self.y0**2)*self.costheta**2 \
+                    + self.z0**2*self.sintheta**2 \
+                    - 2*self.z0*self.sintheta*self.costheta*(self.x0*self.cosphi + self.y0*self.sinphi) \
+                    ) \
+                ) \
+            )/ \
+        (-self.sintheta**2 + self.costheta**2*np.tan(T)**2)
         return rho
 
     def get_A(self,R):
@@ -289,7 +256,7 @@ for k in range(len(t_bin_edges) - 1):
             else:
                 theta_inter.append(None)
        
-        print 'theta ',theta_inter 
+        #print 'theta ',theta_inter 
 
         # phi intervals
         phi_inter = []
@@ -374,15 +341,19 @@ for k in range(len(t_bin_edges) - 1):
                 if phi is None: continue
                 for j,r in enumerate(r_inter_neg):
                     if r is None: continue
-                    if (r[0] < phi[1]) and (phi[0] < r[1]):
-                        # we have oberlap
-                        length = min(phi[1], r[1]) - max(phi[0], r[0])
+                    # interval of r theta and phi
+                    A = max(r[0],theta[0],phi[0])
+                    B = min(r[1],theta[1],phi[1])
+                    if A <= B:
+                        length = B-A
                         z[k][j][m][i] += length
                 for j,r in enumerate(r_inter_pos):
                     if r is None: continue
-                    if (r[0] < phi[1]) and (phi[0] < r[1]):
-                        # we have oberlap
-                        length = min(phi[1], r[1]) - max(phi[0], r[0])
+                    # interval of r theta and phi
+                    A = max(r[0],theta[0],phi[0])
+                    B = min(r[1],theta[1],phi[1])
+                    if A <= B:
+                        length = B-A
                         z[k][j][m][i] += length
 
     #p = phiphi[:,0,:]
