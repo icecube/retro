@@ -108,41 +108,27 @@ class track(object):
         rho = ((x + y) - z*T2 - np.sqrt((x + y)**2 - st2*Pr2 + T2*(Pr2*ct2 + self.z0**2*st2 - z*(x + y))))/(-st2 + ct2*T2)
         return rho
 
+    def get_A(self,r):
+        S = R**2
+            + x0**2*(cos(p0)**2*sin(t0)**2 - 1)
+            + y0**2*(sin(p0)**2*sin(t0)**2 - 1)
+            + z0**2*(cos(t0)**2 - 1)
 
-
-def r_of_r_pos(self, r):
-#rho(R)
-S = R**2
-- x0**2*sin(p0)**2*sin(t0)**2 
-- y0**2*cos(p0)**2*sin(t0)**2 
-- z0**2*sin(t0)**2
-
-+(x0*sin(t0)*cos(p0) + y0*sin(t0)*sin(p0))**2
-+(x0*sin(t0)*sin(p0) - y0*sin(t0)*cos(p0))**2
-- (x0**2 + y0**2)
-
-+ x0*z0*sin(p0)*(cos(t0)**2 - sin(t0)**2)
-+ y0*z0*sin(p0)*2*sin(t0)*cos(t0)
-A = np.sqrt(S)
-return A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
-def r_of_r_neg(self, r):
-return - A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
+            + 2*x0*y0*sin(p0)*sin(t0)**2*cos(p0)
+            + 2*x0*z0*cos(p0)*sin(t0)*cos(t0)
+            + 2*y0*z0*sin(p0)*sin(t0)*cos(t0)
+        if S < 0:
+            return 0.
+        else:
+            return np.sqrt(S)
 
     def r_of_r_pos(self, r):
-        S = r**2 - (self.x0*self.sin)**2 - (self.y0*self.cos)**2 + 2*self.x0*self.y0*self.sin*self.cos
-        if S < 0:
-            A = 0
-        else:
-            A = np.sqrt(S)
-        return A - self.x0*self.cos - self.y0*self.sin
-
+        A = self.get_A(r)
+        return A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
     def r_of_r_neg(self, r):
-        S = r**2 - (self.x0*self.sin)**2 - (self.y0*self.cos)**2 + 2*self.x0*self.y0*self.sin*self.cos
-        if S < 0:
-            A = 0
-        else:
-            A = np.sqrt(S)
-        return - A - self.x0*self.cos - self.y0*self.sin
+        A = self.get_A(r)
+        return - A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
+
 
 # T, X, Y, Z, Phi, Theta, L
 #my_track = track(0, -4.0, -2.1, 0.05, 5.5)
