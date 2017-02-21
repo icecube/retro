@@ -93,9 +93,15 @@ class track(object):
 
     @property
     def tb(self):
-        # closest time to origin
+        # closest time to origin (smallest R)
         return self.t0 - (self.x0*self.sintheta*self.cosphi + self.y0*self.sintheta*self.sinphi + self.z0*self.costheta) / self.c
 
+    @property
+    def ts(self):
+        # smallest Z/R ???
+        #rho = -3*self.x0*self.cosphi/(2*self.sintheta) - 3*self.y0*self.sinphi/(2*self.sintheta) + self.z0/(2*self.costheta) - np.sqrt(9*self.x0**2*self.cosphi**2*self.costheta**2 - 8*self.x0**2*self.costheta**2 + 18*self.x0*self.y0*self.sinphi*self.cosphi*self.costheta**2 - 2*self.x0*self.z0*self.sintheta*self.cosphi*self.costheta - 9*self.y0**2*self.cosphi**2*self.costheta**2 + self.y0**2*self.costheta**2 - 2*self.y0*self.z0*self.sinphi*self.sintheta*self.costheta - self.z0**2*self.costheta**2 + self.z0**2)/np.sin(2*self.theta)
+        rho = 2*(-2*self.x0**2*self.costheta - self.x0*self.z0*np.sin(self.phi - self.theta) + self.x0*self.z0*np.sin(self.phi + self.theta) - 2*self.y0**2*self.costheta + self.y0*self.z0*np.cos(self.phi - self.theta) - self.y0*self.z0*np.cos(self.phi + self.theta))/(-self.x0*np.sin(self.phi - 2*self.theta) + self.x0*np.sin(self.phi + 2*self.theta) + self.y0*np.cos(self.phi - 2*self.theta) - self.y0*np.cos(self.phi + 2*self.theta) + 2*self.z0*np.cos(2*self.theta) - 2*self.z0)
+        return self.t0 + rho / self.c
 
     # --------  ToDo -----------
 
@@ -104,22 +110,38 @@ class track(object):
         cos = np.cos(phi)
         return (sin*self.x0 - cos*self.y0)/(cos*self.sinphi*self.sintheta - sin*self.cosphi*self.sintheta)
 
-    def r_of_theta(self, T):
+    def get_M(self, T):
+
+        S = - self.x0**2*self.sintheta**2*self.sinphi**2 \
+            - self.y0**2*self.cosphi**2*self.sintheta**2 \
+            + 2*self.x0*self.y0*self.sinphi*self.sintheta**2*self.cosphi \
+            + np.tan(T)**2*( \
+                + (self.x0**2 + self.y0**2)*self.costheta**2 \
+                + self.z0**2*self.sintheta**2 \
+                - 2*self.z0*self.sintheta*self.costheta*(self.x0*self.cosphi + self.y0*self.sinphi) \
+            )
+        if S < 0:
+            return 0.
+        else:
+            return np.sqrt(S)
+
+    def r_of_theta_neg(self, T):
+        M = self.get_M(T)
         rho = ( \
             + self.x0*self.sintheta*self.cosphi \
             + self.y0*self.sinphi*self.sintheta \
             - self.z0*self.costheta*np.tan(T)**2 \
-            + np.sqrt( \
-                - self.x0**2*self.sintheta**2*self.sinphi**2 \
-                - self.y0**2*self.cosphi**2*self.sintheta**2 \
-                + 2*self.x0*self.y0*self.sinphi*self.sintheta**2*self.cosphi \
-                + np.tan(T)**2*( \
-                    + (self.x0**2 + self.y0**2)*self.costheta**2 \
-                    + self.z0**2*self.sintheta**2 \
-                    - 2*self.z0*self.sintheta*self.costheta*(self.x0*self.cosphi + self.y0*self.sinphi) \
-                    ) \
-                ) \
-            )/ \
+            + M)/ \
+        (-self.sintheta**2 + self.costheta**2*np.tan(T)**2)
+        return rho
+
+    def r_of_theta_pos(self, T):
+        M = self.get_M(T)
+        rho = ( \
+            + self.x0*self.sintheta*self.cosphi \
+            + self.y0*self.sinphi*self.sintheta \
+            - self.z0*self.costheta*np.tan(T)**2 \
+            - M)/ \
         (-self.sintheta**2 + self.costheta**2*np.tan(T)**2)
         return rho
 
@@ -149,7 +171,7 @@ class track(object):
 #my_track = track(0, -4.0, -2.1, 0.05, 5.5)
 #my_track = track(0, -8.0, -5.1, 0.3, 15.)
 #my_track = track(5, -6.0, -5.1, 3.0, 0.45, 0.2, 15.)
-my_track = track(0, -6.0, -5.1, 2.0, -0.45, 1., 15.)
+my_track = track(0, -6.0, 4.1, 2.0, -0.45, 1., 35.)
 #my_track.set_origin(5,0,-1)
 #my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
@@ -172,10 +194,10 @@ ax.plot([x_0,x_e],[y_0,y_e],zs=[m,m],alpha=0.3,c='k')
 #ax.plot(0,0,'o',markersize=10,mfc='none',c='b')
 
 # binning
-t_bin_edges = np.linspace(0,20,11)
-r_bin_edges = np.linspace(0,10,21)
-phi_bin_edges = np.linspace(0,2*np.pi,21)
-theta_bin_edges = np.linspace(0,np.pi,21)
+t_bin_edges = np.linspace(0,20,101)
+r_bin_edges = np.linspace(5,15,101)
+phi_bin_edges = np.linspace(0,2*np.pi,101)
+theta_bin_edges = np.linspace(0,np.pi,101)
 
 #for r in r_bin_edges:
 #    circle = plt.Circle((0,0), r, color='g', alpha=0.2, fill=False)
@@ -200,10 +222,17 @@ def ctheta(x,y,z):
 
 # closest point
 tb = my_track.tb
-
 if tb > my_track.t0 and tb < my_track.t0 + my_track.dt:
     xb, yb, zb = my_track.point(my_track.tb)
     rb = cr(xb,yb,zb)
+
+ts = my_track.ts# closest point to z-axis:
+#ts = 8.5
+if ts > my_track.t0 and ts < my_track.t0 + my_track.dt:
+    xs, ys, zs = my_track.point(my_track.ts)
+    thetas = ctheta(xs,ys,zs)
+print ts
+#sys.exit()
 
 #ims = []
 z = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1,len(theta_bin_edges) - 1,len(phi_bin_edges) - 1))
@@ -221,7 +250,6 @@ for k in range(len(t_bin_edges) - 1):
         track_phi_extent = sorted([cphi(*extent[0]), cphi(*extent[1])])
         if np.abs(track_phi_extent[1] - track_phi_extent[0])>np.pi:
             track_phi_extent.append(track_phi_extent.pop(0))
-        track_theta_extent = sorted([ctheta(*extent[0]), ctheta(*extent[1])])
         track_r_extent = (cr(*extent[0]), cr(*extent[1]))
         if tb <= t_extent[0]:
             track_r_extent_neg = sorted(track_r_extent)
@@ -233,30 +261,85 @@ for k in range(len(t_bin_edges) - 1):
             track_r_extent_pos = sorted([track_r_extent[0], rb])
             track_r_extent_neg = sorted([rb, track_r_extent[1]])
 
+        track_theta_extent = (ctheta(*extent[0]), ctheta(*extent[1]))
+        if ts <= t_extent[0]:
+            track_theta_extent_neg = sorted(track_theta_extent)
+            track_theta_extent_pos = [0,0]
+        elif ts >= t_extent[1]:
+            track_theta_extent_pos = sorted(track_theta_extent)
+            track_theta_extent_neg = [0,0]
+        else:
+            track_theta_extent_pos = sorted([track_theta_extent[0], thetas])
+            track_theta_extent_neg = sorted([thetas, track_theta_extent[1]])
         
         # --------  ToDo -----------
 
-        # theta intervals
-        theta_inter = []
+        theta_inter_neg = []
         for i in range(len(theta_bin_edges) - 1):
             # get interval overlaps
             # from these two intervals:
-            t = track_theta_extent
+            t = track_theta_extent_neg
             b = (theta_bin_edges[i],theta_bin_edges[i+1])
-            if t[0] == t[1]:
-                # along coordinate axis
-                # ToDo: is this safe?
-                theta_inter.append(r_extent)
-            elif (b[0] <= t[1]) and (t[0] < b[1]):
-                theta_h = min(b[1], t[1])
-                theta_l = max(b[0], t[0])
-                r_l = my_track.r_of_theta(theta_l)
-                r_h = my_track.r_of_theta(theta_h)
-                theta_inter.append(sorted((r_l,r_h)))
+            if (b[0] <= t[1]) and (t[0] < b[1]):
+                ro_h = min(b[1], t[1])
+                ro_l = max(b[0], t[0])
+                if ro_l > ro_h:
+                    theta_l = my_track.r_of_theta_neg(ro_l)
+                    theta_h = my_track.r_of_theta_neg(ro_h)
+                else:
+                    theta_l = my_track.r_of_theta_pos(ro_l)
+                    theta_h = my_track.r_of_theta_pos(ro_h)
+                theta_inter_neg.append(sorted((theta_l,theta_h)))
             else:
-                theta_inter.append(None)
+                theta_inter_neg.append(None)
+        theta_inter_pos = []
+        for i in range(len(theta_bin_edges) - 1):
+            # get interval overlaps
+            # from these two intervals:
+            t = track_theta_extent_pos
+            b = (theta_bin_edges[i],theta_bin_edges[i+1])
+            if (b[0] <= t[1]) and (t[0] < b[1]):
+                ro_h = min(b[1], t[1])
+                ro_l = max(b[0], t[0])
+                if ro_l > ro_h:
+                    theta_l = my_track.r_of_theta_pos(ro_l)
+                    theta_h = my_track.r_of_theta_pos(ro_h)
+                else:
+                    theta_l = my_track.r_of_theta_neg(ro_l)
+                    theta_h = my_track.r_of_theta_neg(ro_h)
+                theta_inter_pos.append(sorted((theta_l,theta_h)))
+            else:
+                theta_inter_pos.append(None)
+
+        # theta intervals
+        #theta_inter_neg = []
+        #theta_inter_pos = []
+        #for i in range(len(theta_bin_edges) - 1):
+        #    # get interval overlaps
+        #    # from these two intervals:
+        #    t = track_theta_extent
+        #    b = (theta_bin_edges[i],theta_bin_edges[i+1])
+        #    if t[0] == t[1]:
+        #        # along coordinate axis
+        #        # ToDo: is this safe?
+        #        theta_inter.append(r_extent)
+        #    elif (b[0] <= t[1]) and (t[0] < b[1]):
+        #        theta_h = min(b[1], t[1])
+        #        theta_l = max(b[0], t[0])
+        #        r_l = my_track.r_of_theta_neg(theta_l)
+        #        r_h = my_track.r_of_theta_neg(theta_h)
+        #        theta_inter.append(sorted((r_l,r_h)))
+        #        r_l = my_track.r_of_theta_pos(theta_l)
+        #        r_h = my_track.r_of_theta_pos(theta_h)
+        #        theta_inter_pos.append(sorted((r_l,r_h)))
+        #    else:
+        #        theta_inter.append(None)
+        #        theta_inter_pos.append(None)
        
-        #print 'theta ',theta_inter 
+        #print 'theta ',theta_inter_neg 
+        #print 'theta ',theta_inter_pos
+        #print my_track.ts
+        #print '\n'
 
         # phi intervals
         phi_inter = []
@@ -335,10 +418,28 @@ for k in range(len(t_bin_edges) - 1):
                 r_inter_pos.append(None)
 
         # get bins with interval overlaps
-        for m,theta in enumerate(theta_inter):
-            if theta is None: continue
-            for i,phi in enumerate(phi_inter):
-                if phi is None: continue
+        for i,phi in enumerate(phi_inter):
+            if phi is None: continue
+            for m,theta in enumerate(theta_inter_neg):
+                if theta is None: continue
+                for j,r in enumerate(r_inter_neg):
+                    if r is None: continue
+                    # interval of r theta and phi
+                    A = max(r[0],theta[0],phi[0])
+                    B = min(r[1],theta[1],phi[1])
+                    if A <= B:
+                        length = B-A
+                        z[k][j][m][i] += length
+                for j,r in enumerate(r_inter_pos):
+                    if r is None: continue
+                    # interval of r theta and phi
+                    A = max(r[0],theta[0],phi[0])
+                    B = min(r[1],theta[1],phi[1])
+                    if A <= B:
+                        length = B-A
+                        z[k][j][m][i] += length
+            for m,theta in enumerate(theta_inter_pos):
+                if theta is None: continue
                 for j,r in enumerate(r_inter_neg):
                     if r is None: continue
                     # interval of r theta and phi
@@ -366,7 +467,7 @@ for k in range(len(t_bin_edges) - 1):
 
 #im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
 #im_ani.save('im.mp4', writer=writer)
-vmax=1.
+vmax=0.1
 
 tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
 zz = z.sum(axis=(2,3))
