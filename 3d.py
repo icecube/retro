@@ -3,20 +3,26 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from mpl_toolkits.mplot3d import Axes3D
 
-Writer = animation.writers['ffmpeg']
-writer = Writer(fps=15, bitrate=20000)
+#Writer = animation.writers['ffmpeg']
+#writer = Writer(fps=15, bitrate=20000)
 
 
 # plot setup
 fig = plt.figure(figsize=(10,10))
-ax = fig.add_subplot(221,adjustable='box', aspect='equal')
+#ax = fig.add_subplot(221,adjustable='box', aspect='equal')
+ax = fig.add_subplot(221,projection='3d')
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_zlabel('z')
 ax2 = fig.add_subplot(222)
 ax3 = fig.add_subplot(223)
 ax4 = fig.add_subplot(224)
 #ax2 = fig.add_subplot(122, projection='polar')
 ax.set_xlim((-10,10))
 ax.set_ylim((-10,10))
+ax.set_zlim((-10,10))
 ax.grid(True)
 
 
@@ -99,6 +105,40 @@ class track(object):
         return (sin*self.x0 - cos*self.y0)/(cos*self.sinphi*self.sintheta - sin*self.cosphi*self.sintheta)
 
     def r_of_theta(self, theta):
+
+(
+    + x0*sin(t0)*cos(p0)
+    + y0*sin(p0)*sin(t0) 
+    - z0*cos(t0)*tan(T)**2 
+    - sqrt(
+        + x0**2*sin(t0)**2*cos(p0)**2 
+        - x0**2*sin(t0)**2 
+        + x0**2*cos(t0)**2*tan(T)**2 
+        + 2*x0*y0*sin(p0)*sin(t0)**2*cos(p0) 
+        - x0*z0*(-sin(p0 - 2*t0) + sin(p0 + 2*t0))*tan(T)**2/2 
+        + y0**2*sin(p0)**2*sin(t0)**2 
+        - y0**2*sin(t0)**2 
+        + y0**2*cos(t0)**2*tan(T)**2 
+        - y0*z0*(cos(p0 - 2*t0) - cos(p0 + 2*t0))*tan(T)**2/2 
+        + z0**2*sin(t0)**2*tan(T)**2)
+    )/
+(-sin(t0)**2 + cos(t0)**2*tan(T)**2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+     
+        # wrooong
         Px = self.x0*self.cosphi
         Py = self.y0*self.sinphi
         Pr2 = (self.x0**2 + self.y0**2)
@@ -108,7 +148,12 @@ class track(object):
         ct2 = self.costheta**2
         z = self.z0*self.costheta
         T2 = np.tan(theta)**2
-        rho = ((x + y) - z*T2 - np.sqrt((x + y)**2 - st2*Pr2 + T2*(Pr2*ct2 + self.z0**2*st2 - z*(x + y))))/(-st2 + ct2*T2)
+        S = (x + y)**2 - st2*Pr2 + T2*(Pr2*ct2 + self.z0**2*st2 - z*(x + y))
+        if S < 0:
+            A = 0.
+        else:
+            A = np.sqrt(S)
+        rho = ((x + y) - z*T2 - A)/(-st2 + ct2*T2)
         return rho
 
     def get_A(self,R):
@@ -137,7 +182,7 @@ class track(object):
 #my_track = track(0, -4.0, -2.1, 0.05, 5.5)
 #my_track = track(0, -8.0, -5.1, 0.3, 15.)
 #my_track = track(5, -6.0, -5.1, 3.0, 0.45, 0.2, 15.)
-my_track = track(5, -6.0, -5.1, 5.0, 0.45, np.pi/2., 15.)
+my_track = track(0, -6.0, -5.1, 2.0, -0.45, 1., 15.)
 #my_track.set_origin(5,0,-1)
 #my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
@@ -146,26 +191,32 @@ x_0, y_0, z_0 = my_track.point(my_track.t0)
 x_e, y_e, z_e  = my_track.point(my_track.t0 + my_track.dt)
 
 # projections?
-ax.arrow(x_0, y_0, x_e - x_0, y_e - y_0, head_width=0.05, head_length=0.1, fc='k', ec='k')
+#ax.arrow(x_0, y_0, x_e - x_0, y_e - y_0, head_width=0.05, head_length=0.1, fc='k', ec='k')
+#ax.quiver(x_0, y_0, z_0, x_e - x_0, y_e - y_0, z_e -z_0)
+m = -10
+ax.plot([x_0,x_e],[y_0,y_e],zs=[z_0,z_e])
+ax.plot([m,m],[y_0,y_e],zs=[z_0,z_e],alpha=0.3,c='k')
+ax.plot([x_0,x_e],[-m,-m],zs=[z_0,z_e],alpha=0.3,c='k')
+ax.plot([x_0,x_e],[y_0,y_e],zs=[m,m],alpha=0.3,c='k')
 
 
 # plot the DOM
-ax.plot(0,0,'+',markersize=10,c='b')
-ax.plot(0,0,'o',markersize=10,mfc='none',c='b')
+#ax.plot(0,0,'+',markersize=10,c='b')
+#ax.plot(0,0,'o',markersize=10,mfc='none',c='b')
 
 # binning
-t_bin_edges = np.linspace(0,20,101)
-r_bin_edges = np.linspace(0,10,101)
-phi_bin_edges = np.linspace(0,2*np.pi,101)
-theta_bin_edges = np.linspace(0,np.pi,101)
+t_bin_edges = np.linspace(0,20,11)
+r_bin_edges = np.linspace(0,10,21)
+phi_bin_edges = np.linspace(0,2*np.pi,21)
+theta_bin_edges = np.linspace(0,np.pi,21)
 
-for r in r_bin_edges:
-    circle = plt.Circle((0,0), r, color='g', alpha=0.2, fill=False)
-    ax.add_artist(circle)
-for phi in phi_bin_edges:
-    dx = 100 * np.cos(phi)
-    dy = 100 * np.sin(phi)
-    ax.plot([0,0 + dx],[0,dy], ls='-', color='g', alpha=0.2)
+#for r in r_bin_edges:
+#    circle = plt.Circle((0,0), r, color='g', alpha=0.2, fill=False)
+#    ax.add_artist(circle)
+#for phi in phi_bin_edges:
+#    dx = 100 * np.cos(phi)
+#    dy = 100 * np.sin(phi)
+#    ax.plot([0,0 + dx],[0,dy], ls='-', color='g', alpha=0.2)
 
 # coord. transforms
 def cr(x,y,z):
@@ -227,6 +278,7 @@ for k in range(len(t_bin_edges) - 1):
             b = (theta_bin_edges[i],theta_bin_edges[i+1])
             if t[0] == t[1]:
                 # along coordinate axis
+                # ToDo: is this safe?
                 theta_inter.append(r_extent)
             elif (b[0] <= t[1]) and (t[0] < b[1]):
                 theta_h = min(b[1], t[1])
@@ -236,7 +288,8 @@ for k in range(len(t_bin_edges) - 1):
                 theta_inter.append(sorted((r_l,r_h)))
             else:
                 theta_inter.append(None)
-        
+       
+        print 'theta ',theta_inter 
 
         # phi intervals
         phi_inter = []
@@ -273,6 +326,8 @@ for k in range(len(t_bin_edges) - 1):
                 phi_inter.append(sorted((r_l,r_h)))
             else:
                 phi_inter.append(None)
+
+        #print 'phi ',phi_inter 
 
         # also need two r extents!
         r_inter_neg = []
@@ -340,22 +395,23 @@ for k in range(len(t_bin_edges) - 1):
 
 #im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
 #im_ani.save('im.mp4', writer=writer)
+vmax=1.
 
 tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
 zz = z.sum(axis=(2,3))
-mg = ax2.pcolormesh(tt, yy, zz.T, cmap='Purples')
+mg = ax2.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap='Purples')
 ax2.set_xlabel('t')
 ax2.set_ylabel('r')
 
 tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
 zz = z.sum(axis=(1,3))
-mg = ax3.pcolormesh(tt, yy, zz.T, cmap='Purples')
+mg = ax3.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap='Purples')
 ax3.set_xlabel('t')
 ax3.set_ylabel(r'$\theta$')
 
 tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
 zz = z.sum(axis=(1,2))
-mg = ax4.pcolormesh(tt, yy, zz.T, cmap='Purples')
+mg = ax4.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap='Purples')
 ax4.set_xlabel('t')
 ax4.set_ylabel(r'$\phi$')
 

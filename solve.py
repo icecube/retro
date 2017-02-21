@@ -58,43 +58,43 @@ z = Eq(z0 + rho*cos(t0) - R*cos(T))
 #print 'rho(P) = ',rho_solved
 
 # rho(Theta)
-#P_solved = solve(x,P,check=False)
-#print 'P = ',P_solved
-#y2 = y.subs({P:P_solved[1]})
-#y2 = trigsimp(y2)
-#y2 = simplify(y2)
-#print y2
-#R_solved = solve(y2,R,check=False)
-#print 'R = ',R_solved
-#z2 = z.subs({P:P_solved[1]})
-#z2 = trigsimp(z2)
-#z2 = simplify(z2)
-##print z2
-#z3 = z2.subs({R:R_solved[1]})
-#z3 = trigsimp(z3)
-#z3 = simplify(z3)
-#print z3
-#rho_solved = solve(z3,rho,check=False)
-#rho_solved = trigsimp(rho_solved[0])
-#print 'rho(T) = ',rho_solved
-
-# rho(Theta)
 P_solved = solve(x,P,check=False)
 print 'P = ',P_solved
 y2 = y.subs({P:P_solved[1]})
 y2 = trigsimp(y2)
 y2 = simplify(y2)
 print y2
-T_solved = solve(y2,T,check=False)
-print 'T = ',T_solved
+R_solved = solve(y2,R,check=False)
+print 'R = ',R_solved
 z2 = z.subs({P:P_solved[1]})
 z2 = trigsimp(z2)
 z2 = simplify(z2)
 #print z2
-z3 = z2.subs({T:T_solved[2]})
+z3 = z2.subs({R:R_solved[2]})
 z3 = trigsimp(z3)
 z3 = simplify(z3)
 print z3
 rho_solved = solve(z3,rho,check=False)
 rho_solved = trigsimp(rho_solved[0])
-print 'rho(R) = ',rho_solved
+print 'rho(T) = ',rho_solved
+
+# rho(R)
+#P_solved = solve(x,P,check=False)
+#print 'P = ',P_solved
+#y2 = y.subs({P:P_solved[1]})
+#y2 = trigsimp(y2)
+#y2 = simplify(y2)
+#print y2
+#T_solved = solve(y2,T,check=False)
+#print 'T = ',T_solved
+#z2 = z.subs({P:P_solved[1]})
+#z2 = trigsimp(z2)
+#z2 = simplify(z2)
+##print z2
+#z3 = z2.subs({T:T_solved[2]})
+#z3 = trigsimp(z3)
+#z3 = simplify(z3)
+#print z3
+#rho_solved = solve(z3,rho,check=False)
+#rho_solved = trigsimp(rho_solved[0])
+#print 'rho(R) = ',rho_solved
