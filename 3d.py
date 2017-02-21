@@ -87,13 +87,46 @@ class track(object):
         # closest time to origin
         return self.t0 - (self.x0*self.sintheta*self.cosphi + self.y0*self.sintheta*self.sinphi + self.z0*self.costheta) / self.c
 
+
+    # --------  ToDo -----------
+
     def r_of_phi(self, phi):
         sin = np.sin(phi)
         cos = np.cos(phi)
-        return (sin*self.x0 - cos*self.y0)/(cos*self.sin - sin*self.cos)
+        return (sin*self.x0 - cos*self.y0)/(cos*self.sinphi*self.sintheta - sin*self.cosphi*self.sintheta)
 
     def r_of_theta(self, theta):
-        pass
+        Px = self.x0*self.cosphi
+        Py = self.y0*self.sinphi
+        Pr2 = (self.x0**2 + self.y0**2)
+        x = Px*self.sintheta
+        y = Py*self.sintheta
+        st2 = self.sintheta**2
+        ct2 = self.costheta**2
+        z = self.z0*self.costheta
+        T2 = np.tan(theta)**2
+        rho = ((x + y) - z*T2 - np.sqrt((x + y)**2 - st2*Pr2 + T2*(Pr2*ct2 + self.z0**2*st2 - z*(x + y))))/(-st2 + ct2*T2)
+        return rho
+
+
+
+def r_of_r_pos(self, r):
+#rho(R)
+S = R**2
+- x0**2*sin(p0)**2*sin(t0)**2 
+- y0**2*cos(p0)**2*sin(t0)**2 
+- z0**2*sin(t0)**2
+
++(x0*sin(t0)*cos(p0) + y0*sin(t0)*sin(p0))**2
++(x0*sin(t0)*sin(p0) - y0*sin(t0)*cos(p0))**2
+- (x0**2 + y0**2)
+
++ x0*z0*sin(p0)*(cos(t0)**2 - sin(t0)**2)
++ y0*z0*sin(p0)*2*sin(t0)*cos(t0)
+A = np.sqrt(S)
+return A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
+def r_of_r_neg(self, r):
+return - A - x0*sin(t0)*cos(p0) - y0*sin(p0)*sin(t0) - z0*cos(t0) 
 
     def r_of_r_pos(self, r):
         S = r**2 - (self.x0*self.sin)**2 - (self.y0*self.cos)**2 + 2*self.x0*self.y0*self.sin*self.cos
@@ -110,11 +143,12 @@ class track(object):
         else:
             A = np.sqrt(S)
         return - A - self.x0*self.cos - self.y0*self.sin
- 
+
+# T, X, Y, Z, Phi, Theta, L
 #my_track = track(0, -4.0, -2.1, 0.05, 5.5)
 #my_track = track(0, -8.0, -5.1, 0.3, 15.)
-my_track = track(5, -6.0, -5.1, 0.45, 15.)
-my_track.set_origin(5,0,-1)
+my_track = track(5, -6.0, -5.1, 3.0, 0.45, 0.2, 15.)
+#my_track.set_origin(5,0,-1)
 #my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
 # plot
@@ -190,6 +224,46 @@ for k in range(len(t_bin_edges) - 1):
             track_r_extent_neg = sorted([rb, track_r_extent[1]])
 
         
+        # --------  ToDo -----------
+
+        # theta intervals
+        theta_inter = []
+        for i in range(len(theta_bin_edges) - 1):
+            # get interval overlaps
+            # from these two intervals:
+            t = track_theta_extent
+            b = (theta_bin_edges[i],theta_bin_edges[i+1])
+            if t[0] == t[1]:
+                # along coordinate axis
+                theta_inter.append(r_extent)
+            elif t[0] <= t[1] and (b[0] <= t[1]) and (t[0] < b[1]):
+                theta_h = min(b[1], t[1])
+                theta_l = max(b[0], t[0])
+                r_l = my_track.r_of_theta(theta_l)
+                r_h = my_track.r_of_theta(theta_h)
+                theta_inter.append(sorted((r_l,r_h)))
+            # crossing the 0/2pi point 
+            elif t[1] < t[0]:
+                if b[1] >= 0 and t[1] >= b[0]:
+                    theta_h = min(b[1], t[1])
+                    theta_l = max(b[0],0)
+                elif 2*np.pi > b[0] and b[1] >= t[0]:
+                    theta_h = min(b[1], 2*np.pi)
+                    theta_l = max(b[0],t[0])
+                elif b[0] <= t[1] and t[0] <= t[1]:
+                    theta_h = min(b[1], t[1])
+                    theta_l = max(b[0], t[0])
+                else:
+                    theta_inter.append(None)
+                    continue
+                r_l = my_track.r_of_theta(theta_l)
+                r_h = my_track.r_of_theta(theta_h)
+                theta_inter.append(sorted((r_l,r_h)))
+            else:
+                theta_inter.append(None)
+        
+
+
         # phi intervals
         phi_inter = []
         for i in range(len(phi_bin_edges) - 1):
