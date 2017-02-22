@@ -175,8 +175,8 @@ class track(object):
 # T, X, Y, Z, Phi, Theta, L
 #my_track = track(0, -4.0, -2.1, 0.05, 5.5)
 #my_track = track(0, -8.0, -5.1, 0.3, 15.)
-#my_track = track(5, -6.0, -5.1, 3.0, 0.45, 0.2, 15.)
 my_track = track(0, -6.0, 4.1, 2.0, -0.45, 1., 20.)
+#my_track = track(0, 6.0, 4.1, -2.0, 2.45, 1., 20.)
 #my_track.set_origin(5,0,-1)
 #my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
@@ -228,13 +228,13 @@ def ctheta(x,y,z):
 # closest point
 tb = my_track.tb
 if tb > my_track.t0 and tb < my_track.t0 + my_track.dt:
-    xb, yb, zb = my_track.point(my_track.tb)
+    xb, yb, zb = my_track.point(tb)
     rb = cr(xb,yb,zb)
 
 ts = my_track.ts# closest point to z-axis:
 #ts = 8.5
 if ts > my_track.t0 and ts < my_track.t0 + my_track.dt:
-    xs, ys, zs = my_track.point(my_track.ts)
+    xs, ys, zs = my_track.point(ts)
     thetas = ctheta(xs,ys,zs)
 print ts
 #sys.exit()
@@ -268,14 +268,18 @@ for k in range(len(t_bin_edges) - 1):
 
         track_theta_extent = (ctheta(*extent[0]), ctheta(*extent[1]))
         if ts <= t_extent[0]:
-            track_theta_extent_neg = sorted(track_theta_extent)
+            track_theta_extent_neg = track_theta_extent
             track_theta_extent_pos = [0,0]
         elif ts >= t_extent[1]:
-            track_theta_extent_pos = sorted(track_theta_extent)
+            track_theta_extent_pos = track_theta_extent
             track_theta_extent_neg = [0,0]
         else:
-            track_theta_extent_pos = sorted([track_theta_extent[0], thetas])
-            track_theta_extent_neg = sorted([thetas, track_theta_extent[1]])
+            track_theta_extent_neg = [track_theta_extent[0], thetas]
+            track_theta_extent_pos = [thetas, track_theta_extent[1]]
+
+        #print track_theta_extent_pos
+        #print track_theta_extent_neg
+        #print '\n'
         
         # --------  ToDo -----------
 
@@ -285,10 +289,20 @@ for k in range(len(t_bin_edges) - 1):
             # from these two intervals:
             t = track_theta_extent_neg
             b = (theta_bin_edges[i],theta_bin_edges[i+1])
-            if (b[0] <= t[1]) and (t[0] < b[1]):
+            if (b[0] <= t[1]) and (t[0] < b[1]) and (t[0] < t[1]):
                 ro_h = min(b[1], t[1])
                 ro_l = max(b[0], t[0])
-                if ro_l > ro_h:
+                if b[0] < np.pi/2.:
+                    theta_l = my_track.r_of_theta_pos(ro_l)
+                    theta_h = my_track.r_of_theta_pos(ro_h)
+                else:
+                    theta_l = my_track.r_of_theta_neg(ro_l)
+                    theta_h = my_track.r_of_theta_neg(ro_h)
+                theta_inter_neg.append(sorted((theta_l,theta_h)))
+            elif (b[0] <= t[0]) and (t[1] < b[1]) and (t[1] < t[0]):
+                ro_h = min(b[1], t[0])
+                ro_l = max(b[0], t[1])
+                if b[0] < np.pi/2.:
                     theta_l = my_track.r_of_theta_neg(ro_l)
                     theta_h = my_track.r_of_theta_neg(ro_h)
                 else:
@@ -297,54 +311,38 @@ for k in range(len(t_bin_edges) - 1):
                 theta_inter_neg.append(sorted((theta_l,theta_h)))
             else:
                 theta_inter_neg.append(None)
+
         theta_inter_pos = []
         for i in range(len(theta_bin_edges) - 1):
             # get interval overlaps
             # from these two intervals:
             t = track_theta_extent_pos
             b = (theta_bin_edges[i],theta_bin_edges[i+1])
-            if (b[0] <= t[1]) and (t[0] < b[1]):
+            if (b[0] <= t[1]) and (t[0] < b[1]) and (t[0] < t[1]):
                 ro_h = min(b[1], t[1])
                 ro_l = max(b[0], t[0])
-                if ro_l > ro_h:
+                if b[0] < np.pi/2.:
                     theta_l = my_track.r_of_theta_pos(ro_l)
                     theta_h = my_track.r_of_theta_pos(ro_h)
                 else:
                     theta_l = my_track.r_of_theta_neg(ro_l)
                     theta_h = my_track.r_of_theta_neg(ro_h)
                 theta_inter_pos.append(sorted((theta_l,theta_h)))
+            elif (b[0] <= t[0]) and (t[1] < b[1]) and (t[1] < t[0]):
+                ro_h = min(b[1], t[0])
+                ro_l = max(b[0], t[1])
+                if b[0] < np.pi/2.:
+                    theta_l = my_track.r_of_theta_neg(ro_l)
+                    theta_h = my_track.r_of_theta_neg(ro_h)
+                else:
+                    theta_l = my_track.r_of_theta_pos(ro_l)
+                    theta_h = my_track.r_of_theta_pos(ro_h)
+                theta_inter_pos.append(sorted((theta_l,theta_h)))
             else:
                 theta_inter_pos.append(None)
 
-        # theta intervals
-        #theta_inter_neg = []
-        #theta_inter_pos = []
-        #for i in range(len(theta_bin_edges) - 1):
-        #    # get interval overlaps
-        #    # from these two intervals:
-        #    t = track_theta_extent
-        #    b = (theta_bin_edges[i],theta_bin_edges[i+1])
-        #    if t[0] == t[1]:
-        #        # along coordinate axis
-        #        # ToDo: is this safe?
-        #        theta_inter.append(r_extent)
-        #    elif (b[0] <= t[1]) and (t[0] < b[1]):
-        #        theta_h = min(b[1], t[1])
-        #        theta_l = max(b[0], t[0])
-        #        r_l = my_track.r_of_theta_neg(theta_l)
-        #        r_h = my_track.r_of_theta_neg(theta_h)
-        #        theta_inter.append(sorted((r_l,r_h)))
-        #        r_l = my_track.r_of_theta_pos(theta_l)
-        #        r_h = my_track.r_of_theta_pos(theta_h)
-        #        theta_inter_pos.append(sorted((r_l,r_h)))
-        #    else:
-        #        theta_inter.append(None)
-        #        theta_inter_pos.append(None)
-       
-        #print 'theta ',theta_inter_neg 
-        #print 'theta ',theta_inter_pos
-        #print my_track.ts
-        #print '\n'
+        #print theta_inter_pos
+        #print theta_inter_neg
 
         # phi intervals
         phi_inter = []

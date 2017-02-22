@@ -1,0 +1,36 @@
+\begin{cases}
+x = x_0 + \rho  \sin{\vartheta}  \cos{\phi} \\
+y = y_0 + \rho  \sin{\vartheta}  \sin{\phi} \\
+z = z_0 + \rho  \cos{\vartheta}
+\end{cases}
+\begin{cases}
+X = R  \sin{\Theta}  \cos{\Phi} \\
+Y = R  \sin{\Theta}  \sin{\Phi} \\
+Z = R  \cos{\Theta}
+\end{cases} \\
+R_b = x_0\sin{\vartheta}\cos{\phi} + y_0\sin{\vartheta}\sin{\phi} + z_0\cos{\vartheta} \\
+\Theta_b = \frac{-\cos{\vartheta}(x_0^2 + y_0^2) + \sin{\vartheta}z_0(x_0\cos{\phi} + y_0\sin{\phi})}{\sin{\vartheta}\cos{\vartheta}(x_0\cos{\phi} + y_0\sin{\phi}) - z_0(\sin{\vartheta}^2) } \\
+\rho(\Phi) = \frac{\sin{\Phi}x_0 - \cos{\Phi}y_0}{\cos{\Phi}\sin{\phi}\sin{\vartheta} - \sin{\Phi}\cos{\phi}\sin{\vartheta}} \\
+\rho(\Theta) = \frac{x_0\sin{\vartheta}\cos{\phi} + y_0\sin{\phi}\sin{\vartheta} - z_0\cos{\vartheta}\tan{\Theta}^2 \pm M}{-\sin{\vartheta}^2 + \cos{\vartheta}^2\tan{\Theta}^2}\\
+M = \sqrt{\sin{\vartheta}^2(- x_0^2\sin{\phi}^2 - y_0^2\cos{\phi}^2 + 2x_0y_0\sin{\phi}\cos{\phi}) + \tan{\Theta}^2\left( x_0^2 + y_0^2)\cos{\vartheta}^2 + z_0^2\sin{\vartheta}^2 - 2z_0\sin{\vartheta}\cos{\vartheta}(x_0\cos{\phi} + y_0\sin{\phi}) )} \\
+\rho(R) = \pm A - x_0\sin{\vartheta}\cos{\phi} - y_0\sin{\phi}\sin{\vartheta} - z_0\cos{\vartheta}
+A = \sqrt{R^2 + x_0^2(\cos{\phi}^2\sin{\vartheta}^2 - 1) + y_0^2(\sin{\phi}^2\sin{\vartheta}^2 - 1) + z_0^2(\cos{\vartheta}^2 - 1) + 2x_0y_0\sin{\phi}\sin{\vartheta}^2\cos{\phi} + 2x_0z_0\cos{\phi}\sin{\vartheta}\cos{\vartheta} + 2y_0z_0\sin{\phi}\sin{\vartheta}\cos{\vartheta}} 
+
+%\begin{cases}
+%x = x_0 + \rho  \sin{\vartheta}  \cos{\phi} \\
+%y = y_0 + \rho  \sin{\vartheta}  \sin{\phi} \\
+%z = z_0 + \rho  \cos{\vartheta}
+%\end{cases}
+%\begin{cases}
+%X = R  \sin{\Theta}  \cos{\Phi} \\
+%Y = R  \sin{\Theta}  \sin{\Phi} \\
+%Z = R  \cos{\Theta}
+%\end{cases} \\
+%R_b = x_0\sin{\vartheta}\cos{\phi} + y_0\sin{\vartheta}\sin{\phi} + z_0\cos{\vartheta} \\
+%\Theta_b = \frac{-\cos{\vartheta}(x_0^2 + y_0^2) + \sin{\vartheta}z_0(x_0\cos{\phi} + y_0\sin{\phi})}{\sin{\vartheta}\cos{\vartheta}(x_0\cos{\phi} + y_0\sin{\phi}) - z_0(\sin{\vartheta}^2) } \\
+%\rho(\Phi) = \frac{\sin{\Phi}x_0 - \cos{\Phi}y_0}{\cos{\Phi}\sin{\phi}\sin{\vartheta} - \sin{\Phi}\cos{\phi}\sin{\vartheta}} \\
+%\rho(\Theta) = \frac{x_0\sin{\vartheta}\cos{\phi} + y_0\sin{\phi}\sin{\vartheta} - z_0\cos{\vartheta}\tan{\Theta}^2 \pm \sqrt{M}}{-\sin{\vartheta}^2 + \cos{\vartheta}^2\tan{\Theta}^2}\\
+%M = \sin{\vartheta}^2(- x_0^2\sin{\phi}^2 - y_0^2\cos{\phi}^2 + 2x_0y_0\sin{\phi}\cos{\phi}) + \tan{\Theta}^2\left( x_0^2 + y_0^2)\cos{\vartheta}^2 + z_0^2\sin{\vartheta}^2 - 2z_0\sin{\vartheta}\cos{\vartheta}(x_0\cos{\phi} + y_0\sin{\phi}) ) \\
+%\rho(R) = \pm \sqrt{A} - x_0\sin{\vartheta}\cos{\phi} - y_0\sin{\phi}\sin{\vartheta} - z_0\cos{\vartheta} \\
+%A = R^2 + x_0^2(\cos{\phi}^2\sin{\vartheta}^2 - 1) + y_0^2(\sin{\phi}^2\sin{\vartheta}^2 - 1) + z_0^2(\cos{\vartheta}^2 - 1) + 2x_0y_0\sin{\phi}\sin{\vartheta}^2\cos{\phi} + 2x_0z_0\cos{\phi}\sin{\vartheta}\cos{\vartheta} + 2y_0z_0\sin{\phi}\sin{\vartheta}\cos{\vartheta}
+%\rho = tc
