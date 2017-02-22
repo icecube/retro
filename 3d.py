@@ -98,9 +98,14 @@ class track(object):
 
     @property
     def ts(self):
-        # smallest Z/R ???
-        #rho = -3*self.x0*self.cosphi/(2*self.sintheta) - 3*self.y0*self.sinphi/(2*self.sintheta) + self.z0/(2*self.costheta) - np.sqrt(9*self.x0**2*self.cosphi**2*self.costheta**2 - 8*self.x0**2*self.costheta**2 + 18*self.x0*self.y0*self.sinphi*self.cosphi*self.costheta**2 - 2*self.x0*self.z0*self.sintheta*self.cosphi*self.costheta - 9*self.y0**2*self.cosphi**2*self.costheta**2 + self.y0**2*self.costheta**2 - 2*self.y0*self.z0*self.sinphi*self.sintheta*self.costheta - self.z0**2*self.costheta**2 + self.z0**2)/np.sin(2*self.theta)
-        rho = 2*(-2*self.x0**2*self.costheta - self.x0*self.z0*np.sin(self.phi - self.theta) + self.x0*self.z0*np.sin(self.phi + self.theta) - 2*self.y0**2*self.costheta + self.y0*self.z0*np.cos(self.phi - self.theta) - self.y0*self.z0*np.cos(self.phi + self.theta))/(-self.x0*np.sin(self.phi - 2*self.theta) + self.x0*np.sin(self.phi + 2*self.theta) + self.y0*np.cos(self.phi - 2*self.theta) - self.y0*np.cos(self.phi + 2*self.theta) + 2*self.z0*np.cos(2*self.theta) - 2*self.z0)
+        # smallest theta
+        rho = ( \
+            - self.costheta*(self.x0**2 + self.y0**2) \
+            + self.sintheta*self.z0*(self.x0*self.cosphi + self.y0*self.sinphi)) \
+        /( \
+            + self.sintheta*self.costheta*(self.x0*self.cosphi + self.y0*self.sinphi) \
+            - self.z0*(self.sintheta**2) \
+            )
         return self.t0 + rho / self.c
 
     # --------  ToDo -----------
@@ -171,7 +176,7 @@ class track(object):
 #my_track = track(0, -4.0, -2.1, 0.05, 5.5)
 #my_track = track(0, -8.0, -5.1, 0.3, 15.)
 #my_track = track(5, -6.0, -5.1, 3.0, 0.45, 0.2, 15.)
-my_track = track(0, -6.0, 4.1, 2.0, -0.45, 1., 35.)
+my_track = track(0, -6.0, 4.1, 2.0, -0.45, 1., 20.)
 #my_track.set_origin(5,0,-1)
 #my_track = track(0, 3.5, -2.1, np.pi/2., 5.5)
 
@@ -467,25 +472,28 @@ for k in range(len(t_bin_edges) - 1):
 
 #im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
 #im_ani.save('im.mp4', writer=writer)
-vmax=0.1
+vmax=0.2
+cmap = 'bone_r'
 
 tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
 zz = z.sum(axis=(2,3))
-mg = ax2.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap='Purples')
+mg = ax2.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
 ax2.set_xlabel('t')
 ax2.set_ylabel('r')
 
 tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
 zz = z.sum(axis=(1,3))
-mg = ax3.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap='Purples')
+mg = ax3.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
 ax3.set_xlabel('t')
 ax3.set_ylabel(r'$\theta$')
+ax3.set_ylim((0,np.pi))
 
 tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
 zz = z.sum(axis=(1,2))
-mg = ax4.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap='Purples')
+mg = ax4.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
 ax4.set_xlabel('t')
 ax4.set_ylabel(r'$\phi$')
+ax4.set_ylim((0,2*np.pi))
 
 plt.show()
 plt.savefig('3d.png',dpi=300)
