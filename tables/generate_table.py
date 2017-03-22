@@ -85,19 +85,21 @@ axes = None
 tray.AddSegment(TabulatePhotonsFromSource,
                 'generator',
                 Seed=opts.seed,
-                PhotonSource='flasher',
-                Zenith=0. * I3Units.degree,
-                ZCoordinate=0.,
+                PhotonSource='retro',
+                Zenith=180. * I3Units.degree,
+                ZCoordinate=-200.,
                 Energy=1., 
-                NEvents=100, 
+                NEvents=25000, 
                 Filename=outfile,
                 TabulateImpactAngle=True,
                 PhotonPrescale=1,
                 RecordErrors=opts.errors,
+                FlasherWidth=127,
+                FlasherBrightness=127,
                 DisableTilt=True,
                 IceModel='spice_mie',
                 Axes=axes,
-                Sensor='dom')
+                Sensor='none')
     
 tray.AddModule('TrashCan', 'MemoryHole')
 tray.Execute()
