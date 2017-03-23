@@ -199,18 +199,28 @@ ax.plot([x_0,x_e],[y_0,y_e],zs=[m,m],alpha=0.3,c='k')
 #ax.plot(0,0,'o',markersize=10,mfc='none',c='b')
 
 # binning
-t_bin_edges = np.linspace(0,20,101)
-r_bin_edges = np.linspace(5,15,101)
-phi_bin_edges = np.linspace(0,2*np.pi,101)
-theta_bin_edges = np.linspace(0,np.pi,101)
+#t_bin_edges = np.linspace(0,20,101)
+#r_bin_edges = np.linspace(5,15,101)
+#phi_bin_edges = np.linspace(0,2*np.pi,101)
+#theta_bin_edges = np.linspace(0,np.pi,101)
 
-#for r in r_bin_edges:
-#    circle = plt.Circle((0,0), r, color='g', alpha=0.2, fill=False)
-#    ax.add_artist(circle)
-#for phi in phi_bin_edges:
-#    dx = 100 * np.cos(phi)
-#    dy = 100 * np.sin(phi)
-#    ax.plot([0,0 + dx],[0,dy], ls='-', color='g', alpha=0.2)
+def PowerAxis(minval, maxval, n_bins, power):
+    # JVSs Power axis reverse engeneered
+    l = np.linspace(np.power(minval,1./power),np.power(maxval,1./power), n_bins+1)
+    bin_edges = np.power(l,power)
+    return bin_edges
+
+# same as CLsim
+#t_bin_edges = PowerAxis(0, 7e3, 105, 2)
+t_bin_edges = PowerAxis(0, 20, 105, 2)
+r_bin_edges = PowerAxis(0, 15, 200, 2)
+#r_bin_edges = PowerAxis(0, 580, 200, 2)
+phi_bin_edges = np.linspace(0, 2*np.pi, 37)
+theta_bin_edges = np.arccos(np.linspace(-1 , 1, 101))[::-1]
+print t_bin_edges
+print r_bin_edges
+print theta_bin_edges
+print phi_bin_edges
 
 # coord. transforms
 def cr(x,y,z):

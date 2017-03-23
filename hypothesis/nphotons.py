@@ -2,31 +2,20 @@ from icecube.clsim.traysegments.common import parseIceModel
 from icecube.clsim import NumberOfPhotonsPerMeter
 from icecube import clsim
 from os.path import expandvars
+from icecube.icetray import I3Units
 
 mediumProperties = parseIceModel(expandvars("$I3_SRC/clsim/resources/ice/spice_mie"), disableTilt=True)
-print mediumProperties.GetMinWavelength()
-print mediumProperties.GetMaxWavelength()
-
-flatAcceptance = clsim.I3CLSimFunctionConstant(1.)
 domAcceptance = clsim.GetIceCubeDOMAcceptance()
+photons_per_meter = NumberOfPhotonsPerMeter(mediumProperties.GetPhaseRefractiveIndex(0),
+                                            domAcceptance,
+                                            mediumProperties.GetMinWavelength(),
+                                            mediumProperties.GetMaxWavelength()
+                                            )
+                                                                                                                                                    )
+density = mediumProperties.GetMediumDensity()
 
-meanPhotonsPerMeterInLayer_flat = []
-meanPhotonsPerMeterInLayer_dom = []
-
-for  i in range(mediumProperties.GetLayersNum()):
-    nPhot_flat = NumberOfPhotonsPerMeter(mediumProperties.GetPhaseRefractiveIndex(i),
-                                   flatAcceptance,
-                                   mediumProperties.GetMinWavelength(),
-                                   mediumProperties.GetMaxWavelength()
-                                   )
-    nPhot_dom = NumberOfPhotonsPerMeter(mediumProperties.GetPhaseRefractiveIndex(i),
-                                   domAcceptance,
-                                   mediumProperties.GetMinWavelength(),
-                                   mediumProperties.GetMaxWavelength()
-                                   )
-
-    meanPhotonsPerMeterInLayer_flat.append(nPhot_flat)
-    meanPhotonsPerMeterInLayer_dom.append(nPhot_dom)
-
-print meanPhotonsPerMeterInLayer_flat
-print meanPhotonsPerMeterInLayer_dom
+# PPC parametrerization
+nph=5.21*(0.924)/density
+nphot10GeV = nph*photons_per_meter*10*I3Units.g/I3Units.cm3
+print '10 GeV cascd = ',nphot10GeV
+print '10 GeV (15 m) trck = ', photons_per_meter*15
