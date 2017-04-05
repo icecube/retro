@@ -17,7 +17,10 @@ table = pyfits.open(sys.argv[1])
 #table.info()
 # cut off under and overflow bins
 data = table[0].data[1:-1,1:-1,1:-1,1:-1,1:-1]
-norm = table[0].header['_i3_n_photons']
+nphotons = table[0].header['_i3_n_photons']
+nphase =  table[0].header['_i3_n_phase']
+# norm N_photons * (speed of light / phase refractive index)
+norm = nphotons * (2.99792458 / nphase)
 data /= norm
 
 lables = [r'$r\ (m)$', r'$\cos{\vartheta}$', r'$t\ (ns)$', r'$\cos{\vartheta_\gamma}$', r'$\phi_\gamma$']
@@ -100,8 +103,9 @@ ax6 = fig.add_subplot(326)
 plot_1d(data, bin_edges, lables, ax1, 0)
 plot_1d(data, bin_edges, lables, ax2, 1)
 plot_1d(data, bin_edges, lables, ax3, 2)
-plot_1d(data, bin_edges, lables, ax4, 3)
-plot_1d(data, bin_edges, lables, ax5, 4)
+plot_1d(data, bin_edges, lables, ax4, 2, log=True)
+plot_1d(data, bin_edges, lables, ax5, 3)
+plot_1d(data, bin_edges, lables, ax6, 4)
 
 plt.savefig(sys.argv[1].split('.')[0]+'_1d.png',dpi=150)
 
