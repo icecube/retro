@@ -294,7 +294,7 @@ class hypo(object):
                 intervals.append(None)
         return intervals
 
-    def get_z_matrix(self, Dt, Dx, Dy, Dz):
+    def get_z_matrix(self, Dt=0, Dx=0, Dy=0, Dz=0):
         ''' calculate the z-matrix for a given DOM hit:
             i.e. dom 3d position + hit time '''
 
@@ -417,6 +417,30 @@ class hypo(object):
 
 if __name__ == '__main__':
 
+    # for plotting
+    import matplotlib as mpl
+    mpl.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.animation as animation
+    from mpl_toolkits.mplot3d import Axes3D
+    # plot setup
+    fig = plt.figure(figsize=(10,10))
+    ax = fig.add_subplot(221,projection='3d')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+    ax2 = fig.add_subplot(222)
+    ax3 = fig.add_subplot(223)
+    ax4 = fig.add_subplot(224)
+
+    plt_lim = 10
+
+    ax.set_xlim((-plt_lim,plt_lim))
+    ax.set_ylim((-plt_lim,plt_lim))
+    ax.set_zlim((-plt_lim,plt_lim))
+    ax.grid(True)
+
+
     def PowerAxis(minval, maxval, n_bins, power):
         '''JVSs Power axis reverse engeneered'''
         l = np.linspace(np.power(minval, 1./power), np.power(maxval, 1./power), n_bins+1)
@@ -431,3 +455,40 @@ if __name__ == '__main__':
 
     my_hypo = hypo(0, 0, 0, 2.0, -0.45, np.pi, 20., 1000)
     my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+
+
+    # plot the track as a line
+    x_0, y_0, z_0 = my_hypo.track.point(my_hypo.track.t0)
+    x_e, y_e, z_e  = my_hypo.track.point(my_hypo.track.t0 + my_hypo.track.dt)
+    ax.plot([x_0,x_e],[y_0,y_e],zs=[z_0,z_e])
+    ax.plot([-plt_lim,-plt_lim],[y_0,y_e],zs=[z_0,z_e],alpha=0.3,c='k')
+    ax.plot([x_0,x_e],[--plt_lim,--plt_lim],zs=[z_0,z_e],alpha=0.3,c='k')
+    ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
+
+    z = my_hypo.get_z_matrix()
+
+    vmax=0.2
+    cmap = 'bone_r'
+
+    tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
+    zz = z.sum(axis=(2,3))
+    mg = ax2.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
+    ax2.set_xlabel('t')
+    ax2.set_ylabel('r')
+
+    tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
+    zz = z.sum(axis=(1,3))
+    mg = ax3.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
+    ax3.set_xlabel('t')
+    ax3.set_ylabel(r'$\theta$')
+    ax3.set_ylim((0,np.pi))
+
+    tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
+    zz = z.sum(axis=(1,2))
+    mg = ax4.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
+    ax4.set_xlabel('t')
+    ax4.set_ylabel(r'$\phi$')
+    ax4.set_ylim((0,2*np.pi))
+
+    plt.show()
+    plt.savefig('hypo.png',dpi=300)
