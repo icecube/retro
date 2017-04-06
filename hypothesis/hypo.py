@@ -109,7 +109,7 @@ class track(object):
         return self.t0 + rho / self.c
 
 
-    def r_of_phi(self, phi):
+    def rho_of_phi(self, phi):
         sin = np.sin(phi)
         cos = np.cos(phi)
         return (sin*self.x0 - cos*self.y0)/(cos*self.sinphi*self.sintheta - sin*self.cosphi*self.sintheta)
@@ -129,7 +129,7 @@ class track(object):
         else:
             return np.sqrt(S)
 
-    def r_of_theta_neg(self, T):
+    def rho_of_theta_neg(self, T):
         M = self.get_M(T)
         d = -self.sintheta**2 + self.costheta**2*np.tan(T)**2
         if d == 0: return np.inf
@@ -141,7 +141,7 @@ class track(object):
             d
         return rho
 
-    def r_of_theta_pos(self, T):
+    def rho_of_theta_pos(self, T):
         M = self.get_M(T)
         d = -self.sintheta**2 + self.costheta**2*np.tan(T)**2
         if d == 0: return np.inf
@@ -166,11 +166,11 @@ class track(object):
         else:
             return np.sqrt(S)
 
-    def r_of_r_pos(self, R):
+    def rho_of_r_pos(self, R):
         A = self.get_A(R)
         return A - self.x0*self.sintheta*self.cosphi - self.y0*self.sinphi*self.sintheta - self.z0*self.costheta 
 
-    def r_of_r_neg(self, R):
+    def rho_of_r_neg(self, R):
         A = self.get_A(R)
         return - A - self.x0*self.sintheta*self.cosphi - self.y0*self.sinphi*self.sintheta - self.z0*self.costheta 
 
@@ -309,25 +309,25 @@ for k in range(len(t_bin_edges) - 1):
 
                 theta_inter_neg.append(r_extent)
             elif (b[0] <= t[1]) and (t[0] < b[1]) and (t[0] < t[1]):
-                ro_h = min(b[1], t[1])
-                ro_l = max(b[0], t[0])
+                val_high = min(b[1], t[1])
+                val_low = max(b[0], t[0])
                 if b[0] < np.pi/2.:
-                    theta_l = my_track.r_of_theta_pos(ro_l)
-                    theta_h = my_track.r_of_theta_pos(ro_h)
+                    theta_low = my_track.rho_of_theta_pos(val_low)
+                    theta_high = my_track.rho_of_theta_pos(val_high)
                 else:
-                    theta_l = my_track.r_of_theta_neg(ro_l)
-                    theta_h = my_track.r_of_theta_neg(ro_h)
-                theta_inter_neg.append(sorted((theta_l,theta_h)))
+                    theta_low = my_track.rho_of_theta_neg(val_low)
+                    theta_high = my_track.rho_of_theta_neg(val_high)
+                theta_inter_neg.append(sorted((theta_low,theta_high)))
             elif (b[0] <= t[0]) and (t[1] < b[1]) and (t[1] < t[0]):
-                ro_h = min(b[1], t[0])
-                ro_l = max(b[0], t[1])
+                val_high = min(b[1], t[0])
+                val_low = max(b[0], t[1])
                 if b[0] < np.pi/2.:
-                    theta_l = my_track.r_of_theta_neg(ro_l)
-                    theta_h = my_track.r_of_theta_neg(ro_h)
+                    theta_low = my_track.rho_of_theta_neg(val_low)
+                    theta_high = my_track.rho_of_theta_neg(val_high)
                 else:
-                    theta_l = my_track.r_of_theta_pos(ro_l)
-                    theta_h = my_track.r_of_theta_pos(ro_h)
-                theta_inter_neg.append(sorted((theta_l,theta_h)))
+                    theta_low = my_track.rho_of_theta_pos(val_low)
+                    theta_high = my_track.rho_of_theta_pos(val_high)
+                theta_inter_neg.append(sorted((theta_low,theta_high)))
             else:
                 theta_inter_neg.append(None)
 
@@ -344,25 +344,25 @@ for k in range(len(t_bin_edges) - 1):
                 # along coordinate axis
                 theta_inter_pos.append(r_extent)
             elif (b[0] <= t[1]) and (t[0] < b[1]) and (t[0] < t[1]):
-                ro_h = min(b[1], t[1])
-                ro_l = max(b[0], t[0])
+                val_high = min(b[1], t[1])
+                val_low = max(b[0], t[0])
                 if b[0] < np.pi/2.:
-                    theta_l = my_track.r_of_theta_pos(ro_l)
-                    theta_h = my_track.r_of_theta_pos(ro_h)
+                    theta_low = my_track.rho_of_theta_pos(val_low)
+                    theta_high = my_track.rho_of_theta_pos(val_high)
                 else:
-                    theta_l = my_track.r_of_theta_neg(ro_l)
-                    theta_h = my_track.r_of_theta_neg(ro_h)
-                theta_inter_pos.append(sorted((theta_l,theta_h)))
+                    theta_low = my_track.rho_of_theta_neg(val_low)
+                    theta_high = my_track.rho_of_theta_neg(val_high)
+                theta_inter_pos.append(sorted((theta_low,theta_high)))
             elif (b[0] <= t[0]) and (t[1] < b[1]) and (t[1] < t[0]):
-                ro_h = min(b[1], t[0])
-                ro_l = max(b[0], t[1])
+                val_high = min(b[1], t[0])
+                val_low = max(b[0], t[1])
                 if b[0] < np.pi/2.:
-                    theta_l = my_track.r_of_theta_neg(ro_l)
-                    theta_h = my_track.r_of_theta_neg(ro_h)
+                    theta_low = my_track.rho_of_theta_neg(val_low)
+                    theta_high = my_track.rho_of_theta_neg(val_high)
                 else:
-                    theta_l = my_track.r_of_theta_pos(ro_l)
-                    theta_h = my_track.r_of_theta_pos(ro_h)
-                theta_inter_pos.append(sorted((theta_l,theta_h)))
+                    theta_low = my_track.rho_of_theta_pos(val_low)
+                    theta_high = my_track.rho_of_theta_pos(val_high)
+                theta_inter_pos.append(sorted((theta_low,theta_high)))
             else:
                 theta_inter_pos.append(None)
 
@@ -380,28 +380,28 @@ for k in range(len(t_bin_edges) - 1):
                 # along coordinate axis
                 phi_inter.append(r_extent)
             elif t[0] <= t[1] and (b[0] <= t[1]) and (t[0] < b[1]):
-                phi_h = min(b[1], t[1])
-                phi_l = max(b[0], t[0])
-                r_l = my_track.r_of_phi(phi_l)
-                r_h = my_track.r_of_phi(phi_h)
-                phi_inter.append(sorted((r_l,r_h)))
+                phi_high = min(b[1], t[1])
+                phi_low = max(b[0], t[0])
+                r_low = my_track.rho_of_phi(phi_low)
+                r_high = my_track.rho_of_phi(phi_high)
+                phi_inter.append(sorted((r_low,r_high)))
             # crossing the 0/2pi point 
             elif t[1] < t[0]:
                 if b[1] >= 0 and t[1] >= b[0]:
-                    phi_h = min(b[1], t[1])
-                    phi_l = max(b[0],0)
+                    phi_high = min(b[1], t[1])
+                    phi_low = max(b[0],0)
                 elif 2*np.pi > b[0] and b[1] >= t[0]:
-                    phi_h = min(b[1], 2*np.pi)
-                    phi_l = max(b[0],t[0])
+                    phi_high = min(b[1], 2*np.pi)
+                    phi_low = max(b[0],t[0])
                 elif b[0] <= t[1] and t[0] <= t[1]:
-                    phi_h = min(b[1], t[1])
-                    phi_l = max(b[0], t[0])
+                    phi_high = min(b[1], t[1])
+                    phi_low = max(b[0], t[0])
                 else:
                     phi_inter.append(None)
                     continue
-                r_l = my_track.r_of_phi(phi_l)
-                r_h = my_track.r_of_phi(phi_h)
-                phi_inter.append(sorted((r_l,r_h)))
+                r_low = my_track.rho_of_phi(phi_low)
+                r_high = my_track.rho_of_phi(phi_high)
+                phi_inter.append(sorted((r_low,r_high)))
             else:
                 phi_inter.append(None)
 
@@ -415,15 +415,15 @@ for k in range(len(t_bin_edges) - 1):
             t = track_r_extent_neg
             b = (r_bin_edges[i],r_bin_edges[i+1])
             if (b[0] <= t[1]) and (t[0] < b[1]):
-                ro_h = min(b[1], t[1])
-                ro_l = max(b[0], t[0])
-                if ro_l > ro_h:
-                    r_l = my_track.r_of_r_neg(ro_l)
-                    r_h = my_track.r_of_r_neg(ro_h)
+                val_high = min(b[1], t[1])
+                val_low = max(b[0], t[0])
+                if val_low > val_high:
+                    r_low = my_track.rho_of_r_neg(val_low)
+                    r_high = my_track.rho_of_r_neg(val_high)
                 else:
-                    r_l = my_track.r_of_r_pos(ro_l)
-                    r_h = my_track.r_of_r_pos(ro_h)
-                r_inter_neg.append(sorted((r_l,r_h)))
+                    r_low = my_track.rho_of_r_pos(val_low)
+                    r_high = my_track.rho_of_r_pos(val_high)
+                r_inter_neg.append(sorted((r_low,r_high)))
             else:
                 r_inter_neg.append(None)
         r_inter_pos = []
@@ -433,15 +433,15 @@ for k in range(len(t_bin_edges) - 1):
             t = track_r_extent_pos
             b = (r_bin_edges[i],r_bin_edges[i+1])
             if (b[0] <= t[1]) and (t[0] < b[1]):
-                ro_h = min(b[1], t[1])
-                ro_l = max(b[0], t[0])
-                if ro_l > ro_h:
-                    r_l = my_track.r_of_r_pos(ro_l)
-                    r_h = my_track.r_of_r_pos(ro_h)
+                val_high = min(b[1], t[1])
+                val_low = max(b[0], t[0])
+                if val_low > val_high:
+                    r_low = my_track.rho_of_r_pos(val_low)
+                    r_high = my_track.rho_of_r_pos(val_high)
                 else:
-                    r_l = my_track.r_of_r_neg(ro_l)
-                    r_h = my_track.r_of_r_neg(ro_h)
-                r_inter_pos.append(sorted((r_l,r_h)))
+                    r_low = my_track.rho_of_r_neg(val_low)
+                    r_high = my_track.rho_of_r_neg(val_high)
+                r_inter_pos.append(sorted((r_low,r_high)))
             else:
                 r_inter_pos.append(None)
 
