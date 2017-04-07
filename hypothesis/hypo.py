@@ -3,9 +3,15 @@ import numpy as np
 class track(object):
     ''' class to calculate track positons for a given track hypo '''
     def __init__(self, t_v, x_v, y_v, z_v, phi, theta, length):
-        ''' initialize with track parameters '''
+        ''' initialize with track parameters :
+            t_v : time (ns)
+            t_x, t_y, t_z : vertex position (m)
+            phi : azimuth (rad)
+            theta : zenith (rad)
+            length : track length (m)
+            '''
         # speed of light
-        self.c = 0.1
+        self.c = 0.299792 # m/ns
         # vertex position, angle and length
         self.t_v = t_v
         self.x_v = x_v
@@ -167,8 +173,8 @@ class hypo(object):
     def __init__(self, t_v, x_v, y_v, z_v, phi, theta, length, cscd_energy):
         ''' provide hypo with vertex (_v), muon direction and length, and cscd energy'''
         self.track = track(t_v, x_v, y_v, z_v, phi, theta, length)
-        self.photons_per_m = 0
-        self.photons_cscd = cscd_energy * 0
+        self.photons_per_m = 10
+        self.cscd_photons = cscd_energy * 10
         self.t_bin_edges = None
         self.r_bin_edges = None
         self.phi_bin_edges = None
@@ -296,7 +302,11 @@ class hypo(object):
 
     def get_z_matrix(self, Dt=0, Dx=0, Dy=0, Dz=0):
         ''' calculate the z-matrix for a given DOM hit:
-            i.e. dom 3d position + hit time '''
+            i.e. dom 3d position + hit time
+            
+            Dt : DOM hit time (ns)
+            Dx, Dy, Dz : DOM position (m)
+            '''
 
         # set the origin of the spherical coords. to the DOM hit pos.
         self.track.set_origin(Dt, Dx, Dy, Dz)
@@ -381,7 +391,7 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length
+                                z[k][j][m][i] += length * self.photons_per_m
                         for j, r in enumerate(r_inter_pos):
                             if r is None:
                                 continue
@@ -390,7 +400,7 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length
+                                z[k][j][m][i] += length * self.photons_per_m
                     for m, theta in enumerate(theta_inter_pos):
                         if theta is None:
                             continue
@@ -402,7 +412,7 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length
+                                z[k][j][m][i] += length * self.photons_per_m
                         for j, r in enumerate(r_inter_pos):
                             if r is None:
                                 continue
@@ -411,9 +421,39 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length
+                                z[k][j][m][i] += length * self.photons_per_m
+
+
+
+        # add cascade as point:
+        # get bin at self.track.t0, ...
+        t0 = self.track.t0
+        x0 = self.track.x0
+        y0 = self.track.y0
+        z0 = self.track.z0
+        r0 = self.cr(x0, y0, z0)
+        theta0 = self.ctheta(x0, y0, z0)
+        phi0 = self.cphi(x0, y0, z0)
+        # find bins
+        t_bin = self.get_bin(t0, self.t_bin_edges)
+        r_bin = self.get_bin(r0, self.r_bin_edges)
+        theta_bin = self.get_bin(theta0, self.theta_bin_edges)
+        phi_bin = self.get_bin(phi0, self.phi_bin_edges)
+        if not None in (t_bin, r_bin, theta_bin, phi_bin):
+            z[t_bin, r_bin, theta_bin, phi_bin] += self.cscd_photons
 
         return z
+
+    @staticmethod
+    def get_bin(val, bin_edges):
+        ''' find bin for value val in bin_edges
+            return None if val is outside binning
+        '''
+        for k in range(len(bin_edges) - 1):
+            if bin_edges[k] <= val and val < bin_edges[k+1]:
+                return k
+        return None
+
 
 if __name__ == '__main__':
 
@@ -453,7 +493,7 @@ if __name__ == '__main__':
     theta_bin_edges = np.arccos(np.linspace(-1, 1, 101))[::-1]
     phi_bin_edges = np.linspace(0, 2*np.pi, 37)
 
-    my_hypo = hypo(0, 0, 0, 2.0, -0.45, np.pi, 20., 1000)
+    my_hypo = hypo(0, 0, 0, 2.0, -0.45, np.pi, 20., 3.3)
     my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
 
 
@@ -467,25 +507,24 @@ if __name__ == '__main__':
 
     z = my_hypo.get_z_matrix()
 
-    vmax=0.2
     cmap = 'bone_r'
 
     tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
     zz = z.sum(axis=(2,3))
-    mg = ax2.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
+    mg = ax2.pcolormesh(tt, yy, zz.T, cmap=cmap)
     ax2.set_xlabel('t')
     ax2.set_ylabel('r')
 
     tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
     zz = z.sum(axis=(1,3))
-    mg = ax3.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
+    mg = ax3.pcolormesh(tt, yy, zz.T, vmin=0., cmap=cmap)
     ax3.set_xlabel('t')
     ax3.set_ylabel(r'$\theta$')
     ax3.set_ylim((0,np.pi))
 
     tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
     zz = z.sum(axis=(1,2))
-    mg = ax4.pcolormesh(tt, yy, zz.T, vmin=0., vmax=vmax, cmap=cmap)
+    mg = ax4.pcolormesh(tt, yy, zz.T, vmin=0., cmap=cmap)
     ax4.set_xlabel('t')
     ax4.set_ylabel(r'$\phi$')
     ax4.set_ylim((0,2*np.pi))
