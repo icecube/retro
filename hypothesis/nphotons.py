@@ -11,11 +11,10 @@ photons_per_meter = NumberOfPhotonsPerMeter(mediumProperties.GetPhaseRefractiveI
                                             mediumProperties.GetMinWavelength(),
                                             mediumProperties.GetMaxWavelength()
                                             )
-                                                                                                                                                    )
 density = mediumProperties.GetMediumDensity()
 
 # PPC parametrerization
 nph=5.21*(0.924)/density
 nphot10GeV = nph*photons_per_meter*10*I3Units.g/I3Units.cm3
 print '10 GeV cascd = ',nphot10GeV
-print '10 GeV (15 m) trck = ', photons_per_meter*15
+print '10 GeV trck = ', photons_per_meter * (10 * 15 / 3.33)

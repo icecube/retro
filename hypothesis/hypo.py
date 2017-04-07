@@ -1,13 +1,19 @@
 import numpy as np
+from icecube.clsim.traysegments.common import parseIceModel
+from icecube.clsim import NumberOfPhotonsPerMeter
+from icecube import clsim
+from os.path import expandvars
+from icecube.icetray import I3Units
+
 
 class track(object):
     ''' class to calculate track positons for a given track hypo '''
-    def __init__(self, t_v, x_v, y_v, z_v, phi, theta, length):
+    def __init__(self, t_v, x_v, y_v, z_v, theta, phi, length):
         ''' initialize with track parameters :
             t_v : time (ns)
             t_x, t_y, t_z : vertex position (m)
-            phi : azimuth (rad)
             theta : zenith (rad)
+            phi : azimuth (rad)
             length : track length (m)
             '''
         # speed of light
@@ -82,6 +88,8 @@ class track(object):
     @property
     def ts(self):
         '''time with smallest theta'''
+        if self.x0 == 0. and self.y0 == 0. and self.z0 == 0.:
+           return self.t0
         rho = ( \
             - self.costheta*(self.x0**2 + self.y0**2) \
             + self.sintheta*self.z0*(self.x0*self.cosphi + self.y0*self.sinphi)) \
@@ -90,6 +98,12 @@ class track(object):
             - self.z0*(self.sintheta**2) \
             )
         return self.t0 + rho / self.c
+
+    def rho_of_t(self, t):
+        if t < self.t0 or t > self.t0 + self.dt:
+            return -1
+        else:
+            return (t - self.t0) * self.c
 
     def rho_of_phi(self, phi):
         '''track parameter rho for a give phi'''
@@ -170,15 +184,38 @@ class hypo(object):
         at the DOM-hit point.
         The cells are devided up according to the binning that must be set.'''
 
-    def __init__(self, t_v, x_v, y_v, z_v, phi, theta, length, cscd_energy):
-        ''' provide hypo with vertex (_v), muon direction and length, and cscd energy'''
-        self.track = track(t_v, x_v, y_v, z_v, phi, theta, length)
-        self.photons_per_m = 10
-        self.cscd_photons = cscd_energy * 10
+    def __init__(self, t_v, x_v, y_v, z_v, theta, phi, trck_energy, cscd_energy):
+        ''' provide hypo with vertex (_v), direction and trck and cscd energy
+            
+            t_v : time (ns)
+            x_v, y_v, z_v : vertex pos. (m)
+            theta : zenith (rad)
+            phi : azimuth (rad)
+            trck_energy : track energy (GeV)
+            cscd_energy : cascade energy (GeV)
+            '''
+
+        # convert trck energy to length by (ToDo check this)
+        length = 15. / 3.3 * trck_energy
+        self.track = track(t_v, x_v, y_v, z_v, theta, phi, length)
+	mediumProperties = parseIceModel(expandvars("$I3_SRC/clsim/resources/ice/spice_mie"), disableTilt=True)
+	domAcceptance = clsim.GetIceCubeDOMAcceptance()
+	self.photons_per_meter = NumberOfPhotonsPerMeter(mediumProperties.GetPhaseRefractiveIndex(0),
+						    domAcceptance,
+						    mediumProperties.GetMinWavelength(),
+						    mediumProperties.GetMaxWavelength()
+						    )
+	density = mediumProperties.GetMediumDensity()
+	# PPC parametrerization
+	nph = 5.21 * 0.924 / density
+        self.cscd_photons = cscd_energy * nph * self.photons_per_meter * I3Units.g / I3Units.cm3
         self.t_bin_edges = None
         self.r_bin_edges = None
         self.phi_bin_edges = None
         self.theta_bin_edges = None
+
+        print 'total number of photons from cscd (%s GeV) = %i'%(cscd_energy, self.cscd_photons)
+        print 'total number of photons from trck (%s GeV) = %i'%(trck_energy, (self.track.length * self.photons_per_meter))
 
     def set_binning(self, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
         ''' set the binning of the spherical coordinates with bin_edges'''
@@ -201,6 +238,8 @@ class hypo(object):
     @staticmethod
     def ctheta(x, y, z):
         '''theta in spehrical coord., given x,y,z'''
+        if x == 0 and y == 0 and z == 0:
+           return 0
         return np.arccos(z/np.sqrt(x**2 + y**2 + z**2))
 
     # bin correlators:
@@ -214,7 +253,7 @@ class hypo(object):
                 intervals.append(None)
                 continue
             b = (bin_edges[i], bin_edges[i+1])
-            if t[0] == t[1] and (b[0] <= t[0]) and (t[0] <= b[1]):
+            if abs(t[0] - t[1]) < 1e-7 and (b[0] <= t[0]) and (t[0] < b[1]):
                 # along coordinate axis
                 intervals.append(rho_extent)
             elif (b[0] <= t[1]) and (t[0] < b[1]) and (t[0] < t[1]):
@@ -249,7 +288,7 @@ class hypo(object):
             # get interval overlaps
             # from these two intervals:
             b = (bin_edges[i], bin_edges[i+1])
-            if t[0] == t[1] and (b[0] <= t[0]) and (t[0] < b[1]):
+            if abs(t[0] - t[1]) < 1e-7 and (b[0] <= t[0]) and (t[0] < b[1]):
                 # along coordinate axis
                 intervals.append(rho_extent)
             elif t[0] <= t[1] and (b[0] <= t[1]) and (t[0] < b[1]):
@@ -289,7 +328,7 @@ class hypo(object):
             if (b[0] <= t[1]) and (t[0] < b[1]):
                 val_high = min(b[1], t[1])
                 val_low = max(b[0], t[0])
-                if ((val_low > val_high) and not pos) or ((val_low <= val_high) and pos):
+                if ((val_low >= val_high) and not pos) or ((val_low <= val_high) and pos):
                     r_low = self.track.rho_of_r_neg(val_low)
                     r_high = self.track.rho_of_r_neg(val_high)
                 else:
@@ -313,13 +352,13 @@ class hypo(object):
 
         # closest point (r inflection point)
         tb = self.track.tb
-        if tb > self.track.t0 and tb < self.track.t0 + self.track.dt:
+        if tb >= self.track.t0 and tb < self.track.t0 + self.track.dt:
             xb, yb, zb = self.track.point(tb)
             r_inflection_point = self.cr(xb, yb, zb)
 
         # theta inflection point
         ts = self.track.ts
-        if ts > self.track.t0 and ts < self.track.t0 + self.track.dt:
+        if ts >= self.track.t0 and ts < self.track.t0 + self.track.dt:
             xs, ys, zs = self.track.point(ts)
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
@@ -336,22 +375,26 @@ class hypo(object):
 
             # only continue if there is anything in that time bins
             if t_extent is not None:
+                #print 'sth in time bin ',k
                 # caluculate the maximal values for each coordinate (r, theta and phi)
                 # over which the track spans in the given time bins
                 extent = [self.track.point(t_extent[0]), self.track.point(t_extent[1])]
-                rho_extent = (self.track.c * t_extent[0], self.track.c * t_extent[1])
+                rho_extent = (self.track.rho_of_t(t_extent[0]), self.track.rho_of_t(t_extent[1]))
 
                 # r
                 track_r_extent = (self.cr(*extent[0]), self.cr(*extent[1]))
                 if tb <= t_extent[0]:
                     track_r_extent_neg = sorted(track_r_extent)
-                    track_r_extent_pos = [0, 0]
-                elif tb >= t_extent[1]:
+                    track_r_extent_pos = [-1, -1]
+                elif tb > t_extent[1]:
                     track_r_extent_pos = sorted(track_r_extent)
-                    track_r_extent_neg = [0, 0]
+                    track_r_extent_neg = [-1, -1]
                 else:
                     track_r_extent_pos = sorted([track_r_extent[0], r_inflection_point])
                     track_r_extent_neg = sorted([r_inflection_point, track_r_extent[1]])
+
+                #print track_r_extent_pos
+                #print track_r_extent_neg
 
                 # theta
                 track_theta_extent = (self.ctheta(*extent[0]), self.ctheta(*extent[1]))
@@ -376,7 +419,7 @@ class hypo(object):
                 phi_inter = self.correlate_phi(self.phi_bin_edges, track_phi_extent, rho_extent)
                 r_inter_neg = self.correlate_r(self.r_bin_edges, track_r_extent_neg, False)
                 r_inter_pos = self.correlate_r(self.r_bin_edges, track_r_extent_pos, True)
-
+                
                 start_t2 = time.time()
                 # Fill in the Z matrix the length of the track if there is overlap of the track with a bin
                 # ugly nested loops
@@ -394,7 +437,7 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length * self.photons_per_m
+                                z[k][j][m][i] += length * self.photons_per_meter
                         for j, r in enumerate(r_inter_pos):
                             if r is None:
                                 continue
@@ -403,7 +446,7 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length * self.photons_per_m
+                                z[k][j][m][i] += length * self.photons_per_meter
                     for m, theta in enumerate(theta_inter_pos):
                         if theta is None:
                             continue
@@ -415,7 +458,7 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length * self.photons_per_m
+                                z[k][j][m][i] += length * self.photons_per_meter
                         for j, r in enumerate(r_inter_pos):
                             if r is None:
                                 continue
@@ -424,7 +467,7 @@ class hypo(object):
                             B = min(r[1], theta[1], phi[1])
                             if A <= B:
                                 length = B - A
-                                z[k][j][m][i] += length * self.photons_per_m
+                                z[k][j][m][i] += length * self.photons_per_meter
                 end_t2 = time.time()
                 inner_loop += end_t2 - start_t2
 
@@ -498,46 +541,50 @@ if __name__ == '__main__':
         return bin_edges
 
     # same as CLsim
-    t_bin_edges = np.linspace(0, 200, 101)
-    r_bin_edges = PowerAxis(0, 100, 200, 2)
-    theta_bin_edges = np.arccos(np.linspace(-1, 1, 101))[::-1]
+    t_bin_edges = np.linspace(0, 500, 51)
+    r_bin_edges = PowerAxis(0, 100, 20, 2)
+    theta_bin_edges = np.arccos(np.linspace(-1, 1, 51))[::-1]
     phi_bin_edges = np.linspace(0, 2*np.pi, 37)
 
-    #my_hypo = hypo(0, 0, 0, 2.0, -0.45, np.pi, 20., 3.3)
-    my_hypo = hypo(10., 2., -3., 2., -0.45, 1.0, 66., 3.3)
+    my_hypo = hypo(50., 0., 0., 0., theta=1.0, phi=-0.45, trck_energy=10., cscd_energy=10.)
     my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
 
 
     # plot the track as a line
     x_0, y_0, z_0 = my_hypo.track.point(my_hypo.track.t0)
+    print 'track vertex', x_0, y_0, z_0
     x_e, y_e, z_e  = my_hypo.track.point(my_hypo.track.t0 + my_hypo.track.dt)
     ax.plot([x_0,x_e],[y_0,y_e],zs=[z_0,z_e])
     ax.plot([-plt_lim,-plt_lim],[y_0,y_e],zs=[z_0,z_e],alpha=0.3,c='k')
-    ax.plot([x_0,x_e],[-plt_lim,-plt_lim],zs=[z_0,z_e],alpha=0.3,c='k')
+    ax.plot([x_0,x_e],[plt_lim,plt_lim],zs=[z_0,z_e],alpha=0.3,c='k')
     ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
     
     t0 = time.time()
-    z = my_hypo.get_z_matrix()
+    z = my_hypo.get_z_matrix(10., 0., 0., 0.)
     print 'took %.2f ms to calculate matrix with %i bins'%((time.time() - t0)*1000, z.size)
+    print 'total number of photons %i'%z.sum()
 
-    cmap = 'bone_r'
+    #cmap = 'gnuplot2_r'
+    cmap = mpl.cm.get_cmap('gnuplot_r')
+    cmap.set_under('w')
+    cmap.set_bad('w')
 
     tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
     zz = z.sum(axis=(2,3))
-    mg = ax2.pcolormesh(tt, yy, zz.T, cmap=cmap)
+    mg = ax2.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
     ax2.set_xlabel('t')
     ax2.set_ylabel('r')
 
     tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
     zz = z.sum(axis=(1,3))
-    mg = ax3.pcolormesh(tt, yy, zz.T, vmin=0., cmap=cmap)
+    mg = ax3.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
     ax3.set_xlabel('t')
     ax3.set_ylabel(r'$\theta$')
     ax3.set_ylim((0,np.pi))
 
     tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
     zz = z.sum(axis=(1,2))
-    mg = ax4.pcolormesh(tt, yy, zz.T, vmin=0., cmap=cmap)
+    mg = ax4.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
     ax4.set_xlabel('t')
     ax4.set_ylabel(r'$\phi$')
     ax4.set_ylim((0,2*np.pi))
