@@ -209,13 +209,16 @@ class hypo(object):
 	# PPC parametrerization
 	nph = 5.21 * 0.924 / density
         self.cscd_photons = cscd_energy * nph * self.photons_per_meter * I3Units.g / I3Units.cm3
+        self.trck_photons = self.track.length * self.photons_per_meter
+        self.tot_photons = self.cscd_photons + self.trck_photons
         self.t_bin_edges = None
         self.r_bin_edges = None
         self.phi_bin_edges = None
         self.theta_bin_edges = None
 
-        print 'total number of photons from cscd (%s GeV) = %i'%(cscd_energy, self.cscd_photons)
-        print 'total number of photons from trck (%s GeV) = %i'%(trck_energy, (self.track.length * self.photons_per_meter))
+        print 'number of photons from cscd (%s GeV) = %i'%(cscd_energy, self.cscd_photons)
+        print 'number of photons from trck (%s GeV) = %i'%(trck_energy, self.trck_photons)
+        print 'total number of photons = %i'%(self.tot_photons) 
 
     def set_binning(self, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
         ''' set the binning of the spherical coordinates with bin_edges'''
@@ -560,9 +563,9 @@ if __name__ == '__main__':
     ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
     
     t0 = time.time()
-    z = my_hypo.get_z_matrix(10., 0., 0., 0.)
+    z = my_hypo.get_z_matrix(10., 0., 0., -20.)
     print 'took %.2f ms to calculate matrix with %i bins'%((time.time() - t0)*1000, z.size)
-    print 'total number of photons %i'%z.sum()
+    print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
 
     #cmap = 'gnuplot2_r'
     cmap = mpl.cm.get_cmap('gnuplot_r')
