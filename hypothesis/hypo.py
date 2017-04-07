@@ -166,7 +166,7 @@ class track(object):
 
 class hypo(object):
     ''' craate the hypo for a given set of parameters and then retrieve maps (z-matrix) that contain
-        the expected photon sources in each cell for a spherical coordinate system that has it's origin
+        the expected photon sources in each cell for a spherical coordinate system that has its origin
         at the DOM-hit point.
         The cells are devided up according to the binning that must be set.'''
 
@@ -326,7 +326,9 @@ class hypo(object):
         # the big matrix z
         z = np.zeros((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
 
-        # terate over time bins
+        start_t = time.time()
+        inner_loop = 0
+        # iterate over time bins
         for k in range(len(self.t_bin_edges) - 1):
             time_bin = (self.t_bin_edges[k], self.t_bin_edges[k+1])
             # maximum extent:
@@ -375,6 +377,7 @@ class hypo(object):
                 r_inter_neg = self.correlate_r(self.r_bin_edges, track_r_extent_neg, False)
                 r_inter_pos = self.correlate_r(self.r_bin_edges, track_r_extent_pos, True)
 
+                start_t2 = time.time()
                 # Fill in the Z matrix the length of the track if there is overlap of the track with a bin
                 # ugly nested loops
                 for i, phi in enumerate(phi_inter):
@@ -422,8 +425,14 @@ class hypo(object):
                             if A <= B:
                                 length = B - A
                                 z[k][j][m][i] += length * self.photons_per_m
+                end_t2 = time.time()
+                inner_loop += end_t2 - start_t2
 
 
+        end_t = time.time()
+
+        print 'inner loop took %.1f ms'%(inner_loop*1000)
+        print 'outer loop took %.1f ms'%((end_t - start_t)*1000)
 
         # add cascade as point:
         # get bin at self.track.t0, ...
@@ -463,6 +472,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     import matplotlib.animation as animation
     from mpl_toolkits.mplot3d import Axes3D
+    import time
     # plot setup
     fig = plt.figure(figsize=(10,10))
     ax = fig.add_subplot(221,projection='3d')
@@ -473,7 +483,7 @@ if __name__ == '__main__':
     ax3 = fig.add_subplot(223)
     ax4 = fig.add_subplot(224)
 
-    plt_lim = 10
+    plt_lim = 50
 
     ax.set_xlim((-plt_lim,plt_lim))
     ax.set_ylim((-plt_lim,plt_lim))
@@ -489,11 +499,12 @@ if __name__ == '__main__':
 
     # same as CLsim
     t_bin_edges = np.linspace(0, 200, 101)
-    r_bin_edges = PowerAxis(0, 15, 200, 2)
+    r_bin_edges = PowerAxis(0, 100, 200, 2)
     theta_bin_edges = np.arccos(np.linspace(-1, 1, 101))[::-1]
     phi_bin_edges = np.linspace(0, 2*np.pi, 37)
 
-    my_hypo = hypo(0, 0, 0, 2.0, -0.45, np.pi, 20., 3.3)
+    #my_hypo = hypo(0, 0, 0, 2.0, -0.45, np.pi, 20., 3.3)
+    my_hypo = hypo(10., 2., -3., 2., -0.45, 1.0, 66., 3.3)
     my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
 
 
@@ -502,10 +513,12 @@ if __name__ == '__main__':
     x_e, y_e, z_e  = my_hypo.track.point(my_hypo.track.t0 + my_hypo.track.dt)
     ax.plot([x_0,x_e],[y_0,y_e],zs=[z_0,z_e])
     ax.plot([-plt_lim,-plt_lim],[y_0,y_e],zs=[z_0,z_e],alpha=0.3,c='k')
-    ax.plot([x_0,x_e],[--plt_lim,--plt_lim],zs=[z_0,z_e],alpha=0.3,c='k')
+    ax.plot([x_0,x_e],[-plt_lim,-plt_lim],zs=[z_0,z_e],alpha=0.3,c='k')
     ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
-
+    
+    t0 = time.time()
     z = my_hypo.get_z_matrix()
+    print 'took %.2f ms to calculate matrix with %i bins'%((time.time() - t0)*1000, z.size)
 
     cmap = 'bone_r'
 
