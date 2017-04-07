@@ -21,6 +21,8 @@ nphotons = table[0].header['_i3_n_photons']
 nphase =  table[0].header['_i3_n_phase']
 # norm N_photons * (speed of light / phase refractive index)
 norm = nphotons * (2.99792458 / nphase)
+# correct for DOM angular acceptance
+norm /= 0.338019664877
 data /= norm
 
 lables = [r'$r\ (m)$', r'$\cos{\vartheta}$', r'$t\ (ns)$', r'$\cos{\vartheta_\gamma}$', r'$\phi_\gamma$']

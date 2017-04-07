@@ -1,104 +1,64 @@
 #!/usr/bin/env python
-#
-# Copyright (c) 2012, 2015
-# Jakob van Santen <jvansanten@icecube.wisc.edu>
-# and the IceCube Collaboration <http://www.icecube.wisc.edu>
-# 
-# Permission to use, copy, modify, and/or distribute this software for any
-# purpose with or without fee is hereby granted, provided that the above
-# copyright notice and this permission notice appear in all copies.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-# SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-# OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-# CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-# 
-# 
-# $Id: photomc.py 136148 2015-08-12 17:46:32Z jvansanten $
-# 
-# @file photomc.py
-# @version $LastChangedRevision: 136148 $
-# @date $Date: 2015-08-12 13:46:32 -0400 (Wed, 12 Aug 2015) $
-# @author Jakob van Santen
-
 """
-Tabulate the photon flux from a light source in South Pole ice.
+Tabulate the retro lught flux
 """
 
 from optparse import OptionParser
+from icecube import icetray
 from icecube.icetray import I3Units
+from icecube.clsim.tablemaker.tabulator import TabulatePhotonsFromSource, generate_seed
+from I3Tray import I3Tray
 from os import path, unlink
+import sys
 
-usage = "usage: %prog [options] outputfile"
-parser = OptionParser(usage, description=__doc__)
-
-parser.add_option("--seed", dest="seed", type="int", default=None,
-    help="Seed for random number generators; harvested from /dev/random if unspecified.")
-parser.add_option("--record-errors", dest="errors", action="store_true", default=False,
-    help="Record both weights and squares of weights (useful for error bars)")
-parser.add_option("--step", dest="steplength", type="float", default=1,
-    help="Sampling step length in meters [%default]")
-parser.add_option("--overwrite", dest="overwrite", action="store_true", default=False,
-    help="Overwrite output file if it already exists")
-    
+parser = OptionParser()
+parser.add_option("--subdet", dest="subdet", type="str", default='IC',
+    help="Calculate for IceCube z-pos (IC) or DeepCore z-pos (DC)")
+parser.add_option("--dom", dest="dom", type="int", default=0,
+    help="DOM number on string for z-pos")
+parser.add_option("--nevts", dest="nevts", type="int", default=1000,
+    help="Number of events")
 opts, args = parser.parse_args()
 
-if len(args) != 1:
-	parser.error("You must specify an output file!")
-outfile = args[0]
+outfile = 'tables/retro_nevts%i_%s_DOM%s.fits'%(opts.nevts, opts.subdet, opts.dom)
 if path.exists(outfile):
-	if opts.overwrite:
-		unlink(outfile)
-	else:
-		parser.error("Output file exists! Pass --overwrite to overwrite it.")
-
-from icecube import icetray
-from icecube.clsim.tablemaker.tabulator import TabulatePhotonsFromSource, generate_seed
-
-outfile = args[0]
-if opts.seed is None:
-	opts.seed = generate_seed()
-
-from I3Tray import I3Tray
+    unlink(outfile)
 
 tray = I3Tray()
+
+# z_pos from geo.py
+IC_z = [501.58615386180389, 484.56641094501202, 467.53781871306592, 450.52576974722058, 433.49294848319812, 416.48833328638324, 399.45294854579828, 382.44884667029748, 365.4128210605719, 348.40564121344153, 331.37281916691705, 314.36564088479065, 297.3325641338642, 280.31782062237079, 263.28397310697113, 246.27871821476862, 229.24294809194711, 212.23987227219803, 195.20448733598758, 178.20051300831329, 161.16448681171124, 144.15717980800531, 127.12435913085938, 110.11717947935446, 93.085897103334091, 76.078589904002655, 59.045128015371468, 42.029999953049881, 24.996410223153923, 7.9888461460001192, -9.0439743934533539, -26.049487190368847, -43.080769441066643, -60.087948872492866, -77.120897733248199, -94.128076993502106, -111.15923103919395, -128.16641000600961, -145.19935891567133, -162.20371852776944, -179.24769259721805, -196.25589713072165, -213.2888457469451, -230.29628186348157, -247.32910332312952, -264.33628121400488, -281.36910384740582, -298.34910231370191, -315.40756421211438, -332.38756502591644, -349.44602457682294, -366.45320559770636, -383.48474355844348, -400.49948746118793, -417.53371801131811, -434.51192259177185, -451.56307592147436, -468.54307634402545, -485.64474565554889, -502.7208975767478]
+DC_z = [188.22000122070312, 178.20999799455916, 168.2000013078962, 158.19000026157923, 148.17000034877233, 138.16000148228235, 128.14999934605189, 118.14000047956195, 108.12571498325893, 98.110001700265073, -159.19999912806921, -166.21000017438615, -173.2199990408761, -180.22999790736608, -187.23428562709265, -194.23999895368303, -201.25, -208.26000322614397, -215.26999991280692, -222.27999877929688, -229.29000200544084, -236.29428536551339, -243.2999986921038, -250.30999973842077, -257.31999860491072, -264.33000401088168, -271.34000069754467, -278.3499973842076, -285.35428728376115, -292.36000279017856, -299.36999947684154, -306.37999616350447, -313.39000156947543, -320.39999825613842, -327.40999494280135, -334.4142848423549, -341.42000034877231, -348.43000139508928, -355.44000244140625, -362.44999912806918, -369.46000017438615, -376.47000122070312, -383.47428676060269, -390.47999790736606, -397.49000331333707, -404.5, -411.51000104631697, -418.52000209263394, -425.52857317243303, -432.53428431919644, -439.53999982561385, -446.55000087193082, -453.55999755859375, -460.56999860491072, -467.58000401088168, -474.58857509068082, -481.59286063058033, -488.5999973842076, -495.57714407784596, -502.65428379603793]
+
+if opts.subdet == 'IC':
+    z_pos = IC_z[opts.dom]
+   
+elif opts.subdet == 'DC':
+    z_pos = DC_z[opts.dom]
+print z_pos
 
 icetray.logging.set_level_for_unit('I3CLSimStepToTableConverter', 'TRACE')
 icetray.logging.set_level_for_unit('I3CLSimTabulatorModule', 'DEBUG')
 icetray.logging.set_level_for_unit('I3CLSimLightSourceToStepConverterGeant4', 'TRACE')
 icetray.logging.set_level_for_unit('I3CLSimLightSourceToStepConverterFlasher', 'TRACE')
 
-
-# axes?
-axes = None
-
-#PhotonSource = ('cascade', 'flasher', 'infinite-muon', 'muon-segment')
-# prescale : Only propagate 1/PRESCALE of photons. This is useful for controlling
-# how many photons are simulated per source, e.g. for infinite muons where 
-# multiple trajectories need to be sampled
-
-#E, zen, z of lightsource (Energy (GeV), zenith angle and z position
-
 tray.AddSegment(TabulatePhotonsFromSource,
                 'generator',
-                Seed=opts.seed,
+                Seed=generate_seed(),
                 PhotonSource='retro',
                 Zenith=180. * I3Units.degree,
-                ZCoordinate=-200.,
+                ZCoordinate=z_pos,
                 Energy=1., 
                 NEvents=100, 
                 Filename=outfile,
                 TabulateImpactAngle=True,
                 PhotonPrescale=1,
-                RecordErrors=opts.errors,
+                RecordErrors=False,
                 FlasherWidth=127,
                 FlasherBrightness=127,
                 DisableTilt=True,
                 IceModel='spice_mie',
-                Axes=axes,
+                Axes=None,
                 Sensor='none')
     
 tray.AddModule('TrashCan', 'MemoryHole')
