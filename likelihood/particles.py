@@ -1,0 +1,137 @@
+import numpy as np
+
+# speed of light
+c = 0.29979 # m/ns
+
+class particle(object):
+    """
+    class to contain a particle and useful properties
+    
+    forward : bool
+        if the particle should be plotted forward or backards in time
+    """
+    def __init__(self,evt,t,x,y,z,zen,az,energy=None,length=None,pdg=None,interaction=None,forward=False, color='r', linestyle='--',label=''):
+        self.evt = evt
+        self.t = t
+        self.x = x
+        self.y = y
+        self.z = z
+        self.zen = zen
+        self.az = az
+        self.energy = energy
+        self.length = length
+        self.pdg = pdg
+        self.interaction = interaction
+        self.forward = forward
+        self.color = color
+        self.linestyle = linestyle
+        self.label = label
+
+    @property
+    def theta(self):
+        return np.pi - self.zen
+
+    @property
+    def phi(self):
+        return (self.az - np.pi)%(2*np.pi)
+
+    @property
+    def v(self):
+        return np.array([self.t, self.x, self.y, self.z])
+
+    @property
+    def dt(self):
+        # distance traveled, if no length is given set to 1000 m
+        return 100. if self.length is None else self.length
+
+    # deltas
+    @property
+    def dx(self):
+        return np.sin(self.theta)*np.cos(self.phi) 
+
+    @property
+    def dy(self):
+        return np.sin(self.theta)*np.sin(self.phi) 
+
+    @property
+    def dz(self):
+        return np.cos(self.theta)
+
+    @property
+    def d(self):
+        return np.array([self.dt, self.dx, self.dy, self.dz])
+
+    # lines to plot
+    @property
+    def lt(self):
+        if self.forward:
+            return [self.t, self.t + self.dt/c]
+        return [self.t - self.dt/c ,self.t]
+    @property
+    def lx(self):
+        if self.forward:
+            return [self.x, self.x + self.dt*self.dx]
+        return [self.x - self.dt*self.dx ,self.x]
+    @property
+    def ly(self):
+        if self.forward:
+            return [self.y, self.y + self.dt*self.dy]
+        return [self.y - self.dt*self.dy ,self.y]
+    @property
+    def lz(self):
+        if self.forward:
+            return [self.z, self.z + self.dt*self.dz]
+        return [self.z - self.dt*self.dz ,self.z]
+
+    @property
+    def line(self):
+        return [self.lt, self.lx, self.ly, self.lz]
+
+
+class particle_array(object):
+    """
+    Container class for particles from arrays
+    get_item will just return a particle object at that position
+    """
+    def __init__(self,evt,t,x,y,z,zen,az,energy=None,length=None,pdg=None,interaction=None,forward=False, color='r', linestyle='--',label=''):
+        self.evt = evt
+        self.t = t
+        self.x = x
+        self.y = y
+        self.z = z
+        self.zen = zen
+        self.az = az
+        self.energy = energy
+        self.length = length
+        self.pdg = pdg
+        self.interaction = interaction
+        self.forward = forward
+        self.color = color
+        self.linestyle = linestyle
+        self.label = label
+
+    def __getitem__(self, idx):
+        energy = None if self.energy is None else self.energy[idx]
+        length = None if self.length is None else self.length[idx]
+        pdg = None if self.pdg is None else self.pdg[idx]
+        interaction = None if self.interaction is None else self.interaction[idx]
+        return particle(self.evt[idx],
+                        self.t[idx],
+                        self.x[idx],
+                        self.y[idx],
+                        self.z[idx],
+                        self.zen[idx],
+                        self.az[idx],
+                        energy,
+                        length,
+                        pdg,
+                        interaction,
+                        self.forward, 
+                        self.color, 
+                        self.linestyle,
+                        self.label)
+
+    def __len__(self):
+        return len(self.evt)
+
+

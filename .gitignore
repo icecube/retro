@@ -3,3 +3,6 @@
 *.mp4
 .DS_Store
 ._.DS_Store
+*.pyc
+*.i3
+*.i3.gz

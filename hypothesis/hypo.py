@@ -5,6 +5,12 @@ from icecube import clsim
 from os.path import expandvars
 from icecube.icetray import I3Units
 
+def PowerAxis(minval, maxval, n_bins, power):
+    '''JVSs Power axis reverse engeneered'''
+    l = np.linspace(np.power(minval, 1./power), np.power(maxval, 1./power), n_bins+1)
+    bin_edges = np.power(l, power)
+    return bin_edges
+
 
 class track(object):
     ''' class to calculate track positons for a given track hypo '''
@@ -536,12 +542,6 @@ if __name__ == '__main__':
     ax.set_zlim((-plt_lim,plt_lim))
     ax.grid(True)
 
-
-    def PowerAxis(minval, maxval, n_bins, power):
-        '''JVSs Power axis reverse engeneered'''
-        l = np.linspace(np.power(minval, 1./power), np.power(maxval, 1./power), n_bins+1)
-        bin_edges = np.power(l, power)
-        return bin_edges
 
     # same as CLsim
     t_bin_edges = np.linspace(0, 500, 51)
