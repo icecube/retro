@@ -563,7 +563,7 @@ if __name__ == '__main__':
     ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
     
     t0 = time.time()
-    z = my_hypo.get_z_matrix(10., 0., 0., -20.)
+    z = my_hypo.get_z_matrix(10., -20., -20., -20.)
     print 'took %.2f ms to calculate matrix with %i bins'%((time.time() - t0)*1000, z.size)
     print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
 
