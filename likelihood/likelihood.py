@@ -21,14 +21,14 @@ args = parser.parse_args()
 n_phi_bins = 20.
 norm = 1./n_phi_bins
 
-# load photon tables (r, cz, t) -> (t, r, cz)
+# load photon tables (r, cz, t) -> (-t, r, cz)
 IC = {}
 DC = {}
 for dom in range(60):
     table = pyfits.open('tables/tables/summed/retro_nevts1000_IC_DOM%i_r_cz_t.fits'%dom)
-    IC[dom] = np.rollaxis(table[0].data, 2, 0) * norm
+    IC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * norm
     table = pyfits.open('tables/tables/summed/retro_nevts1000_DC_DOM%i_r_cz_t.fits'%dom)
-    DC[dom] = np.rollaxis(table[0].data, 2, 0) * norm
+    DC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * norm
 
 # need to change the tables into expecte n-photons:
 
@@ -38,7 +38,7 @@ for dom in range(60):
 #    print 'DC DOM %i, sum = %.2f'%(key, val.sum())
 
 # construct binning: same as tables (ToDo: should assert that)
-t_bin_edges = np.linspace(0, 3e3, 301)
+t_bin_edges = np.linspace(-3e3, 0, 301)
 r_bin_edges = PowerAxis(0, 400, 200, 2)
 theta_bin_edges = np.arccos(np.linspace(-1, 1, 41))[::-1]
 phi_bin_edges = np.linspace(0, 2*np.pi, n_phi_bins)
@@ -128,6 +128,33 @@ SPE_recos = particle_array(
 # --- load detector geometry array ---
 geo = np.load('likelihood/geo_array.npy')
 
+
+def get_llh(hypo, t, x, y, z, q, string, om):
+    llh = 0
+    # loop over hits
+    for hit in range(len(t)):
+        # for every DOM + hit:
+        #print 'getting matrix for hit %i'%hit
+        # t, r ,cz, phi 
+        #print 'hit at %.2f ns at (%.2f, %.2f, %.2f)'%(t[hit], x[hit], y[hit], z[hit])
+        z_matrix = hypo.get_z_matrix(t[hit], x[hit], y[hit], z[hit])
+        if string[hit] < 78:
+            gamma_map = IC[om[hit]]
+        else:
+            gamma_map = DC[om[hit]]
+        # get max llh between z_matrix and gamma_map
+        min_chi2 = 1e8
+        for phi_idx in range(z_matrix.shape[3]):
+            hypo_gammas = z_matrix[:, :, :, phi_idx]
+            non_zero = (hypo_gammas != 0.) * (gamma_map != 0.)
+            if non_zero.any():
+                #print 'found non-zero'
+                chi2 = np.square(hypo_gammas[non_zero] - q[hit]/gamma_map[non_zero])/hypo_gammas[non_zero]
+                min_chi2 = min(min_chi2, np.min(chi2))
+        llh += min_chi2
+    return llh
+
+
 # iterate through events
 for idx in xrange(args.index, len(neutrinos)):
 
@@ -172,56 +199,209 @@ for idx in xrange(args.index, len(neutrinos)):
     y_v_true = neutrinos[idx].v[2]
     z_v_true = neutrinos[idx].v[3]
     theta_true = neutrinos[idx].theta
-    phi_true = neutrinos[idx].phi
+    # azimuth?
+    phi_true = neutrinos[idx].az
     cscd_energy_true = cascades[idx].energy
     trck_energy_true = tracks[idx].energy
 
-    z_vs = np.linspace(-500, 0, 101)
     print 'True event info:'
     print 'time = %.2f ns'%t_v_true
     print 'vertex = (%.2f, %.2f, %.2f)'%(x_v_true, y_v_true, z_v_true)
     print 'theta, phi = (%.2f, %.2f)'%(theta_true, phi_true)
     print 'E_cscd, E_trck (GeV) = %.2f, %.2f'%(cscd_energy_true, trck_energy_true)
-    llhs = []
-    # construct hypo
-    for z_v in z_vs:
-        print 'testing z = %.2f'%z_v
-	my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
-	my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-	llh = 0
-	# loop over hits
-	for hit in range(len(t)):
-	    # for every DOM + hit:
-            #print 'getting matrix for hit %i'%hit
-            # t, r ,cz, phi 
-            #print 'hit at %.2f ns at (%.2f, %.2f, %.2f)'%(t[hit], x[hit], y[hit], z[hit])
-	    z_matrix = my_hypo.get_z_matrix(t[hit], x[hit], y[hit], z[hit])
-            if string[hit] < 78:
-                gamma_map = IC[om[hit]]
-            else:
-                gamma_map = DC[om[hit]]
-            # get max llh between z_matrix and gamma_map
-            min_delta = 1e7
-            for phi_idx in range(z_matrix.shape[3]):
-	        hypo_gammas = z_matrix[:, :, :, phi_idx]
-                #print 'non-zero hypo = ', (hypo_gammas != 0.).sum()
-                #print 'non-zero map  = ', (gamma_map != 0.).sum()
-                non_zero = (hypo_gammas != 0.) * (gamma_map != 0.)
-                if non_zero.any():
-                    #print 'found non-zero'
-                    deltas = abs(hypo_gammas[non_zero] - 1./gamma_map[non_zero])
-                    #hit_gammas = 1./gamma_map 
-                    min_delta = min(min_delta, np.min(deltas))
-            if min_delta > 0:
-                llh += np.log(min_delta)
-	llhs.append(llh)
 
-    fig = plt.figure()
-    ax1 = fig.add_subplot(111)
-    ax1.plot(z_vs, llhs)
-    plt.axvline(z_v_true, color='r')
-    plt.savefig('zvs.png',dpi=150)
-    print z_vs
-    print llhs
+    #plt.clf()
+    #fig = plt.figure(figsize=(10,20))
+    #ax1 = fig.add_subplot(421)
+    #ax = fig.add_subplot(422)
+    #ax = fig.add_subplot(423)
+    #ax = fig.add_subplot(424)
+    #ax = fig.add_subplot(425)
+    #ax = fig.add_subplot(426)
+    #ax = fig.add_subplot(427)
+    #ax = fig.add_subplot(428)
+
+    do_x =  False
+    do_y =  False
+    do_z =  False
+    do_t =  False
+    do_theta =  False
+    do_phi =  False
+    do_cscd_energy =  False
+    do_trck_energy =  False
+    do_x =  True
+    do_y =  True
+    do_z =  True
+    do_t =  True
+    #do_theta =  True
+    #do_phi =  True
+    #do_cscd_energy =  True
+    #do_trck_energy =  True
+
+    n_scan_points = 11
+
+
+    if do_z:
+        # scan z pos
+        z_vs = np.linspace(z_v_true - 20, z_v_true + 20, n_scan_points)
+        llhs = []
+        for z_v in z_vs:
+            print 'testing z = %.2f'%z_v
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(z_vs, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('Vertex z (m)')
+        #truth
+        ax.axvline(z_v_true, color='r')
+        plt.savefig('z_%s.png'%evt,dpi=150)
+
+    if do_x:
+        # scan x pos
+        x_vs = np.linspace(x_v_true - 50, x_v_true + 50, n_scan_points)
+        llhs = []
+        for x_v in x_vs:
+            print 'testing x = %.2f'%x_v
+            my_hypo = hypo(t_v_true, x_v, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(x_vs, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('Vertex x (m)')
+        #truth
+        ax.axvline(x_v_true, color='r')
+        plt.savefig('x_%s.png'%evt,dpi=150)
+
+    if do_y:
+        # scan y pos
+        y_vs = np.linspace(y_v_true - 50, y_v_true + 50, n_scan_points)
+        llhs = []
+        for y_v in y_vs:
+            print 'testing y = %.2f'%y_v
+            my_hypo = hypo(t_v_true, x_v_true, y_v, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(y_vs, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('Vertex y (m)')
+        #truth
+        ax.axvline(y_v_true, color='r')
+        plt.savefig('y_%s.png'%evt,dpi=150)
+
+    if do_t:
+        # scan t pos
+        t_vs = np.linspace(t_v_true - 200, t_v_true + 200, n_scan_points)
+        llhs = []
+        for t_v in t_vs:
+            print 'testing t = %.2f'%t_v
+            my_hypo = hypo(t_v, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(t_vs, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('Vertex t (ns)')
+        #truth
+        ax.axvline(t_v_true, color='r')
+        plt.savefig('t_%s.png'%evt,dpi=150)
+
+    if do_theta:
+        # scan theta
+        thetas = np.linspace(0, np.pi, n_scan_points)
+        llhs = []
+        for theta in thetas:
+            print 'testing theta = %.2f'%theta
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(thetas, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('theta (rad)')
+        #truth
+        ax.axvline(theta_true, color='r')
+        plt.savefig('theta_%s.png'%evt,dpi=150)
+
+    if do_phi:
+        # scan phi
+        phis = np.linspace(0, 2*np.pi, n_scan_points)
+        llhs = []
+        for phi in phis:
+            print 'testing phi = %.2f'%phi
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(phis, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('phi (rad)')
+        #truth
+        ax.axvline(phi_true, color='r')
+        plt.savefig('phi_%s.png'%evt,dpi=150)
+
+    if do_cscd_energy:
+        # scan cscd_energy
+        cscd_energys = np.linspace(0, 500, n_scan_points)
+        llhs = []
+        for cscd_energy in cscd_energys:
+            print 'testing cscd_energy = %.2f'%cscd_energy
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(cscd_energys, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('cscd_energy (GeV)')
+        #truth
+        ax.axvline(cscd_energy_true, color='r')
+        plt.savefig('cscd_energy_%s.png'%evt,dpi=150)
+
+    if do_trck_energy:
+        # scan trck_energy
+        trck_energys = np.linspace(0, 50, n_scan_points)
+        llhs = []
+        for trck_energy in trck_energys:
+            print 'testing trck_energy = %.2f'%trck_energy
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy, cscd_energy=cscd_energy_true)
+            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llhs.append(llh)
+        plt.clf()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(trck_energys, llhs)
+        ax.set_ylabel('llh')
+        ax.set_xlabel('trck_energy (GeV)')
+        #truth
+        ax.axvline(trck_energy_true, color='r')
+        plt.savefig('trck_energy_%s.png'%evt,dpi=150)
+
+    #plt.savefig('scan_%s.png'%evt,dpi=150)
+
     # exit after one event
     sys.exit()

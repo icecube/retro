@@ -52,7 +52,7 @@ class track(object):
     @property
     def t0(self):
         ''' transalted t '''
-        return self.t_o - self.t_v
+        return self.t_v - self.t_o
     @property
     def x0(self):
         ''' translated x '''
