@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from icecube.clsim.traysegments.common import parseIceModel
 from icecube.clsim import NumberOfPhotonsPerMeter
 from icecube import clsim
@@ -51,7 +52,7 @@ class track(object):
     @property
     def t0(self):
         ''' transalted t '''
-        return self.t_v - self.t_o
+        return self.t_o - self.t_v
     @property
     def x0(self):
         ''' translated x '''
@@ -222,9 +223,9 @@ class hypo(object):
         self.phi_bin_edges = None
         self.theta_bin_edges = None
 
-        print 'number of photons from cscd (%s GeV) = %i'%(cscd_energy, self.cscd_photons)
-        print 'number of photons from trck (%s GeV) = %i'%(trck_energy, self.trck_photons)
-        print 'total number of photons = %i'%(self.tot_photons) 
+        #print 'number of photons from cscd (%s GeV) = %i'%(cscd_energy, self.cscd_photons)
+        #print 'number of photons from trck (%s GeV) = %i'%(trck_energy, self.trck_photons)
+        #print 'total number of photons = %i'%(self.tot_photons) 
 
     def set_binning(self, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
         ''' set the binning of the spherical coordinates with bin_edges'''
@@ -483,8 +484,8 @@ class hypo(object):
 
         end_t = time.time()
 
-        print 'inner loop took %.1f ms'%(inner_loop*1000)
-        print 'outer loop took %.1f ms'%((end_t - start_t)*1000)
+        #print 'inner loop took %.1f ms'%(inner_loop*1000)
+        #print 'outer loop took %.1f ms'%((end_t - start_t)*1000)
 
         # add cascade as point:
         # get bin at self.track.t0, ...
