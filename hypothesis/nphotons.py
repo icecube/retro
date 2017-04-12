@@ -15,6 +15,8 @@ density = mediumProperties.GetMediumDensity()
 
 # PPC parametrerization
 nph=5.21*(0.924)/density
-nphot10GeV = nph*photons_per_meter*10*I3Units.g/I3Units.cm3
-print '10 GeV cascd = ',nphot10GeV
+photons_per_gev_cscd = nph*photons_per_meter*I3Units.g/I3Units.cm3
+print 'photons per trck m = ',photons_per_meter
+print 'photons per cscd GeV = ',photons_per_gev_cscd 
+print '10 GeV cscd = ', photons_per_gev_cscd*10
 print '10 GeV trck = ', photons_per_meter * (10 * 15 / 3.33)

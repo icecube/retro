@@ -1,10 +1,7 @@
 import numpy as np
 import time
-from icecube.clsim.traysegments.common import parseIceModel
-from icecube.clsim import NumberOfPhotonsPerMeter
-from icecube import clsim
+import numba
 from os.path import expandvars
-from icecube.icetray import I3Units
 
 def PowerAxis(minval, maxval, n_bins, power):
     '''JVSs Power axis reverse engeneered'''
@@ -205,17 +202,10 @@ class hypo(object):
         # convert trck energy to length by (ToDo check this)
         length = 15. / 3.3 * trck_energy
         self.track = track(t_v, x_v, y_v, z_v, theta, phi, length)
-	mediumProperties = parseIceModel(expandvars("$I3_SRC/clsim/resources/ice/spice_mie"), disableTilt=True)
-	domAcceptance = clsim.GetIceCubeDOMAcceptance()
-	self.photons_per_meter = NumberOfPhotonsPerMeter(mediumProperties.GetPhaseRefractiveIndex(0),
-						    domAcceptance,
-						    mediumProperties.GetMinWavelength(),
-						    mediumProperties.GetMaxWavelength()
-						    )
-	density = mediumProperties.GetMediumDensity()
-	# PPC parametrerization
-	nph = 5.21 * 0.924 / density
-        self.cscd_photons = cscd_energy * nph * self.photons_per_meter * I3Units.g / I3Units.cm3
+        # precalculated (nphotons.py) to avoid icetray
+        self.photons_per_meter =  2451.4544553
+        photons_per_gev_cscd = 12805.3383311
+        self.cscd_photons = cscd_energy * photons_per_gev_cscd
         self.trck_photons = self.track.length * self.photons_per_meter
         self.tot_photons = self.cscd_photons + self.trck_photons
         self.t_bin_edges = None
@@ -254,13 +244,14 @@ class hypo(object):
 
     # bin correlators:
     def correlate_theta(self, bin_edges, t, rho_extent):
+        start_t = time.time()
         '''get the track parameter rho intervals, which lie inside bins'''
         intervals = []
         for i in range(len(bin_edges) - 1):
             # get interval overlaps
             # from these two intervals:
             if t is None:
-                intervals.append(None)
+                intervals.append([-1.,-1.])
                 continue
             b = (bin_edges[i], bin_edges[i+1])
             if abs(t[0] - t[1]) < 1e-7 and (b[0] <= t[0]) and (t[0] < b[1]):
@@ -275,7 +266,7 @@ class hypo(object):
                 else:
                     theta_low = self.track.rho_of_theta_neg(val_low)
                     theta_high = self.track.rho_of_theta_neg(val_high)
-                intervals.append(sorted((theta_low, theta_high)))
+                intervals.append(sorted([theta_low, theta_high]))
             elif (b[0] <= t[0]) and (t[1] < b[1]) and (t[1] < t[0]):
                 val_high = min(b[1], t[0])
                 val_low = max(b[0], t[1])
@@ -285,12 +276,15 @@ class hypo(object):
                 else:
                     theta_low = self.track.rho_of_theta_pos(val_low)
                     theta_high = self.track.rho_of_theta_pos(val_high)
-                intervals.append(sorted((theta_low, theta_high)))
+                intervals.append(sorted([theta_low, theta_high]))
             else:
-                intervals.append(None)
-        return intervals
+                intervals.append([-1.,-1.])
+        end_t = time.time()
+        #print 'corr theta took %.2f'%((end_t-start_t)*1000)
+        return np.array(intervals)
 
     def correlate_phi(self, bin_edges, t, rho_extent):
+        start_t = time.time()
         '''get the track parameter rho intervals, which lie inside bins'''
         # phi intervals
         intervals = []
@@ -306,7 +300,7 @@ class hypo(object):
                 phi_low = max(b[0], t[0])
                 r_low = self.track.rho_of_phi(phi_low)
                 r_high = self.track.rho_of_phi(phi_high)
-                intervals.append(sorted((r_low, r_high)))
+                intervals.append(sorted([r_low, r_high]))
             # crossing the 0/2pi point
             elif t[1] < t[0]:
                 if b[1] >= 0 and t[1] >= b[0]:
@@ -319,16 +313,19 @@ class hypo(object):
                     phi_high = min(b[1], t[1])
                     phi_low = max(b[0], t[0])
                 else:
-                    intervals.append(None)
+                    intervals.append([-1,-1])
                     continue
                 r_low = self.track.rho_of_phi(phi_low)
                 r_high = self.track.rho_of_phi(phi_high)
-                intervals.append(sorted((r_low, r_high)))
+                intervals.append(sorted([r_low, r_high]))
             else:
-                intervals.append(None)
-        return intervals
+                intervals.append([-1.,-1.])
+        end_t = time.time()
+        #print 'corr phi took %.2f'%((end_t-start_t)*1000)
+        return np.array(intervals)
 
     def correlate_r(self, bin_edges, t, pos):
+        start_t = time.time()
         '''get the track parameter rho intervals, which lie inside bins'''
         intervals = []
         for i in range(len(bin_edges) - 1):
@@ -344,10 +341,12 @@ class hypo(object):
                 else:
                     r_low = self.track.rho_of_r_pos(val_low)
                     r_high = self.track.rho_of_r_pos(val_high)
-                intervals.append(sorted((r_low, r_high)))
+                intervals.append(sorted([r_low, r_high]))
             else:
-                intervals.append(None)
-        return intervals
+                intervals.append([-1.,-1.])
+        end_t = time.time()
+        #print 'corr r took %.2f'%((end_t-start_t)*1000)
+        return np.array(intervals)
 
     def get_z_matrix(self, Dt=0, Dx=0, Dy=0, Dz=0):
         ''' calculate the z-matrix for a given DOM hit:
@@ -373,14 +372,14 @@ class hypo(object):
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
         # the big matrix z
-        z = np.zeros((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
+        z = np.zeros((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1), dtype=np.float32)
 
         start_t = time.time()
-        inner_loop = 0
+        t_inner_loop = 0
         corr_loop = 0
         # iterate over time bins
         for k in range(len(self.t_bin_edges) - 1):
-            time_bin = (self.t_bin_edges[k], self.t_bin_edges[k+1])
+            time_bin = [self.t_bin_edges[k], self.t_bin_edges[k+1]]
             # maximum extent:
             t_extent = self.track.extent(*time_bin)
 
@@ -390,10 +389,10 @@ class hypo(object):
                 # caluculate the maximal values for each coordinate (r, theta and phi)
                 # over which the track spans in the given time bins
                 extent = [self.track.point(t_extent[0]), self.track.point(t_extent[1])]
-                rho_extent = (self.track.rho_of_t(t_extent[0]), self.track.rho_of_t(t_extent[1]))
+                rho_extent = [self.track.rho_of_t(t_extent[0]), self.track.rho_of_t(t_extent[1])]
 
                 # r
-                track_r_extent = (self.cr(*extent[0]), self.cr(*extent[1]))
+                track_r_extent = [self.cr(*extent[0]), self.cr(*extent[1])]
                 if tb <= t_extent[0]:
                     track_r_extent_neg = sorted(track_r_extent)
                     track_r_extent_pos = [-1, -1]
@@ -408,7 +407,7 @@ class hypo(object):
                 #print track_r_extent_neg
 
                 # theta
-                track_theta_extent = (self.ctheta(*extent[0]), self.ctheta(*extent[1]))
+                track_theta_extent = [self.ctheta(*extent[0]), self.ctheta(*extent[1])]
                 if ts <= t_extent[0]:
                     track_theta_extent_neg = track_theta_extent
                     track_theta_extent_pos = None
@@ -416,8 +415,8 @@ class hypo(object):
                     track_theta_extent_pos = track_theta_extent
                     track_theta_extent_neg = None
                 else:
-                    track_theta_extent_neg = (track_theta_extent[0], theta_inflection_point)
-                    track_theta_extent_pos = (theta_inflection_point, track_theta_extent[1])
+                    track_theta_extent_neg = [track_theta_extent[0], theta_inflection_point]
+                    track_theta_extent_pos = [theta_inflection_point, track_theta_extent[1]]
 
                 # phi
                 track_phi_extent = sorted([self.cphi(*extent[0]), self.cphi(*extent[1])])
@@ -435,61 +434,17 @@ class hypo(object):
                 corr_loop += end_t3 - start_t3
                 
                 start_t2 = time.time()
-                # Fill in the Z matrix the length of the track if there is overlap of the track with a bin
-                # ugly nested loops
-                for i, phi in enumerate(phi_inter):
-                    if phi is None:
-                        continue
-                    for m, theta in enumerate(theta_inter_neg):
-                        if theta is None:
-                            continue
-                        for j, r in enumerate(r_inter_neg):
-                            if r is None:
-                                continue
-                            # interval of r theta and phi
-                            A = max(r[0], theta[0], phi[0])
-                            B = min(r[1], theta[1], phi[1])
-                            if A <= B:
-                                length = B - A
-                                z[k][j][m][i] += length * self.photons_per_meter
-                        for j, r in enumerate(r_inter_pos):
-                            if r is None:
-                                continue
-                            # interval of r theta and phi
-                            A = max(r[0], theta[0], phi[0])
-                            B = min(r[1], theta[1], phi[1])
-                            if A <= B:
-                                length = B - A
-                                z[k][j][m][i] += length * self.photons_per_meter
-                    for m, theta in enumerate(theta_inter_pos):
-                        if theta is None:
-                            continue
-                        for j, r in enumerate(r_inter_neg):
-                            if r is None:
-                                continue
-                            # interval of r theta and phi
-                            A = max(r[0], theta[0], phi[0])
-                            B = min(r[1], theta[1], phi[1])
-                            if A <= B:
-                                length = B - A
-                                z[k][j][m][i] += length * self.photons_per_meter
-                        for j, r in enumerate(r_inter_pos):
-                            if r is None:
-                                continue
-                            # interval of r theta and phi
-                            A = max(r[0], theta[0], phi[0])
-                            B = min(r[1], theta[1], phi[1])
-                            if A <= B:
-                                length = B - A
-                                z[k][j][m][i] += length * self.photons_per_meter
+                z[k] = inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos)
                 end_t2 = time.time()
-                inner_loop += end_t2 - start_t2
+                t_inner_loop += end_t2 - start_t2
 
+        # convert length in (m) in to n_photons
+        z *= self.photons_per_meter
 
         end_t = time.time()
 
         #print 'corr loop took %.1f ms'%(corr_loop*1000)
-        #print 'inner loop took %.1f ms'%(inner_loop*1000)
+        #print 'inner loop took %.1f ms'%(t_inner_loop*1000)
         #print 'outer loop took %.1f ms'%((end_t - start_t)*1000)
 
         # add cascade as point:
@@ -521,6 +476,64 @@ class hypo(object):
                 return k
         return None
 
+@numba.jit('''((float32[:,:,:]))(float64[:,:],float64[:,:],float64[:,:],float64[:,:],float64[:,:])''', nopython=True, nogil=True, fastmath=True, cache=True)
+def inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos):
+    # Fill in the Z matrix the length of the track if there is overlap of the track with a bin
+    # ugly nested loops
+    z_slice = np.zeros((len(r_inter_neg), len(theta_inter_neg), len(phi_inter)), dtype=np.float32)
+    for i in range(phi_inter.shape[0]):
+        phi = phi_inter[i]
+        if phi[0] < 0 and phi[1] < 0:
+            continue
+        for m in range(theta_inter_neg.shape[0]):
+            theta = theta_inter_neg[m]
+            if theta[0] < 0 and theta[1] < 0:
+                continue
+            for j in range(r_inter_neg.shape[0]):
+                r = r_inter_neg[j]
+                if r[0] < 0 and r[1] < 0:
+                    continue
+                # interval of r theta and phi
+                A = max(r[0], theta[0], phi[0])
+                B = min(r[1], theta[1], phi[1])
+                if A <= B:
+                    length = B - A
+                    z_slice[j][m][i] += length 
+            for j in range(r_inter_pos.shape[0]):
+                r = r_inter_pos[j]
+                if r[0] < 0 and r[1] < 0:
+                    continue
+                # interval of r theta and phi
+                A = max(r[0], theta[0], phi[0])
+                B = min(r[1], theta[1], phi[1])
+                if A <= B:
+                    length = B - A
+                    z_slice[j][m][i] += length
+        for m in range(theta_inter_pos.shape[0]):
+            theta = theta_inter_pos[m]
+            if theta[0] < 0 and theta[1] < 0:
+                continue
+            for j in range(r_inter_neg.shape[0]):
+                r = r_inter_neg[j]
+                if r[0] < 0 and r[1] < 0:
+                    continue
+                # interval of r theta and phi
+                A = max(r[0], theta[0], phi[0])
+                B = min(r[1], theta[1], phi[1])
+                if A <= B:
+                    length = B - A
+                    z_slice[j][m][i] += length
+            for j in range(r_inter_pos.shape[0]):
+                r = r_inter_pos[j]
+                if r[0] < 0 and r[1] < 0:
+                    continue
+                # interval of r theta and phi
+                A = max(r[0], theta[0], phi[0])
+                B = min(r[1], theta[1], phi[1])
+                if A <= B:
+                    length = B - A
+                    z_slice[j][m][i] += length
+    return z_slice
 
 if __name__ == '__main__':
 
@@ -561,7 +574,7 @@ if __name__ == '__main__':
 
     # plot the track as a line
     x_0, y_0, z_0 = my_hypo.track.point(my_hypo.track.t0)
-    print 'track vertex', x_0, y_0, z_0
+    #print 'track vertex', x_0, y_0, z_0
     x_e, y_e, z_e  = my_hypo.track.point(my_hypo.track.t0 + my_hypo.track.dt)
     ax.plot([x_0,x_e],[y_0,y_e],zs=[z_0,z_e])
     ax.plot([-plt_lim,-plt_lim],[y_0,y_e],zs=[z_0,z_e],alpha=0.3,c='k')
@@ -570,8 +583,8 @@ if __name__ == '__main__':
     
     t0 = time.time()
     z = my_hypo.get_z_matrix(10., -20., -20., -20.)
-    print 'took %.2f ms to calculate matrix with %i bins'%((time.time() - t0)*1000, z.size)
-    print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
+    #print 'took %.2f ms to calculate matrix with %i bins'%((time.time() - t0)*1000, z.size)
+    #print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
 
     #cmap = 'gnuplot2_r'
     cmap = mpl.cm.get_cmap('gnuplot_r')

@@ -3,12 +3,13 @@ import pyfits
 import h5py
 import sys
 from argparse import ArgumentParser
-from hypothesis.hypo import hypo, PowerAxis
-#from likelihood.particles import particle, particle_array
+from hypothesis.hypo_fast import hypo, PowerAxis
 from particles import particle, particle_array
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
+import numba
+#from line_profiler import profile
 
 parser = ArgumentParser(description='''make 2d event pictures''')
 parser.add_argument('-f', '--file', metavar='H5_FILE', type=str, help='input HDF5 file',
@@ -128,7 +129,7 @@ SPE_recos = particle_array(
 # --- load detector geometry array ---
 geo = np.load('likelihood/geo_array.npy')
 
-
+#@profile
 def get_llh(hypo, t, x, y, z, q, string, om):
     llh = 0
     # loop over hits
@@ -139,21 +140,47 @@ def get_llh(hypo, t, x, y, z, q, string, om):
         #print 'hit at %.2f ns at (%.2f, %.2f, %.2f)'%(t[hit], x[hit], y[hit], z[hit])
         z_matrix = hypo.get_z_matrix(t[hit], x[hit], y[hit], z[hit])
         if string[hit] < 78:
-            gamma_map = IC[om[hit]]
+            gamma_map = IC[om[hit] - 1]
         else:
-            gamma_map = DC[om[hit]]
+            gamma_map = DC[om[hit] - 1]
         # get max llh between z_matrix and gamma_map
-        min_chi2 = 1e8
+        min_chi2 = 1e9
         for phi_idx in range(z_matrix.shape[3]):
             hypo_gammas = z_matrix[:, :, :, phi_idx]
-            non_zero = (hypo_gammas != 0.) * (gamma_map != 0.)
-            if non_zero.any():
-                #print 'found non-zero'
-                chi2 = np.square(hypo_gammas[non_zero] - q[hit]/gamma_map[non_zero])/hypo_gammas[non_zero]
-                min_chi2 = min(min_chi2, np.min(chi2))
+            chi2 = get_chi2(hypo_gammas, gamma_map, q[hit])
+            min_chi2 = min(min_chi2, chi2)
         llh += min_chi2
     return llh
 
+@numba.jit('''((float64))(float32[:,:,:],float32[:,:,:],float64)''', nopython=True, nogil=True, fastmath=True, cache=True) 
+def get_chi2(hypo_gammas, gamma_map, q):
+    chi2 = 1e9
+    for i in xrange(hypo_gammas.shape[0]):
+        for j in xrange(hypo_gammas.shape[1]):
+            for k in xrange(hypo_gammas.shape[2]):
+                h = hypo_gammas[i, j, k]
+                if h > 0:
+                    g = gamma_map[i, j, k] / q
+                    if g > 0.:
+                        new_chi2 = (h - 1./g)**2*g
+                        chi2 = min(chi2, new_chi2)
+    return chi2
+
+#def get_chi2(hypo_gammas, gamma_map, q):
+#    #non_zero = (hypo_gammas != 0.) * (gamma_map != 0.)
+#    #if non_zero.any():
+#    #    #print 'found non-zero'
+#    #    chi2 = np.square(hypo_gammas[non_zero] - q[hit]/gamma_map[non_zero])/hypo_gammas[non_zero]
+#    #    min_chi2 = min(min_chi2, np.min(chi2))
+#    mask = hypo_gammas != 0.
+#    reduced_hypo = hypo_gammas[mask]
+#    reduced_gamma = gamma_map[mask]
+#    mask = reduced_gamma != 0
+#    reduced_gamma = reduced_gamma[mask]/q
+#    reduced_hypo = reduced_hypo[mask]
+#    if len(reduced_hypo) > 0:
+#        return np.min(np.square(reduced_hypo - 1./reduced_gamma)*reduced_gamma)
+#    return 1e8
 
 # iterate through events
 for idx in xrange(args.index, len(neutrinos)):
@@ -200,7 +227,7 @@ for idx in xrange(args.index, len(neutrinos)):
     z_v_true = neutrinos[idx].v[3]
     theta_true = neutrinos[idx].theta
     # azimuth?
-    phi_true = neutrinos[idx].az
+    phi_true = neutrinos[idx].phi
     cscd_energy_true = cascades[idx].energy
     trck_energy_true = tracks[idx].energy
 
@@ -229,16 +256,20 @@ for idx in xrange(args.index, len(neutrinos)):
     do_phi =  False
     do_cscd_energy =  False
     do_trck_energy =  False
-    do_x =  True
-    do_y =  True
-    do_z =  True
-    do_t =  True
+    do_xz = False
+    do_thetaphi = False
+    #do_x =  True
+    #do_y =  True
+    #do_z =  True
+    #do_t =  True
     #do_theta =  True
     #do_phi =  True
     #do_cscd_energy =  True
     #do_trck_energy =  True
+    #do_xz = True
+    do_thetaphi = True
 
-    n_scan_points = 11
+    n_scan_points = 7
 
 
     if do_z:
@@ -401,7 +432,80 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.axvline(trck_energy_true, color='r')
         plt.savefig('trck_energy_%s.png'%evt,dpi=150)
 
-    #plt.savefig('scan_%s.png'%evt,dpi=150)
+
+    if do_xz:
+        x_points = 11
+        y_points = 11
+        x_vs = np.linspace(x_v_true - 150, x_v_true + 150, x_points)
+        z_vs = np.linspace(z_v_true - 100, z_v_true + 100, y_points)
+        llhs = []
+        for z_v in z_vs:
+            for x_v in x_vs:
+                print 'testing z = %.2f, x = %.2f'%(z_v, x_v)
+                my_hypo = hypo(t_v_true, x_v, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+                my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+                llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+                print 'llh = %.2f'%llh
+                llhs.append(llh)
+        plt.clf()
+        # [z, x]
+        llhs = np.array(llhs)
+        llhs = llhs.reshape(y_points, x_points)
+
+        x_edges = np.linspace(x_vs[0] - np.diff(x_vs)[0]/2., x_vs[-1] + np.diff(x_vs)[0]/2., len(x_vs) + 1)
+        z_edges = np.linspace(z_vs[0] - np.diff(z_vs)[0]/2., z_vs[-1] + np.diff(z_vs)[0]/2., len(z_vs) + 1)
+
+        xx, yy = np.meshgrid(x_edges, z_edges)
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        mg = ax.pcolormesh(xx, yy, llhs, cmap='YlGnBu_r')
+        ax.set_ylabel('Vertex z (m)')
+        ax.set_xlabel('Vertex x (m)')
+        ax.set_xlim((x_edges[0], x_edges[-1]))
+        ax.set_ylim((z_edges[0], z_edges[-1]))
+        #truth
+        ax.axvline(x_v_true, color='r')
+        ax.axhline(z_v_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
+        plt.savefig('xz_%s.png'%evt,dpi=150)
+        
+    if do_thetaphi:
+        x_points = 7
+        y_points = 7
+        theta_edges = np.linspace(0, np.pi, x_points + 1)
+        phi_edges = np.linspace(0, 2*np.pi, y_points + 1)
+        
+        thetas = 0.5 * (theta_edges[:-1] + theta_edges[1:])
+        phis = 0.5 * (phi_edges[:-1] + phi_edges[1:])
+
+        llhs = []
+        for phi in phis:
+            for theta in thetas:
+                print 'testing phi = %.2f, theta = %.2f'%(phi, theta)
+                my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+                my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+                llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+                print 'llh = %.2f'%llh
+                llhs.append(llh)
+        plt.clf()
+        llhs = np.array(llhs)
+        # will be [phi, theta]
+        llhs = llhs.reshape(y_points, x_points)
+        
+
+        xx, yy = np.meshgrid(theta_edges, phi_edges)
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        mg = ax.pcolormesh(xx, yy, llhs, cmap='YlGnBu_r')
+        ax.set_xlabel(r'$\theta$ (rad)')
+        ax.set_ylabel(r'$\phi$ (rad)')
+        ax.set_xlim((theta_edges[0], theta_edges[-1]))
+        ax.set_ylim((phi_edges[0], phi_edges[-1]))
+        #truth
+        ax.axvline(theta_true, color='r')
+        ax.axhline(phi_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
+        plt.savefig('thetaphi_%s.png'%evt,dpi=150)
 
     # exit after one event
-    sys.exit()
+    #sys.exit()
