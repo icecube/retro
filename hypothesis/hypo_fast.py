@@ -2,6 +2,7 @@ import numpy as np
 import time
 import numba
 from os.path import expandvars
+from sparse import sparse
 
 def PowerAxis(minval, maxval, n_bins, power):
     '''JVSs Power axis reverse engeneered'''
@@ -372,7 +373,7 @@ class hypo(object):
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
         # the big matrix z
-        z = np.zeros((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1), dtype=np.float32)
+        z = sparse((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
 
         start_t = time.time()
         t_inner_loop = 0
@@ -403,9 +404,6 @@ class hypo(object):
                     track_r_extent_pos = sorted([track_r_extent[0], r_inflection_point])
                     track_r_extent_neg = sorted([r_inflection_point, track_r_extent[1]])
 
-                #print track_r_extent_pos
-                #print track_r_extent_neg
-
                 # theta
                 track_theta_extent = [self.ctheta(*extent[0]), self.ctheta(*extent[1])]
                 if ts <= t_extent[0]:
@@ -434,12 +432,9 @@ class hypo(object):
                 corr_loop += end_t3 - start_t3
                 
                 start_t2 = time.time()
-                z[k] = inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos)
+                inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos, self.photons_per_meter)
                 end_t2 = time.time()
                 t_inner_loop += end_t2 - start_t2
-
-        # convert length in (m) in to n_photons
-        z *= self.photons_per_meter
 
         end_t = time.time()
 
@@ -476,11 +471,10 @@ class hypo(object):
                 return k
         return None
 
-@numba.jit('''((float32[:,:,:]))(float64[:,:],float64[:,:],float64[:,:],float64[:,:],float64[:,:])''', nopython=True, nogil=True, fastmath=True, cache=True)
-def inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos):
+#@numba.jit('''((float32[:,:,:]))(float64[:,:],float64[:,:],float64[:,:],float64[:,:],float64[:,:])''', nopython=True, nogil=True, fastmath=True, cache=True)
+def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos, photons_per_meter):
     # Fill in the Z matrix the length of the track if there is overlap of the track with a bin
     # ugly nested loops
-    z_slice = np.zeros((len(r_inter_neg), len(theta_inter_neg), len(phi_inter)), dtype=np.float32)
     for i in range(phi_inter.shape[0]):
         phi = phi_inter[i]
         if phi[0] < 0 and phi[1] < 0:
@@ -498,7 +492,7 @@ def inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z_slice[j][m][i] += length 
+                    z[k,j,m,i] += length * photons_per_meter
             for j in range(r_inter_pos.shape[0]):
                 r = r_inter_pos[j]
                 if r[0] < 0 and r[1] < 0:
@@ -508,7 +502,7 @@ def inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z_slice[j][m][i] += length
+                    z[k,j,m,i] += length * photons_per_meter
         for m in range(theta_inter_pos.shape[0]):
             theta = theta_inter_pos[m]
             if theta[0] < 0 and theta[1] < 0:
@@ -522,7 +516,7 @@ def inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z_slice[j][m][i] += length
+                    z[k,j,m,i] += length * photons_per_meter
             for j in range(r_inter_pos.shape[0]):
                 r = r_inter_pos[j]
                 if r[0] < 0 and r[1] < 0:
@@ -532,8 +526,8 @@ def inner_loop(phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z_slice[j][m][i] += length
-    return z_slice
+                    z[k,j,m,i] += length * photons_per_meter
+        return z
 
 if __name__ == '__main__':
 
@@ -582,7 +576,12 @@ if __name__ == '__main__':
     ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
     
     t0 = time.time()
-    z = my_hypo.get_z_matrix(10., -20., -20., -20.)
+    z = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
+    hits = my_hypo.get_z_matrix(10., -20., -20., -20.)
+    for hit in hits:
+        print hit
+        idx, count = hit
+        z[idx] = count
     #print 'took %.2f ms to calculate matrix with %i bins'%((time.time() - t0)*1000, z.size)
     #print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
 

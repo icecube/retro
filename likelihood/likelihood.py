@@ -144,43 +144,16 @@ def get_llh(hypo, t, x, y, z, q, string, om):
         else:
             gamma_map = DC[om[hit] - 1]
         # get max llh between z_matrix and gamma_map
-        min_chi2 = 1e9
-        for phi_idx in range(z_matrix.shape[3]):
-            hypo_gammas = z_matrix[:, :, :, phi_idx]
-            chi2 = get_chi2(hypo_gammas, gamma_map, q[hit])
-            min_chi2 = min(min_chi2, chi2)
-        llh += min_chi2
+        chi2 = 1e9
+        for element in z_matrix:
+            idx, hypo_count = element
+            map_count = gamma_map[idx[0:3]]
+            if map_count > 0:
+                g = map_count / q[hit]
+                new_chi2 = (hypo_count - 1./g)**2*g
+                chi2 = min(chi2, new_chi2)
+        llh += chi2
     return llh
-
-@numba.jit('''((float64))(float32[:,:,:],float32[:,:,:],float64)''', nopython=True, nogil=True, fastmath=True, cache=True) 
-def get_chi2(hypo_gammas, gamma_map, q):
-    chi2 = 1e9
-    for i in xrange(hypo_gammas.shape[0]):
-        for j in xrange(hypo_gammas.shape[1]):
-            for k in xrange(hypo_gammas.shape[2]):
-                h = hypo_gammas[i, j, k]
-                if h > 0:
-                    g = gamma_map[i, j, k] / q
-                    if g > 0.:
-                        new_chi2 = (h - 1./g)**2*g
-                        chi2 = min(chi2, new_chi2)
-    return chi2
-
-#def get_chi2(hypo_gammas, gamma_map, q):
-#    #non_zero = (hypo_gammas != 0.) * (gamma_map != 0.)
-#    #if non_zero.any():
-#    #    #print 'found non-zero'
-#    #    chi2 = np.square(hypo_gammas[non_zero] - q[hit]/gamma_map[non_zero])/hypo_gammas[non_zero]
-#    #    min_chi2 = min(min_chi2, np.min(chi2))
-#    mask = hypo_gammas != 0.
-#    reduced_hypo = hypo_gammas[mask]
-#    reduced_gamma = gamma_map[mask]
-#    mask = reduced_gamma != 0
-#    reduced_gamma = reduced_gamma[mask]/q
-#    reduced_hypo = reduced_hypo[mask]
-#    if len(reduced_hypo) > 0:
-#        return np.min(np.square(reduced_hypo - 1./reduced_gamma)*reduced_gamma)
-#    return 1e8
 
 # iterate through events
 for idx in xrange(args.index, len(neutrinos)):
@@ -237,17 +210,6 @@ for idx in xrange(args.index, len(neutrinos)):
     print 'theta, phi = (%.2f, %.2f)'%(theta_true, phi_true)
     print 'E_cscd, E_trck (GeV) = %.2f, %.2f'%(cscd_energy_true, trck_energy_true)
 
-    #plt.clf()
-    #fig = plt.figure(figsize=(10,20))
-    #ax1 = fig.add_subplot(421)
-    #ax = fig.add_subplot(422)
-    #ax = fig.add_subplot(423)
-    #ax = fig.add_subplot(424)
-    #ax = fig.add_subplot(425)
-    #ax = fig.add_subplot(426)
-    #ax = fig.add_subplot(427)
-    #ax = fig.add_subplot(428)
-
     do_x =  False
     do_y =  False
     do_z =  False
@@ -266,8 +228,8 @@ for idx in xrange(args.index, len(neutrinos)):
     #do_phi =  True
     #do_cscd_energy =  True
     #do_trck_energy =  True
-    #do_xz = True
-    do_thetaphi = True
+    do_xz = True
+    #do_thetaphi = True
 
     n_scan_points = 7
 
@@ -434,18 +396,18 @@ for idx in xrange(args.index, len(neutrinos)):
 
 
     if do_xz:
-        x_points = 11
-        y_points = 11
+        x_points = 21
+        y_points = 21
         x_vs = np.linspace(x_v_true - 150, x_v_true + 150, x_points)
         z_vs = np.linspace(z_v_true - 100, z_v_true + 100, y_points)
         llhs = []
         for z_v in z_vs:
             for x_v in x_vs:
-                print 'testing z = %.2f, x = %.2f'%(z_v, x_v)
+                #print 'testing z = %.2f, x = %.2f'%(z_v, x_v)
                 my_hypo = hypo(t_v_true, x_v, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
                 my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
                 llh = get_llh(my_hypo, t, x, y, z, q, string, om)
-                print 'llh = %.2f'%llh
+                print ' z = %.2f, x = %.2f : llh = %.2f'%(z_v, x_v, llh)
                 llhs.append(llh)
         plt.clf()
         # [z, x]
