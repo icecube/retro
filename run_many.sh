@@ -1,0 +1,16 @@
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000001.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000002.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000003.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000004.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000005.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000006.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000007.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000008.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000009.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000010.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000011.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000012.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000013.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000014.hdf5 -i 300 &
+nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000015.hdf5 -i 300 &

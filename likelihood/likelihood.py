@@ -2,6 +2,7 @@ import numpy as np
 import pyfits
 import h5py
 import sys
+from scipy.special import gammaln
 from argparse import ArgumentParser
 from hypothesis.hypo_fast import hypo, PowerAxis
 from particles import particle, particle_array
@@ -21,15 +22,17 @@ args = parser.parse_args()
 # tables are not binned in phi, but we will do so for the hypo, therefore need to apply norm
 n_phi_bins = 20.
 norm = 1./n_phi_bins
+dom_eff_ic = 0.25
+dom_eff_dc = 0.35
 
 # load photon tables (r, cz, t) -> (-t, r, cz)
 IC = {}
 DC = {}
 for dom in range(60):
     table = pyfits.open('tables/tables/summed/retro_nevts1000_IC_DOM%i_r_cz_t.fits'%dom)
-    IC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * norm
+    IC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * (norm * dom_eff_ic)
     table = pyfits.open('tables/tables/summed/retro_nevts1000_DC_DOM%i_r_cz_t.fits'%dom)
-    DC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * norm
+    DC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * (norm * dom_eff_dc)
 
 # need to change the tables into expecte n-photons:
 
@@ -144,14 +147,23 @@ def get_llh(hypo, t, x, y, z, q, string, om):
         else:
             gamma_map = DC[om[hit] - 1]
         # get max llh between z_matrix and gamma_map
-        chi2 = 1e9
+        # noise probability?
+        l_noise = 0.0000025
+        #llh = -(q[hit]*np.log(l_noise) - l_noise  - gammaln(q[hit]+1.))
+        chi2_noise = np.square(q[hit] - l_noise)/q[hit]
+        #print 'noise llh = ', llh
+        #chi2 = 10.
+        expected_q = 0.
         for element in z_matrix:
             idx, hypo_count = element
             map_count = gamma_map[idx[0:3]]
-            if map_count > 0:
-                g = map_count / q[hit]
-                new_chi2 = (hypo_count - 1./g)**2*g
-                chi2 = min(chi2, new_chi2)
+            expected_q += hypo_count * map_count
+            #new_llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
+            #print 'new_llh ',new_llh
+        #print 'expected q = %.2f'%expected_q
+        #print 'observed q = %.2f'%q[hit]
+        chi2_hit = np.square(expected_q - q[hit])/q[hit]
+        chi2 = min(chi2_noise, chi2_hit)
         llh += chi2
     return llh
 
@@ -210,6 +222,11 @@ for idx in xrange(args.index, len(neutrinos)):
     print 'theta, phi = (%.2f, %.2f)'%(theta_true, phi_true)
     print 'E_cscd, E_trck (GeV) = %.2f, %.2f'%(cscd_energy_true, trck_energy_true)
 
+    # some factors by pure choice
+    cscd_e_scale=cscd_e_scale = 6.
+    trck_e_scale=trck_e_scale = 6.
+
+    do_true = False
     do_x =  False
     do_y =  False
     do_z =  False
@@ -220,19 +237,26 @@ for idx in xrange(args.index, len(neutrinos)):
     do_trck_energy =  False
     do_xz = False
     do_thetaphi = False
-    #do_x =  True
-    #do_y =  True
-    #do_z =  True
-    #do_t =  True
-    #do_theta =  True
-    #do_phi =  True
-    #do_cscd_energy =  True
-    #do_trck_energy =  True
-    do_xz = True
+    #do_true = True
+    do_x =  True
+    do_y =  True
+    do_z =  True
+    do_t =  True
+    do_theta =  True
+    do_phi =  True
+    do_cscd_energy =  True
+    do_trck_energy =  True
+    #do_xz = True
     #do_thetaphi = True
 
-    n_scan_points = 7
+    n_scan_points = 101
+    #cmap = 'afmhot'
+    cmap = 'YlGnBu_r'
 
+    if do_true:
+        my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
+        my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+        llh = get_llh(my_hypo, t, x, y, z, q, string, om)
 
     if do_z:
         # scan z pos
@@ -240,7 +264,7 @@ for idx in xrange(args.index, len(neutrinos)):
         llhs = []
         for z_v in z_vs:
             print 'testing z = %.2f'%z_v
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -252,6 +276,7 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('Vertex z (m)')
         #truth
         ax.axvline(z_v_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('z_%s.png'%evt,dpi=150)
 
     if do_x:
@@ -260,7 +285,7 @@ for idx in xrange(args.index, len(neutrinos)):
         llhs = []
         for x_v in x_vs:
             print 'testing x = %.2f'%x_v
-            my_hypo = hypo(t_v_true, x_v, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo = hypo(t_v_true, x_v, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -272,6 +297,7 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('Vertex x (m)')
         #truth
         ax.axvline(x_v_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('x_%s.png'%evt,dpi=150)
 
     if do_y:
@@ -280,7 +306,7 @@ for idx in xrange(args.index, len(neutrinos)):
         llhs = []
         for y_v in y_vs:
             print 'testing y = %.2f'%y_v
-            my_hypo = hypo(t_v_true, x_v_true, y_v, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo = hypo(t_v_true, x_v_true, y_v, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -292,6 +318,7 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('Vertex y (m)')
         #truth
         ax.axvline(y_v_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('y_%s.png'%evt,dpi=150)
 
     if do_t:
@@ -300,7 +327,7 @@ for idx in xrange(args.index, len(neutrinos)):
         llhs = []
         for t_v in t_vs:
             print 'testing t = %.2f'%t_v
-            my_hypo = hypo(t_v, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo = hypo(t_v, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -312,6 +339,7 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('Vertex t (ns)')
         #truth
         ax.axvline(t_v_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('t_%s.png'%evt,dpi=150)
 
     if do_theta:
@@ -320,7 +348,7 @@ for idx in xrange(args.index, len(neutrinos)):
         llhs = []
         for theta in thetas:
             print 'testing theta = %.2f'%theta
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -332,6 +360,7 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('theta (rad)')
         #truth
         ax.axvline(theta_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('theta_%s.png'%evt,dpi=150)
 
     if do_phi:
@@ -340,7 +369,7 @@ for idx in xrange(args.index, len(neutrinos)):
         llhs = []
         for phi in phis:
             print 'testing phi = %.2f'%phi
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -352,15 +381,16 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('phi (rad)')
         #truth
         ax.axvline(phi_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('phi_%s.png'%evt,dpi=150)
 
     if do_cscd_energy:
         # scan cscd_energy
-        cscd_energys = np.linspace(0, 500, n_scan_points)
+        cscd_energys = np.linspace(0, 10.*cscd_energy_true, n_scan_points)
         llhs = []
         for cscd_energy in cscd_energys:
             print 'testing cscd_energy = %.2f'%cscd_energy
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy)
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -372,6 +402,7 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('cscd_energy (GeV)')
         #truth
         ax.axvline(cscd_energy_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('cscd_energy_%s.png'%evt,dpi=150)
 
     if do_trck_energy:
@@ -380,7 +411,7 @@ for idx in xrange(args.index, len(neutrinos)):
         llhs = []
         for trck_energy in trck_energys:
             print 'testing trck_energy = %.2f'%trck_energy
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy, cscd_energy=cscd_energy_true)
+            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
             llh = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
@@ -392,19 +423,20 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('trck_energy (GeV)')
         #truth
         ax.axvline(trck_energy_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('trck_energy_%s.png'%evt,dpi=150)
 
 
     if do_xz:
-        x_points = 21
-        y_points = 21
+        x_points = 51
+        y_points = 51
         x_vs = np.linspace(x_v_true - 150, x_v_true + 150, x_points)
         z_vs = np.linspace(z_v_true - 100, z_v_true + 100, y_points)
         llhs = []
         for z_v in z_vs:
             for x_v in x_vs:
                 #print 'testing z = %.2f, x = %.2f'%(z_v, x_v)
-                my_hypo = hypo(t_v_true, x_v, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+                my_hypo = hypo(t_v_true, x_v, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
                 my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
                 llh = get_llh(my_hypo, t, x, y, z, q, string, om)
                 print ' z = %.2f, x = %.2f : llh = %.2f'%(z_v, x_v, llh)
@@ -420,7 +452,7 @@ for idx in xrange(args.index, len(neutrinos)):
         xx, yy = np.meshgrid(x_edges, z_edges)
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        mg = ax.pcolormesh(xx, yy, llhs, cmap='YlGnBu_r')
+        mg = ax.pcolormesh(xx, yy, llhs, cmap=cmap)
         ax.set_ylabel('Vertex z (m)')
         ax.set_xlabel('Vertex x (m)')
         ax.set_xlim((x_edges[0], x_edges[-1]))
@@ -432,8 +464,8 @@ for idx in xrange(args.index, len(neutrinos)):
         plt.savefig('xz_%s.png'%evt,dpi=150)
         
     if do_thetaphi:
-        x_points = 7
-        y_points = 7
+        x_points = 100
+        y_points = 100
         theta_edges = np.linspace(0, np.pi, x_points + 1)
         phi_edges = np.linspace(0, 2*np.pi, y_points + 1)
         
@@ -444,7 +476,7 @@ for idx in xrange(args.index, len(neutrinos)):
         for phi in phis:
             for theta in thetas:
                 print 'testing phi = %.2f, theta = %.2f'%(phi, theta)
-                my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true)
+                my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
                 my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
                 llh = get_llh(my_hypo, t, x, y, z, q, string, om)
                 print 'llh = %.2f'%llh
@@ -458,7 +490,7 @@ for idx in xrange(args.index, len(neutrinos)):
         xx, yy = np.meshgrid(theta_edges, phi_edges)
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        mg = ax.pcolormesh(xx, yy, llhs, cmap='YlGnBu_r')
+        mg = ax.pcolormesh(xx, yy, llhs, cmap=cmap)
         ax.set_xlabel(r'$\theta$ (rad)')
         ax.set_ylabel(r'$\phi$ (rad)')
         ax.set_xlim((theta_edges[0], theta_edges[-1]))

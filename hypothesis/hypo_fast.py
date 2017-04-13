@@ -189,7 +189,7 @@ class hypo(object):
         at the DOM-hit point.
         The cells are devided up according to the binning that must be set.'''
 
-    def __init__(self, t_v, x_v, y_v, z_v, theta, phi, trck_energy, cscd_energy):
+    def __init__(self, t_v, x_v, y_v, z_v, theta, phi, trck_energy, cscd_energy, cscd_e_scale=1., trck_e_scale=1.):
         ''' provide hypo with vertex (_v), direction and trck and cscd energy
             
             t_v : time (ns)
@@ -204,8 +204,8 @@ class hypo(object):
         length = 15. / 3.3 * trck_energy
         self.track = track(t_v, x_v, y_v, z_v, theta, phi, length)
         # precalculated (nphotons.py) to avoid icetray
-        self.photons_per_meter =  2451.4544553
-        photons_per_gev_cscd = 12805.3383311
+        self.photons_per_meter =  2451.4544553 * trck_e_scale
+        photons_per_gev_cscd = 12805.3383311 * cscd_e_scale
         self.cscd_photons = cscd_energy * photons_per_gev_cscd
         self.trck_photons = self.track.length * self.photons_per_meter
         self.tot_photons = self.cscd_photons + self.trck_photons
