@@ -214,9 +214,9 @@ class hypo(object):
         self.phi_bin_edges = None
         self.theta_bin_edges = None
 
-        print 'number of photons from cscd (%s GeV) = %i'%(cscd_energy, self.cscd_photons)
-        print 'number of photons from trck (%s GeV) = %i'%(trck_energy, self.trck_photons)
-        print 'total number of photons = %i'%(self.tot_photons) 
+        #print 'number of photons from cscd (%s GeV) = %i'%(cscd_energy, self.cscd_photons)
+        #print 'number of photons from trck (%s GeV) = %i'%(trck_energy, self.trck_photons)
+        #print 'total number of photons = %i'%(self.tot_photons) 
 
     def set_binning(self, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
         ''' set the binning of the spherical coordinates with bin_edges'''
@@ -460,7 +460,7 @@ class hypo(object):
                 t_inner_loop += end_t2 - start_t2
 
         end_t = time.time()
-        print 'track photons ', total_rho * self.photons_per_meter 
+        #print 'track photons ', total_rho * self.photons_per_meter 
 
         #print 'corr loop took %.1f ms'%(corr_loop*1000)
         #print 'inner loop took %.1f ms'%(t_inner_loop*1000)

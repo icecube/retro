@@ -1,7 +1,7 @@
 import numpy as np
 import pyfits
 import h5py
-import sys
+import sys, os
 from scipy.special import gammaln
 from argparse import ArgumentParser
 from hypothesis.hypo_fast import hypo, PowerAxis
@@ -29,10 +29,18 @@ dom_eff_dc = 0.35
 IC = {}
 DC = {}
 for dom in range(60):
-    table = pyfits.open('tables/tables/summed/retro_nevts1000_IC_DOM%i_r_cz_t.fits'%dom)
+    if os.path.isfile('tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_smooth_2.fits'%dom):
+        table = pyfits.open('tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_smooth_2.fits'%dom)
+    else:
+        print 'fallback to small table'
+        table = pyfits.open('tables/tables/summed/retro_nevts1000_IC_DOM%i_r_cz_t_smooth_2.fits'%dom)
     IC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * (norm * dom_eff_ic)
-    table = pyfits.open('tables/tables/summed/retro_nevts1000_DC_DOM%i_r_cz_t.fits'%dom)
-    DC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * (norm * dom_eff_dc)
+    if os.path.isfile('tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom):
+        table = pyfits.open('tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom)
+    else:
+        print 'fallback to small table'
+        table = pyfits.open('tables/tables/summed/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom)
+    DC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * (norm * dom_eff_ic)
 
 # need to change the tables into expecte n-photons:
 
@@ -134,7 +142,8 @@ geo = np.load('likelihood/geo_array.npy')
 
 #@profile
 def get_llh(hypo, t, x, y, z, q, string, om):
-    llh = 0
+    llhs = []
+    n_noise = 0
     # loop over hits
     for hit in range(len(t)):
         # for every DOM + hit:
@@ -148,24 +157,44 @@ def get_llh(hypo, t, x, y, z, q, string, om):
             gamma_map = DC[om[hit] - 1]
         # get max llh between z_matrix and gamma_map
         # noise probability?
-        l_noise = 0.0000025
+        #l_noise = 0.0000025
+        l_noise = 0.00000025
         #llh = -(q[hit]*np.log(l_noise) - l_noise  - gammaln(q[hit]+1.))
-        chi2_noise = np.square(q[hit] - l_noise)/q[hit]
+        chi2_noise = np.square(q[hit] - l_noise)
+        #/l_noise
         #print 'noise llh = ', llh
         #chi2 = 10.
         expected_q = 0.
         for element in z_matrix:
             idx, hypo_count = element
             map_count = gamma_map[idx[0:3]]
+            #print 'hypo count: ', hypo_count
+            #print 'map count: ',map_count
             expected_q += hypo_count * map_count
             #new_llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
             #print 'new_llh ',new_llh
+        if l_noise > expected_q:
+            n_noise += 1
+        expected_q = max(l_noise, expected_q)
+        llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
+        llhs.append(llh)
         #print 'expected q = %.2f'%expected_q
         #print 'observed q = %.2f'%q[hit]
-        chi2_hit = np.square(expected_q - q[hit])/q[hit]
-        chi2 = min(chi2_noise, chi2_hit)
-        llh += chi2
-    return llh
+        #print ''
+        #chi2_hit = np.square(expected_q - q[hit])
+        #llhs.append(chi2_hit)
+        #/expected_q
+        #chi2 = min(chi2_noise, chi2_hit)
+        #else:
+        #chi2 = chi2_hit
+        #llh += chi2
+    #print llhs
+    # drop shittiest ones:
+    #n_drop = int(np.floor(0.1 * len(t)))
+    #print 'removing ',n_drop
+    #for i in range(n_drop):
+    #    llhs.remove(max(llhs))
+    return sum(llhs), n_noise
 
 # iterate through events
 for idx in xrange(args.index, len(neutrinos)):
@@ -221,10 +250,11 @@ for idx in xrange(args.index, len(neutrinos)):
     print 'vertex = (%.2f, %.2f, %.2f)'%(x_v_true, y_v_true, z_v_true)
     print 'theta, phi = (%.2f, %.2f)'%(theta_true, phi_true)
     print 'E_cscd, E_trck (GeV) = %.2f, %.2f'%(cscd_energy_true, trck_energy_true)
+    print 'n hits = %i'%len(t)
 
     # some factors by pure choice
-    cscd_e_scale=cscd_e_scale = 6.
-    trck_e_scale=trck_e_scale = 6.
+    cscd_e_scale=cscd_e_scale = 1./20.
+    trck_e_scale=trck_e_scale = 5./10
 
     do_true = False
     do_x =  False
@@ -244,30 +274,32 @@ for idx in xrange(args.index, len(neutrinos)):
     do_t =  True
     do_theta =  True
     do_phi =  True
-    do_cscd_energy =  True
-    do_trck_energy =  True
+    #do_cscd_energy =  True
+    #do_trck_energy =  True
     #do_xz = True
     #do_thetaphi = True
 
-    n_scan_points = 101
+    n_scan_points = 21
     #cmap = 'afmhot'
     cmap = 'YlGnBu_r'
 
     if do_true:
         my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
         my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-        llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+        llh, noise  = get_llh(my_hypo, t, x, y, z, q, string, om)
 
     if do_z:
         # scan z pos
-        z_vs = np.linspace(z_v_true - 20, z_v_true + 20, n_scan_points)
+        z_vs = np.linspace(z_v_true - 50, z_v_true + 50, n_scan_points)
         llhs = []
+        noises = []
         for z_v in z_vs:
             print 'testing z = %.2f'%z_v
             my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
+            noises.append(noise)
         plt.clf()
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -276,6 +308,8 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('Vertex z (m)')
         #truth
         ax.axvline(z_v_true, color='r')
+        ax.axvline(ML_recos[idx].v[3], color='g')
+        ax.axvline(SPE_recos[idx].v[3], color='m')
         ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('z_%s.png'%evt,dpi=150)
 
@@ -287,7 +321,7 @@ for idx in xrange(args.index, len(neutrinos)):
             print 'testing x = %.2f'%x_v
             my_hypo = hypo(t_v_true, x_v, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
         plt.clf()
         fig = plt.figure()
@@ -297,6 +331,8 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('Vertex x (m)')
         #truth
         ax.axvline(x_v_true, color='r')
+        ax.axvline(ML_recos[idx].v[1], color='g')
+        ax.axvline(SPE_recos[idx].v[1], color='m')
         ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('x_%s.png'%evt,dpi=150)
 
@@ -308,7 +344,7 @@ for idx in xrange(args.index, len(neutrinos)):
             print 'testing y = %.2f'%y_v
             my_hypo = hypo(t_v_true, x_v_true, y_v, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
         plt.clf()
         fig = plt.figure()
@@ -318,6 +354,8 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('Vertex y (m)')
         #truth
         ax.axvline(y_v_true, color='r')
+        ax.axvline(ML_recos[idx].v[2], color='g')
+        ax.axvline(SPE_recos[idx].v[2], color='m')
         ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('y_%s.png'%evt,dpi=150)
 
@@ -325,20 +363,25 @@ for idx in xrange(args.index, len(neutrinos)):
         # scan t pos
         t_vs = np.linspace(t_v_true - 200, t_v_true + 200, n_scan_points)
         llhs = []
+        noises = []
         for t_v in t_vs:
             print 'testing t = %.2f'%t_v
             my_hypo = hypo(t_v, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
+            noises.append(noise)
         plt.clf()
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(t_vs, llhs)
+        ax.plot(t_vs, noises)
         ax.set_ylabel('llh')
         ax.set_xlabel('Vertex t (ns)')
         #truth
         ax.axvline(t_v_true, color='r')
+        ax.axvline(ML_recos[idx].v[0], color='g')
+        ax.axvline(SPE_recos[idx].v[0], color='m')
         ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('t_%s.png'%evt,dpi=150)
 
@@ -350,7 +393,7 @@ for idx in xrange(args.index, len(neutrinos)):
             print 'testing theta = %.2f'%theta
             my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
         plt.clf()
         fig = plt.figure()
@@ -360,6 +403,8 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('theta (rad)')
         #truth
         ax.axvline(theta_true, color='r')
+        ax.axvline(ML_recos[idx].theta, color='g')
+        ax.axvline(SPE_recos[idx].theta, color='m')
         ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('theta_%s.png'%evt,dpi=150)
 
@@ -371,7 +416,7 @@ for idx in xrange(args.index, len(neutrinos)):
             print 'testing phi = %.2f'%phi
             my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
         plt.clf()
         fig = plt.figure()
@@ -381,18 +426,20 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.set_xlabel('phi (rad)')
         #truth
         ax.axvline(phi_true, color='r')
+        ax.axvline(ML_recos[idx].phi, color='g')
+        ax.axvline(SPE_recos[idx].phi, color='m')
         ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('phi_%s.png'%evt,dpi=150)
 
     if do_cscd_energy:
         # scan cscd_energy
-        cscd_energys = np.linspace(0, 10.*cscd_energy_true, n_scan_points)
+        cscd_energys = np.linspace(0, 5.*cscd_energy_true, n_scan_points)
         llhs = []
         for cscd_energy in cscd_energys:
             print 'testing cscd_energy = %.2f'%cscd_energy
             my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
         plt.clf()
         fig = plt.figure()
@@ -413,7 +460,7 @@ for idx in xrange(args.index, len(neutrinos)):
             print 'testing trck_energy = %.2f'%trck_energy
             my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
             my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
             llhs.append(llh)
         plt.clf()
         fig = plt.figure()
@@ -428,8 +475,8 @@ for idx in xrange(args.index, len(neutrinos)):
 
 
     if do_xz:
-        x_points = 51
-        y_points = 51
+        x_points = 21
+        y_points = 21
         x_vs = np.linspace(x_v_true - 150, x_v_true + 150, x_points)
         z_vs = np.linspace(z_v_true - 100, z_v_true + 100, y_points)
         llhs = []
@@ -438,7 +485,7 @@ for idx in xrange(args.index, len(neutrinos)):
                 #print 'testing z = %.2f, x = %.2f'%(z_v, x_v)
                 my_hypo = hypo(t_v_true, x_v, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
                 my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-                llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+                llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
                 print ' z = %.2f, x = %.2f : llh = %.2f'%(z_v, x_v, llh)
                 llhs.append(llh)
         plt.clf()
@@ -464,8 +511,8 @@ for idx in xrange(args.index, len(neutrinos)):
         plt.savefig('xz_%s.png'%evt,dpi=150)
         
     if do_thetaphi:
-        x_points = 100
-        y_points = 100
+        x_points = 20
+        y_points = 20
         theta_edges = np.linspace(0, np.pi, x_points + 1)
         phi_edges = np.linspace(0, 2*np.pi, y_points + 1)
         
@@ -478,7 +525,7 @@ for idx in xrange(args.index, len(neutrinos)):
                 print 'testing phi = %.2f, theta = %.2f'%(phi, theta)
                 my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
                 my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-                llh = get_llh(my_hypo, t, x, y, z, q, string, om)
+                llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
                 print 'llh = %.2f'%llh
                 llhs.append(llh)
         plt.clf()
