@@ -18,3 +18,11 @@ do
     done
     wait
 done
+#for d in $dom
+#do
+#    for i in `seq 0 9`; do
+#        DOM=$(($d + $i))
+#        nohup python generate_table.py --nevts 1000 --subdet IC --dom $DOM > /dev/null 2>&1 &
+#    done
+#    wait
+#done

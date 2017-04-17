@@ -1,10 +1,19 @@
 import pyfits
 import numpy as np
-import sys
+import sys, os
 
-table = pyfits.open(sys.argv[1])
-path, ext = sys.argv[1].split('.')
+fname = sys.argv[1]
+if not os.path.isfile(fname):
+    print 'table %s does not exist'%fname
+    sys.exit()
+
+path, ext = fname.split('.')
 new_fname = path + '_r_cz_t.' + ext
+if os.path.isfile(new_fname):
+    print 'summed table %s exists already! Skipping!'%new_fname
+    sys.exit()
+
+table = pyfits.open(fname)
 #table.info()
 # cut off under and overflow bins
 data = table[0].data[1:-1,1:-1,1:-1,1:-1,1:-1]
