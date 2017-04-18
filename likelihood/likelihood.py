@@ -26,6 +26,7 @@ dom_eff_ic = 0.25
 dom_eff_dc = 0.35
 
 # load photon tables (r, cz, t) -> (-t, r, cz)
+# and also flip coszen binning!
 IC = {}
 DC = {}
 for dom in range(60):
@@ -34,13 +35,13 @@ for dom in range(60):
     else:
         print 'fallback to small table'
         table = pyfits.open('tables/tables/summed/retro_nevts1000_IC_DOM%i_r_cz_t_smooth_2.fits'%dom)
-    IC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * (norm * dom_eff_ic)
+    IC[dom] = np.flipud(np.rollaxis(np.fliplr(table[0].data), 2, 0)) * (norm * dom_eff_ic)
     if os.path.isfile('tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom):
         table = pyfits.open('tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom)
     else:
         print 'fallback to small table'
         table = pyfits.open('tables/tables/summed/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom)
-    DC[dom] = np.flipud(np.rollaxis(table[0].data, 2, 0)) * (norm * dom_eff_ic)
+    DC[dom] = np.flipud(np.rollaxis(np.fliplr(table[0].data), 2, 0)) * (norm * dom_eff_ic)
 
 # need to change the tables into expecte n-photons:
 
@@ -151,7 +152,7 @@ def get_llh(hypo, t, x, y, z, q, string, om):
         # t, r ,cz, phi 
         #print 'hit at %.2f ns at (%.2f, %.2f, %.2f)'%(t[hit], x[hit], y[hit], z[hit])
         z_matrix = hypo.get_z_matrix(t[hit], x[hit], y[hit], z[hit])
-        if string[hit] < 78:
+        if string[hit] < 79:
             gamma_map = IC[om[hit] - 1]
         else:
             gamma_map = DC[om[hit] - 1]
@@ -224,6 +225,7 @@ for idx in xrange(args.index, len(neutrinos)):
     x = []
     y = []
     z = []
+    #print geo.shape
     for s, o in zip(string, om):
         x.append(geo[s-1, o-1, 0])
         y.append(geo[s-1, o-1, 1])
@@ -267,6 +269,7 @@ for idx in xrange(args.index, len(neutrinos)):
     do_trck_energy =  False
     do_xz = False
     do_thetaphi = False
+    do_thetaz = False
     #do_true = True
     do_x =  True
     do_y =  True
@@ -276,10 +279,11 @@ for idx in xrange(args.index, len(neutrinos)):
     do_phi =  True
     #do_cscd_energy =  True
     #do_trck_energy =  True
-    #do_xz = True
-    #do_thetaphi = True
+    do_xz = True
+    do_thetaphi = True
+    do_thetaz = True
 
-    n_scan_points = 21
+    n_scan_points = 51
     #cmap = 'afmhot'
     cmap = 'YlGnBu_r'
 
@@ -475,8 +479,8 @@ for idx in xrange(args.index, len(neutrinos)):
 
 
     if do_xz:
-        x_points = 21
-        y_points = 21
+        x_points = 51
+        y_points = 51
         x_vs = np.linspace(x_v_true - 150, x_v_true + 150, x_points)
         z_vs = np.linspace(z_v_true - 100, z_v_true + 100, y_points)
         llhs = []
@@ -511,8 +515,8 @@ for idx in xrange(args.index, len(neutrinos)):
         plt.savefig('xz_%s.png'%evt,dpi=150)
         
     if do_thetaphi:
-        x_points = 20
-        y_points = 20
+        x_points = 50
+        y_points = 50
         theta_edges = np.linspace(0, np.pi, x_points + 1)
         phi_edges = np.linspace(0, 2*np.pi, y_points + 1)
         
@@ -547,6 +551,44 @@ for idx in xrange(args.index, len(neutrinos)):
         ax.axhline(phi_true, color='r')
         ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
         plt.savefig('thetaphi_%s.png'%evt,dpi=150)
+
+    if do_thetaz:
+        x_points = 51
+        y_points = 51
+        theta_edges = np.linspace(0, np.pi, x_points + 1)
+        z_edges = np.linspace(z_v_true - 20, z_v_true + 20, y_points + 1)
+        
+        thetas = 0.5 * (theta_edges[:-1] + theta_edges[1:])
+        zs = 0.5 * (z_edges[:-1] + z_edges[1:])
+
+        llhs = []
+        for z_v in zs:
+            for theta in thetas:
+                print 'testing z = %.2f, theta = %.2f'%(z_v, theta)
+                my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
+                my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+                llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
+                print 'llh = %.2f'%llh
+                llhs.append(llh)
+        plt.clf()
+        llhs = np.array(llhs)
+        # will be [z, theta]
+        llhs = llhs.reshape(y_points, x_points)
+        
+
+        xx, yy = np.meshgrid(theta_edges, z_edges)
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        mg = ax.pcolormesh(xx, yy, llhs, cmap=cmap)
+        ax.set_xlabel(r'$\theta$ (rad)')
+        ax.set_ylabel(r'Vertex z (m)')
+        ax.set_xlim((theta_edges[0], theta_edges[-1]))
+        ax.set_ylim((z_edges[0], z_edges[-1]))
+        #truth
+        ax.axvline(theta_true, color='r')
+        ax.axhline(z_v_true, color='r')
+        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
+        plt.savefig('thetaz_%s.png'%evt,dpi=150)
 
     # exit after one event
     #sys.exit()
