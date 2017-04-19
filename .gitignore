@@ -6,3 +6,5 @@
 *.pyc
 *.i3
 *.i3.gz
+*.csv
+*.out

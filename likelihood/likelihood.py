@@ -10,6 +10,7 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 import numba
+from pyswarm import pso
 #from line_profiler import profile
 
 parser = ArgumentParser(description='''make 2d event pictures''')
@@ -41,7 +42,7 @@ for dom in range(60):
     else:
         print 'fallback to small table'
         table = pyfits.open('tables/tables/summed/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom)
-    DC[dom] = np.flipud(np.rollaxis(np.fliplr(table[0].data), 2, 0)) * (norm * dom_eff_ic)
+    DC[dom] = np.flipud(np.rollaxis(np.fliplr(table[0].data), 2, 0)) * (norm * dom_eff_dc)
 
 # need to change the tables into expecte n-photons:
 
@@ -197,6 +198,27 @@ def get_llh(hypo, t, x, y, z, q, string, om):
     #    llhs.remove(max(llhs))
     return sum(llhs), n_noise
 
+def get_6d_llh(params_6d, trck_energy, cscd_energy, trck_e_scale, cscd_e_scale, t, x, y, z, q, string, om, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
+    ''' minimizer callable for 6d (vertex + angle) minimization)
+        params_6d : list
+            [t, x, y, z, theta, phi]
+        '''
+    my_hypo = hypo(params_6d[0], params_6d[1], params_6d[2], params_6d[3], theta=params_6d[4], phi=params_6d[5], trck_energy=trck_energy, cscd_energy=cscd_energy, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
+    my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
+    llh, _ = get_llh(my_hypo, t, x, y, z, q, string, om)
+    #print 'llh=%.2f at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple([llh] + [p for p in params_6d])
+    return llh
+
+outfile_name = name+'.csv'
+if os.path.isfile(outfile_name):
+    print 'File %s exists'%outfile_name
+    sys.exit()
+with open(outfile_name, 'w') as outfile:
+    outfile.write('#event, t_true, x_true, y_true, z_true, theta_true, phi_true, trck_energy_true, cscd_energy_true, llh_true, \
+t_retro, x_retro, y_retro, z_retro, theta_retro, phi_retro, llh_retro, \
+t_mn, x_mn, y_mn, z_mn, theta_mn, phi_mn, llh_mn, \
+t_spe, x_spe, y_spe, z_spe, theta_spe, phi_spe, llh_spe\n')
+
 # iterate through events
 for idx in xrange(args.index, len(neutrinos)):
 
@@ -270,22 +292,72 @@ for idx in xrange(args.index, len(neutrinos)):
     do_xz = False
     do_thetaphi = False
     do_thetaz = False
+    do_minimize = False
     #do_true = True
-    do_x =  True
-    do_y =  True
-    do_z =  True
-    do_t =  True
-    do_theta =  True
-    do_phi =  True
+    #do_x =  True
+    #do_y =  True
+    #do_z =  True
+    #do_t =  True
+    #do_theta =  True
+    #do_phi =  True
     #do_cscd_energy =  True
     #do_trck_energy =  True
-    do_xz = True
-    do_thetaphi = True
-    do_thetaz = True
+    #do_xz = True
+    #do_thetaphi = True
+    #do_thetaz = True
+    do_minimize = True
 
     n_scan_points = 51
     #cmap = 'afmhot'
     cmap = 'YlGnBu_r'
+
+
+
+    if do_minimize:
+        kwargs = {}
+        kwargs['t_bin_edges'] = t_bin_edges
+        kwargs['r_bin_edges'] = r_bin_edges
+        kwargs['theta_bin_edges'] = theta_bin_edges
+        kwargs['phi_bin_edges'] = phi_bin_edges
+        kwargs['trck_energy'] = trck_energy_true
+        kwargs['trck_e_scale'] = trck_e_scale
+        kwargs['cscd_energy'] = cscd_energy_true
+        kwargs['cscd_e_scale'] = cscd_e_scale
+        kwargs['t'] = t
+        kwargs['x'] = x
+        kwargs['y'] = y
+        kwargs['z'] = z
+        kwargs['q'] = q
+        kwargs['string'] = string
+        kwargs['om'] = om
+
+        # [t, x, y, z, theta, phi]
+        lower_bounds = [t_v_true - 100, x_v_true - 50, y_v_true - 50, z_v_true - 50, max(0, theta_true - 0.5), max(0, phi_true - 1.)]
+        upper_bounds = [t_v_true + 100, x_v_true + 50, y_v_true + 50, z_v_true + 50, min(np.pi, theta_true + 0.5), min(2*np.pi, phi_true + 1.)]
+        
+        truth = [t_v_true, x_v_true, y_v_true, z_v_true, theta_true, phi_true]
+        llh_truth = get_6d_llh(truth, **kwargs)
+        print 'llh at truth = %.2f'%llh_truth
+
+        mn = [ML_recos[idx].v[0], ML_recos[idx].v[1], ML_recos[idx].v[2], ML_recos[idx].v[3], ML_recos[idx].theta, ML_recos[idx].phi]
+        llh_mn = get_6d_llh(mn, **kwargs)
+
+        spe = [SPE_recos[idx].v[0], SPE_recos[idx].v[1], SPE_recos[idx].v[2], SPE_recos[idx].v[3], SPE_recos[idx].theta, SPE_recos[idx].phi]
+        llh_spe = get_6d_llh(spe, **kwargs)
+
+        xopt1, fopt1 = pso(get_6d_llh, lower_bounds, upper_bounds, kwargs=kwargs, minstep=1e-5, minfunc=1e-1, debug=True)
+
+        print 'truth at   t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple(truth)
+        print('with llh = %.2f'%llh_truth)
+        print 'optimum at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple([p for p in xopt1])
+        print('with llh = %.2f\n'%fopt1)
+
+        outlist = [evt] + truth + [trck_energy_true, cscd_energy_true] + [llh_truth] + [p for p in xopt1] + [fopt1] + mn + [llh_mn] + spe + [llh_spe]
+        string = ", ".join([str(e) for e in outlist])
+        with open(outfile_name, 'a') as outfile:
+            outfile.write(string)
+            outfile.write('\n')
+
 
     if do_true:
         my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
@@ -592,3 +664,4 @@ for idx in xrange(args.index, len(neutrinos)):
 
     # exit after one event
     #sys.exit()
+outfile.close()

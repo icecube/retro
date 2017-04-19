@@ -586,7 +586,7 @@ if __name__ == '__main__':
     theta_bin_edges = np.arccos(np.linspace(-1, 1, 51))[::-1]
     phi_bin_edges = np.linspace(0, 2*np.pi, 37)
 
-    my_hypo = hypo(10., 0., 4., 0., theta=1., phi=5.3, trck_energy=10., cscd_energy=10.)
+    my_hypo = hypo(10., 0., 4., 0., theta=0.57, phi=5.3, trck_energy=25., cscd_energy=10.)
     my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
 
 
