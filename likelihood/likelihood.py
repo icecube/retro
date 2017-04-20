@@ -23,6 +23,10 @@ args = parser.parse_args()
 # tables are not binned in phi, but we will do so for the hypo, therefore need to apply norm
 n_phi_bins = 20.
 norm = 1./n_phi_bins
+# correct for DOM wavelength acceptance, given cherenkov spectrum (source photons)
+# see tables/wavelegth.py
+norm *= 0.0544243061857
+# add in dom efficiencies (?)
 dom_eff_ic = 0.25
 dom_eff_dc = 0.35
 
@@ -144,7 +148,8 @@ geo = np.load('likelihood/geo_array.npy')
 
 #@profile
 def get_llh(hypo, t, x, y, z, q, string, om):
-    llhs = []
+    #llhs = []
+    tot_llh = 0.
     n_noise = 0
     # loop over hits
     for hit in range(len(t)):
@@ -160,26 +165,34 @@ def get_llh(hypo, t, x, y, z, q, string, om):
         # get max llh between z_matrix and gamma_map
         # noise probability?
         #l_noise = 0.0000025
-        l_noise = 0.00000025
+        l_noise = 0.0000025
         #llh = -(q[hit]*np.log(l_noise) - l_noise  - gammaln(q[hit]+1.))
-        chi2_noise = np.square(q[hit] - l_noise)
+        #chi2_noise = np.square(q[hit] - l_noise)
         #/l_noise
         #print 'noise llh = ', llh
         #chi2 = 10.
-        expected_q = 0.
+        llhs = []
+        #expected_q = 0.
+        #expected_q += l_noise
         for element in z_matrix:
             idx, hypo_count = element
             map_count = gamma_map[idx[0:3]]
             #print 'hypo count: ', hypo_count
             #print 'map count: ',map_count
-            expected_q += hypo_count * map_count
+            #expected_q += hypo_count * map_count
+            expected_q = hypo_count * map_count + l_noise
+            llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
+            llhs.append(llh)
             #new_llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
             #print 'new_llh ',new_llh
-        if l_noise > expected_q:
-            n_noise += 1
-        expected_q = max(l_noise, expected_q)
-        llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
-        llhs.append(llh)
+        expected_q = l_noise
+        llhs.append(-(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.)))
+        #if l_noise > expected_q:
+        #    n_noise += 1
+        #expected_q = max(l_noise, expected_q)
+        #llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
+        tot_llh += min(llhs)
+        #llhs.append(llh)
         #print 'expected q = %.2f'%expected_q
         #print 'observed q = %.2f'%q[hit]
         #print ''
@@ -196,7 +209,8 @@ def get_llh(hypo, t, x, y, z, q, string, om):
     #print 'removing ',n_drop
     #for i in range(n_drop):
     #    llhs.remove(max(llhs))
-    return sum(llhs), n_noise
+    #return sum(llhs), n_noise
+    return tot_llh, n_noise
 
 def get_6d_llh(params_6d, trck_energy, cscd_energy, trck_e_scale, cscd_e_scale, t, x, y, z, q, string, om, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
     ''' minimizer callable for 6d (vertex + angle) minimization)
@@ -209,12 +223,40 @@ def get_6d_llh(params_6d, trck_energy, cscd_energy, trck_e_scale, cscd_e_scale, 
     #print 'llh=%.2f at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple([llh] + [p for p in params_6d])
     return llh
 
-outfile_name = name+'.csv'
-if os.path.isfile(outfile_name):
-    print 'File %s exists'%outfile_name
-    sys.exit()
-with open(outfile_name, 'w') as outfile:
-    outfile.write('#event, t_true, x_true, y_true, z_true, theta_true, phi_true, trck_energy_true, cscd_energy_true, llh_true, \
+do_true = False
+do_x =  False
+do_y =  False
+do_z =  False
+do_t =  False
+do_theta =  False
+do_phi =  False
+do_cscd_energy =  False
+do_trck_energy =  False
+do_xz = False
+do_thetaphi = False
+do_thetaz = False
+do_minimize = False
+#do_true = True
+#do_x =  True
+#do_y =  True
+#do_z =  True
+do_t =  True
+#do_theta =  True
+#do_phi =  True
+#do_cscd_energy =  True
+#do_trck_energy =  True
+#do_xz = True
+#do_thetaphi = True
+#do_thetaz = True
+#do_minimize = True
+
+if do_minimize:
+    outfile_name = name+'.csv'
+    if os.path.isfile(outfile_name):
+        print 'File %s exists'%outfile_name
+        sys.exit()
+    with open(outfile_name, 'w') as outfile:
+        outfile.write('#event, t_true, x_true, y_true, z_true, theta_true, phi_true, trck_energy_true, cscd_energy_true, llh_true, \
 t_retro, x_retro, y_retro, z_retro, theta_retro, phi_retro, llh_retro, \
 t_mn, x_mn, y_mn, z_mn, theta_mn, phi_mn, llh_mn, \
 t_spe, x_spe, y_spe, z_spe, theta_spe, phi_spe, llh_spe\n')
@@ -275,43 +317,15 @@ for idx in xrange(args.index, len(neutrinos)):
     print 'theta, phi = (%.2f, %.2f)'%(theta_true, phi_true)
     print 'E_cscd, E_trck (GeV) = %.2f, %.2f'%(cscd_energy_true, trck_energy_true)
     print 'n hits = %i'%len(t)
+    print 't hits: .',t
 
-    # some factors by pure choice
-    cscd_e_scale=cscd_e_scale = 1./20.
-    trck_e_scale=trck_e_scale = 5./10
-
-    do_true = False
-    do_x =  False
-    do_y =  False
-    do_z =  False
-    do_t =  False
-    do_theta =  False
-    do_phi =  False
-    do_cscd_energy =  False
-    do_trck_energy =  False
-    do_xz = False
-    do_thetaphi = False
-    do_thetaz = False
-    do_minimize = False
-    #do_true = True
-    #do_x =  True
-    #do_y =  True
-    #do_z =  True
-    #do_t =  True
-    #do_theta =  True
-    #do_phi =  True
-    #do_cscd_energy =  True
-    #do_trck_energy =  True
-    #do_xz = True
-    #do_thetaphi = True
-    #do_thetaz = True
-    do_minimize = True
+    # some factors by pure choice, since we don't have directionality yet...
+    cscd_e_scale=cscd_e_scale = 2.
+    trck_e_scale=trck_e_scale = 20.
 
     n_scan_points = 51
     #cmap = 'afmhot'
     cmap = 'YlGnBu_r'
-
-
 
     if do_minimize:
         kwargs = {}
@@ -332,8 +346,10 @@ for idx in xrange(args.index, len(neutrinos)):
         kwargs['om'] = om
 
         # [t, x, y, z, theta, phi]
-        lower_bounds = [t_v_true - 100, x_v_true - 50, y_v_true - 50, z_v_true - 50, max(0, theta_true - 0.5), max(0, phi_true - 1.)]
-        upper_bounds = [t_v_true + 100, x_v_true + 50, y_v_true + 50, z_v_true + 50, min(np.pi, theta_true + 0.5), min(2*np.pi, phi_true + 1.)]
+        #lower_bounds = [t_v_true - 100, x_v_true - 50, y_v_true - 50, z_v_true - 50, max(0, theta_true - 0.5), max(0, phi_true - 1.)]
+        #upper_bounds = [t_v_true + 100, x_v_true + 50, y_v_true + 50, z_v_true + 50, min(np.pi, theta_true + 0.5), min(2*np.pi, phi_true + 1.)]
+        lower_bounds = [t_v_true - 300, x_v_true - 100, y_v_true - 100, z_v_true - 100, 0., 0.]
+        upper_bounds = [t_v_true + 300, x_v_true + 100, y_v_true + 100, z_v_true + 100, np.pi, 2*np.pi]
         
         truth = [t_v_true, x_v_true, y_v_true, z_v_true, theta_true, phi_true]
         llh_truth = get_6d_llh(truth, **kwargs)
@@ -437,7 +453,7 @@ for idx in xrange(args.index, len(neutrinos)):
 
     if do_t:
         # scan t pos
-        t_vs = np.linspace(t_v_true - 200, t_v_true + 200, n_scan_points)
+        t_vs = np.linspace(t_v_true - 2000, t_v_true + 200, n_scan_points)
         llhs = []
         noises = []
         for t_v in t_vs:
@@ -451,7 +467,7 @@ for idx in xrange(args.index, len(neutrinos)):
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(t_vs, llhs)
-        ax.plot(t_vs, noises)
+        #ax.plot(t_vs, noises)
         ax.set_ylabel('llh')
         ax.set_xlabel('Vertex t (ns)')
         #truth
