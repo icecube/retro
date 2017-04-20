@@ -13,10 +13,16 @@ def Cherenkov_dN_dXdwlen(wlen, beta=1.):
 
 dom_acceptance = GetIceCubeDOMAcceptance()
 acceptance = []
+cherenkov = []
 wavelengths = np.arange(265, 680, 5)
 for wlen in wavelengths:
     acceptance.append(dom_acceptance.GetValue(wlen*I3Units.nanometer) * Cherenkov_dN_dXdwlen(wlen))
+    cherenkov.append(Cherenkov_dN_dXdwlen(wlen))
 integral = scipy.integrate.trapz(y=acceptance, x=wavelengths)
+integral_cherenkov = scipy.integrate.trapz(y=cherenkov, x=wavelengths)
 acceptance /= integral
 for x,y in zip(wavelengths, acceptance):
     print x,y
+print 'integral = ',integral
+print 'cherenkov integral = ',integral_cherenkov
+print 'fraction (accept./cherenk.) = ',integral/integral_cherenkov
