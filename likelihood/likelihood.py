@@ -3,6 +3,7 @@ import pyfits
 import h5py
 import sys, os
 from scipy.special import gammaln
+from scipy.stats import norm
 from argparse import ArgumentParser
 from hypothesis.hypo_fast import hypo, PowerAxis
 from particles import particle, particle_array
@@ -11,13 +12,20 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 import numba
 from pyswarm import pso
-#from line_profiler import profile
 
+'''
+This module is loading up retor tables into RAM first, and then tales icecube hdf5 files with events (hits series) inthem as inputs and calculates lilkelihoods
+These likelihoods can be single points or 1d or 2d scans at the moment.
+
+'''
+
+# cmd line arguments
 parser = ArgumentParser(description='''make 2d event pictures''')
 parser.add_argument('-f', '--file', metavar='H5_FILE', type=str, help='input HDF5 file',
                     default='/fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5')
 parser.add_argument('-i', '--index', default=0, type=int, help='index offset for event to start with')
 args = parser.parse_args()
+
 
 # --- load tables ---
 # tables are not binned in phi, but we will do so for the hypo, therefore need to apply norm
@@ -25,41 +33,62 @@ n_phi_bins = 20.
 norm = 1./n_phi_bins
 # correct for DOM wavelength acceptance, given cherenkov spectrum (source photons)
 # see tables/wavelegth.py
-norm *= 0.0544243061857
-# add in dom efficiencies (?)
+#norm *= 0.0544243061857
+# compensate for costheta bins (40) and wavelength accepet.
+#norm = 0.0544243061857 * 40.
+# add in quantum efficiencies (?)
 dom_eff_ic = 0.25
 dom_eff_dc = 0.35
 
-# load photon tables (r, cz, t) -> (-t, r, cz)
-# and also flip coszen binning!
-IC = {}
-DC = {}
+# define phi bin edges, as these are ignored in the tables (symmetry)
+phi_bin_edges = np.linspace(0, 2*np.pi, n_phi_bins+1)
+
+# dictionarries with DOM depth number as key, separately for IceCube (IC) and DeepCore (DC)
+IC_n_phot = {}
+IC_p_theta = {}
+IC_p_phi = {}
+IC_p_length = {}
+DC_n_phot = {}
+DC_p_theta = {}
+DC_p_phi = {}
+DC_p_length = {}
+# read in the actual tables
 for dom in range(60):
-    if os.path.isfile('tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_smooth_2.fits'%dom):
-        table = pyfits.open('tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_smooth_2.fits'%dom)
+    # IC tables
+    fname = 'tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_angles.fits'%dom
+    if os.path.isfile(fname):
+        table = pyfits.open(fname)
+        IC_n_phot[dom] = table[0].data * (norm * dom_eff_ic)
+        IC_p_theta[dom] = table[1].data
+        IC_p_phi[dom] = table[2].data
+        IC_p_length[dom] = table[3].data
     else:
-        print 'fallback to small table'
-        table = pyfits.open('tables/tables/summed/retro_nevts1000_IC_DOM%i_r_cz_t_smooth_2.fits'%dom)
-    IC[dom] = np.flipud(np.rollaxis(np.fliplr(table[0].data), 2, 0)) * (norm * dom_eff_ic)
-    if os.path.isfile('tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom):
-        table = pyfits.open('tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom)
+        print'No table for IC DOM %i'%dom
+    if dom == 0:
+        # first dom used to get the bin edges:
+        t_bin_edges = table[4].data
+        r_bin_edges = table[5].data
+        theta_bin_edges = table[6].data
     else:
-        print 'fallback to small table'
-        table = pyfits.open('tables/tables/summed/retro_nevts1000_DC_DOM%i_r_cz_t_smooth_2.fits'%dom)
-    DC[dom] = np.flipud(np.rollaxis(np.fliplr(table[0].data), 2, 0)) * (norm * dom_eff_dc)
+        assert np.array_equal(t_bin_edges, table[4].data)
+        assert np.array_equal(r_bin_edges, table[5].data)
+        assert np.array_equal(theta_bin_edges, table[6].data)
+    # DC tables
+    fname = 'tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_angles.fits'%dom
+    if os.path.isfile(fname):
+        table = pyfits.open(fname)
+        DC_n_phot[dom] = table[0].data * (norm * dom_eff_dc)
+        DC_p_theta[dom] = table[1].data
+        DC_p_phi[dom] = table[2].data
+        DC_p_length[dom] = table[3].data
+        assert np.array_equal(t_bin_edges, table[4].data)
+        assert np.array_equal(r_bin_edges, table[5].data)
+        assert np.array_equal(theta_bin_edges, table[6].data)
+    else:
+        print'No table for DC DOM %i'%dom
 
-# need to change the tables into expecte n-photons:
-
-#for key, val in IC.items():
-#    print 'IC DOM %i, sum = %.2f'%(key, val.sum())
-#for key, val in DC.items():
-#    print 'DC DOM %i, sum = %.2f'%(key, val.sum())
-
-# construct binning: same as tables (ToDo: should assert that)
-t_bin_edges = np.linspace(-3e3, 0, 301)
-r_bin_edges = PowerAxis(0, 400, 200, 2)
-theta_bin_edges = np.arccos(np.linspace(-1, 1, 41))[::-1]
-phi_bin_edges = np.linspace(0, 2*np.pi, n_phi_bins)
+# ToDo...not very nice to invert the time direction here
+t_bin_edges = - t_bin_edges[::-1]
 
 
 
@@ -157,59 +186,88 @@ def get_llh(hypo, t, x, y, z, q, string, om):
         #print 'getting matrix for hit %i'%hit
         # t, r ,cz, phi 
         #print 'hit at %.2f ns at (%.2f, %.2f, %.2f)'%(t[hit], x[hit], y[hit], z[hit])
-        z_matrix = hypo.get_z_matrix(t[hit], x[hit], y[hit], z[hit])
+
+        # get the photon expectations of the hypothesis in the DOM-hit coordinates
+        n_phot, p_theta, p_phi, p_length = hypo.get_matrices(t[hit], x[hit], y[hit], z[hit])
+        # and also get the retro table for that hit
         if string[hit] < 79:
-            gamma_map = IC[om[hit] - 1]
+            # these are ordinary icecube strings
+            n_phot_map = IC_n_phot[om[hit] - 1]
+            p_theta_map = IC_p_theta[om[hit] - 1]
+            p_phi_map = IC_p_phi[om[hit] - 1]
+            p_length_map = IC_p_length[om[hit] - 1]
         else:
-            gamma_map = DC[om[hit] - 1]
+            # these are deepocre strings
+            n_phot_map = DC_n_phot[om[hit] - 1]
+            p_theta_map = DC_p_theta[om[hit] - 1]
+            p_phi_map = DC_p_phi[om[hit] - 1]
+            p_length_map = DC_p_length[om[hit] - 1]
+
         # get max llh between z_matrix and gamma_map
         # noise probability?
-        #l_noise = 0.0000025
-        l_noise = 0.0000025
-        #llh = -(q[hit]*np.log(l_noise) - l_noise  - gammaln(q[hit]+1.))
-        #chi2_noise = np.square(q[hit] - l_noise)
-        #/l_noise
-        #print 'noise llh = ', llh
-        #chi2 = 10.
-        llhs = []
-        #expected_q = 0.
-        #expected_q += l_noise
-        for element in z_matrix:
+        q_noise = 0.00000025
+        expected_q = 0.
+        for element in n_phot:
+            # get hypo
             idx, hypo_count = element
-            map_count = gamma_map[idx[0:3]]
+            # these two agles need to be inverted, because we're backpropagating but want to match to forward propagating photons
+            hypo_theta = np.pi - p_theta[idx]
+            hypo_phi = np.pi - p_phi[idx]
+            hypo_legth = p_length[idx]
+            # get map
+            map_count = n_phot_map[idx[0:3]]
+            map_theta = p_theta_map[idx[0:3]]
+            map_phi = p_phi_map[idx[0:3]]
+            map_length = p_length_map[idx[0:3]]
+
+            # assume now source is totally directed at 0.73 (cherenkov angle)
+
+            # accept this fraction as isotropic light
+            dir_fraction = map_length**2
+            print 'map length = ',dir_fraction
+            iso_fraction = (1. - dir_fraction)
+
+            # whats the cos(psi) between track direction and map?
+            # accept this fraction of directional light
+            # this is wrong i think...
+	    #proj_dir = np.arccos((np.cos(hypo_theta)*np.cos(map_theta) + np.sin(hypo_theta)*np.sin(map_theta)*np.cos(hypo_phi - map_phi)))
+	    proj_dir = (np.cos(hypo_theta)*np.cos(map_theta) + np.sin(hypo_theta)*np.sin(map_theta)*np.cos(hypo_phi - map_phi))
+            #print proj_dir
+            # how close to 0.754 is it?
+            # get a weight from a gaussian
+            delta = -proj_dir - 0.754
+            accept_dir = np.exp(- delta**2 / 0.1) * dir_fraction
+            accept_iso = iso_fraction
+
+            # acceptance directed light
+            total_q = hypo_count * map_count
+            directional_q = hypo_legth * total_q 
+            isotropic_q = (1. - hypo_legth) * total_q
+
+            # factor betwen isotropic and direction light
+            #f_iso_dir = 10.
+
+            #expected_q += directional_q * (accept_iso/f_iso_dir + accept_dir) + isotropic_q * (accept_iso + accept_dir/f_iso_dir)
+            #expected_q += directional_q * accept_dir + isotropic_q * accept_iso
+            expected_q += total_q * accept_dir
+
+            #print 'total q ',total_q
+            #print 'directional q = ,', directional_q
             #print 'hypo count: ', hypo_count
             #print 'map count: ',map_count
-            #expected_q += hypo_count * map_count
-            expected_q = hypo_count * map_count + l_noise
-            llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
-            llhs.append(llh)
-            #new_llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
-            #print 'new_llh ',new_llh
-        expected_q = l_noise
-        llhs.append(-(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.)))
-        #if l_noise > expected_q:
-        #    n_noise += 1
-        #expected_q = max(l_noise, expected_q)
-        #llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
-        tot_llh += min(llhs)
-        #llhs.append(llh)
-        #print 'expected q = %.2f'%expected_q
-        #print 'observed q = %.2f'%q[hit]
+            #print 'accept iso = ', accept_iso
+            #print 'accept dir = ', accept_dir
+
+        #print 'expected q = %.4f'%expected_q
+        #print 'observed q = %.4f'%q[hit]
         #print ''
-        #chi2_hit = np.square(expected_q - q[hit])
-        #llhs.append(chi2_hit)
-        #/expected_q
-        #chi2 = min(chi2_noise, chi2_hit)
-        #else:
-        #chi2 = chi2_hit
-        #llh += chi2
-    #print llhs
-    # drop shittiest ones:
-    #n_drop = int(np.floor(0.1 * len(t)))
-    #print 'removing ',n_drop
-    #for i in range(n_drop):
-    #    llhs.remove(max(llhs))
-    #return sum(llhs), n_noise
+
+        if q_noise > expected_q:
+            n_noise += 1
+        expected_q = max(q_noise, expected_q)
+        llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
+        #print llh
+        tot_llh += llh
     return tot_llh, n_noise
 
 def get_6d_llh(params_6d, trck_energy, cscd_energy, trck_e_scale, cscd_e_scale, t, x, y, z, q, string, om, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
@@ -223,6 +281,8 @@ def get_6d_llh(params_6d, trck_energy, cscd_energy, trck_e_scale, cscd_e_scale, 
     #print 'llh=%.2f at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple([llh] + [p for p in params_6d])
     return llh
 
+
+# a super quirky way to define what to run
 do_true = False
 do_x =  False
 do_y =  False
@@ -320,10 +380,10 @@ for idx in xrange(args.index, len(neutrinos)):
     print 't hits: .',t
 
     # some factors by pure choice, since we don't have directionality yet...
-    cscd_e_scale=cscd_e_scale = 2.
-    trck_e_scale=trck_e_scale = 20.
+    cscd_e_scale=cscd_e_scale = 10. #2.
+    trck_e_scale=trck_e_scale = 10. #20.
 
-    n_scan_points = 51
+    n_scan_points = 21
     #cmap = 'afmhot'
     cmap = 'YlGnBu_r'
 
@@ -453,7 +513,7 @@ for idx in xrange(args.index, len(neutrinos)):
 
     if do_t:
         # scan t pos
-        t_vs = np.linspace(t_v_true - 2000, t_v_true + 200, n_scan_points)
+        t_vs = np.linspace(t_v_true - 200, t_v_true + 200, n_scan_points)
         llhs = []
         noises = []
         for t_v in t_vs:
