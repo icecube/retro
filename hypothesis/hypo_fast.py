@@ -225,6 +225,11 @@ class hypo(object):
         self.theta_bin_edges = theta_bin_edges
         self.phi_bin_edges = phi_bin_edges
 
+        self.t_bin_centers = 0.5 * (t_bin_edges[:-1] + t_bin_edges[1:])
+        self.r_bin_centers = 0.5 * (r_bin_edges[:-1] + r_bin_edges[1:])
+        self.theta_bin_centers = 0.5 * (theta_bin_edges[:-1] + theta_bin_edges[1:])
+        self.phi_bin_centers = 0.5 * (phi_bin_edges[:-1] + phi_bin_edges[1:])
+
     # coord. transforms
     @staticmethod
     def cr(x, y, z):
@@ -349,12 +354,19 @@ class hypo(object):
         #print 'corr r took %.2f'%((end_t-start_t)*1000)
         return np.array(intervals)
 
-    def get_z_matrix(self, Dt=0, Dx=0, Dy=0, Dz=0):
-        ''' calculate the z-matrix for a given DOM hit:
+    def get_matrices(self, Dt=0, Dx=0, Dy=0, Dz=0):
+        ''' calculate the matrices for a given DOM hit:
             i.e. dom 3d position + hit time
-            
+
             Dt : DOM hit time (ns)
             Dx, Dy, Dz : DOM position (m)
+
+            matrix in t, r, theta, phi
+            n_photons = number of photons
+            p_theta = source direction in theta
+            p_phi = delta phi direction of source
+            p_length = correlation of photons
+            
             '''
 
         # set the origin of the spherical coords. to the DOM hit pos.
@@ -373,7 +385,10 @@ class hypo(object):
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
         # the big matrix z
-        z = sparse((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
+        n_photons = sparse((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
+        p_theta = sparse((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
+        p_phi = sparse((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
+        p_length = sparse((len(self.t_bin_edges) - 1, len(self.r_bin_edges) - 1, len(self.theta_bin_edges) - 1, len(self.phi_bin_edges) - 1))
 
         start_t = time.time()
         t_inner_loop = 0
@@ -455,7 +470,7 @@ class hypo(object):
                 #print 'r- ',  [inter for inter in r_inter_neg if inter[0] > -1]
                 
                 start_t2 = time.time()
-                z = inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos, self.photons_per_meter)
+                n_photons = inner_loop(n_photons, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r_inter_pos, self.photons_per_meter)
                 end_t2 = time.time()
                 t_inner_loop += end_t2 - start_t2
 
@@ -465,6 +480,26 @@ class hypo(object):
         #print 'corr loop took %.1f ms'%(corr_loop*1000)
         #print 'inner loop took %.1f ms'%(t_inner_loop*1000)
         #print 'outer loop took %.1f ms'%((end_t - start_t)*1000)
+
+
+
+        # add angles:
+        for element in n_photons:
+            idx, _ = element
+            _, r_idx, theta_idx, phi_idx = idx
+            theta = self.track.theta
+            phi = self.phi_bin_centers[phi_idx]
+            #delta_phi = np.abs(self.track.phi - phi)%(2.*np.pi)
+            # calculate same way as in photon propapgation (CLsim)
+            delta = np.abs(phi - self.track.phi)
+            delta_phi = delta if delta <= np.pi else 2*np.pi - delta
+            #delta_phi = np.pi - np.abs((np.abs(phi - self.track.phi)  - np.pi))
+            p_theta[idx] = theta
+            p_phi[idx] = delta_phi
+            # set corr. length for tracks to 1.0, i.e. totally directed
+            p_length[idx] = 1.0
+
+
 
         # add cascade as point:
         # get bin at self.track.t0, ...
@@ -481,9 +516,11 @@ class hypo(object):
         theta_bin = self.get_bin(theta0, self.theta_bin_edges)
         phi_bin = self.get_bin(phi0, self.phi_bin_edges)
         if not None in (t_bin, r_bin, theta_bin, phi_bin):
-            z[t_bin, r_bin, theta_bin, phi_bin] += self.cscd_photons
+            #weighted average of corr length from track and cascde, while assume 0.5 for cascade right now
+            p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average([p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5], weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cscd_photons])
+            n_photons[t_bin, r_bin, theta_bin, phi_bin] += self.cscd_photons
 
-        return z
+        return n_photons, p_theta, p_phi, p_length
 
     @staticmethod
     def get_bin(val, bin_edges):
@@ -600,7 +637,7 @@ if __name__ == '__main__':
     ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
     
     t0 = time.time()
-    hits = my_hypo.get_z_matrix(0., -20., -20., -20.)
+    hits, n_t, n_p, n_l = my_hypo.get_matrices(0., -20., -20., -20.)
     print 'took %.2f ms to calculate z-matrix'%((time.time() - t0)*1000)
     z = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
     for hit in hits:
