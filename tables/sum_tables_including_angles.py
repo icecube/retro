@@ -26,7 +26,7 @@ norm = nphotons * (2.99792458 / nphase)
 norm /= 0.338019664877
 
 r_bin_edges = table[1].data
-theta_bin_edges = table[2].data
+theta_bin_edges = np.arccos(table[2].data)
 t_bin_edges = table[3].data
 # photon arrival directions
 p_theta_bin_edges = table[4].data
@@ -38,6 +38,7 @@ n_photons = data.sum(axis=(3,4))
 n_photons /= norm
 
 average_thetas = np.zeros_like(n_photons)
+average_phis = np.zeros_like(n_photons)
 lengths = np.zeros_like(n_photons)
 
 for i in xrange(n_photons.shape[0]):
@@ -46,38 +47,46 @@ for i in xrange(n_photons.shape[0]):
             weights = data[i][j][k]
             if weights.sum() == 0:
                 # if no photons, just set the average direction to the theate of the bin center
-                average_thetas[i][j][k] = 0.5 * (theta_bin_edges[j] + theta_bin_edges[j + 1])
+                average_theta = 0.5 * (theta_bin_edges[j] + theta_bin_edges[j + 1])
                 # and lengths to 0
-                lengths[i][j][k] = 0.
+                length = 0.
+                average_phi = 0.
             else:
-                # proejct phi values
+                # average theta
                 weights_theta = np.sum(weights, axis=1)
-                average_thetas[i][j][k] = np.average(p_theta_centers, weights=weights_theta)
+                average_theta = np.average(p_theta_centers, weights=weights_theta)
 
-                # delta angles to average for all bins
-                delta_thetas = p_theta_centers - average_thetas[i][j][k]
-                # project onto average direction
-                projected = np.outer(np.cos(delta_thetas), np.cos(p_delta_phi_centers))
-                lengths[i][j][k] = np.average(projected, weights=weights)
+                # average delta phi
+                projected_n_photons = weights * np.sin(p_theta_centers)[:, np.newaxis]
+                weights_phi = np.sum(projected_n_photons, axis=0)
+                average_phi = np.average(p_delta_phi_centers, weights=weights_phi)
+
+                # length of vector (using projections from all vectors onto average vector
+                # cos(angle) between average vector and all angles
+                coscos = np.cos(p_theta_centers)*np.cos(average_theta)
+                sinsin = np.sin(p_theta_centers)*np.sin(average_theta)
+                cosphi = np.cos(p_delta_phi_centers - average_phi)
+                cospsi = coscos[:, np.newaxis] + np.outer(sinsin, cosphi)
+                length = np.average(cospsi, weights=weights)
+
+            average_thetas[i][j][k] = average_theta
+            average_phis[i][j][k] = average_phi
+            lengths[i][j][k] = length
 
 # invert tables (r, cz, t) -> (-t, r, cz)
 # and also flip coszen binning!
 n_photons = np.flipud(np.rollaxis(np.fliplr(n_photons), 2, 0))
 average_thetas = np.flipud(np.rollaxis(np.fliplr(average_thetas), 2, 0))
+average_phis = np.flipud(np.rollaxis(np.fliplr(average_phis), 2, 0))
 lengths = np.flipud(np.rollaxis(np.fliplr(lengths), 2, 0))
 
 a = pyfits.PrimaryHDU(n_photons)
 b = pyfits.ImageHDU(average_thetas)
-c = pyfits.ImageHDU(lengths)
-d = pyfits.ImageHDU(t_bin_edges)
-e = pyfits.ImageHDU(r_bin_edges)
-f = pyfits.ImageHDU(theta_bin_edges[::-1])
+c = pyfits.ImageHDU(average_phis)
+d = pyfits.ImageHDU(lengths)
+e = pyfits.ImageHDU(t_bin_edges)
+f = pyfits.ImageHDU(r_bin_edges)
+g = pyfits.ImageHDU(theta_bin_edges[::-1])
 
-hdulist = pyfits.HDUList([a, b, c, d, e, f])
+hdulist = pyfits.HDUList([a, b, c, d, e, f, g])
 hdulist.writeto(new_fname)
-#tbhdu = pyfits.BinTableHDU.from_columns([
-#    pyfits.Column(name='n_photons', format='E', array=n_photons),
-#    pyfits.Column(name='average_thetas', format='E', array=average_thetas),
-#    pyfits.Column(name='lengths', format='E', array=lengths)])
-#
-#tbhdu.writeto(new_fname)
