@@ -43,8 +43,13 @@ if __name__ == '__main__':
 
     # kevin array
     t0 = time.time()
-    z_kevin = get_track_lengths(10e-9, 0., 4., 0., 0.57, 5.3, 113.636) * 2451.4544553
+    z_kevin_sparse = get_track_lengths(10e-9, 0., 4., 0., 0.57, 5.3, 113.636)
     print 'took%.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
+    z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
+    for hit in z_kevin_sparse:
+        #print hit
+        idx, count = hit
+        z_kevin[idx] = count * 2451.4544553
     print 'total number of photons in kevin matrix = %i (%.2f %%)'%(z_kevin.sum(), z_kevin.sum()/my_hypo.tot_photons*100.)
 
     # plot the track as a line
@@ -66,30 +71,32 @@ if __name__ == '__main__':
         z[idx] = count
     print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
 
+    print 'total_residual = ',(z - z_kevin).sum()/z.sum()
+
     #cmap = 'gnuplot2_r'
     cmap = mpl.cm.get_cmap('gnuplot_r')
     cmap.set_under('w')
     cmap.set_bad('w')
 
     tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
-    zz = z.sum(axis=(2,3))# - z.sum(axis=(2,3))
+    zz = z_kevin.sum(axis=(2,3)) - z.sum(axis=(2,3))
     mg = ax2.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
     ax2.set_xlabel('t')
     ax2.set_ylabel('r')
 
     tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
-    zz = z.sum(axis=(1,3))# - z.sum(axis=(1,3))
+    zz = z_kevin.sum(axis=(1,3)) - z.sum(axis=(1,3))
     mg = ax3.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
     ax3.set_xlabel('t')
     ax3.set_ylabel(r'$\theta$')
     ax3.set_ylim((0,np.pi))
 
     tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
-    zz = z.sum(axis=(1,2))# - z.sum(axis=(1,2))
+    zz = z_kevin.sum(axis=(1,2)) - z.sum(axis=(1,2))
     mg = ax4.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
     ax4.set_xlabel('t')
     ax4.set_ylabel(r'$\phi$')
     ax4.set_ylim((0,2*np.pi))
 
     plt.show()
-    plt.savefig('hypo_philip2.png',dpi=300)
+    plt.savefig('hypo_diff2.png',dpi=300)
