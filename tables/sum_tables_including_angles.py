@@ -2,6 +2,19 @@ import pyfits
 import numpy as np
 import sys, os
 
+
+'''
+This script takes the raw 5-d tables straight out of CLsim and converts them to 3-d retro tables
+
+* The time and zenith angles are inverted
+* Correct normalization for survival probabilities are applied
+* Undr- and Overflow bins are cut off
+* the photon angles (p_theta and p_delta_phi) are used to calculate an everage vector of all photons with:
+    - an average angle theta
+    - an average delta phi angle
+    - a length (which quantifies how direct (1 = fully directional, 0 = isotroic) the light is
+'''
+
 fname = sys.argv[1]
 if not os.path.isfile(fname):
     print 'table %s does not exist'%fname
@@ -31,7 +44,8 @@ t_bin_edges = table[3].data
 # photon arrival directions
 p_theta_bin_edges = table[4].data
 p_delta_phi_bin_edges = table[5].data
-p_theta_centers = 0.5 * (p_theta_bin_edges[1:] + p_theta_bin_edges[:-1])
+p_costheta_centers = 0.5 * (p_theta_bin_edges[1:] + p_theta_bin_edges[:-1])
+p_theta_centers = np.arccos(p_costheta_centers) 
 p_delta_phi_centers = 0.5 * (p_delta_phi_bin_edges[1:] + p_delta_phi_bin_edges[:-1])
 
 n_photons = data.sum(axis=(3,4))
@@ -44,7 +58,8 @@ lengths = np.zeros_like(n_photons)
 for i in xrange(n_photons.shape[0]):
     for j in xrange(n_photons.shape[1]):
         for k in xrange(n_photons.shape[2]):
-            weights = data[i][j][k]
+            # flip coszen?
+            weights = data[i][j][k][::-1][:]
             if weights.sum() == 0:
                 # if no photons, just set the average direction to the theate of the bin center
                 average_theta = 0.5 * (theta_bin_edges[j] + theta_bin_edges[j + 1])
@@ -65,9 +80,13 @@ for i in xrange(n_photons.shape[0]):
                 # cos(angle) between average vector and all angles
                 coscos = np.cos(p_theta_centers)*np.cos(average_theta)
                 sinsin = np.sin(p_theta_centers)*np.sin(average_theta)
+                #cosphi = np.cos((p_delta_phi_centers - average_phi)%np.pi)
                 cosphi = np.cos(p_delta_phi_centers - average_phi)
+                #other half of sphere
+                #cosphi_second = np.cos(-(p_delta_phi_centers - average_phi)%np.pi)
                 cospsi = coscos[:, np.newaxis] + np.outer(sinsin, cosphi)
-                length = np.average(cospsi, weights=weights)
+                #cospsi_second = coscos[:, np.newaxis] + np.outer(sinsin, cosphi_second)
+                length = max(0,np.average(cospsi, weights=weights) - 0.5) * 2.
 
             average_thetas[i][j][k] = average_theta
             average_phis[i][j][k] = average_phi

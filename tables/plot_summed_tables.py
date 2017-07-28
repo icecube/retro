@@ -8,6 +8,13 @@ import sys
 
 import matplotlib.animation as animation
 
+
+'''
+make plots from the 3-d retro tables
+The output will be 2-d maps plus the time dimension as the video time
+
+'''
+
 Writer = animation.writers['ffmpeg']
 writer = Writer(fps=15, bitrate=20000)
 
@@ -49,27 +56,36 @@ a_lengths = lengths[-100].T
 
 #sys.exit()
 # plot movie
-plt.clf()
-fig = plt.figure(figsize=(10,10))
-ax1 = fig.add_subplot(111)
-ims = []
-cmap='Accent'
+#cmap='Accent'
+#cmap='viridis'
+#cmap='nipy_spectral'
 
-data = lengths
-#r_cos_t_data = data.sum(axis=(3,4))
-#vmin = np.log(data[data != 0].min())
-#vmax = np.log(data.max())
-vmin = data.min()
-vmax = data.max()
-for tidx in range(data.shape[0])[::-1]:
-    #im = plot_2d(data[tidx], [r_bin_edges, theta_bin_edges], ['r','theta'], ax1, 1, 0, log=True, vmax=vmax, vmin=vmin, cb=False)
-    xx, yy = np.meshgrid(r_bin_edges, theta_bin_edges)
-    im = ax1.pcolormesh(xx, yy, data[tidx].T, cmap=cmap, vmax=vmax, vmin=vmin)
-    ax1.set_xlim([r_bin_edges[0],r_bin_edges[-1]])
-    ax1.set_ylim([theta_bin_edges[0],theta_bin_edges[-1]])
-    ax1.set_xlabel('r')
-    ax1.set_ylabel('theta')
-    ims.append([im])
-    
-im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
-im_ani.save(sys.argv[1].split('.')[0]+'.mp4', writer=writer)
+
+datas = [n_photons, average_thetas, average_phis, lengths]
+names = ['survival', 'theta', 'delta_phi', 'corr_length']
+cmaps = ['BuPu', 'nipy_spectral', 'nipy_spectral', 'afmhot_r']
+
+for data, name, cmap in zip(datas, names, cmaps):
+    plt.clf()
+    fig = plt.figure(figsize=(10,10))
+    ax1 = fig.add_subplot(111)
+    ims = []
+    #data = lengths
+    #data = average_thetas
+    #r_cos_t_data = data.sum(axis=(3,4))
+    #vmin = np.log(data[data != 0].min())
+    #vmax = np.log(data.max())
+    vmin = data.min()
+    vmax = data.max()
+    for tidx in range(data.shape[0])[::-1]:
+        #im = plot_2d(data[tidx], [r_bin_edges, theta_bin_edges], ['r','theta'], ax1, 1, 0, log=True, vmax=vmax, vmin=vmin, cb=False)
+        xx, yy = np.meshgrid(r_bin_edges, theta_bin_edges)
+        im = ax1.pcolormesh(xx, yy, data[tidx].T, cmap=cmap, vmax=vmax, vmin=vmin)
+        ax1.set_xlim([r_bin_edges[0],r_bin_edges[-1]])
+        ax1.set_ylim([theta_bin_edges[0],theta_bin_edges[-1]])
+        ax1.set_xlabel('r')
+        ax1.set_ylabel('theta')
+        ims.append([im])
+        
+    im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
+    im_ani.save(sys.argv[1].split('.')[0]+'_'+name+'.mp4', writer=writer)
