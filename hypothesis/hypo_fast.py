@@ -501,24 +501,24 @@ class hypo(object):
 
 
 
-        # add cascade as point:
-        # get bin at self.track.t0, ...
-        t0 = self.track.t0
-        x0 = self.track.x0
-        y0 = self.track.y0
-        z0 = self.track.z0
-        r0 = self.cr(x0, y0, z0)
-        theta0 = self.ctheta(x0, y0, z0)
-        phi0 = self.cphi(x0, y0, z0)
-        # find bins
-        t_bin = self.get_bin(t0, self.t_bin_edges)
-        r_bin = self.get_bin(r0, self.r_bin_edges)
-        theta_bin = self.get_bin(theta0, self.theta_bin_edges)
-        phi_bin = self.get_bin(phi0, self.phi_bin_edges)
-        if not None in (t_bin, r_bin, theta_bin, phi_bin):
-            #weighted average of corr length from track and cascde, while assume 0.5 for cascade right now
-            p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average([p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5], weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cscd_photons])
-            n_photons[t_bin, r_bin, theta_bin, phi_bin] += self.cscd_photons
+        ## add cascade as point:
+        ## get bin at self.track.t0, ...
+        #t0 = self.track.t0
+        #x0 = self.track.x0
+        #y0 = self.track.y0
+        #z0 = self.track.z0
+        #r0 = self.cr(x0, y0, z0)
+        #theta0 = self.ctheta(x0, y0, z0)
+        #phi0 = self.cphi(x0, y0, z0)
+        ## find bins
+        #t_bin = self.get_bin(t0, self.t_bin_edges)
+        #r_bin = self.get_bin(r0, self.r_bin_edges)
+        #theta_bin = self.get_bin(theta0, self.theta_bin_edges)
+        #phi_bin = self.get_bin(phi0, self.phi_bin_edges)
+        #if not None in (t_bin, r_bin, theta_bin, phi_bin):
+        #    #weighted average of corr length from track and cascde, while assume 0.5 for cascade right now
+        #    p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average([p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5], weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cscd_photons])
+        #    n_photons[t_bin, r_bin, theta_bin, phi_bin] += self.cscd_photons
 
         return n_photons, p_theta, p_phi, p_length
 
@@ -590,86 +590,4 @@ def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg, r
                     z[k,j,m,i] += (length * photons_per_meter)
     return z
 
-if __name__ == '__main__':
 
-    # for plotting
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
-    import matplotlib.animation as animation
-    from mpl_toolkits.mplot3d import Axes3D
-    import time
-    # plot setup
-    fig = plt.figure(figsize=(10,10))
-    ax = fig.add_subplot(221,projection='3d')
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('z')
-    ax2 = fig.add_subplot(222)
-    ax3 = fig.add_subplot(223)
-    ax4 = fig.add_subplot(224)
-
-    plt_lim = 50
-
-    ax.set_xlim((-plt_lim,plt_lim))
-    ax.set_ylim((-plt_lim,plt_lim))
-    ax.set_zlim((-plt_lim,plt_lim))
-    ax.grid(True)
-
-
-    # same as CLsim
-    t_bin_edges = np.linspace(0, 500, 51)
-    r_bin_edges = PowerAxis(0, 200, 20, 2)
-    theta_bin_edges = np.arccos(np.linspace(-1, 1, 51))[::-1]
-    phi_bin_edges = np.linspace(0, 2*np.pi, 37)
-
-    my_hypo = hypo(10., 0., 4., 0., theta=0.57, phi=5.3, trck_energy=25., cscd_energy=10.)
-    my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-
-
-    # plot the track as a line
-    x_0, y_0, z_0 = my_hypo.track.point(my_hypo.track.t0)
-    #print 'track vertex', x_0, y_0, z_0
-    x_e, y_e, z_e  = my_hypo.track.point(my_hypo.track.t0 + my_hypo.track.dt)
-    ax.plot([x_0,x_e],[y_0,y_e],zs=[z_0,z_e])
-    ax.plot([-plt_lim,-plt_lim],[y_0,y_e],zs=[z_0,z_e],alpha=0.3,c='k')
-    ax.plot([x_0,x_e],[plt_lim,plt_lim],zs=[z_0,z_e],alpha=0.3,c='k')
-    ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
-    
-    t0 = time.time()
-    hits, n_t, n_p, n_l = my_hypo.get_matrices(0., -20., -20., -20.)
-    print 'took %.2f ms to calculate z-matrix'%((time.time() - t0)*1000)
-    z = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
-    for hit in hits:
-        #print hit
-        idx, count = hit
-        z[idx] = count
-    print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
-
-    #cmap = 'gnuplot2_r'
-    cmap = mpl.cm.get_cmap('gnuplot_r')
-    cmap.set_under('w')
-    cmap.set_bad('w')
-
-    tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
-    zz = z.sum(axis=(2,3))
-    mg = ax2.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
-    ax2.set_xlabel('t')
-    ax2.set_ylabel('r')
-
-    tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
-    zz = z.sum(axis=(1,3))
-    mg = ax3.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
-    ax3.set_xlabel('t')
-    ax3.set_ylabel(r'$\theta$')
-    ax3.set_ylim((0,np.pi))
-
-    tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
-    zz = z.sum(axis=(1,2))
-    mg = ax4.pcolormesh(tt, yy, zz.T, vmin=1e-7, cmap=cmap)
-    ax4.set_xlabel('t')
-    ax4.set_ylabel(r'$\phi$')
-    ax4.set_ylim((0,2*np.pi))
-
-    plt.show()
-    plt.savefig('hypo.png',dpi=300)
