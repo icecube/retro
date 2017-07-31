@@ -21,7 +21,9 @@ def get_bin_index(t, x, y, z):
     bin_index = (t_index, r_index, theta_index, phi_index)
     return bin_index
 
-def get_track_lengths(t, x, y, z, theta, phi, total_track_length):
+def get_track_lengths(t, x, y, z, theta, phi, track_energy, cscd_energy):
+
+    # function setup
     n_t_bins = 50
     n_r_bins = 20
     n_theta_bins = 50
@@ -29,8 +31,11 @@ def get_track_lengths(t, x, y, z, theta, phi, total_track_length):
     time_increment = 1e-9
     speed_of_light = 2.99e8
     track_segment = time_increment * speed_of_light
+    total_track_length = track_energy * 15. / 3.3
     cumulative_track_length = 0
     radius = (x ** 2 + y ** 2 + z ** 2)**0.5
+    photons_per_meter = 2451.4544553
+    photons_per_gev_cscd = 12805.3383311
     
     #t_bin_edges = np.linspace(0, 500e-9, n_t_bins+1)
     #r_bin_edges = PowerAxis(0, 200, n_r_bins, 2)
@@ -39,8 +44,14 @@ def get_track_lengths(t, x, y, z, theta, phi, total_track_length):
     #z_kevin = np.zeros((n_t_bins, n_r_bins, n_theta_bins, n_phi_bins))
     z_kevin = sparse((n_t_bins, n_r_bins, n_theta_bins, n_phi_bins))
     
-    while cumulative_track_length < total_track_length and radius < 200 and t < 500e-9:
-        z_kevin[get_bin_index(t, x, y, z)] += track_segment
+    # add cscd photons
+    if radius < 200:
+        z_kevin[get_bin_index(t, x, y, z)] += cscd_energy * photons_per_gev_cscd
+
+    # traverse track and add track photons if within radius of the dom
+    while cumulative_track_length < total_track_length and t < 500e-9:
+        if radius < 200:
+            z_kevin[get_bin_index(t, x, y, z)] += track_segment * photons_per_meter
         cumulative_track_length += track_segment
         x = speed_of_light * np.sin(theta) * np.cos(phi) * time_increment + x
         y = speed_of_light * np.sin(theta) * np.sin(phi) * time_increment + y

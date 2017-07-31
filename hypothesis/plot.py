@@ -99,4 +99,4 @@ if __name__ == '__main__':
     ax4.set_ylim((0,2*np.pi))
 
     plt.show()
-    plt.savefig('hypo_diff2.png',dpi=300)
+    plt.savefig('hypo_diff3.png',dpi=300)
