@@ -23,12 +23,12 @@ class segment_hypo(object):
         cscd_energy : cascade energy (GeV)
         '''     
         #assign vertex
-        self.t = t_v
+        self.t = t_v * 1e-9
         self.x = x_v
         self.y = y_v
         self.z = z_v
-        self.theta_v = theta
-        self.phi_v = phi
+        self.theta_v = theta_v
+        self.phi_v = phi_v
         #calculate frequently used values
         self.radius = np.sqrt(self.x ** 2 + self.y ** 2 + self.z ** 2)
         self.radius_squared = self.radius ** 2
@@ -52,12 +52,14 @@ class segment_hypo(object):
     def set_binning(self, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_max, r_max):
         '''
         define binnings of spherical coordinates
+        t_max : max time (ns)
+        r_max : max radius (m)
         '''
         self.n_t_bins = n_t_bins
         self.n_r_bins = n_r_bins
         self.n_theta_bins = n_theta_bins
         self.n_phi_bins = n_phi_bins
-        self.t_max = t_max
+        self.t_max = t_max * 1e-9
         self.r_max = r_max
         self.r_scaling_factor = self.n_r_bins ** 2 / self.r_max
 
@@ -71,7 +73,7 @@ class segment_hypo(object):
         if self.radius == 0.:
             self.cos_theta = 1.
         else:
-            self.cos_theta = z / radius
+            self.cos_theta = self.z / self.radius
         self.theta_index = int(math.floor((self.cos_theta / -1. + 1.) * self.n_theta_bins / 2.))
         self.phi = np.arctan2(self.y, self.x)
         self.phi_index = int(math.floor(self.phi * 18 / np.pi))
@@ -84,9 +86,9 @@ class segment_hypo(object):
         self.cumulative_track_length = 0.
         
         # add cscd photons
-        if self.radius < r_max:
+        if self.radius < self.r_max:
             self.set_bin_index()
-            self.z_kevin[self.t_index, self.r_index, self.theta_index, self.phi_index] += cscd_energy * photons_per_gev_cscd
+            self.z_kevin[self.t_index, self.r_index, self.theta_index, self.phi_index] += self.cscd_photons
 
         # traverse track and add track photons if within radius of the dom
         while self.cumulative_track_length < self.trck_length and self.t < self.t_max:
@@ -95,7 +97,7 @@ class segment_hypo(object):
                 self.z_kevin[self.t_index, self.r_index, self.theta_index, self.phi_index] += self.segment_length * self.photons_per_meter
             self.cumulative_track_length += self.segment_length
             self.x += self.speed_of_light * self.sin_theta_v * self.cos_phi_v * self.time_increment
-            self.y += speed_of_light * self.sin_theta_v * self.sin_phi_v * self.time_increment
-            self.z += speed_of_light * self.cos_theta_v * self.time_increment
+            self.y += self.speed_of_light * self.sin_theta_v * self.sin_phi_v * self.time_increment
+            self.z += self.speed_of_light * self.cos_theta_v * self.time_increment
             self.t += self.time_increment
             self.radius_squared = self.x ** 2 + self.y ** 2 + self.z ** 2

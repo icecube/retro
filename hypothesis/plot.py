@@ -1,6 +1,5 @@
 from track_hypo import PowerAxis
-from track_hypo import get_bin_index
-from track_hypo import get_track_lengths
+from track_hypo import segment_hypo
 from hypo_fast import hypo
 import numpy as np
 import math
@@ -43,13 +42,16 @@ if __name__ == '__main__':
 
     # kevin array
     t0 = time.time()
-    z_kevin_sparse = get_track_lengths(10e-9, 0., 4., 0., 0.57, 5.3, 113.636)
+    kevin_hypo = segment_hypo(10., 0., 4., 0., 0.57, 5.3, 25., 0.)
+    kevin_hypo.set_binning(50., 20., 50., 36., 500., 200.)
+    kevin_hypo.create_photon_matrix()
+    z_kevin_sparse = kevin_hypo.z_kevin
     print 'took%.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
     z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
     for hit in z_kevin_sparse:
         #print hit
         idx, count = hit
-        z_kevin[idx] = count * 2451.4544553
+        z_kevin[idx] = count
     print 'total number of photons in kevin matrix = %i (%.2f %%)'%(z_kevin.sum(), z_kevin.sum()/my_hypo.tot_photons*100.)
 
     # plot the track as a line
@@ -99,4 +101,4 @@ if __name__ == '__main__':
     ax4.set_ylim((0,2*np.pi))
 
     plt.show()
-    plt.savefig('hypo_diff3.png',dpi=300)
+    plt.savefig('hypo_diff4.png',dpi=300)
