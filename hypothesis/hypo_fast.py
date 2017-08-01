@@ -501,24 +501,24 @@ class hypo(object):
 
 
 
-        ## add cascade as point:
-        ## get bin at self.track.t0, ...
-        #t0 = self.track.t0
-        #x0 = self.track.x0
-        #y0 = self.track.y0
-        #z0 = self.track.z0
-        #r0 = self.cr(x0, y0, z0)
-        #theta0 = self.ctheta(x0, y0, z0)
-        #phi0 = self.cphi(x0, y0, z0)
-        ## find bins
-        #t_bin = self.get_bin(t0, self.t_bin_edges)
-        #r_bin = self.get_bin(r0, self.r_bin_edges)
-        #theta_bin = self.get_bin(theta0, self.theta_bin_edges)
-        #phi_bin = self.get_bin(phi0, self.phi_bin_edges)
-        #if not None in (t_bin, r_bin, theta_bin, phi_bin):
-        #    #weighted average of corr length from track and cascde, while assume 0.5 for cascade right now
-        #    p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average([p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5], weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cscd_photons])
-        #    n_photons[t_bin, r_bin, theta_bin, phi_bin] += self.cscd_photons
+        # add cascade as point:
+        # get bin at self.track.t0, ...
+        t0 = self.track.t0
+        x0 = self.track.x0
+        y0 = self.track.y0
+        z0 = self.track.z0
+        r0 = self.cr(x0, y0, z0)
+        theta0 = self.ctheta(x0, y0, z0)
+        phi0 = self.cphi(x0, y0, z0)
+        # find bins
+        t_bin = self.get_bin(t0, self.t_bin_edges)
+        r_bin = self.get_bin(r0, self.r_bin_edges)
+        theta_bin = self.get_bin(theta0, self.theta_bin_edges)
+        phi_bin = self.get_bin(phi0, self.phi_bin_edges)
+        if not None in (t_bin, r_bin, theta_bin, phi_bin):
+            #weighted average of corr length from track and cascde, while assume 0.5 for cascade right now
+            p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average([p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5], weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cscd_photons])
+            n_photons[t_bin, r_bin, theta_bin, phi_bin] += self.cscd_photons
 
         return n_photons, p_theta, p_phi, p_length
 

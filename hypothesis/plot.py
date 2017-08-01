@@ -37,12 +37,12 @@ if __name__ == '__main__':
     theta_bin_edges = np.arccos(np.linspace(-1, 1, 51))[::-1]
     phi_bin_edges = np.linspace(0, 2*np.pi, 37)
 
-    my_hypo = hypo(10., 0., 4., 0., theta=0.57, phi=5.3, trck_energy=25., cscd_energy=0.)
+    my_hypo = hypo(10., 0., 4., 0., theta=0.57, phi=5.3, trck_energy=25., cscd_energy=10.)
     my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
 
     # kevin array
     t0 = time.time()
-    kevin_hypo = segment_hypo(10., 0., 4., 0., 0.57, 5.3, 25., 0.)
+    kevin_hypo = segment_hypo(10., 0., 4., 0., 0.57, 5.3, 25., 10.)
     kevin_hypo.set_binning(50., 20., 50., 36., 500., 200.)
     kevin_hypo.create_photon_matrix()
     z_kevin_sparse = kevin_hypo.z_kevin
