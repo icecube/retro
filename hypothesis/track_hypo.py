@@ -12,7 +12,7 @@ class segment_hypo(object):
     create hypo using individual segments and retrieve matrix that contains expected photons in each cell in spherical coordinate system with dom at origin.
     binnnings and location of the dom must be set
     '''
-    def __init__(self, t_v, x_v, y_v, z_v, theta, phi, trck_energy, cscd_energy, time_increment=1e-9):
+    def __init__(self, t_v, x_v, y_v, z_v, theta_v, phi_v, trck_energy, cscd_energy, time_increment=1e-9):
         '''
         provide vertex and track information
         t_v : time (ns)
@@ -27,10 +27,15 @@ class segment_hypo(object):
         self.x = x_v
         self.y = y_v
         self.z = z_v
-        self.theta = theta
-        self.phi = phi
+        self.theta_v = theta
+        self.phi_v = phi
+        #calculate frequently used values
         self.radius = np.sqrt(self.x ** 2 + self.y ** 2 + self.z ** 2)
         self.radius_squared = self.radius ** 2
+        self.sin_theta_v = np.sin(self.theta_v)
+        self.cos_theta_v = np.cos(self.theta_v)
+        self.sin_phi_v = np.sin(self.phi_v)
+        self.cos_phi_v = np.cos(self.phi_v)
         #convert track energy to length
         self.trck_length = 15. / 3.3 * trck_energy
         #precalculated (nphotons.py) to avoid icetray
@@ -84,13 +89,13 @@ class segment_hypo(object):
             self.z_kevin[self.t_index, self.r_index, self.theta_index, self.phi_index] += cscd_energy * photons_per_gev_cscd
 
         # traverse track and add track photons if within radius of the dom
-        while self.cumulative_track_length < self.trck_length and t < self.t_max:
+        while self.cumulative_track_length < self.trck_length and self.t < self.t_max:
             if self.radius_squared < self.r_max ** 2:
                 self.set_bin_index()
                 self.z_kevin[self.t_index, self.r_index, self.theta_index, self.phi_index] += self.segment_length * self.photons_per_meter
             self.cumulative_track_length += self.segment_length
-            self.x += self.speed_of_light * np.sin(self.theta) * np.cos(self.phi) * self.time_increment
-            self.y += speed_of_light * np.sin(self.theta) * np.sin(self.phi) * self.time_increment
-            self.z += speed_of_light * np.cos(self.theta) * self.time_increment
+            self.x += self.speed_of_light * self.sin_theta_v * self.cos_phi_v * self.time_increment
+            self.y += speed_of_light * self.sin_theta_v * self.sin_phi_v * self.time_increment
+            self.z += speed_of_light * self.cos_theta_v * self.time_increment
             self.t += self.time_increment
             self.radius_squared = self.x ** 2 + self.y ** 2 + self.z ** 2
