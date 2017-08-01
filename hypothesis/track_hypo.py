@@ -45,6 +45,7 @@ class segment_hypo(object):
         self.tot_photons = self.cscd_photons + self.trck_photons
         #declaring constants 
         self.time_increment = time_increment
+        self.scaled_time_increment = False
         self.speed_of_light = 2.99e8
         self.segment_length = self.time_increment * self.speed_of_light
 
@@ -95,9 +96,31 @@ class segment_hypo(object):
             if self.radius_squared < self.r_max ** 2:
                 self.set_bin_index()
                 self.z_kevin[self.t_index, self.r_index, self.theta_index, self.phi_index] += self.segment_length * self.photons_per_meter
+            if self.scaled_time_increment == True:
+                self.time_increment = self.radius * self.time_increment_scaling
+                self.segment_length = self.speed_of_light * self.time_increment
             self.cumulative_track_length += self.segment_length
             self.x += self.speed_of_light * self.sin_theta_v * self.cos_phi_v * self.time_increment
             self.y += self.speed_of_light * self.sin_theta_v * self.sin_phi_v * self.time_increment
             self.z += self.speed_of_light * self.cos_theta_v * self.time_increment
             self.t += self.time_increment
             self.radius_squared = self.x ** 2 + self.y ** 2 + self.z ** 2
+
+    def set_dom_location(self, t_dom=0., x_dom=0., y_dom=0., z_dom=0.):
+        '''
+        changes the track vertex to be relative to a dom at a given position with
+        t_dom : time (ns)
+        x_dom, y_dom, z_dom : position of the dom (m)
+        '''
+        self.t = self.t - t_dom * 1e-9
+        self.x = self.x - x_dom
+        self.y = self.y - y_dom
+        self.z = self.z - z_dom
+
+    def use_scaled_time_increment(self, scaling = 0.1):
+        '''
+        causes the create_photon_matrix method to use a time increment proportional to the radius
+        scaling : time increment per meter of radius (ns/m)
+        '''
+        self.scaled_time_increment = True
+        self.time_increment_scaling = scaling * 1e-9
