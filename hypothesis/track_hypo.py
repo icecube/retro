@@ -7,6 +7,7 @@ def PowerAxis(minval, maxval, n_bins, power):
     bin_edges = np.power(l, power)
     return bin_edges
 
+
 class segment_hypo(object):
     '''
     create hypo using individual segments and retrieve matrix that contains expected photons in each cell in spherical coordinate system with dom at origin.
@@ -36,11 +37,11 @@ class segment_hypo(object):
         self.speed_of_light = 2.99e8
         self.segment_length = self.time_increment * self.speed_of_light
         #calculate frequently used values
-        self.radius = np.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
-        self.sin_theta_v = np.sin(self.theta_v)
-        self.cos_theta_v = np.cos(self.theta_v)
-        self.sin_phi_v = np.sin(self.phi_v)
-        self.cos_phi_v = np.cos(self.phi_v)
+        self.radius = math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+        self.sin_theta_v = math.sin(self.theta_v)
+        self.cos_theta_v = math.cos(self.theta_v)
+        self.sin_phi_v = math.sin(self.phi_v)
+        self.cos_phi_v = math.cos(self.phi_v)
         self.speed_x = self.speed_of_light * self.sin_theta_v * self.cos_phi_v
         self.speed_y = self.speed_of_light * self.sin_theta_v * self.sin_phi_v
         self.speed_z = self.speed_of_light * self.cos_theta_v
@@ -79,13 +80,13 @@ class segment_hypo(object):
         takes t, x, y, z position and creates indices in t, r, theta, and phi
         '''
         self.t_index = int(self.t * self.t_scaling_factor)
-        self.r_index = int(np.sqrt(self.radius * self.r_scaling_factor))
+        self.r_index = int(math.sqrt(self.radius * self.r_scaling_factor))
         if self.radius == 0.:
             self.cos_theta = 1.
         else:
             self.cos_theta = self.z / self.radius
         self.theta_index = int((-self.cos_theta + 1.) * self.theta_scaling_factor)
-        self.phi = np.arctan2(self.y, self.x)
+        self.phi = math.atan2(self.y, self.x)
         self.phi_index = int(self.phi * self.phi_scaling_factor)
     
     def create_photon_matrix(self):
@@ -103,7 +104,7 @@ class segment_hypo(object):
 
         # traverse track and add track photons if within radius of the dom
         while self.cumulative_track_length < self.trck_length and self.t < self.t_max:
-            self.radius = np.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+            self.radius = math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
             if self.radius < self.r_max:
                 self.set_bin_index()
                 self.z_kevin[self.t_index, self.r_index, self.theta_index, self.phi_index] += self.segment_length * self.photons_per_meter
@@ -131,7 +132,7 @@ class segment_hypo(object):
         self.x = self.x - x_dom
         self.y = self.y - y_dom
         self.z = self.z - z_dom
-        self.radius = np.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+        self.radius = math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
 
     def use_scaled_time_increments(self, scaling=0.01, min_time_increment=1.):
         self.scaled_time_increment = True

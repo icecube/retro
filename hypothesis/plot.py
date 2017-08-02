@@ -49,7 +49,7 @@ if __name__ == '__main__':
     kevin_hypo.create_photon_matrix()
     print kevin_hypo.number_of_segments
     z_kevin_sparse = kevin_hypo.z_kevin
-    print 'took%.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
+    print 'took %.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
     z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
     for hit in z_kevin_sparse:
         #print hit
@@ -118,4 +118,4 @@ if __name__ == '__main__':
     plt.colorbar(mg, ax=ax4)
     
     plt.show()
-    plt.savefig('hypo_per11.png',dpi=300)
+    plt.savefig('hypo_per12.png',dpi=300)
