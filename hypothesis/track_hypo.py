@@ -1,11 +1,101 @@
 import numpy as np
 import math
 from sparse import sparse
+from numba import jit, int32, float32
 
 def PowerAxis(minval, maxval, n_bins, power):
     l = np.linspace(np.power(minval, 1./power), np.power(maxval, 1./power), n_bins+1)
     bin_edges = np.power(l, power)
     return bin_edges
+
+@jit((float32, float32, float32, float32, float32, float32, float32, float32, float32), nopython=True, nogil=True, fastmath=True)
+def numba_bin_indices(t, x, y, z, radius, t_scaling_factor, r_scaling_factor, theta_scaling_factor, phi_scaling_factor):
+    t_index = int(t * t_scaling_factor)
+    r_index = int(math.sqrt(radius * r_scaling_factor))
+    if radius == 0.:
+        cos_theta = 1.
+    else:
+        cos_theta = z / radius
+    theta_index = int((-cos_theta + 1.) * theta_scaling_factor)
+    phi = math.atan2(y, x)
+    phi_index = int(phi * phi_scaling_factor)
+    return (t_index, r_index, theta_index, phi_index)
+
+@jit
+def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, time_increment, scaled_time_increment, time_increment_scaling, min_time_increment, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_min, t_max, r_min, r_max):
+    #load dictionaries
+    vertex_info = vertex_info
+    time_increment_info = time_increment_info
+    bin_info = bin_info
+    #create dictionary
+    z_dict = {}
+    #declare constants
+    speed_of_light = 2.99e8
+    time_increment = time_increment * 1e-9
+    scaled_time_increment = scaled_time_increment
+    segment_length = time_increment * speed_of_light
+    cumulative_track_length = 0.
+    #calculate frequently used values
+    radius = math.sqrt(x * x + y * y + z * z)
+    sin_theta_v = math.sin(theta_v)
+    cos_theta_v = math.cos(theta_v)
+    sin_phi_v = math.sin(phi_v)
+    cos_phi_v = math.cos(phi_v)
+    speed_x = speed_of_light * sin_theta_v * cos_phi_v
+    speed_y = speed_of_light * sin_theta_v * sin_phi_v
+    speed_z = speed_of_light * cos_theta_v
+    #calculate scaling factors
+    t_scaling_factor = (t_max - t_min) / n_t_bins
+    r_scaling_factor = n_r_bins * n_r_bins / r_max
+    theta_scaling_factor = n_theta_bins / 2.
+    phi_scaling_factor = n_phi_bins / 2.
+    #add cascade photons
+    if radius < r_max:
+        t_index = int(t * t_scaling_factor)
+        r_index = int(math.sqrt(radius * r_scaling_factor))
+        if radius == 0.:
+            cos_theta = 1.
+        else:
+            cos_theta = z / radius
+        theta_index = int((-cos_theta + 1.) * theta_scaling_factor)
+        phi = math.atan2(y, x)
+        phi_index = int(phi * phi_scaling_factor)
+        key = (t_index, r_index, theta_index, phi_index)
+        if key in dict.keys():
+            z_dict[keys] += cscd_photons
+        else:
+            z_dict[keys] = cscd_photons
+    # traverse track and add track photons if within radius of the dom
+    while cumulative_track_length < trck_length and t < t_max:
+        radius = math.sqrt(x * x + y * y + z * z)
+        if radius < r_max:
+            t_index = int(t * t_scaling_factor)
+            r_index = int(math.sqrt(radius * r_scaling_factor))
+            if radius == 0.:
+                cos_theta = 1.
+            else:
+                cos_theta = z / radius
+            theta_index = int((-cos_theta + 1.) * theta_scaling_factor)
+            phi = math.atan2(y, x)
+            phi_index = int(phi * phi_scaling_factor)
+            key = (t_index, r_index, theta_index, phi_index)
+            if key in dict.keys():
+                z_dict[keys] += segment_length * photons_per_meter
+            else:
+                z_dict[keys] = segment_length * photons_per_meter
+        if scaled_time_increment == True:
+            if radius * time_increment_scaling > min_time_increment:
+                time_increment = radius * time_increment_scaling
+                segment_length = speed_of_light * time_increment
+            else:
+                time_increment = min_time_increment
+                segment_length = speed_of_light * time_increment
+        cumulative_track_length += segment_length
+        t += time_increment
+        x += speed_x * time_increment
+        y += speed_y * time_increment
+        z += speed_z * time_increment
+     return z_dict   
 
 
 class segment_hypo(object):
@@ -79,15 +169,16 @@ class segment_hypo(object):
         '''
         takes t, x, y, z position and creates indices in t, r, theta, and phi
         '''
-        self.t_index = int(self.t * self.t_scaling_factor)
-        self.r_index = int(math.sqrt(self.radius * self.r_scaling_factor))
-        if self.radius == 0.:
-            self.cos_theta = 1.
-        else:
-            self.cos_theta = self.z / self.radius
-        self.theta_index = int((-self.cos_theta + 1.) * self.theta_scaling_factor)
-        self.phi = math.atan2(self.y, self.x)
-        self.phi_index = int(self.phi * self.phi_scaling_factor)
+        #self.t_index = int(self.t * self.t_scaling_factor)
+        #self.r_index = int(math.sqrt(self.radius * self.r_scaling_factor))
+        #if self.radius == 0.:
+        #    self.cos_theta = 1.
+        #else:
+        #    self.cos_theta = self.z / self.radius
+        #self.theta_index = int((-self.cos_theta + 1.) * self.theta_scaling_factor)
+        #self.phi = math.atan2(self.y, self.x)
+        #self.phi_index = int(self.phi * self.phi_scaling_factor)
+        self.t_index, self.r_index, self.theta_index, self.phi_index = numba_bin_indices(self.t, self.x, self.y, self.z, self.radius, self.t_scaling_factor, self.r_scaling_factor, self.theta_scaling_factor, self.phi_scaling_factor)
     
     def create_photon_matrix(self):
         '''
@@ -135,6 +226,24 @@ class segment_hypo(object):
         self.radius = math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
 
     def use_scaled_time_increments(self, scaling=0.01, min_time_increment=1.):
+        '''
+        causes create_photon_matrix to use time increments that scale based off of the radius
+        scaling : time increment per radius (ns/m)
+        min_time_increment : the lowest possible time increment (ns)
+        '''
         self.scaled_time_increment = True
         self.time_increment_scaling = scaling * 1e-9
         self.min_time_increment = min_time_increment * 1e-9
+
+    def use_numba_create_photon_matrix(self):
+        '''
+        uses numba to create the photon matrix
+        '''
+        vertex_info = dict(t=self.t, x=self.x, y=self.y, z=self.z, theta_v=self.theta_v, phi_v=self.phi_v, trck_length=self.trck_length, cscd_photons=self.cscd_photons)
+        time_increment_info = dict(time_increment=self.time_increment, scaled_time_increment=self.scaled_time_increment, time_increment_scaling=self.time_increment_scaling, min_time_increment=self.min_time_increment)
+        bin_info = dict(n_t_bins=self.n_t_bins, n_r_bins=self.n_r_bins, n_theta_bins=self.n_theta_bins, n_phi_bins=self.n_phi_bins, t_min=self.t_min, t_max=self.t_max, r_min=self.r_min, r_max=self.r_max)
+        kwargs = {}
+        kwargs.update(vertex_info)
+        kwargs.update(time_increment_info)
+        kwargs.update(bin_info)
+        self.z_dict = numba_create_photon_matrix(**kwargs)

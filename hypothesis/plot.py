@@ -47,9 +47,9 @@ if __name__ == '__main__':
     kevin_hypo.set_dom_location(0., 10., -10., 40.)
     kevin_hypo.use_scaled_time_increments()
     kevin_hypo.create_photon_matrix()
-    print kevin_hypo.number_of_segments
-    z_kevin_sparse = kevin_hypo.z_kevin
     print 'took %.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
+    print 'number of segments: %i'%kevin_hypo.number_of_segments
+    z_kevin_sparse = kevin_hypo.z_kevin
     z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
     for hit in z_kevin_sparse:
         #print hit
