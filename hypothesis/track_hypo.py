@@ -21,16 +21,13 @@ def numba_bin_indices(t, x, y, z, radius, t_scaling_factor, r_scaling_factor, th
     phi_index = int(phi * phi_scaling_factor)
     return (t_index, r_index, theta_index, phi_index)
 
-@jit
-def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, time_increment, scaled_time_increment, time_increment_scaling, min_time_increment, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_min, t_max, r_min, r_max):
-    #load dictionaries
-    vertex_info = vertex_info
-    time_increment_info = time_increment_info
-    bin_info = bin_info
+@jit(nopython=True, nogil=True, fastmath=True)
+def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, trck_length, cscd_photons, time_increment, scaled_time_increment, time_increment_scaling, min_time_increment, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_min, t_max, r_min, r_max):
     #create dictionary
     z_dict = {}
     #declare constants
     speed_of_light = 2.99e8
+    photons_per_meter = 2451.4544553
     time_increment = time_increment * 1e-9
     scaled_time_increment = scaled_time_increment
     segment_length = time_increment * speed_of_light
@@ -61,10 +58,10 @@ def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, time_increment, scale
         phi = math.atan2(y, x)
         phi_index = int(phi * phi_scaling_factor)
         key = (t_index, r_index, theta_index, phi_index)
-        if key in dict.keys():
-            z_dict[keys] += cscd_photons
+        if key in dict.keys(z_dict):
+            z_dict[key] += cscd_photons
         else:
-            z_dict[keys] = cscd_photons
+            z_dict[key] = cscd_photons
     # traverse track and add track photons if within radius of the dom
     while cumulative_track_length < trck_length and t < t_max:
         radius = math.sqrt(x * x + y * y + z * z)
@@ -79,10 +76,10 @@ def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, time_increment, scale
             phi = math.atan2(y, x)
             phi_index = int(phi * phi_scaling_factor)
             key = (t_index, r_index, theta_index, phi_index)
-            if key in dict.keys():
-                z_dict[keys] += segment_length * photons_per_meter
+            if key in dict.keys(z_dict):
+                z_dict[key] += segment_length * photons_per_meter
             else:
-                z_dict[keys] = segment_length * photons_per_meter
+                z_dict[key] = segment_length * photons_per_meter
         if scaled_time_increment == True:
             if radius * time_increment_scaling > min_time_increment:
                 time_increment = radius * time_increment_scaling
@@ -95,7 +92,7 @@ def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, time_increment, scale
         x += speed_x * time_increment
         y += speed_y * time_increment
         z += speed_z * time_increment
-     return z_dict   
+        return z_dict   
 
 
 class segment_hypo(object):
@@ -239,9 +236,9 @@ class segment_hypo(object):
         '''
         uses numba to create the photon matrix
         '''
-        vertex_info = dict(t=self.t, x=self.x, y=self.y, z=self.z, theta_v=self.theta_v, phi_v=self.phi_v, trck_length=self.trck_length, cscd_photons=self.cscd_photons)
-        time_increment_info = dict(time_increment=self.time_increment, scaled_time_increment=self.scaled_time_increment, time_increment_scaling=self.time_increment_scaling, min_time_increment=self.min_time_increment)
-        bin_info = dict(n_t_bins=self.n_t_bins, n_r_bins=self.n_r_bins, n_theta_bins=self.n_theta_bins, n_phi_bins=self.n_phi_bins, t_min=self.t_min, t_max=self.t_max, r_min=self.r_min, r_max=self.r_max)
+        vertex_info = {'t':self.t, 'x':self.x, 'y':self.y, 'z':self.z, 'theta_v':self.theta_v, 'phi_v':self.phi_v, 'trck_length':self.trck_length, 'cscd_photons':self.cscd_photons}
+        time_increment_info = {'time_increment':self.time_increment, 'scaled_time_increment':self.scaled_time_increment, 'time_increment_scaling':self.time_increment_scaling, 'min_time_increment':self.min_time_increment}
+        bin_info = {'n_t_bins':self.n_t_bins, 'n_r_bins':self.n_r_bins, 'n_theta_bins':self.n_theta_bins, 'n_phi_bins':self.n_phi_bins, 't_min':self.t_min, 't_max':self.t_max, 'r_min':self.r_min, 'r_max':self.r_max}
         kwargs = {}
         kwargs.update(vertex_info)
         kwargs.update(time_increment_info)
