@@ -21,7 +21,7 @@ def numba_bin_indices(t, x, y, z, radius, t_scaling_factor, r_scaling_factor, th
     phi_index = int(phi * phi_scaling_factor)
     return (t_index, r_index, theta_index, phi_index)
 
-@jit(nopython=True, nogil=True, fastmath=True)
+@jit()
 def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, trck_length, cscd_photons, time_increment, scaled_time_increment, time_increment_scaling, min_time_increment, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_min, t_max, r_min, r_max):
     #create dictionary
     z_dict = {}
@@ -244,3 +244,18 @@ class segment_hypo(object):
         kwargs.update(time_increment_info)
         kwargs.update(bin_info)
         self.z_dict = numba_create_photon_matrix(**kwargs)
+
+    def vector_photon_matrix(self):
+        '''
+        uses a single time array to simultaneously calculate all of the positions along the track, using information from __init__
+        '''
+        self.t_array = np.arange(self.t, max(self.t_max, self.trck_length / self.speed_of_light + self.t), self.time_increment)
+        self.x_array = self.x + self.speed_x * self.t_array
+        self.y_array = self.y + self.speed_y * self.t_array
+        self.z_array = self.z + self.speed_z * self.t_array
+        self.r_array = np.sqrt(np.square(self.x_array) + np.square(self.y_array) + np.square(self.z_array))
+        self.r_index_array = np.int_(np.sqrt(self.r_array * self.r_scaling_factor)) 
+        self.cos_theta_array = self.z_array / self.r_array
+        self.theta_index_array = np.int_((-self.cos_theta_array + 1.) * self.theta_scaling_factor)
+        self.phi_array = np.arctan2(self.y_array / self.x_array)
+        self.phi_index_array = np.int_(self.phi_array * self.phi_scaling_factor)
