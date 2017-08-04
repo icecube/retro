@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from track_hypo import PowerAxis
 from track_hypo import segment_hypo
 from hypo_fast import hypo
@@ -45,16 +47,36 @@ if __name__ == '__main__':
     kevin_hypo = segment_hypo(10., 0., 40., 45., 2.57, 5.3, 25., 25.)
     kevin_hypo.set_binning(50., 20., 50., 36., 500., 200.)
     kevin_hypo.set_dom_location(0., 10., -10., 40.)
-    kevin_hypo.use_scaled_time_increments()
-    kevin_hypo.create_photon_matrix()
+    #kevin_hypo.use_scaled_time_increments()
+    #kevin_hypo.create_photon_matrix()
+    kevin_hypo.vector_photon_matrix()
     print 'took %.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
-    print 'number of segments: %i'%kevin_hypo.number_of_segments
-    z_kevin_sparse = kevin_hypo.z_kevin
+    #print 'number of segments: %i'%kevin_hypo.number_of_segments
+    print 'number of segments: %i'%kevin_hypo.number_of_increments
+    #z_kevin_sparse = kevin_hypo.z_kevin
+    z_kevin_vector = kevin_hypo.indices_array
     z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
-    for hit in z_kevin_sparse:
-        #print hit
-        idx, count = hit
-        z_kevin[idx] = count
+    #for hit in z_kevin_sparse:
+    #    #print hit
+    #    idx, count = hit
+    
+    #debug prints
+    #    z_kevin[idx] = count
+    #print z_kevin_vector
+    #print kevin_hypo.variables_array
+    #print kevin_hypo.t_array
+    print kevin_hypo.variables_array[0, :]
+    #print kevin_hypo.t_index_array
+    print kevin_hypo.indices_array[0, :]
+    #print kevin_hypo.variables_array[1, :]
+    #print kevin_hypo.variables_array[2, :]    
+    #print kevin_hypo.variables_array[6, :]
+    #print kevin_hypo.indices_array[3, :]
+   
+    for col in xrange(kevin_hypo.number_of_increments):
+        idx = (int(z_kevin_vector[0, col]), int(z_kevin_vector[1, col]), int(z_kevin_vector[2, col]), int(z_kevin_vector[3, col]))
+        if z_kevin_vector[1, col] < kevin_hypo.r_max:
+            z_kevin[idx] += kevin_hypo.variables_array[7, col]
     print 'total number of photons in kevin matrix = %i (%.2f %%)'%(z_kevin.sum(), z_kevin.sum()/my_hypo.tot_photons*100.)
 
     # plot the track as a line
@@ -92,7 +114,7 @@ if __name__ == '__main__':
     cmap.set_bad('w')
 
     tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
-    zz = z_per.sum(axis=(2,3))
+    zz = z_diff.sum(axis=(2,3))
     z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
     mg = ax2.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax2.set_xlabel('t')
@@ -100,7 +122,7 @@ if __name__ == '__main__':
     plt.colorbar(mg, ax=ax2)
 
     tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
-    zz = z_per.sum(axis=(1,3))
+    zz = z_diff.sum(axis=(1,3))
     z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
     mg = ax3.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax3.set_xlabel('t')
@@ -109,7 +131,7 @@ if __name__ == '__main__':
     plt.colorbar(mg, ax=ax3)
 
     tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
-    zz = z_per.sum(axis=(1,2))
+    zz = z_diff.sum(axis=(1,2))
     z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
     mg = ax4.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax4.set_xlabel('t')
@@ -118,4 +140,4 @@ if __name__ == '__main__':
     plt.colorbar(mg, ax=ax4)
     
     plt.show()
-    plt.savefig('hypo_per12.png',dpi=300)
+    plt.savefig('hypo_vector2.png',dpi=300)
