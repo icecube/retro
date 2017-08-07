@@ -250,7 +250,8 @@ class segment_hypo(object):
         uses a single time array to simultaneously calculate all of the positions along the track, using information from __init__
         '''
         #create initial time array
-        self.t_array_init = np.arange(self.t, min(self.t_max, self.trck_length / self.speed_of_light + self.t), self.time_increment, dtype=np.float32)
+        self.t_array_init = np.arange(self.t, min(self.t_max, self.trck_length / self.speed_of_light + self.t), self.time_increment, dtype=np.float32) - self.time_increment / 2
+        self.t_array_init[0] = self.t
         #set the number of time increments in the track
         self.number_of_increments = int(len(self.t_array_init))
         #create array with variables
@@ -258,11 +259,11 @@ class segment_hypo(object):
         self.t_array = self.variables_array[0, :]
         self.t_array[:] = self.t_array_init 
         self.x_array = self.variables_array[1, :]
-        self.x_array[:] = self.x + self.speed_x * self.t_array
+        self.x_array[:] = self.x + self.speed_x * (self.t_array - self.t)
         self.y_array = self.variables_array[2, :]
-        self.y_array[:] = self.y + self.speed_y * self.t_array
+        self.y_array[:] = self.y + self.speed_y * (self.t_array - self.t)
         self.z_array = self.variables_array[3, :]
-        self.z_array[:] = self.z + self.speed_z * self.t_array
+        self.z_array[:] = self.z + self.speed_z * (self.t_array - self.t)
         self.r_array = self.variables_array[4, :]
         self.r_array[:] = np.sqrt(np.square(self.x_array) + np.square(self.y_array) + np.square(self.z_array))
         self.cos_theta_array = self.variables_array[5, :]
@@ -272,7 +273,7 @@ class segment_hypo(object):
         self.photons_array = self.variables_array[7, :]
         self.photons_array[:] = self.segment_length * self.photons_per_meter
         #add cascade photons
-        self.photons_array[0] += self.cscd_photons 
+        self.photons_array[0] = self.cscd_photons 
         
         #create array with indices
         self.indices_array = np.empty((4, self.number_of_increments), dtype=np.uint16)

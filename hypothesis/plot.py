@@ -39,14 +39,14 @@ if __name__ == '__main__':
     theta_bin_edges = np.arccos(np.linspace(-1, 1, 51))[::-1]
     phi_bin_edges = np.linspace(0, 2*np.pi, 37)
 
-    my_hypo = hypo(0., 1., 40., 45., theta=2.57, phi=5.3, trck_energy=25., cscd_energy=25.)
+    my_hypo = hypo(65., 1., 10., -50., theta=1.08, phi=0.96, trck_energy=20., cscd_energy=25.)
     my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
 
     # kevin array
     t0 = time.time()
-    kevin_hypo = segment_hypo(0., 1., 40., 45., 2.57, 5.3, 25., 25.)
+    kevin_hypo = segment_hypo(65., 1., 10., -50, 1.08, 0.96, 20., 25.)
     kevin_hypo.set_binning(50., 20., 50., 36., 500., 200.)
-    kevin_hypo.set_dom_location(0., 0., 0., 0.)
+    kevin_hypo.set_dom_location(50., 0., 10., 0.)
     #kevin_hypo.use_scaled_time_increments()
     #kevin_hypo.create_photon_matrix()
     kevin_hypo.vector_photon_matrix()
@@ -83,7 +83,7 @@ if __name__ == '__main__':
     ax.plot([x_0,x_e],[y_0,y_e],zs=[-plt_lim,-plt_lim],alpha=0.3,c='k')
     
     t0 = time.time()
-    hits, n_t, n_p, n_l = my_hypo.get_matrices(0., 0., 0., 0.)
+    hits, n_t, n_p, n_l = my_hypo.get_matrices(50., 0., 10., 0.)
     print 'took %.2f ms to calculate z-matrix'%((time.time() - t0)*1000)
     z = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
     for hit in hits:
@@ -134,12 +134,12 @@ if __name__ == '__main__':
     ax4.set_ylim((0,2*np.pi))
     cb4 = plt.colorbar(mg, ax=ax4)
     
-    ax2.grid(True, color='g')
-    ax3.grid(True, color='g')
-    ax4.grid(True, color='g')
+    ax2.grid(True, 'both', color='g')
+    ax3.grid(True, 'both', color='g')
+    ax4.grid(True, 'both', color='g')
 
     plt.show()
-    plt.savefig('hypo_diff3.png',dpi=300)
+    plt.savefig('hypo_diff11.png',dpi=300)
 
     #clear colorbars
     cb2.remove()
@@ -173,12 +173,12 @@ if __name__ == '__main__':
     ax4.set_ylim((0,2*np.pi))
     cb4 = plt.colorbar(mg, ax=ax4)
     
-    ax2.grid(True, color='g')
-    ax3.grid(True, color='g')
-    ax4.grid(True, color='g')
+    ax2.grid(True, 'both', color='g')
+    ax3.grid(True, 'both', color='g')
+    ax4.grid(True, 'both', color='g')
     
     plt.show()
-    plt.savefig('hypo_per3.png',dpi=300)
+    plt.savefig('hypo_per11.png',dpi=300)
 
     #clear colorbars
     cb2.remove()
@@ -218,12 +218,12 @@ if __name__ == '__main__':
     ax4.set_ylim((0,2*np.pi))
     cb4 = plt.colorbar(mg, ax=ax4)
     
-    ax2.grid(True, color='g')
-    ax3.grid(True, color='g')
-    ax4.grid(True, color='g')
+    ax2.grid(True, 'both', color='g')
+    ax3.grid(True, 'both', color='g')
+    ax4.grid(True, 'both', color='g')
     
     plt.show()
-    plt.savefig('hypo_kevin3.png',dpi=300)
+    plt.savefig('hypo_kevin11.png',dpi=300)
 
     #clear colorbars
     cb2.remove()
@@ -257,12 +257,12 @@ if __name__ == '__main__':
     ax4.set_ylim((0,2*np.pi))
     cb4 = plt.colorbar(mg, ax=ax4)
     
-    ax2.grid(True, color='g')
-    ax3.grid(True, color='g')
-    ax4.grid(True, color='g')
+    ax2.grid(True, 'both', color='g')
+    ax3.grid(True, 'both', color='g')
+    ax4.grid(True, 'both', color='g')
  
     plt.show()
-    plt.savefig('hypo_philipp3.png',dpi=300)
+    plt.savefig('hypo_philipp11.png',dpi=300)
 
     #clear colorbars
     cb2.remove()
