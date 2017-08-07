@@ -157,7 +157,7 @@ class segment_hypo(object):
         self.t_max = t_max * 1e-9
         self.r_min = r_min
         self.r_max = r_max
-        self.t_scaling_factor = (self.t_max - self.t_min) / self.n_t_bins
+        self.t_scaling_factor = self.n_t_bins / (self.t_max - self.t_min)
         self.r_scaling_factor = self.n_r_bins * self.n_r_bins / self.r_max
         self.theta_scaling_factor = self.n_theta_bins / 2.
         self.phi_scaling_factor = self.n_phi_bins / np.pi / 2.
@@ -250,13 +250,13 @@ class segment_hypo(object):
         uses a single time array to simultaneously calculate all of the positions along the track, using information from __init__
         '''
         #create initial time array
-        self.t_array_init = np.arange(self.t, min(self.t_max, self.trck_length / self.speed_of_light + self.t), self.time_increment)
+        self.t_array_init = np.arange(self.t, min(self.t_max, self.trck_length / self.speed_of_light + self.t), self.time_increment, dtype=np.float32)
         #set the number of time increments in the track
         self.number_of_increments = int(len(self.t_array_init))
         #create array with variables
         self.variables_array = np.empty((8, self.number_of_increments), dtype=np.float32)
         self.t_array = self.variables_array[0, :]
-        self.t_array[:] = np.arange(self.t, min(self.t_max, self.trck_length / self.speed_of_light + self.t), self.time_increment, dtype=np.float32)
+        self.t_array[:] = self.t_array_init 
         self.x_array = self.variables_array[1, :]
         self.x_array[:] = self.x + self.speed_x * self.t_array
         self.y_array = self.variables_array[2, :]
