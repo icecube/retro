@@ -2,14 +2,13 @@ import numpy as np
 import math
 from sparse import sparse
 from numba import jit, int32, float32
-
-def PowerAxis(minval, maxval, n_bins, power):
-    l = np.linspace(np.power(minval, 1./power), np.power(maxval, 1./power), n_bins+1)
-    bin_edges = np.power(l, power)
-    return bin_edges
+from power_axis import PowerAxis
 
 @jit((float32, float32, float32, float32, float32, float32, float32, float32, float32), nopython=True, nogil=True, fastmath=True)
 def numba_bin_indices(t, x, y, z, radius, t_scaling_factor, r_scaling_factor, theta_scaling_factor, phi_scaling_factor):
+    '''
+    uses numba to compile the process of determining the bin index in t, r, theta, and phi
+    '''
     t_index = int(t * t_scaling_factor)
     r_index = int(math.sqrt(radius * r_scaling_factor))
     if radius == 0.:
@@ -23,6 +22,9 @@ def numba_bin_indices(t, x, y, z, radius, t_scaling_factor, r_scaling_factor, th
 
 @jit()
 def numba_create_photon_matrix(t, x, y, z, theta_v, phi_v, trck_length, cscd_photons, time_increment, scaled_time_increment, time_increment_scaling, min_time_increment, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_min, t_max, r_min, r_max):
+    '''
+    uses numba to entirely compute the photon matrix (cannot be used with nopython=True as numba dictionary support has not yet been added)
+    '''
     #create dictionary
     z_dict = {}
     #declare constants
@@ -143,7 +145,7 @@ class segment_hypo(object):
     
     def set_binning(self, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_max, r_max, t_min=0, r_min=0):
         '''
-        define binnings of spherical coordinates
+        define binnings of spherical coordinates assuming: linear in time, quadratic in radius, linear in cos(theta), linear in phi
         t_min : min time (ns)
         t_max : max time (ns)
         r_min : min radius (m)

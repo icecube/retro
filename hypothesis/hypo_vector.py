@@ -47,7 +47,7 @@ class segment_hypo(object):
     
     def set_binning(self, n_t_bins, n_r_bins, n_theta_bins, n_phi_bins, t_max, r_max, t_min=0, r_min=0):
         '''
-        define binnings of spherical coordinates
+        define binnings of spherical coordinates assuming: linear binning in time, quadratic binning in radius, linear binning in cos(theta), and linear binning in phi
         t_min : min time (ns)
         t_max : max time (ns)
         r_min : min radius (m)
