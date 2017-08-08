@@ -48,23 +48,22 @@ if __name__ == '__main__':
     kevin_hypo.set_binning(50., 20., 50., 36., 500., 200.)
     kevin_hypo.set_dom_location(50., 0., 10., 0.)
     kevin_hypo.vector_photon_matrix()
-    print 'took %.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
-    z_kevin_indices = kevin_hypo.indices_array
-    z_kevin_values = kevin_hypo.values_array
-    z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
+    print 'took %.2f ms to calculate z_matrix'%((time.time() - t0)*1000)
+    z_indices = kevin_hypo.indices_array
+    z_values = kevin_hypo.values_array
+    z_matrix = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
 
     #debug prints
-    #print z_kevin_vector.shape
     #print kevin_hypo.variables_array.shape
     #print kevin_hypo.variables_array[6, :]
     #print kevin_hypo.indices_array[3, :]
     #print kevin_hypo.values_array[2, :]
    
     for col in xrange(kevin_hypo.number_of_increments):
-        idx = (int(z_kevin_indices[0, col]), int(z_kevin_indices[1, col]), int(z_kevin_indices[2, col]), int(z_kevin_indices[3, col]))
-        if z_kevin_indices[1, col] < kevin_hypo.r_max:
-            z_kevin[idx] += kevin_hypo.values_array[0, col]
-    print 'total number of photons in kevin matrix = %i (%.2f %%)'%(z_kevin.sum(), z_kevin.sum()/my_hypo.tot_photons*100.)
+        idx = (int(z_indices[0, col]), int(z_indices[1, col]), int(z_indices[2, col]), int(z_indices[3, col]))
+        if z_indices[1, col] < kevin_hypo.r_max:
+            z_matrix[idx] += z_values[0, col]
+    print 'total number of photons in kevin matrix = %i (%.2f %%)'%(z_matrix.sum(), z_matrix.sum()/my_hypo.tot_photons*100.)
 
     # plot the track as a line
     x_0, y_0, z_0 = my_hypo.track.point(my_hypo.track.t0)
@@ -77,7 +76,7 @@ if __name__ == '__main__':
     
     t0 = time.time()
     hits, n_t, n_p, n_l = my_hypo.get_matrices(50., 0., 10., 0.)
-    print 'took %.2f ms to calculate z-matrix'%((time.time() - t0)*1000)
+    print 'took %.2f ms to calculate z'%((time.time() - t0)*1000)
     z = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
     for hit in hits:
         #print hit
@@ -85,15 +84,15 @@ if __name__ == '__main__':
         z[idx] = count
     print 'total number of photons in matrix = %i (%.2f %%)'%(z.sum(), z.sum()/my_hypo.tot_photons*100.)
 
-    print 'total_residual = ',(z - z_kevin).sum()/z.sum()
+    print 'total_residual = ',(z - z_matrix).sum()/z.sum()
 
     #create differential matrix
-    z_diff = z_kevin - z
+    z_diff = z_matrix - z
 
     #create percent differnt matrix
-    z_per = np.zeros_like(z_kevin)
+    z_per = np.zeros_like(z_matrix)
     mask = z != 0
-    z_per[mask] = z_kevin[mask] / z[mask] -1
+    z_per[mask] = z_matrix[mask] / z[mask] -1
 
     #cmap = 'gnuplot_r'
     cmap = mpl.cm.get_cmap('bwr')
@@ -186,7 +185,7 @@ if __name__ == '__main__':
     
     #make third plot
     tt, yy = np.meshgrid(t_bin_edges, r_bin_edges)
-    zz = z_kevin.sum(axis=(2,3))
+    zz = z_matrix.sum(axis=(2,3))
     z_vmax = np.partition(zz.flatten(), -2)[-2]
     mg = ax2.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
     ax2.set_xlabel('t')
@@ -194,7 +193,7 @@ if __name__ == '__main__':
     cb2 = plt.colorbar(mg, ax=ax2)
 
     tt, yy = np.meshgrid(t_bin_edges, theta_bin_edges)
-    zz = z_kevin.sum(axis=(1,3))
+    zz = z_matrix.sum(axis=(1,3))
     z_vmax = np.partition(zz.flatten(), -2)[-2]
     mg = ax3.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
     ax3.set_xlabel('t')
@@ -203,7 +202,7 @@ if __name__ == '__main__':
     cb3 = plt.colorbar(mg, ax=ax3)
 
     tt, yy = np.meshgrid(t_bin_edges, phi_bin_edges)
-    zz = z_kevin.sum(axis=(1,2))
+    zz = z_matrix.sum(axis=(1,2))
     z_vmax = np.partition(zz.flatten(), -2)[-2]
     mg = ax4.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
     ax4.set_xlabel('t')
