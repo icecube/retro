@@ -49,19 +49,21 @@ if __name__ == '__main__':
     kevin_hypo.set_dom_location(50., 0., 10., 0.)
     kevin_hypo.vector_photon_matrix()
     print 'took %.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
-    z_kevin_vector = kevin_hypo.indices_array
+    z_kevin_indices = kevin_hypo.indices_array
+    z_kevin_values = kevin_hypo.values_array
     z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
 
     #debug prints
-    #print z_kevin_vector
-    #print kevin_hypo.variables_array
-    #print kevin_hypo.variables_array[0, :]
-    #print kevin_hypo.indices_array[0, :]
+    #print z_kevin_vector.shape
+    #print kevin_hypo.variables_array.shape
+    #print kevin_hypo.variables_array[6, :]
+    #print kevin_hypo.indices_array[3, :]
+    #print kevin_hypo.values_array[2, :]
    
     for col in xrange(kevin_hypo.number_of_increments):
-        idx = (int(z_kevin_vector[0, col]), int(z_kevin_vector[1, col]), int(z_kevin_vector[2, col]), int(z_kevin_vector[3, col]))
-        if z_kevin_vector[1, col] < kevin_hypo.r_max:
-            z_kevin[idx] += kevin_hypo.variables_array[7, col]
+        idx = (int(z_kevin_indices[0, col]), int(z_kevin_indices[1, col]), int(z_kevin_indices[2, col]), int(z_kevin_indices[3, col]))
+        if z_kevin_indices[1, col] < kevin_hypo.r_max:
+            z_kevin[idx] += kevin_hypo.values_array[0, col]
     print 'total number of photons in kevin matrix = %i (%.2f %%)'%(z_kevin.sum(), z_kevin.sum()/my_hypo.tot_photons*100.)
 
     # plot the track as a line

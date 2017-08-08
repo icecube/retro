@@ -65,6 +65,7 @@ class segment_hypo(object):
         self.r_scaling_factor = self.n_r_bins * self.n_r_bins / self.r_max
         self.theta_scaling_factor = self.n_theta_bins / 2.
         self.phi_scaling_factor = self.n_phi_bins / np.pi / 2.
+        self.phi_bin_width = 2. * np.pi / self.n_phi_bins
 
     def set_dom_location(self, t_dom=0., x_dom=0., y_dom=0., z_dom=0.):
         '''
@@ -102,10 +103,6 @@ class segment_hypo(object):
         self.cos_theta_array[:] = self.z_array / self.r_array
         self.phi_array = self.variables_array[6, :]
         self.phi_array[:] = np.arctan2(self.y_array, self.x_array) % (2 * np.pi)
-        self.photons_array = self.variables_array[7, :]
-        self.photons_array[:] = self.segment_length * self.photons_per_meter
-        #add cascade photons
-        self.photons_array[0] = self.cscd_photons 
         
         #create array with indices
         self.indices_array = np.empty((4, self.number_of_increments), dtype=np.uint16)
@@ -117,3 +114,17 @@ class segment_hypo(object):
         self.theta_index_array[:] = (-self.cos_theta_array + 1.) * self.theta_scaling_factor
         self.phi_index_array = self.indices_array[3, :]
         self.phi_index_array[:] = self.phi_array * self.phi_scaling_factor
+
+        #create array to store values for each index
+        self.values_array = np.empty((3, self.number_of_increments), dtype=np.float32)
+        #add track photons
+        self.photon_array = self.values_array[0, :]
+        self.photon_array[:] = self.segment_length * self.photons_per_meter
+        #add cascade photons
+        self.photon_array[0] = self.cscd_photons
+        #add track theta values
+        self.track_theta_array = self.values_array[1, :]
+        self.track_theta_array[:] = self.theta_v
+        #add delta phi values
+        self.delta_phi_array = self.values_array[2, :]
+        self.delta_phi_array[:] = np.abs(self.phi_v - (self.phi_index_array * self.phi_bin_width + self.phi_bin_width / 2.))
