@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-from track_hypo import PowerAxis
-from track_hypo import segment_hypo
+from power_axis import PowerAxis
+from hypo_vector import segment_hypo
 from hypo_fast import hypo
 import numpy as np
 import math
@@ -47,19 +47,10 @@ if __name__ == '__main__':
     kevin_hypo = segment_hypo(65., 1., 10., -50, 1.08, 0.96, 20., 25.)
     kevin_hypo.set_binning(50., 20., 50., 36., 500., 200.)
     kevin_hypo.set_dom_location(50., 0., 10., 0.)
-    #kevin_hypo.use_scaled_time_increments()
-    #kevin_hypo.create_photon_matrix()
     kevin_hypo.vector_photon_matrix()
     print 'took %.2f ms to calculate z_kevin-matrix'%((time.time() - t0)*1000)
-    #print 'number of segments: %i'%kevin_hypo.number_of_segments
-    print 'number of segments: %i'%kevin_hypo.number_of_increments
-    #z_kevin_sparse = kevin_hypo.z_kevin
     z_kevin_vector = kevin_hypo.indices_array
     z_kevin = np.zeros((len(t_bin_edges) - 1, len(r_bin_edges) - 1, len(theta_bin_edges) - 1, len(phi_bin_edges) - 1))
-    #for hit in z_kevin_sparse:
-    #    #print hit
-    #    idx, count = hit
-    #    z_kevin[idx] = count
 
     #debug prints
     #print z_kevin_vector

@@ -166,16 +166,16 @@ class segment_hypo(object):
         '''
         takes t, x, y, z position and creates indices in t, r, theta, and phi
         '''
-        #self.t_index = int(self.t * self.t_scaling_factor)
-        #self.r_index = int(math.sqrt(self.radius * self.r_scaling_factor))
-        #if self.radius == 0.:
-        #    self.cos_theta = 1.
-        #else:
-        #    self.cos_theta = self.z / self.radius
-        #self.theta_index = int((-self.cos_theta + 1.) * self.theta_scaling_factor)
-        #self.phi = math.atan2(self.y, self.x)
-        #self.phi_index = int(self.phi * self.phi_scaling_factor)
-        self.t_index, self.r_index, self.theta_index, self.phi_index = numba_bin_indices(self.t, self.x, self.y, self.z, self.radius, self.t_scaling_factor, self.r_scaling_factor, self.theta_scaling_factor, self.phi_scaling_factor)
+        self.t_index = int(self.t * self.t_scaling_factor)
+        self.r_index = int(math.sqrt(self.radius * self.r_scaling_factor))
+        if self.radius == 0.:
+            self.cos_theta = 1.
+        else:
+            self.cos_theta = self.z / self.radius
+        self.theta_index = int((-self.cos_theta + 1.) * self.theta_scaling_factor)
+        self.phi = math.atan2(self.y, self.x)
+        self.phi_index = int(self.phi * self.phi_scaling_factor)
+        #self.t_index, self.r_index, self.theta_index, self.phi_index = numba_bin_indices(self.t, self.x, self.y, self.z, self.radius, self.t_scaling_factor, self.r_scaling_factor, self.theta_scaling_factor, self.phi_scaling_factor)
     
     def create_photon_matrix(self):
         '''
@@ -249,7 +249,7 @@ class segment_hypo(object):
         '''
         uses a single time array to simultaneously calculate all of the positions along the track, using information from __init__
         '''
-        #create initial time array
+        #create initial time array, using the midpoints of each time increment
         self.t_array_init = np.arange(self.t, min(self.t_max, self.trck_length / self.speed_of_light + self.t), self.time_increment, dtype=np.float32) - self.time_increment / 2
         self.t_array_init[0] = self.t
         #set the number of time increments in the track
