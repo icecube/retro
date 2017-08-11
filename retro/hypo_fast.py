@@ -399,8 +399,9 @@ class Hypo(object):
             theta=0.5 * (bin_edges.theta[:-1] + bin_edges.theta[1:]),
             phi=0.5 * (bin_edges.phi[:-1] + bin_edges.phi[1:])
         )
+        self.shape = BinningCoords(*(len(dim) for dim in self.bin_centers))
 
-    # coord. transforms
+    # -- Coordinate transforms -- #
 
     @staticmethod
     def cr(x, y, z):
@@ -422,7 +423,8 @@ class Hypo(object):
             return 0
         return np.arccos(z / np.sqrt(x*x + y*y + z*z))
 
-    # bin correlators:
+    # -- Bin correlators -- #
+
     def correlate_theta(self, bin_edges, t, rho_extent):
         """get the track parameter rho intervals, which lie inside bins"""
         start_t = time.time()
@@ -529,8 +531,8 @@ class Hypo(object):
         return np.array(intervals, dtype=FTYPE)
 
     def get_matrices(self, Dt=0, Dx=0, Dy=0, Dz=0):
-        """Calculate the matrices for a given DOM hit, i.e., DOM 3D position +
-        hit time
+        """Calculate the matrices for a given DOM hit, i.e.,
+        DOM 3D position + hit time.
 
         Parameters
         ----------
@@ -563,16 +565,11 @@ class Hypo(object):
             xs, ys, zs = self.track.point(ts)
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
-        sparse_dims = (len(self.bin_edges.t) - 1,
-                       len(self.bin_edges.r) - 1,
-                       len(self.bin_edges.theta) - 1,
-                       len(self.bin_edges.phi) - 1)
-
         # the big matrix z
-        n_photons = Sparse(shape=sparse_dims, default=0, dtype=FTYPE)
-        p_theta = Sparse(shape=sparse_dims, default=0, dtype=FTYPE)
-        p_phi = Sparse(shape=sparse_dims, default=0, dtype=FTYPE)
-        p_length = Sparse(shape=sparse_dims, default=0, dtype=FTYPE)
+        n_photons = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        p_theta = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        p_phi = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        p_length = Sparse(shape=self.shape, default=0, dtype=FTYPE)
 
         start_t = time.time()
         t_inner_loop = 0
@@ -672,9 +669,15 @@ class Hypo(object):
         r_bin = self.get_bin(r0, self.bin_edges.r)
         theta_bin = self.get_bin(theta0, self.bin_edges.theta)
         phi_bin = self.get_bin(phi0, self.bin_edges.phi)
-        if not None in (t_bin, r_bin, theta_bin, phi_bin):
-            #weighted average of corr length from track and cascade, while assume 0.5 for cascade right now
-            p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average([p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5], weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons])
+        if None not in (t_bin, r_bin, theta_bin, phi_bin):
+            print [p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5]
+            print [n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons]
+            # Weighted average of corr length from track and cascade, while
+            # assuming 0.5 for cascade right now
+            p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average(
+                [p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5],
+                weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons]
+            )
             n_photons[t_bin, r_bin, theta_bin, phi_bin] += self.cascade_photons
 
         return n_photons, p_theta, p_phi, p_length
