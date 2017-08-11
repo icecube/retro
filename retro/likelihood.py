@@ -28,8 +28,8 @@ import pyfits
 from pyswarm import pso
 from scipy.special import gammaln
 
-from hypothesis.hypo_fast import (FTYPE, HYPO_PARAMS_T, event_to_hypo_params,
-                                  Hypo)
+from hypothesis.hypo_fast import (FTYPE, HypoParams10D, HYPO_PARAMS_T,
+                                  event_to_hypo_params, Hypo)
 from particles import ParticleArray
 
 
@@ -57,7 +57,7 @@ NUM_SCAN_POINTS = 20
 HYPO_T = Hypo
 CMAP = 'YlGnBu_r'
 
-ABS_BOUNDS = HYPO_PARAMS_T(
+ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
     x=(-1000, 1000),
     y=(-1000, 1000),
@@ -71,7 +71,7 @@ ABS_BOUNDS = HYPO_PARAMS_T(
 )
 """Absolute bounds for scanning / minimizer to work within"""
 
-REL_BOUNDS = HYPO_PARAMS_T(
+REL_BOUNDS = HypoParams10D(
     t=(-300, 300),
     x=(-100, 100),
     y=(-100, 100),
@@ -191,7 +191,7 @@ class Events(object):
             self.pulses = Pulses(
                 strings=pulses['string'],
                 oms=pulses['om'],
-                times=pulses['times'],
+                times=pulses['time'],
                 charges=pulses['charge'],
             )
 
@@ -570,7 +570,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                 for test, ref in zip(bin_edges, ref_bin_edges):
                     assert np.array_equal(test, ref)
         else:
-            print 'No table for IC DOM depth index %i' % dom
+            print 'No table for IC DOM depth index %i found at path "%s"' % (dom, fpath)
 
         # DeepCore tables
         fpath = DC_TABLE_FPATH_PROTO % dom
@@ -587,7 +587,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                 for test, ref in zip(bin_edges, ref_bin_edges):
                     assert np.array_equal(test, ref)
         else:
-            print 'No table for IC DOM depth index %i' % dom
+            print 'No table for IC DOM depth index %i found at path "%s"' % (dom, fpath)
 
     # --- load detector geometry array ---
     detector_geometry = np.load(DETECTOR_GEOM_FILE)
@@ -619,10 +619,10 @@ def main(events_fpath, start_index=None, stop_index=None):
             lower_bounds = []
             upper_bounds = []
             for dim in MIN_DIMS:
-                if MIN_USE_RELATIVE_BOUNDS and dim in REL_BOUNDS:
+                if MIN_USE_RELATIVE_BOUNDS and REL_BOUNDS[dim] is not None:
                     nom_val = getattr(truth_params, dim)
-                    lower = nom_val + REL_BOUNDS[0]
-                    upper = nom_val + REL_BOUNDS[1]
+                    lower = nom_val + REL_BOUNDS[dim][0]
+                    upper = nom_val + REL_BOUNDS[dim][1]
                 else:
                     lower, upper = ABS_BOUNDS[dim]
                 lower_bounds.append(lower)
@@ -650,10 +650,10 @@ def main(events_fpath, start_index=None, stop_index=None):
                 nominal_params = deepcopy(truth_params)
                 scan_values = []
                 for dim in dims:
-                    if SCAN_USE_RELATIVE_BOUNDS and dim in REL_BOUNDS:
+                    if SCAN_USE_RELATIVE_BOUNDS and REL_BOUNDS[dim] is not None:
                         nom_val = getattr(nominal_params, dim)
-                        lower = nom_val + REL_BOUNDS[0]
-                        upper = nom_val + REL_BOUNDS[1]
+                        lower = nom_val + REL_BOUNDS[dim][0]
+                        upper = nom_val + REL_BOUNDS[dim][1]
                     else:
                         lower, upper = ABS_BOUNDS[dim]
                     scan_values.append(

@@ -10,5 +10,5 @@ if [ "$HOSTNAME" = unterwalden ]; then
 fi
 for i in `seq 0 15`; do
 	num=$(($offset + $i))
-	nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.0000${num}.hdf5 -i 300 &
+	nohup python likelihood/likelihood.py -f /fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.0000${num}.hdf5 -start-index 300 &
 done
