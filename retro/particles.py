@@ -21,7 +21,7 @@ class Particle(object):
     forward : bool
         if the particle should be plotted forward or backards in time
     """
-    def __init__(self, evt, t, x, y, z, zen, az, energy=None, length=None,
+    def __init__(self, evt, t, x, y, z, zenith, azimuth, energy=None, length=None,
                  pdg=None, interaction=None, forward=False, color='r',
                  linestyle='--', label=''):
         self.evt = evt
@@ -29,8 +29,8 @@ class Particle(object):
         self.x = x
         self.y = y
         self.z = z
-        self.zen = zen
-        self.az = az
+        self.zenith = zenith
+        self.azimuth = azimuth
         self.energy = energy
         self.length = length
         self.pdg = pdg
@@ -42,11 +42,11 @@ class Particle(object):
 
     @property
     def theta(self):
-        return np.pi - self.zen
+        return np.pi - self.zenith
 
     @property
     def phi(self):
-        return (self.az - np.pi)%(2*np.pi)
+        return (self.azimuth - np.pi)%(2*np.pi)
 
     @property
     def vertex(self):
@@ -107,7 +107,7 @@ class ParticleArray(object):
     Container class for particles from arrays
     get_item will just return a particle object at that position
     """
-    def __init__(self, evt, t, x, y, z, zen, az, energy=None, length=None,
+    def __init__(self, evt, t, x, y, z, zenith, azimuth, energy=None, length=None,
                  pdg=None, interaction=None, forward=False, color='r',
                  linestyle='--', label=''):
         self.evt = evt
@@ -115,8 +115,8 @@ class ParticleArray(object):
         self.x = x
         self.y = y
         self.z = z
-        self.zen = zen
-        self.az = az
+        self.zenith = zenith
+        self.azimuth = azimuth
         self.energy = energy
         self.length = length
         self.pdg = pdg
@@ -139,8 +139,8 @@ class ParticleArray(object):
                         self.x[idx],
                         self.y[idx],
                         self.z[idx],
-                        self.zen[idx],
-                        self.az[idx],
+                        self.zenith[idx],
+                        self.azimuth[idx],
                         energy,
                         length,
                         pdg,

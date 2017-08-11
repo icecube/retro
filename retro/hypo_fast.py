@@ -12,38 +12,14 @@ import time
 
 import numba # pylint: disable=unused-import
 import numpy as np
-from .sparse import Sparse
+
+from retro import (BinningCoords, FTYPE, SPEED_OF_LIGHT_M_PER_NS,
+                   HYPO_PARAMS_T, HypoParams8D, PI_BY_TWO, TrackParams)
+from sparse import Sparse
 
 
-__all__ = ['FTYPE', 'SPEED_OF_LIGHT_M_PER_NS', 'HYPO_PARAMS_T', 'HypoParams8D',
-           'HypoParams10D', 'TrackParams', 'event_to_hypo_params',
-           'hypo_to_track_params', 'power_axis', 'Track', 'Hypo']
-
-
-FTYPE = np.float32
-
-SPEED_OF_LIGHT_M_PER_NS = FTYPE(0.299792458)
-"""Speed of light in units of m/ns"""
-
-TWO_PI = FTYPE(2*np.pi)
-PI_BY_TWO = FTYPE(np.pi / 2)
-
-HypoParams8D = namedtuple(typename='HypoParams8D', # pylint: disable=invalid-name
-                          field_names=('t', 'x', 'y', 'z', 'track_azimuth',
-                                       'track_zenith', 'track_energy',
-                                       'cascade_energy'))
-
-HypoParams10D = namedtuple(typename='HypoParams10D', # pylint: disable=invalid-name
-                           field_names=('t', 'x', 'y', 'z', 'track_azimuth',
-                                        'track_zenith', 'track_energy',
-                                        'cascade_azimuth', 'cascade_zenith',
-                                        'cascade_energy'))
-
-HYPO_PARAMS_T = HypoParams8D
-
-TrackParams = namedtuple(typename='TrackParams', # pylint: disable=invalid-name
-                         field_names=('t', 'x', 'y', 'z', 'azimuth', 'zenith',
-                                      'length'))
+__all__ = ['event_to_hypo_params', 'hypo_to_track_params', 'power_axis',
+           'Track', 'Hypo']
 
 
 def event_to_hypo_params(event):
@@ -405,37 +381,24 @@ class Hypo(object):
         self.track_photons = self.track.length * self.photons_per_meter
         self.tot_photons = self.cascade_photons + self.track_photons
 
-        self.t_bin_edges = None
-        self.r_bin_edges = None
-        self.phi_bin_edges = None
-        self.theta_bin_edges = None
+        self.bin_edges = None
+        self.bin_centers = None
 
-        self.t_bin_centers = None
-        self.r_bin_centers = None
-        self.theta_bin_centers = None
-        self.phi_bin_centers = None
-
-    def set_binning(self, t_bin_edges, r_bin_edges, theta_bin_edges,
-                    phi_bin_edges):
+    def set_binning(self, bin_edges): #t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
         """Set the binning of the spherical coordinates with bin_edges.
 
         Parameters
         ----------
-        t_bin_edges
-        r_bin_edges
-        theta_bin_edges
-        phi_bin_edges
+        bin_edges : likelihood.BinningCoords namedtuple
 
         """
-        self.t_bin_edges = t_bin_edges
-        self.r_bin_edges = r_bin_edges
-        self.theta_bin_edges = theta_bin_edges
-        self.phi_bin_edges = phi_bin_edges
-
-        self.t_bin_centers = 0.5 * (t_bin_edges[:-1] + t_bin_edges[1:])
-        self.r_bin_centers = 0.5 * (r_bin_edges[:-1] + r_bin_edges[1:])
-        self.theta_bin_centers = 0.5 * (theta_bin_edges[:-1] + theta_bin_edges[1:])
-        self.phi_bin_centers = 0.5 * (phi_bin_edges[:-1] + phi_bin_edges[1:])
+        self.bin_edges = bin_edges
+        self.bin_centers = BinningCoords(
+            t=0.5 * (bin_edges.t[:-1] + bin_edges.t[1:]),
+            r=0.5 * (bin_edges.r[:-1] + bin_edges.r[1:]),
+            theta=0.5 * (bin_edges.theta[:-1] + bin_edges.theta[1:]),
+            phi=0.5 * (bin_edges.phi[:-1] + bin_edges.phi[1:])
+        )
 
     # coord. transforms
 
@@ -600,10 +563,10 @@ class Hypo(object):
             xs, ys, zs = self.track.point(ts)
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
-        sparse_dims = (len(self.t_bin_edges) - 1,
-                       len(self.r_bin_edges) - 1,
-                       len(self.theta_bin_edges) - 1,
-                       len(self.phi_bin_edges) - 1)
+        sparse_dims = (len(self.bin_edges.t) - 1,
+                       len(self.bin_edges.r) - 1,
+                       len(self.bin_edges.theta) - 1,
+                       len(self.bin_edges.phi) - 1)
 
         # the big matrix z
         n_photons = Sparse(shape=sparse_dims, default=0, dtype=FTYPE)
@@ -616,8 +579,8 @@ class Hypo(object):
         corr_loop = 0
         # iterate over time bins
         total_rho = 0
-        for k in range(len(self.t_bin_edges) - 1):
-            time_bin = [self.t_bin_edges[k], self.t_bin_edges[k+1]]
+        for k in range(len(self.bin_edges.t) - 1):
+            time_bin = [self.bin_edges.t[k], self.bin_edges.t[k+1]]
             # maximum extent:
             t_extent = self.track.extent(*time_bin)
 
@@ -662,11 +625,11 @@ class Hypo(object):
 
                 # Clalculate intervals with bin edges:
                 start_t3 = time.time()
-                theta_inter_neg = self.correlate_theta(self.theta_bin_edges, track_theta_extent_neg, rho_extent)
-                theta_inter_pos = self.correlate_theta(self.theta_bin_edges, track_theta_extent_pos, rho_extent)
-                phi_inter = self.correlate_phi(self.phi_bin_edges, track_phi_extent, rho_extent)
-                r_inter_neg = self.correlate_r(self.r_bin_edges, track_r_extent_neg, False)
-                r_inter_pos = self.correlate_r(self.r_bin_edges, track_r_extent_pos, True)
+                theta_inter_neg = self.correlate_theta(self.bin_edges.theta, track_theta_extent_neg, rho_extent)
+                theta_inter_pos = self.correlate_theta(self.bin_edges.theta, track_theta_extent_pos, rho_extent)
+                phi_inter = self.correlate_phi(self.bin_edges.phi, track_phi_extent, rho_extent)
+                r_inter_neg = self.correlate_r(self.bin_edges.r, track_r_extent_neg, False)
+                r_inter_pos = self.correlate_r(self.bin_edges.r, track_r_extent_pos, True)
                 end_t3 = time.time()
                 corr_loop += end_t3 - start_t3
 
@@ -684,7 +647,7 @@ class Hypo(object):
         for element in n_photons:
             idx, _ = element
             theta = self.track.theta
-            phi = self.phi_bin_centers[idx[-1]]
+            phi = self.bin_centers.phi[idx[-1]]
             #delta_phi = np.abs(self.track.phi - phi)%(TWO_PI)
             # calculate same way as in photon propapgation (CLsim)
             delta = np.abs(phi - self.track.phi)
@@ -705,10 +668,10 @@ class Hypo(object):
         theta0 = self.ctheta(x0, y0, z0)
         phi0 = self.cphi(x0, y0, z0)
         # find bins
-        t_bin = self.get_bin(t0, self.t_bin_edges)
-        r_bin = self.get_bin(r0, self.r_bin_edges)
-        theta_bin = self.get_bin(theta0, self.theta_bin_edges)
-        phi_bin = self.get_bin(phi0, self.phi_bin_edges)
+        t_bin = self.get_bin(t0, self.bin_edges.t)
+        r_bin = self.get_bin(r0, self.bin_edges.r)
+        theta_bin = self.get_bin(theta0, self.bin_edges.theta)
+        phi_bin = self.get_bin(phi0, self.bin_edges.phi)
         if not None in (t_bin, r_bin, theta_bin, phi_bin):
             #weighted average of corr length from track and cascade, while assume 0.5 for cascade right now
             p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average([p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5], weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons])

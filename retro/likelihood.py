@@ -13,10 +13,10 @@ At the moment, these likelihoods can be single points or 1d or 2d scans.
 from __future__ import absolute_import, division
 
 from argparse import ArgumentParser
-from collections import namedtuple
 from copy import deepcopy
 from itertools import izip, product
-from os.path import expanduser, expandvars, isfile
+import os
+from os.path import abspath, dirname, expanduser, expandvars, isfile, join
 
 import h5py
 import matplotlib as mpl
@@ -28,23 +28,28 @@ import pyfits
 from pyswarm import pso
 from scipy.special import gammaln
 
-from hypothesis.hypo_fast import (FTYPE, HypoParams10D, HYPO_PARAMS_T,
-                                  event_to_hypo_params, Hypo)
+if __name__ == '__main__' and __package__ is None:
+    os.sys.path.append(dirname(dirname(abspath(__file__))))
+from retro import (BinningCoords, Event, FTYPE, HypoParams10D, HYPO_PARAMS_T,
+                   PhotonInfo, Pulses)
+from hypo_fast import event_to_hypo_params, Hypo
 from particles import ParticleArray
 
 
 IC_TABLE_FPATH_PROTO = (
-    'tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_angles.fits'
+    '/data/icecube/retro_tables/full1000'
+    '/retro_nevts1000_IC_DOM%i_r_cz_t_angles.fits'
 )
 
 DC_TABLE_FPATH_PROTO = (
-    'tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_angles.fits'
+    '/data/icecube/retro_tables/full1000'
+    '/retro_nevts1000_DC_DOM%i_r_cz_t_angles.fits'
 )
 
 PULSE_SERIES = 'SRTInIcePulses'
 ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 SPE_RECO_NAME = 'SPEFit2'
-DETECTOR_GEOM_FILE = 'likelihood/geo_array.npy'
+DETECTOR_GEOM_FILE = join(dirname(__file__), 'data', 'geo_array.npy')
 DFLT_EVENTS_FPATH = (
     '/fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600'
     '/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5'
@@ -103,20 +108,6 @@ SCAN_DIM_SETS = (
 """Which dimensions to scan. Tuples specify 2+ dimension scans"""
 
 
-Event = namedtuple(typename='Event', # pylint: disable=invalid-name
-                   field_names=('event', 'pulses', 'interaction', 'neutrino',
-                                'track', 'cascade', 'ml_reco', 'spe_reco'))
-
-Pulses = namedtuple(typename='Pulses', # pylint: disable=invalid-name
-                    field_names=('strings', 'oms', 'times', 'charges'))
-
-PhotonInfo = namedtuple(typename='PhotonInfo', # pylint: disable=invalid-name
-                        field_names=('count', 'theta', 'phi', 'length'))
-"""Intended to contain dictionaries with DOM depth number as keys"""
-
-BinEdges = namedtuple(typename='BinEdges', # pylint: disable=invalid-name
-                      field_names=('t', 'r', 'theta', 'phi'))
-
 def expand(p):
     """Expand path"""
     return expanduser(expandvars(p))
@@ -139,12 +130,12 @@ def fill_photon_info(fpath, dom, scale=1, photon_info=None):
     Returns
     -------
     photon_info : PhotonInfo namedtuple
-    bin_edges : BinEdges namedtuple
+    bin_edges : BinningCoords namedtuple
 
     """
     # pylint: disable=no-member
     if photon_info is None:
-        photon_info = PhotonInfo(*[{}]*len(PhotonInfo._fields))
+        photon_info = PhotonInfo(*([{}]*len(PhotonInfo._fields)))
 
     with pyfits.open(expand(fpath)) as table:
         photon_info.count[dom] = table[0].data * scale
@@ -153,8 +144,8 @@ def fill_photon_info(fpath, dom, scale=1, photon_info=None):
         photon_info.length[dom] = table[3].data
 
         # Note that we invert (reverse and multiply by -1) time edges
-        bin_edges = BinEdges(t=-table[4].data[::-1], r=table[5].data,
-                             theta=table[6].data, phi=[])
+        bin_edges = BinningCoords(t=-table[4].data[::-1], r=table[5].data,
+                                  theta=table[6].data, phi=[])
 
     return photon_info, bin_edges
 
@@ -169,12 +160,12 @@ class Events(object):
 
     """
     def __init__(self, events_fpath):
-        self.load(events_fpath)
         self.events = []
         self._num_events = 0
         self.pulses = None
         self.pulse_event_boundaries = None
         self.int_type = None
+        self.load(events_fpath)
 
     def load(self, events_fpath):
         """Load events from file, populating `self`.
@@ -185,7 +176,9 @@ class Events(object):
             Path to HDF5 file
 
         """
+        print 'loading events from path "%s"' % events_fpath
         with h5py.File(expand(events_fpath)) as h5:
+            print h5
             pulses = h5[PULSE_SERIES]
             pulse_events = pulses['Event']
             self.pulses = Pulses(
@@ -211,8 +204,8 @@ class Events(object):
                 x=nu['x'],
                 y=nu['y'],
                 z=nu['z'],
-                zen=nu['zenith'],
-                az=nu['azimuth'],
+                zenith=nu['zenith'],
+                azimuth=nu['azimuth'],
                 energy=nu['energy'],
                 length=None,
                 pdg=nu['type'],
@@ -227,8 +220,8 @@ class Events(object):
                 x=mu['x'],
                 y=mu['y'],
                 z=mu['z'],
-                zen=mu['zenith'],
-                az=mu['azimuth'],
+                zenith=mu['zenith'],
+                azimuth=mu['azimuth'],
                 energy=mu['energy'],
                 length=mu['length'],
                 forward=True,
@@ -243,8 +236,8 @@ class Events(object):
                 x=cascade['x'],
                 y=cascade['y'],
                 z=cascade['z'],
-                zen=cascade['zenith'],
-                az=cascade['azimuth'],
+                zenith=cascade['zenith'],
+                azimuth=cascade['azimuth'],
                 energy=cascade['energy'],
                 length=None,
                 color='y',
@@ -257,8 +250,8 @@ class Events(object):
                 x=reco['x'],
                 y=reco['y'],
                 z=reco['z'],
-                zen=reco['zenith'],
-                az=reco['azimuth'],
+                zenith=reco['zenith'],
+                azimuth=reco['azimuth'],
                 energy=reco['energy'],
                 length=None,
                 color='g',
@@ -271,8 +264,8 @@ class Events(object):
                 x=reco['x'],
                 y=reco['y'],
                 z=reco['z'],
-                zen=reco['zenith'],
-                az=reco['azimuth'],
+                zenith=reco['zenith'],
+                azimuth=reco['azimuth'],
                 color='m',
                 label='SPE'
             )
@@ -337,7 +330,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
     n_noise = 0
 
     # Loop over pulses (aka hits)
-    for string, om, pulse_time, pulse_charge in izip(event.pulses):
+    for string, om, pulse_time, pulse_charge in izip(*event.pulses):
         x, y, z = detector_geometry[string, om]
 
         # Get the photon expectations of the hypothesis in the DOM-hit
@@ -424,7 +417,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
     return llh
 
 
-def scan(llh_func, event, dims, scan_values, nominal_params=None,
+def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
          llh_func_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
 
@@ -497,8 +490,8 @@ def scan(llh_func, event, dims, scan_values, nominal_params=None,
             params[pidx] = pval
             uniques[idx].add(pval)
 
-        hypo = HYPO_PARAMS_T(params=params, cascade_e_scale=CASCADE_E_SCALE,
-                             track_e_scale=TRACK_E_SCALE)
+        hypo = HYPO_T(params=params, cascade_e_scale=CASCADE_E_SCALE,
+                      track_e_scale=TRACK_E_SCALE)
         llh = llh_func(hypo, event, **llh_func_kwargs)
         all_llh.append(llh)
 
@@ -529,6 +522,8 @@ def main(events_fpath, start_index=None, stop_index=None):
     # pylint: disable=no-member
     #events_file_basename, _ = splitext(basename(events_fpath))
     events = Events(events_fpath)
+
+    print '%d events found' % len(events)
 
     # --- load tables ---
 
@@ -578,7 +573,7 @@ def main(events_fpath, start_index=None, stop_index=None):
             dc_photon_info, bin_edges = fill_photon_info(
                 fpath=fpath,
                 dom=dom,
-                scale=norm*dom_eff_dc,
+                scale=norm * dom_eff_dc,
                 photon_info=dc_photon_info
             )
             if ref_bin_edges is None:
@@ -588,6 +583,10 @@ def main(events_fpath, start_index=None, stop_index=None):
                     assert np.array_equal(test, ref)
         else:
             print 'No table for IC DOM depth index %i found at path "%s"' % (dom, fpath)
+
+    bin_edges = BinningCoords(t=bin_edges.t, r=bin_edges.r,
+                              theta=bin_edges.theta,
+                              phi=np.linspace(0, 2*np.pi))
 
     # --- load detector geometry array ---
     detector_geometry = np.load(DETECTOR_GEOM_FILE)
@@ -602,11 +601,15 @@ def main(events_fpath, start_index=None, stop_index=None):
                                dc_photon_info=dc_photon_info)
 
         truth_params = event_to_hypo_params(event)
-        llh_truth = get_llh(hypo=HYPO_PARAMS_T(truth_params), **llh_func_kwargs)
+        truth_hypo = HYPO_T(params=truth_params,
+                            cascade_e_scale=CASCADE_E_SCALE,
+                            track_e_scale=TRACK_E_SCALE)
+        truth_hypo.set_binning(bin_edges)
+        llh_truth = get_llh(hypo=truth_hypo, **llh_func_kwargs)
+        print 'llh at truth = %.2f' % llh_truth
 
         if MIN_DIMS:
             print 'Will minimize following dimension(s): %s' % MIN_DIMS
-            print 'llh at truth = %.2f' % llh_truth
 
             variable_dims = []
             fixed_dims = []
@@ -643,6 +646,7 @@ def main(events_fpath, start_index=None, stop_index=None):
             #print 'with llh = %.2f\n' % fopt1
 
         if SCAN_DIM_SETS:
+            print 'Will scan following sets of dimensions: %s' % SCAN_DIM_SETS
             for dims in SCAN_DIM_SETS:
                 if isinstance(dims, basestring):
                     dims = [dims]
@@ -661,7 +665,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                     )
 
                 llh = scan(llh_func=get_llh, event=event, dims=dims,
-                           scan_values=scan_values,
+                           scan_values=scan_values, bin_edges=bin_edges,
                            nominal_params=nominal_params,
                            llh_func_kwargs=llh_func_kwargs)
 
@@ -758,8 +762,7 @@ def parse_args(description=__doc__):
     """Parse command line arguments"""
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '-f', '--file', metavar='H5_FILE', type=str,
-        default=DFLT_EVENTS_FPATH,
+        '-f', '--file', metavar='H5_FILE', type=str, required=True,
         help='''Events HDF5 file, containing (string, DOM, charge, time per
         event)''',
     )
