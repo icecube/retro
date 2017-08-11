@@ -1,16 +1,29 @@
+"""
+"""
+
+
+from __future__ import absolute_import, division
+
 import numpy as np
 
-# speed of light
-c = 0.29979 # m/ns
 
-class particle(object):
+__all__ = ['SPEED_OF_LIGHT', 'Particle', 'ParticleArray']
+
+
+SPEED_OF_LIGHT = 0.29979
+"""speed of light in units of m/ns"""
+
+
+class Particle(object):
     """
     class to contain a particle and useful properties
-    
+
     forward : bool
         if the particle should be plotted forward or backards in time
     """
-    def __init__(self,evt,t,x,y,z,zen,az,energy=None,length=None,pdg=None,interaction=None,forward=False, color='r', linestyle='--',label=''):
+    def __init__(self, evt, t, x, y, z, zen, az, energy=None, length=None,
+                 pdg=None, interaction=None, forward=False, color='r',
+                 linestyle='--', label=''):
         self.evt = evt
         self.t = t
         self.x = x
@@ -36,7 +49,7 @@ class particle(object):
         return (self.az - np.pi)%(2*np.pi)
 
     @property
-    def v(self):
+    def vertex(self):
         return np.array([self.t, self.x, self.y, self.z])
 
     @property
@@ -47,11 +60,11 @@ class particle(object):
     # deltas
     @property
     def dx(self):
-        return np.sin(self.theta)*np.cos(self.phi) 
+        return np.sin(self.theta)*np.cos(self.phi)
 
     @property
     def dy(self):
-        return np.sin(self.theta)*np.sin(self.phi) 
+        return np.sin(self.theta)*np.sin(self.phi)
 
     @property
     def dz(self):
@@ -65,35 +78,37 @@ class particle(object):
     @property
     def lt(self):
         if self.forward:
-            return [self.t, self.t + self.dt/c]
-        return [self.t - self.dt/c ,self.t]
+            return [self.t, self.t + self.dt/SPEED_OF_LIGHT]
+        return [self.t - self.dt / SPEED_OF_LIGHT, self.t]
     @property
     def lx(self):
         if self.forward:
             return [self.x, self.x + self.dt*self.dx]
-        return [self.x - self.dt*self.dx ,self.x]
+        return [self.x - self.dt * self.dx, self.x]
     @property
     def ly(self):
         if self.forward:
             return [self.y, self.y + self.dt*self.dy]
-        return [self.y - self.dt*self.dy ,self.y]
+        return [self.y - self.dt * self.dy, self.y]
     @property
     def lz(self):
         if self.forward:
             return [self.z, self.z + self.dt*self.dz]
-        return [self.z - self.dt*self.dz ,self.z]
+        return [self.z - self.dt * self.dz, self.z]
 
     @property
     def line(self):
         return [self.lt, self.lx, self.ly, self.lz]
 
 
-class particle_array(object):
+class ParticleArray(object):
     """
     Container class for particles from arrays
     get_item will just return a particle object at that position
     """
-    def __init__(self,evt,t,x,y,z,zen,az,energy=None,length=None,pdg=None,interaction=None,forward=False, color='r', linestyle='--',label=''):
+    def __init__(self, evt, t, x, y, z, zen, az, energy=None, length=None,
+                 pdg=None, interaction=None, forward=False, color='r',
+                 linestyle='--', label=''):
         self.evt = evt
         self.t = t
         self.x = x
@@ -114,8 +129,11 @@ class particle_array(object):
         energy = None if self.energy is None else self.energy[idx]
         length = None if self.length is None else self.length[idx]
         pdg = None if self.pdg is None else self.pdg[idx]
-        interaction = None if self.interaction is None else self.interaction[idx]
-        return particle(self.evt[idx],
+        if self.interaction is None:
+            interaction = None
+        else:
+            interaction = self.interaction[idx]
+        return Particle(self.evt[idx],
                         self.t[idx],
                         self.x[idx],
                         self.y[idx],
@@ -126,12 +144,10 @@ class particle_array(object):
                         length,
                         pdg,
                         interaction,
-                        self.forward, 
-                        self.color, 
+                        self.forward,
+                        self.color,
                         self.linestyle,
                         self.label)
 
     def __len__(self):
         return len(self.evt)
-
-

@@ -1,743 +1,773 @@
-import numpy as np
-import pyfits
-import h5py
-import sys, os
-from scipy.special import gammaln
-from scipy.stats import norm
+#!/usr/bin/env python
+
+# pylint: disable=print-statement, xrange-builtin, wrong-import-position
+
+"""
+Load retro tables into RAM, then tales of icecube hdf5 files with events (hits
+series) in them as inputs and calculates lilkelihoods.
+
+At the moment, these likelihoods can be single points or 1d or 2d scans.
+"""
+
+
+from __future__ import absolute_import, division
+
 from argparse import ArgumentParser
-from hypothesis.hypo_fast import hypo, PowerAxis
-from particles import particle, particle_array
+from collections import namedtuple
+from itertools import izip
+from os.path import expanduser, expandvars, isfile
+
+import h5py
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
-import numba
+import numba # pylint: disable=unused-import
+import numpy as np
+import pyfits
 from pyswarm import pso
+from scipy.special import gammaln
+#from scipy.stats import norm
 
-'''
-This module is loading up retor tables into RAM first, and then tales icecube hdf5 files with events (hits series) inthem as inputs and calculates lilkelihoods
-These likelihoods can be single points or 1d or 2d scans at the moment.
-
-'''
-
-# cmd line arguments
-parser = ArgumentParser(description='''make 2d event pictures''')
-parser.add_argument('-f', '--file', metavar='H5_FILE', type=str, help='input HDF5 file',
-                    default='/fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5')
-parser.add_argument('-i', '--index', default=0, type=int, help='index offset for event to start with')
-args = parser.parse_args()
+from hypothesis.hypo_fast import FTYPE, HYPO_TYPE, Hypo
+from particles import ParticleArray
 
 
-# --- load tables ---
-# tables are not binned in phi, but we will do so for the hypo, therefore need to apply norm
-n_phi_bins = 20.
-norm = 1./n_phi_bins
-# correct for DOM wavelength acceptance, given cherenkov spectrum (source photons)
-# see tables/wavelegth.py
-#norm *= 0.0544243061857
-# compensate for costheta bins (40) and wavelength accepet.
-#norm = 0.0544243061857 * 40.
-# add in quantum efficiencies (?)
-dom_eff_ic = 0.25
-dom_eff_dc = 0.35
+IC_TABLE_FPATH_PROTO = (
+    'tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_angles.fits'
+)
 
-# define phi bin edges, as these are ignored in the tables (symmetry)
-phi_bin_edges = np.linspace(0, 2*np.pi, n_phi_bins+1)
+DC_TABLE_FPATH_PROTO = (
+    'tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_angles.fits'
+)
 
-# dictionarries with DOM depth number as key, separately for IceCube (IC) and DeepCore (DC)
-IC_n_phot = {}
-IC_p_theta = {}
-IC_p_phi = {}
-IC_p_length = {}
-DC_n_phot = {}
-DC_p_theta = {}
-DC_p_phi = {}
-DC_p_length = {}
-# read in the actual tables
-for dom in range(60):
-    # IC tables
-    fname = 'tables/tables/full1000/retro_nevts1000_IC_DOM%i_r_cz_t_angles.fits'%dom
-    if os.path.isfile(fname):
-        table = pyfits.open(fname)
-        IC_n_phot[dom] = table[0].data * (norm * dom_eff_ic)
-        IC_p_theta[dom] = table[1].data
-        IC_p_phi[dom] = table[2].data
-        IC_p_length[dom] = table[3].data
-    else:
-        print'No table for IC DOM %i'%dom
-    if dom == 0:
-        # first dom used to get the bin edges:
-        t_bin_edges = table[4].data
-        r_bin_edges = table[5].data
-        theta_bin_edges = table[6].data
-    else:
-        assert np.array_equal(t_bin_edges, table[4].data)
-        assert np.array_equal(r_bin_edges, table[5].data)
-        assert np.array_equal(theta_bin_edges, table[6].data)
-    # DC tables
-    fname = 'tables/tables/full1000/retro_nevts1000_DC_DOM%i_r_cz_t_angles.fits'%dom
-    if os.path.isfile(fname):
-        table = pyfits.open(fname)
-        DC_n_phot[dom] = table[0].data * (norm * dom_eff_dc)
-        DC_p_theta[dom] = table[1].data
-        DC_p_phi[dom] = table[2].data
-        DC_p_length[dom] = table[3].data
-        assert np.array_equal(t_bin_edges, table[4].data)
-        assert np.array_equal(r_bin_edges, table[5].data)
-        assert np.array_equal(theta_bin_edges, table[6].data)
-    else:
-        print'No table for DC DOM %i'%dom
+PULSE_SERIES = 'SRTInIcePulses'
+ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
+SPE_RECO_NAME = 'SPEFit2'
+DETECTOR_GEOM_FILE = 'likelihood/geo_array.npy'
+DFLT_EVENTS_FPATH = (
+    '/fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600'
+    '/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5'
+)
+N_PHI_BINS = 20
+NOISE_CHARGE = 0.00000025
+CASCADE_E_SCALE = 10 #2.
+TRACK_E_SCALE = 10 #20.
+N_SCAN_POINTS = 20
 
-# ToDo...not very nice to invert the time direction here
-t_bin_edges = - t_bin_edges[::-1]
+ABS_BOUNDS = HYPO_TYPE(
+    t=(-1000, 1e6),
+    x=(-1000, 1000),
+    y=(-1000, 1000),
+    z=(-1000, 1000),
+    track_azimuth=(0, 2*np.pi),
+    track_zenith=(-np.pi, np.pi),
+    track_energy=(0, 1e3),
+    cascade_energy=(0, 1e3),
+)
+"""Absolute bounds for scanning / minimizer to work within"""
+
+REL_BOUNDS = HYPO_TYPE(
+    t=300,
+    x=100,
+    y=100,
+    z=100,
+    track_azimuth=None,
+    track_zenith=None,
+    track_energy=None,
+    cascade_energy=None
+)
+"""Relative bounds defined about "truth" values for scanning / minimization"""
+
+MIN_USE_RELATIVE_BOUNDS = True
+"""Whether minimizer is to use relative bounds (where defined)"""
+
+SCAN_USE_RELATIVE_BOUNDS = True
+"""Whether scanning is to use relative bounds (where defined)"""
+
+MIN_DIMS = ('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
+            'track_energy')
+"""Which dimensions to plug into minimizer (dims not fixed to truth)"""
+
+SCAN_DIM_SETS = (
+    't', 'x', 'y', 'z', 'track_zenith', 'track_azimuth', 'track_energy',
+    ('t', 'x'), ('t', 'y'), ('t', 'z'), ('x', 'z'),
+    ('track_zenith', 'track_azimuth'), ('track_zenith', 'z')
+)
+"""Which dimensions to scan. Tuples specify 2+ dimension scans"""
 
 
+Event = namedtuple(typename='Event', # pylint: disable=invalid-name
+                   field_names=('event', 'pulses', 'interaction', 'neutrino',
+                                'track', 'cascade', 'ml_reco', 'spe_reco'))
 
-# --- load events ---
-f = h5py.File(args.file)
-name = args.file.split('/')[-1][:-5]
-#pulses
-var = 'SRTInIcePulses'
-p_evts = f[var]['Event']
-p_string = f[var]['string']
-p_om = f[var]['om']
-p_time = f[var]['time']
-p_charge = f[var]['charge']
+Pulses = namedtuple(typename='Pulses', # pylint: disable=invalid-name
+                    field_names=('strings', 'oms', 'times', 'charges'))
 
-# interaction type
-int_type = f['I3MCWeightDict']['InteractionType']
+PhotonInfo = namedtuple(typename='PhotonInfo', # pylint: disable=invalid-name
+                        field_names=('count', 'theta', 'phi', 'length'))
+"""Intended to contain dictionaries with DOM depth number as keys"""
 
-# true Neutrino
-neutrinos = particle_array(
-    f['trueNeutrino']['Event'],
-    f['trueNeutrino']['time'],
-    f['trueNeutrino']['x'],
-    f['trueNeutrino']['y'],
-    f['trueNeutrino']['z'],
-    f['trueNeutrino']['zenith'],
-    f['trueNeutrino']['azimuth'],
-    f['trueNeutrino']['energy'],
-    None,
-    f['trueNeutrino']['type'],
-    color='r',
-    linestyle=':',
-    label='Neutrino')
-# true track
-tracks = particle_array(
-    f['trueMuon']['Event'],
-    f['trueMuon']['time'],
-    f['trueMuon']['x'],
-    f['trueMuon']['y'],
-    f['trueMuon']['z'],
-    f['trueMuon']['zenith'],
-    f['trueMuon']['azimuth'],
-    f['trueMuon']['energy'],
-    f['trueMuon']['length'],
-    forward=True,
-    color='b',
-    linestyle='-',
-    label='track')
-# true Cascade
-cascades = particle_array(
-    f['trueCascade']['Event'],
-    f['trueCascade']['time'],
-    f['trueCascade']['x'],
-    f['trueCascade']['y'],
-    f['trueCascade']['z'],
-    f['trueCascade']['zenith'],
-    f['trueCascade']['azimuth'],
-    f['trueCascade']['energy'],
-    color='y',
-    label='cascade')
-# Multinest reco
-ML_recos = particle_array(
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['Event'],
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['time'],
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['x'],
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['y'],
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['z'],
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['zenith'],
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['azimuth'],
-    f['IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC']['energy'],
-    color='g',
-    label='Multinest')
-# SPE fit
-SPE_recos = particle_array(
-    f['SPEFit2']['Event'],
-    f['SPEFit2']['time'],
-    f['SPEFit2']['x'],
-    f['SPEFit2']['y'],
-    f['SPEFit2']['z'],
-    f['SPEFit2']['zenith'],
-    f['SPEFit2']['azimuth'],
-    color='m',
-    label='SPE')
+BinEdges = namedtuple(typename='BinEdges', # pylint: disable=invalid-name
+                      field_names=('t', 'r', 'theta', 'phi'))
 
-# --- load detector geometry array ---
-geo = np.load('likelihood/geo_array.npy')
+def expand(p):
+    """Expand path"""
+    return expanduser(expandvars(p))
 
-#@profile
-def get_llh(hypo, t, x, y, z, q, string, om):
-    #llhs = []
-    tot_llh = 0.
+
+def fill_photon_info(fpath, dom, scale=1, photon_info=None):
+    """Fill photon info namedtuple-of-dictionaries from FITS file.
+
+    Parameters
+    ----------
+    fpath : string
+    dom : int
+        Depth index (e.g. from 0 to 59)
+    norm : float
+    dom_eff : float
+    photon_info : None or PhotonInfo
+        If None, creates a new PhotonInfo namedtuple with empty dicts to fill.
+        If one is provided, the existing component dictionaries are updated.
+
+    Returns
+    -------
+    photon_info : PhotonInfo namedtuple
+    bin_edges : BinEdges namedtuple
+
+    """
+    # pylint: disable=no-member
+    if photon_info is None:
+        photon_info = PhotonInfo(*[{}]*len(PhotonInfo._fields))
+
+    with pyfits.open(expand(fpath)) as table:
+        photon_info.count[dom] = table[0].data * scale
+        photon_info.theta[dom] = table[1].data
+        photon_info.phi[dom] = table[2].data
+        photon_info.length[dom] = table[3].data
+
+        # Note that we invert (reverse and multiply by -1) time edges
+        bin_edges = BinEdges(t=-table[4].data[::-1], r=table[5].data,
+                             theta=table[6].data, phi=[])
+
+    return photon_info, bin_edges
+
+
+class Events(object):
+    """Container for events extracted from an HDF5 file.
+
+    Parameters
+    ----------
+    events_fpath : string
+        Path to HDF5 file
+
+    """
+    def __init__(self, events_fpath):
+        self.load(events_fpath)
+        self.events = []
+        self._num_events = 0
+        self.pulses = None
+        self.pulse_event_boundaries = None
+        self.int_type = None
+
+    def load(self, events_fpath):
+        """Load events from file, populating `self`.
+
+        Parameters
+        ----------
+        events_fpath : string
+            Path to HDF5 file
+
+        """
+        with h5py.File(expand(events_fpath)) as h5:
+            pulses = h5[PULSE_SERIES]
+            pulse_events = pulses['Event']
+            self.pulses = Pulses(
+                strings=pulses['string'],
+                oms=pulses['om'],
+                times=pulses['times'],
+                charges=pulses['charge'],
+            )
+
+            # Calculate the first index into the pulses array for each unique
+            # event
+            self.pulse_event_boundaries = [0]
+            self.pulse_event_boundaries.extend(
+                np.where(np.diff(pulse_events))[0]
+            )
+
+            self.interactions = h5['I3MCWeightDict']['InteractionType']
+
+            nu = h5['trueNeutrino']
+            self.neutrinos = ParticleArray(
+                evt=nu['Event'],
+                t=nu['time'],
+                x=nu['x'],
+                y=nu['y'],
+                z=nu['z'],
+                zen=nu['zenith'],
+                az=nu['azimuth'],
+                energy=nu['energy'],
+                length=None,
+                pdg=nu['type'],
+                color='r',
+                linestyle=':',
+                label='Neutrino'
+            )
+            mu = h5['trueMuon']
+            self.tracks = ParticleArray(
+                evt=mu['Event'],
+                t=mu['time'],
+                x=mu['x'],
+                y=mu['y'],
+                z=mu['z'],
+                zen=mu['zenith'],
+                az=mu['azimuth'],
+                energy=mu['energy'],
+                length=mu['length'],
+                forward=True,
+                color='b',
+                linestyle='-',
+                label='track'
+            )
+            cascade = h5['trueCascade']
+            self.cascades = ParticleArray(
+                evt=cascade['Event'],
+                t=cascade['time'],
+                x=cascade['x'],
+                y=cascade['y'],
+                z=cascade['z'],
+                zen=cascade['zenith'],
+                az=cascade['azimuth'],
+                energy=cascade['energy'],
+                length=None,
+                color='y',
+                label='cascade'
+            )
+            reco = h5[ML_RECO_NAME]
+            self.ml_recos = ParticleArray(
+                evt=reco['Event'],
+                t=reco['time'],
+                x=reco['x'],
+                y=reco['y'],
+                z=reco['z'],
+                zen=reco['zenith'],
+                az=reco['azimuth'],
+                energy=reco['energy'],
+                length=None,
+                color='g',
+                label='Multinest'
+            )
+            reco = h5[SPE_RECO_NAME]
+            self.spe_recos = ParticleArray(
+                evt=reco['Event'],
+                t=reco['time'],
+                x=reco['x'],
+                y=reco['y'],
+                z=reco['z'],
+                zen=reco['zenith'],
+                az=reco['azimuth'],
+                color='m',
+                label='SPE'
+            )
+        self.events = self.neutrinos.evt
+        self._num_events = len(self.events)
+
+    def __len__(self):
+        return self._num_events
+
+    def __iter__(self):
+        for idx in xrange(self._num_events):
+            yield self[idx]
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            # Convert slice into (start, stop, step) tuple
+            range_args = idx.indices(len(self))
+            return [self[i] for i in xrange(*range_args)]
+
+        neutrino = self.neutrinos[idx]
+        event = neutrino.evt
+        pulse_start_idx = self.pulse_event_boundaries[idx]
+        if idx < self._num_events - 1:
+            pulse_stop_idx = self.pulse_event_boundaries[idx + 1]
+        else:
+            pulse_stop_idx = None
+        slc = slice(pulse_start_idx, pulse_stop_idx)
+        event = Event(
+            event=event,
+            pulses=Pulses(
+                strings=self.pulses.strings[slc],
+                oms=self.pulses.oms[slc],
+                times=self.pulses.times[slc],
+                charges=self.pulses.charges[slc]
+            ),
+            interaction=self.interactions[idx],
+            neutrino=self.neutrinos[idx],
+            track=self.tracks[idx],
+            cascade=self.cascades[idx],
+            ml_reco=self.ml_recos[idx],
+            spe_reco=self.spe_recos[idx]
+        )
+        return event
+
+
+def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
+    """Get log likelihood.
+
+    Parameters
+    ----------
+    hypo : hypo_fast.Hypo
+    event : Event namedtuple
+    ic_photon_info : dict
+    dc_photon_info : dict
+
+    Returns
+    -------
+    llh : float
+
+    """
+    llh = 0
     n_noise = 0
-    # loop over hits
-    for hit in range(len(t)):
-        # for every DOM + hit:
-        #print 'getting matrix for hit %i'%hit
-        # t, r ,cz, phi 
-        #print 'hit at %.2f ns at (%.2f, %.2f, %.2f)'%(t[hit], x[hit], y[hit], z[hit])
 
-        # get the photon expectations of the hypothesis in the DOM-hit coordinates
-        n_phot, p_theta, p_phi, p_length = hypo.get_matrices(t[hit], x[hit], y[hit], z[hit])
-        # and also get the retro table for that hit
-        if string[hit] < 79:
+    # Loop over pulses (aka hits)
+    for string, om, pulse_time, pulse_charge in izip(event.pulses):
+        x, y, z = detector_geometry[string, om]
+
+        # Get the photon expectations of the hypothesis in the DOM-hit
+        # coordinates
+        n_phot, photon_theta, photon_phi, photon_length = hypo.get_matrices(
+            Dt=pulse_time, Dx=x, Dy=y, Dz=z
+        )
+
+        # Get the retro table for the pulse
+        retro_idx = om - 1
+        if string < 79:
             # these are ordinary icecube strings
-            n_phot_map = IC_n_phot[om[hit] - 1]
-            p_theta_map = IC_p_theta[om[hit] - 1]
-            p_phi_map = IC_p_phi[om[hit] - 1]
-            p_length_map = IC_p_length[om[hit] - 1]
+            n_phot_map = ic_photon_info.count[retro_idx]
+            photon_theta_map = ic_photon_info.theta[retro_idx]
+            photon_phi_map = ic_photon_info.phi[retro_idx]
+            photon_length_map = ic_photon_info.length[retro_idx]
         else:
             # these are deepocre strings
-            n_phot_map = DC_n_phot[om[hit] - 1]
-            p_theta_map = DC_p_theta[om[hit] - 1]
-            p_phi_map = DC_p_phi[om[hit] - 1]
-            p_length_map = DC_p_length[om[hit] - 1]
+            n_phot_map = dc_photon_info.count[retro_idx]
+            photon_theta_map = dc_photon_info.theta[retro_idx]
+            photon_phi_map = dc_photon_info.phi[retro_idx]
+            photon_length_map = dc_photon_info.length[retro_idx]
 
-        # get max llh between z_matrix and gamma_map
+        # Get max llh between z_matrix and gamma_map
         # noise probability?
-        q_noise = 0.00000025
-        expected_q = 0.
-        for element in n_phot:
-            # get hypo
-            idx, hypo_count = element
-            # these two agles need to be inverted, because we're backpropagating but want to match to forward propagating photons
-            hypo_theta = np.pi - p_theta[idx]
-            hypo_phi = np.pi - p_phi[idx]
-            hypo_legth = p_length[idx]
-            # get map
-            map_count = n_phot_map[idx[0:3]]
-            map_theta = p_theta_map[idx[0:3]]
-            map_phi = p_phi_map[idx[0:3]]
-            map_length = p_length_map[idx[0:3]]
+        expected_charge = 0
+        for photon_idx, hypo_count in n_phot:
+            # These two agles need to be inverted, because we're
+            # backpropagating but want to match to forward-propagating photons
+            hypo_theta = np.pi - photon_theta[photon_idx]
+            hypo_phi = np.pi - photon_phi[photon_idx]
+            #hypo_legth = photon_length[photon_idx]
 
-            # assume now source is totally directed at 0.73 (cherenkov angle)
+            # Get map
+            map_count = n_phot_map[photon_idx[0:3]]
+            map_theta = photon_theta_map[photon_idx[0:3]]
+            map_phi = photon_phi_map[photon_idx[0:3]]
+            map_length = photon_length_map[photon_idx[0:3]]
 
-            # accept this fraction as isotropic light
+            # Assume source is totally directed at 0.73 rad (cherenkov angle)
+
+            # Accept this fraction as isotropic light
             dir_fraction = map_length**2
-            print 'map length = ',dir_fraction
-            iso_fraction = (1. - dir_fraction)
+            print 'map length = ', dir_fraction
+            #iso_fraction = 1. - dir_fraction
 
             # whats the cos(psi) between track direction and map?
             # accept this fraction of directional light
             # this is wrong i think...
-	    #proj_dir = np.arccos((np.cos(hypo_theta)*np.cos(map_theta) + np.sin(hypo_theta)*np.sin(map_theta)*np.cos(hypo_phi - map_phi)))
-	    proj_dir = (np.cos(hypo_theta)*np.cos(map_theta) + np.sin(hypo_theta)*np.sin(map_theta)*np.cos(hypo_phi - map_phi))
+            #proj_dir = np.arccos((np.cos(hypo_theta)*np.cos(map_theta) + np.sin(hypo_theta)*np.sin(map_theta)*np.cos(hypo_phi - map_phi)))
+
+            proj_dir = (np.cos(hypo_theta) * np.cos(map_theta)
+                        + (np.sin(hypo_theta) * np.sin(map_theta)
+                           * np.cos(hypo_phi - map_phi)))
+
             #print proj_dir
-            # how close to 0.754 is it?
-            # get a weight from a gaussian
+
+            # How close to 0.754 is it? Use this to get a Gaussian weight
             delta = -proj_dir - 0.754
             accept_dir = np.exp(- delta**2 / 0.1) * dir_fraction
-            accept_iso = iso_fraction
+            #accept_iso = iso_fraction
 
-            # acceptance directed light
-            total_q = hypo_count * map_count
-            directional_q = hypo_legth * total_q 
-            isotropic_q = (1. - hypo_legth) * total_q
+            # Acceptance directed light
+            total_charge = hypo_count * map_count
+            #directional_q = hypo_legth * total_charge
+            #isotropic_q = (1. - hypo_legth) * total_charge
 
-            # factor betwen isotropic and direction light
+            # Factor betwen isotropic and direction light
             #f_iso_dir = 10.
 
-            #expected_q += directional_q * (accept_iso/f_iso_dir + accept_dir) + isotropic_q * (accept_iso + accept_dir/f_iso_dir)
-            #expected_q += directional_q * accept_dir + isotropic_q * accept_iso
-            expected_q += total_q * accept_dir
+            #expected_charge += directional_q * (accept_iso/f_iso_dir + accept_dir) + isotropic_q * (accept_iso + accept_dir/f_iso_dir)
+            #expected_charge += directional_q * accept_dir + isotropic_q * accept_iso
+            expected_charge += total_charge * accept_dir
 
-            #print 'total q ',total_q
-            #print 'directional q = ,', directional_q
-            #print 'hypo count: ', hypo_count
-            #print 'map count: ',map_count
-            #print 'accept iso = ', accept_iso
-            #print 'accept dir = ', accept_dir
-
-        #print 'expected q = %.4f'%expected_q
-        #print 'observed q = %.4f'%q[hit]
-        #print ''
-
-        if q_noise > expected_q:
+        if expected_charge < NOISE_CHARGE:
             n_noise += 1
-        expected_q = max(q_noise, expected_q)
-        llh = -(q[hit]*np.log(expected_q) - expected_q  - gammaln(q[hit]+1.))
-        #print llh
-        tot_llh += llh
-    return tot_llh, n_noise
 
-def get_6d_llh(params_6d, trck_energy, cscd_energy, trck_e_scale, cscd_e_scale, t, x, y, z, q, string, om, t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
-    ''' minimizer callable for 6d (vertex + angle) minimization)
-        params_6d : list
-            [t, x, y, z, theta, phi]
-        '''
-    my_hypo = hypo(params_6d[0], params_6d[1], params_6d[2], params_6d[3], theta=params_6d[4], phi=params_6d[5], trck_energy=trck_energy, cscd_energy=cscd_energy, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-    my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-    llh, _ = get_llh(my_hypo, t, x, y, z, q, string, om)
-    #print 'llh=%.2f at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple([llh] + [p for p in params_6d])
+        expected_charge = max(NOISE_CHARGE, expected_charge)
+        pulse_llh = -(pulse_charge * np.log(expected_charge)
+                      - expected_charge
+                      - gammaln(pulse_charge + 1))
+        llh += pulse_llh
+
     return llh
 
 
-# a super quirky way to define what to run
-do_true = False
-do_x =  False
-do_y =  False
-do_z =  False
-do_t =  False
-do_theta =  False
-do_phi =  False
-do_cscd_energy =  False
-do_trck_energy =  False
-do_xz = False
-do_thetaphi = False
-do_thetaz = False
-do_minimize = False
-#do_true = True
-#do_x =  True
-#do_y =  True
-#do_z =  True
-do_t =  True
-#do_theta =  True
-#do_phi =  True
-#do_cscd_energy =  True
-#do_trck_energy =  True
-#do_xz = True
-#do_thetaphi = True
-#do_thetaz = True
-#do_minimize = True
+def llh_scan(llh_func, event, dims, scan_values, nominal_params=None,
+             llh_func_kwargs=None):
+    """Scan likelihoods for hypotheses changing one parameter dimension.
 
-if do_minimize:
-    outfile_name = name+'.csv'
-    if os.path.isfile(outfile_name):
-        print 'File %s exists'%outfile_name
-        sys.exit()
-    with open(outfile_name, 'w') as outfile:
-        outfile.write('#event, t_true, x_true, y_true, z_true, theta_true, phi_true, trck_energy_true, cscd_energy_true, llh_true, \
-t_retro, x_retro, y_retro, z_retro, theta_retro, phi_retro, llh_retro, \
-t_mn, x_mn, y_mn, z_mn, theta_mn, phi_mn, llh_mn, \
-t_spe, x_spe, y_spe, z_spe, theta_spe, phi_spe, llh_spe\n')
+    Parameters
+    ----------
+    llh_func : callable
+        Function used to compute a likelihood. Must take ``hypo`` and ``event``
+        as first two arguments, where ``hypo`` is a :class:`hypo_fast.Hypo`
+        object and ``event`` is the argument passed here. Function must return
+        just one value (the ``llh``)
 
-# iterate through events
-for idx in xrange(args.index, len(neutrinos)):
+    event : Event
+        Event for which to get likelihoods
 
-    # ---------- read event ------------
-    evt = neutrinos[idx].evt
-    print 'working on %i'%evt
-    # find first index
-    first = np.where(p_evts == evt)[0][0]
-    # read in DOM hits
-    string = []
-    om = []
-    t = []
-    q = []
-    current_event = p_evts[first]
-    while p_evts[first] == evt:
-        string.append(p_string[first])
-        om.append(p_om[first])
-        t.append(p_time[first])
-        q.append(p_charge[first])
-        first += 1
-    string = np.array(string)
-    om = np.array(om)
-    t = np.array(t)
-    q = np.array(q)
-    # convert to x,y,z hit positions
-    x = []
-    y = []
-    z = []
-    #print geo.shape
-    for s, o in zip(string, om):
-        x.append(geo[s-1, o-1, 0])
-        y.append(geo[s-1, o-1, 1])
-        z.append(geo[s-1, o-1, 2])
-    x = np.array(x)
-    y = np.array(y)
-    z = np.array(z)
-    # -------------------------------
-    # scan vertex z-positions, eerything else at truth
+    dims : string or iterable thereof
+        One of 't', 'x', 'y', 'z', 'azimuth', 'zenith', 'cascade_energy',
+        or 'track_energy'.
 
-    # truth values
-    t_v_true = neutrinos[idx].v[0]
-    x_v_true = neutrinos[idx].v[1]
-    y_v_true = neutrinos[idx].v[2]
-    z_v_true = neutrinos[idx].v[3]
-    theta_true = neutrinos[idx].theta
-    # azimuth?
-    phi_true = neutrinos[idx].phi
-    cscd_energy_true = cascades[idx].energy
-    trck_energy_true = tracks[idx].energy
+    scan_values : iterable of floats, or iterable thereof
+        Values to set for the dimension being scanned.
 
-    print 'True event info:'
-    print 'time = %.2f ns'%t_v_true
-    print 'vertex = (%.2f, %.2f, %.2f)'%(x_v_true, y_v_true, z_v_true)
-    print 'theta, phi = (%.2f, %.2f)'%(theta_true, phi_true)
-    print 'E_cscd, E_trck (GeV) = %.2f, %.2f'%(cscd_energy_true, trck_energy_true)
-    print 'n hits = %i'%len(t)
-    print 't hits: .',t
+    nominal_params : None or HYPO_TYPE namedtuple
+        Nominal values for all param values. The value for the params being
+        scanned are irrelevant, as this is replaced with each value from
+        `scan_values`. Therefore this is optional if _all_ parameters are
+        subject to the scan.
 
-    # some factors by pure choice, since we don't have directionality yet...
-    cscd_e_scale=cscd_e_scale = 10. #2.
-    trck_e_scale=trck_e_scale = 10. #20.
+    llh_func_kwargs : mapping or None
+        Keyword arguments to pass to `get_llh` function
 
-    n_scan_points = 21
-    #cmap = 'afmhot'
-    cmap = 'YlGnBu_r'
+    Returns
+    -------
+    all_llh : numpy.ndarray (len(scan_values[0]) x len(scan_values[1]) x ...)
+        Likelihoods corresponding to each value in product(*scan_values).
 
-    if do_minimize:
-        kwargs = {}
-        kwargs['t_bin_edges'] = t_bin_edges
-        kwargs['r_bin_edges'] = r_bin_edges
-        kwargs['theta_bin_edges'] = theta_bin_edges
-        kwargs['phi_bin_edges'] = phi_bin_edges
-        kwargs['trck_energy'] = trck_energy_true
-        kwargs['trck_e_scale'] = trck_e_scale
-        kwargs['cscd_energy'] = cscd_energy_true
-        kwargs['cscd_e_scale'] = cscd_e_scale
-        kwargs['t'] = t
-        kwargs['x'] = x
-        kwargs['y'] = y
-        kwargs['z'] = z
-        kwargs['q'] = q
-        kwargs['string'] = string
-        kwargs['om'] = om
+    """
+    all_params = HYPO_TYPE._fields
 
-        # [t, x, y, z, theta, phi]
-        #lower_bounds = [t_v_true - 100, x_v_true - 50, y_v_true - 50, z_v_true - 50, max(0, theta_true - 0.5), max(0, phi_true - 1.)]
-        #upper_bounds = [t_v_true + 100, x_v_true + 50, y_v_true + 50, z_v_true + 50, min(np.pi, theta_true + 0.5), min(2*np.pi, phi_true + 1.)]
-        lower_bounds = [t_v_true - 300, x_v_true - 100, y_v_true - 100, z_v_true - 100, 0., 0.]
-        upper_bounds = [t_v_true + 300, x_v_true + 100, y_v_true + 100, z_v_true + 100, np.pi, 2*np.pi]
-        
-        truth = [t_v_true, x_v_true, y_v_true, z_v_true, theta_true, phi_true]
-        llh_truth = get_6d_llh(truth, **kwargs)
-        print 'llh at truth = %.2f'%llh_truth
+    # Need list of strings (dim names). If we just have a string, make it the
+    # first element of a single-element tuple.
+    if isinstance(dims, basestring):
+        dims = (dims,)
 
-        mn = [ML_recos[idx].v[0], ML_recos[idx].v[1], ML_recos[idx].v[2], ML_recos[idx].v[3], ML_recos[idx].theta, ML_recos[idx].phi]
-        llh_mn = get_6d_llh(mn, **kwargs)
+    # Need iterable-of-iterables-of-floats. If we have just an iterable of
+    # floats (e.g. for 1D scan), then make it the first element of a
+    # single-element tuple.
+    if np.isscalar(next(iter(scan_values))):
+        scan_values = (scan_values,)
 
-        spe = [SPE_recos[idx].v[0], SPE_recos[idx].v[1], SPE_recos[idx].v[2], SPE_recos[idx].v[3], SPE_recos[idx].theta, SPE_recos[idx].phi]
-        llh_spe = get_6d_llh(spe, **kwargs)
+    if nominal_params is None:
+        #assert len(dims) == len(all_params)
+        nominal_params = HYPO_TYPE(*([np.nan]*len(all_params)))
 
-        xopt1, fopt1 = pso(get_6d_llh, lower_bounds, upper_bounds, kwargs=kwargs, minstep=1e-5, minfunc=1e-1, debug=True)
+    # Make nominal into a list so we can mutate its values as we scan
+    params = list(nominal_params)
 
-        print 'truth at   t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple(truth)
-        print('with llh = %.2f'%llh_truth)
-        print 'optimum at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f'%tuple([p for p in xopt1])
-        print('with llh = %.2f\n'%fopt1)
+    # Storage for unique vals in each dimension, from which to determine
+    # overall dimensionality
+    uniques = [set([])] * len(dims)
 
-        outlist = [evt] + truth + [trck_energy_true, cscd_energy_true] + [llh_truth] + [p for p in xopt1] + [fopt1] + mn + [llh_mn] + spe + [llh_spe]
-        string = ", ".join([str(e) for e in outlist])
-        with open(outfile_name, 'a') as outfile:
-            outfile.write(string)
-            outfile.write('\n')
+    # Get indices for each param that we'll be changing, in the order they will
+    # be specified
+    param_indices = []
+    for dim in dims:
+        param_indices.append(all_params.index(dim))
+
+    all_llh = []
+    for param_values in product(*scan_values):
+        for idx, (pidx, pval) in enumerate(izip(param_indices, param_values)):
+            params[pidx] = pval
+            uniques[idx].add(pval)
+
+        hypo = HYPO_TYPE(params=params, cascade_e_scale=CASCADE_E_SCALE,
+                         track_e_scale=TRACK_E_SCALE)
+        llh = llh_func(hypo, event, **llh_func_kwargs)
+        all_llh.append(llh)
+
+    all_llh = np.array(all_llh, dtype=FTYPE)
+    all_llh.reshape(tuple(len(u) for u in uniques))
+
+    return all_llh
 
 
-    if do_true:
-        my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-        my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-        llh, noise  = get_llh(my_hypo, t, x, y, z, q, string, om)
+def main(events_fpath, start_index=None, stop_index=None):
+    """Perform scans and minimization for events.
 
-    if do_z:
-        # scan z pos
-        z_vs = np.linspace(z_v_true - 50, z_v_true + 50, n_scan_points)
-        llhs = []
-        noises = []
-        for z_v in z_vs:
-            print 'testing z = %.2f'%z_v
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-            noises.append(noise)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(z_vs, llhs)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('Vertex z (m)')
-        #truth
-        ax.axvline(z_v_true, color='r')
-        ax.axvline(ML_recos[idx].v[3], color='g')
-        ax.axvline(SPE_recos[idx].v[3], color='m')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('z_%s.png'%evt,dpi=150)
+    Parameters
+    ----------
+    events_fpath : string
+        Path to events HDF5 file
 
-    if do_x:
-        # scan x pos
-        x_vs = np.linspace(x_v_true - 50, x_v_true + 50, n_scan_points)
-        llhs = []
-        for x_v in x_vs:
-            print 'testing x = %.2f'%x_v
-            my_hypo = hypo(t_v_true, x_v, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(x_vs, llhs)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('Vertex x (m)')
-        #truth
-        ax.axvline(x_v_true, color='r')
-        ax.axvline(ML_recos[idx].v[1], color='g')
-        ax.axvline(SPE_recos[idx].v[1], color='m')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('x_%s.png'%evt,dpi=150)
+    start_index : None or int
+        Event index (as ordered in events file) to start on. Specify 0 or
+        `None` to start with the first event. I.e., iterate over
+        `range(start_index, stop_index)`.
 
-    if do_y:
-        # scan y pos
-        y_vs = np.linspace(y_v_true - 50, y_v_true + 50, n_scan_points)
-        llhs = []
-        for y_v in y_vs:
-            print 'testing y = %.2f'%y_v
-            my_hypo = hypo(t_v_true, x_v_true, y_v, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(y_vs, llhs)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('Vertex y (m)')
-        #truth
-        ax.axvline(y_v_true, color='r')
-        ax.axvline(ML_recos[idx].v[2], color='g')
-        ax.axvline(SPE_recos[idx].v[2], color='m')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('y_%s.png'%evt,dpi=150)
+    stop_index : None or int
+        Event index (as ordered in events file) to stop before. I.e., iterate
+        over `range(start_index, stop_index)`.
 
-    if do_t:
-        # scan t pos
-        t_vs = np.linspace(t_v_true - 200, t_v_true + 200, n_scan_points)
-        llhs = []
-        noises = []
-        for t_v in t_vs:
-            print 'testing t = %.2f'%t_v
-            my_hypo = hypo(t_v, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-            noises.append(noise)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(t_vs, llhs)
-        #ax.plot(t_vs, noises)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('Vertex t (ns)')
-        #truth
-        ax.axvline(t_v_true, color='r')
-        ax.axvline(ML_recos[idx].v[0], color='g')
-        ax.axvline(SPE_recos[idx].v[0], color='m')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('t_%s.png'%evt,dpi=150)
+    """
+    # pylint: disable=no-member
+    #events_file_basename, _ = splitext(basename(events_fpath))
+    events = Events(events_fpath)
 
-    if do_theta:
-        # scan theta
-        thetas = np.linspace(0, np.pi, n_scan_points)
-        llhs = []
-        for theta in thetas:
-            print 'testing theta = %.2f'%theta
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(thetas, llhs)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('theta (rad)')
-        #truth
-        ax.axvline(theta_true, color='r')
-        ax.axvline(ML_recos[idx].theta, color='g')
-        ax.axvline(SPE_recos[idx].theta, color='m')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('theta_%s.png'%evt,dpi=150)
+    # --- load tables ---
 
-    if do_phi:
-        # scan phi
-        phis = np.linspace(0, 2*np.pi, n_scan_points)
-        llhs = []
-        for phi in phis:
-            print 'testing phi = %.2f'%phi
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(phis, llhs)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('phi (rad)')
-        #truth
-        ax.axvline(phi_true, color='r')
-        ax.axvline(ML_recos[idx].phi, color='g')
-        ax.axvline(SPE_recos[idx].phi, color='m')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('phi_%s.png'%evt,dpi=150)
+    # Tables are not binned in phi, but we will do so for the hypo, therefore
+    # need to apply norm
+    norm = 1 / N_PHI_BINS
 
-    if do_cscd_energy:
-        # scan cscd_energy
-        cscd_energys = np.linspace(0, 5.*cscd_energy_true, n_scan_points)
-        llhs = []
-        for cscd_energy in cscd_energys:
-            print 'testing cscd_energy = %.2f'%cscd_energy
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(cscd_energys, llhs)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('cscd_energy (GeV)')
-        #truth
-        ax.axvline(cscd_energy_true, color='r')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('cscd_energy_%s.png'%evt,dpi=150)
+    # Correct for DOM wavelength acceptance, given cherenkov spectrum (source
+    # photons); see tables/wavelegth.py
+    #norm *= 0.0544243061857
 
-    if do_trck_energy:
-        # scan trck_energy
-        trck_energys = np.linspace(0, 50, n_scan_points)
-        llhs = []
-        for trck_energy in trck_energys:
-            print 'testing trck_energy = %.2f'%trck_energy
-            my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta_true, phi=phi_true, trck_energy=trck_energy, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-            my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-            llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-            llhs.append(llh)
-        plt.clf()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.plot(trck_energys, llhs)
-        ax.set_ylabel('llh')
-        ax.set_xlabel('trck_energy (GeV)')
-        #truth
-        ax.axvline(trck_energy_true, color='r')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('trck_energy_%s.png'%evt,dpi=150)
+    # Compensate for costheta bins (40) and wavelength accepet.
+    #norm = 0.0544243061857 * 40.
+
+    # Add in quantum efficiencies (?)
+    dom_eff_ic = 0.25
+    dom_eff_dc = 0.35
+
+    # Define phi bin edges, as these are ignored in the tables (symmetry)
+    phi_bin_edges = np.linspace(0, 2*np.pi, N_PHI_BINS + 1)
+
+    ic_photon_info, dc_photon_info = None, None
+
+    # Read in the actual tables
+    ref_bin_edges = None
+    for dom in range(60):
+        # IceCube (non-DeepCore) tables
+        fpath = IC_TABLE_FPATH_PROTO % dom
+        if isfile(fpath):
+            ic_photon_info, bin_edges = fill_photon_info(
+                fpath=fpath,
+                dom=dom,
+                scale=norm * dom_eff_ic,
+                photon_info=ic_photon_info
+            )
+            if ref_bin_edges is None:
+                ref_bin_edges = bin_edges
+            else:
+                for test, ref in zip(bin_edges, ref_bin_edges):
+                    assert np.array_equal(test, ref)
+        else:
+            print 'No table for IC DOM depth index %i' % dom
+
+        # DeepCore tables
+        fpath = DC_TABLE_FPATH_PROTO % dom
+        if isfile(fpath):
+            dc_photon_info, bin_edges = fill_photon_info(
+                fpath=fpath,
+                dom=dom,
+                scale=norm*dom_eff_dc,
+                photon_info=dc_photon_info
+            )
+            if ref_bin_edges is None:
+                ref_bin_edges = bin_edges
+            else:
+                for test, ref in zip(bin_edges, ref_bin_edges):
+                    assert np.array_equal(test, ref)
+        else:
+            print 'No table for IC DOM depth index %i' % dom
+
+    # --- load detector geometry array ---
+    detector_geometry = np.load(DETECTOR_GEOM_FILE)
+
+    # Iterate through events
+    for idx, event in enumerate(events[start_index:stop_index]):
+        print 'working on event #%i / event ID %d' % (idx, event.event)
+
+        # Truth values from the event
+        track = event.track
+
+        print 'True event info:'
+        print 'time = %.2f ns' % event.neutrino.t
+        print ('vertex = (%.2f, %.2f, %.2f)'
+               % (event.neutrino.x, event.neutrino.y, event.neutrino.z))
+        print ('theta, phi = (%.2f, %.2f)'
+               % (event.neutrino.theta, event.neutrino.phi))
+        print ('E_cascade, E_track (GeV) = %.2f, %.2f'
+               % (event.cascade.energy, event.track.energy))
+        print 'n hits = %i' % len(t)
+        print 't hits: .', t
+
+        cmap = 'YlGnBu_r'
+
+        llh_func_kwargs = dict(event=event,
+                               detector_geometry=detector_geometry,
+                               ic_photon_info=ic_photon_info,
+                               dc_photon_info=dc_photon_info)
+
+        truth_params = event_to_hypo_params(event)
+        llh_truth = get_llh(hypo=truth_hypo, **llh_func_kwargs)
+
+        if MIN_DIMS:
+            print 'Will minimize following dimension(s): %s' % MIN_DIMS
+            print 'llh at truth = %.2f' % llh_truth
+
+            variable_dims = []
+            fixed_dims = []
+            for dim in HYPO_TYPE._fields:
+                if dim in MIN_DIMS:
+                    variable_dims.append(dim)
+                else:
+                    fixed_dims.append(dim)
+
+            lower_bounds = []
+            upper_bounds = []
+
+            if MIN_USE_RELATIVE_BOUNDS:
+                lower_bounds = []
+                upper_bounds = []
+
+            def get_llh_partial(args):
+                pass
+
+            xopt1, fopt1 = pso(get_llh_partial, lower_bounds, upper_bounds,
+                               kwargs=llh_func_kwargs,
+                               minstep=1e-5,
+                               minfunc=1e-1,
+                               debug=True)
+
+            print 'truth at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple(truth)
+            print 'with llh = %.2f' % llh_truth
+            print 'optimum at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple([p for p in xopt1])
+            print 'with llh = %.2f\n' % fopt1
+
+        if SCAN_DIM_SETS:
+            for dims in SCAN_DIM_SETS:
+                if isinstance(dims, basestring):
+                    dims = [dims]
+
+                nominal_params = deepcopy(truth_hypo)
+                scan_values = []
+                for dim in dims:
 
 
-    if do_xz:
-        x_points = 51
-        y_points = 51
-        x_vs = np.linspace(x_v_true - 150, x_v_true + 150, x_points)
-        z_vs = np.linspace(z_v_true - 100, z_v_true + 100, y_points)
-        llhs = []
-        for z_v in z_vs:
-            for x_v in x_vs:
-                #print 'testing z = %.2f, x = %.2f'%(z_v, x_v)
-                my_hypo = hypo(t_v_true, x_v, y_v_true, z_v, theta=theta_true, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-                my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-                llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-                print ' z = %.2f, x = %.2f : llh = %.2f'%(z_v, x_v, llh)
-                llhs.append(llh)
-        plt.clf()
-        # [z, x]
-        llhs = np.array(llhs)
-        llhs = llhs.reshape(y_points, x_points)
+                llh = llh_scan(get_llh, llh_func_kwargs=llh_func_kwargs)
+                z_vs = np.linspace(neutrino.z - 50, neutrino.z + 50, N_SCAN_POINTS)
 
-        x_edges = np.linspace(x_vs[0] - np.diff(x_vs)[0]/2., x_vs[-1] + np.diff(x_vs)[0]/2., len(x_vs) + 1)
-        z_edges = np.linspace(z_vs[0] - np.diff(z_vs)[0]/2., z_vs[-1] + np.diff(z_vs)[0]/2., len(z_vs) + 1)
+                llhs = []
+                noises = []
+                for z_v in z_vs:
+                    print 'testing z = %.2f' % z_v
+                    my_hypo = Hypo(neutrino.t, neutrino.x, neutrino.y, z_v,
+                                   theta=neutrino.theta, phi=neutrino.phi,
+                                   track_energy=track.energy,
+                                   cascade_energy=cascade.energy,
+                                   cascade_e_scale=CASCADE_E_SCALE,
+                                   track_e_scale=TRACK_E_SCALE)
+                    my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges,
+                                        phi_bin_edges)
+                    llh, noise = get_llh(hypo=my_hypo, t=t, x=x, y=y, z=z, q=q,
+                                         string=strings, om=oms,
+                                         ic_photon_info=ic_photon_info,
+                                         dc_photon_info=dc_photon_info)
+                    llhs.append(llh)
+                    noises.append(noise)
 
-        xx, yy = np.meshgrid(x_edges, z_edges)
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        mg = ax.pcolormesh(xx, yy, llhs, cmap=cmap)
-        ax.set_ylabel('Vertex z (m)')
-        ax.set_xlabel('Vertex x (m)')
-        ax.set_xlim((x_edges[0], x_edges[-1]))
-        ax.set_ylim((z_edges[0], z_edges[-1]))
-        #truth
-        ax.axvline(x_v_true, color='r')
-        ax.axhline(z_v_true, color='r')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('xz_%s.png'%evt,dpi=150)
-        
-    if do_thetaphi:
-        x_points = 50
-        y_points = 50
-        theta_edges = np.linspace(0, np.pi, x_points + 1)
-        phi_edges = np.linspace(0, 2*np.pi, y_points + 1)
-        
-        thetas = 0.5 * (theta_edges[:-1] + theta_edges[1:])
-        phis = 0.5 * (phi_edges[:-1] + phi_edges[1:])
+                if not plot:
+                    return
 
-        llhs = []
-        for phi in phis:
-            for theta in thetas:
-                print 'testing phi = %.2f, theta = %.2f'%(phi, theta)
-                my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v_true, theta=theta, phi=phi, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-                my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-                llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-                print 'llh = %.2f'%llh
-                llhs.append(llh)
-        plt.clf()
-        llhs = np.array(llhs)
-        # will be [phi, theta]
-        llhs = llhs.reshape(y_points, x_points)
-        
+                plt.clf()
+                fig = plt.figure()
+                ax = fig.add_subplot(111)
+                ax.plot(z_vs, llhs)
+                ax.set_ylabel('llh')
+                ax.set_xlabel('Vertex z (m)')
+                # Truth
+                ax.axvline(neutrino.z, color='r')
+                ax.axvline(events.ml_recos[event_idx].vertex[3], color='g')
+                ax.axvline(events.spe_recos[event_idx].vertex[3], color='m')
+                ax.set_title('Event %i, E_cascade = %.2f GeV, E_track = %.2f GeV'
+                             % (evt, cascade.energy, track.energy))
+                plt.savefig('z_%s.png' % evt, dpi=150)
 
-        xx, yy = np.meshgrid(theta_edges, phi_edges)
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        mg = ax.pcolormesh(xx, yy, llhs, cmap=cmap)
-        ax.set_xlabel(r'$\theta$ (rad)')
-        ax.set_ylabel(r'$\phi$ (rad)')
-        ax.set_xlim((theta_edges[0], theta_edges[-1]))
-        ax.set_ylim((phi_edges[0], phi_edges[-1]))
-        #truth
-        ax.axvline(theta_true, color='r')
-        ax.axhline(phi_true, color='r')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('thetaphi_%s.png'%evt,dpi=150)
 
-    if do_thetaz:
-        x_points = 51
-        y_points = 51
-        theta_edges = np.linspace(0, np.pi, x_points + 1)
-        z_edges = np.linspace(z_v_true - 20, z_v_true + 20, y_points + 1)
-        
-        thetas = 0.5 * (theta_edges[:-1] + theta_edges[1:])
-        zs = 0.5 * (z_edges[:-1] + z_edges[1:])
+                #    if do_xz:
+                #        x_points = 51
+                #        y_points = 51
+                #        x_vs = np.linspace(neutrino.x - 150, neutrino.x + 150, x_points)
+                #        z_vs = np.linspace(neutrino.z - 100, neutrino.z + 100, y_points)
+                #        llhs = []
+                #        for z_v in z_vs:
+                #            for x_v in x_vs:
+                #                my_hypo = Hypo(neutrino.t, x_v, neutrino.y, z_v,
+                #                               theta=neutrino.theta, phi=neutrino.phi,
+                #                               track_energy=track.energy,
+                #                               cascade_energy=cascade.energy,
+                #                               cascade_e_scale=CASCADE_E_SCALE,
+                #                               track_e_scale=TRACK_E_SCALE)
+                #                my_hypo.set_binning(t_bin_edges, r_bin_edges,
+                #                                    theta_bin_edges, phi_bin_edges)
+                #                llh, noise = get_llh(hypo=my_hypo, t=t, x=x, y=y, z=z, q=q,
+                #                                     string=strings, om=oms,
+                #                                     ic_photon_info=ic_photon_info,
+                #                                     dc_photon_info=dc_photon_info)
+                #                print ' z = %.2f, x = %.2f : llh = %.2f' % (z_v, x_v, llh)
+                #                llhs.append(llh)
+                #        plt.clf()
+                #        # [z, x]
+                #        llhs = np.array(llhs)
+                #        llhs = llhs.reshape(y_points, x_points)
 
-        llhs = []
-        for z_v in zs:
-            for theta in thetas:
-                print 'testing z = %.2f, theta = %.2f'%(z_v, theta)
-                my_hypo = hypo(t_v_true, x_v_true, y_v_true, z_v, theta=theta, phi=phi_true, trck_energy=trck_energy_true, cscd_energy=cscd_energy_true, cscd_e_scale=cscd_e_scale, trck_e_scale=trck_e_scale)
-                my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges)
-                llh, noise = get_llh(my_hypo, t, x, y, z, q, string, om)
-                print 'llh = %.2f'%llh
-                llhs.append(llh)
-        plt.clf()
-        llhs = np.array(llhs)
-        # will be [z, theta]
-        llhs = llhs.reshape(y_points, x_points)
-        
+                #        x_edges = np.linspace(x_vs[0] - np.diff(x_vs)[0]/2.,
+                #                              x_vs[-1] + np.diff(x_vs)[0]/2.,
+                #                              len(x_vs) + 1)
+                #        z_edges = np.linspace(z_vs[0] - np.diff(z_vs)[0]/2.,
+                #                              z_vs[-1] + np.diff(z_vs)[0]/2.,
+                #                              len(z_vs) + 1)
 
-        xx, yy = np.meshgrid(theta_edges, z_edges)
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        mg = ax.pcolormesh(xx, yy, llhs, cmap=cmap)
-        ax.set_xlabel(r'$\theta$ (rad)')
-        ax.set_ylabel(r'Vertex z (m)')
-        ax.set_xlim((theta_edges[0], theta_edges[-1]))
-        ax.set_ylim((z_edges[0], z_edges[-1]))
-        #truth
-        ax.axvline(theta_true, color='r')
-        ax.axhline(z_v_true, color='r')
-        ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
-        plt.savefig('thetaz_%s.png'%evt,dpi=150)
+                #        xx, yy = np.meshgrid(x_edges, z_edges)
+                #        fig = plt.figure()
+                #        ax = fig.add_subplot(111)
+                #        ax.pcolormesh(xx, yy, llhs, cmap=cmap)
+                #        ax.set_ylabel('Vertex z (m)')
+                #        ax.set_xlabel('Vertex x (m)')
+                #        ax.set_xlim((x_edges[0], x_edges[-1]))
+                #        ax.set_ylim((z_edges[0], z_edges[-1]))
+                #        #truth
+                #        ax.axvline(neutrino.x, color='r')
+                #        ax.axhline(neutrino.z, color='r')
+                #        ax.set_title('Event %i, E_cascade = %.2f GeV, E_track = %.2f GeV'
+                #                     % (evt, cascade.energy, track.energy))
+                #        plt.savefig('xz_%s.png' % evt, dpi=150)
 
-    # exit after one event
-    #sys.exit()
-outfile.close()
+
+def parse_args(description=__doc__):
+    """Parse command line arguments"""
+    parser = ArgumentParser(description=description)
+    parser.add_argument(
+        '-f', '--file', metavar='H5_FILE', type=str,
+        default=DFLT_EVENTS_FPATH,
+        help='''Events HDF5 file, containing (string, DOM, charge, time per
+        event)''',
+    )
+    parser.add_argument(
+        '--start-index', default=None, type=int,
+        help='''Event index offset for event to start with (0-indexed)'''
+    )
+    parser.add_argument(
+        '--stop-index', default=None, type=int,
+        help='''Event index offset for event to start with (0-indexed)'''
+    )
+    args = parser.parse_args()
+    return args
+
+
+if __name__ == '__main__':
+    ARGS = parse_args()
+    main(events_fpath=ARGS.file, start_index=ARGS.start_index,
+         stop_index=ARGS.stop_index)
