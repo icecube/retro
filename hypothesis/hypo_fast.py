@@ -15,15 +15,15 @@ import numpy as np
 from .sparse import Sparse
 
 
-__all__ = ['FTYPE', 'SPEED_OF_LIGHT_M_PER_NS', 'HYPO_TYPE', 'HypoParams8D',
-           'TrackParams', 'hypo_to_track_params', 'power_axis', 'Track',
-           'Hypo']
+__all__ = ['FTYPE', 'SPEED_OF_LIGHT_M_PER_NS', 'HYPO_PARAMS_T', 'HypoParams8D',
+           'HypoParams10D', 'TrackParams', 'event_to_hypo_params',
+           'hypo_to_track_params', 'power_axis', 'Track', 'Hypo']
 
 
 FTYPE = np.float32
 
 SPEED_OF_LIGHT_M_PER_NS = FTYPE(0.299792458)
-"""Speed of light in m/ns"""
+"""Speed of light in units of m/ns"""
 
 TWO_PI = FTYPE(2*np.pi)
 PI_BY_TWO = FTYPE(np.pi / 2)
@@ -39,7 +39,7 @@ HypoParams10D = namedtuple(typename='HypoParams10D', # pylint: disable=invalid-n
                                         'cascade_azimuth', 'cascade_zenith',
                                         'cascade_energy'))
 
-HYPO_TYPE = HypoParams8D
+HYPO_PARAMS_T = HypoParams8D
 
 TrackParams = namedtuple(typename='TrackParams', # pylint: disable=invalid-name
                          field_names=('t', 'x', 'y', 'z', 'azimuth', 'zenith',
@@ -58,19 +58,19 @@ def event_to_hypo_params(event):
 
     Returns
     -------
-    params : HYPO_TYPE namedtuple
+    params : HYPO_PARAMS_T namedtuple
 
     """
-    assert HYPO_TYPE is HypoParams8D
+    assert HYPO_PARAMS_T is HypoParams8D
 
-    if event.interaction == 1: # CC
+    if event.interaction == 1: # charged current
         track_energy = event.neutrino.energy
         cascade_energy = 0
-    else:
+    else: # neutral current (2)
         track_energy = 0
         cascade_energy = event.neutrino.energy
 
-    params = HYPO_TYPE(
+    hypo_params = HYPO_PARAMS_T(
         t=event.neutrino.t,
         x=event.neutrino.x,
         y=event.neutrino.y,
@@ -81,13 +81,15 @@ def event_to_hypo_params(event):
         cascade_energy=cascade_energy
     )
 
+    return hypo_params
+
 
 def hypo_to_track_params(hypo_params):
     """Extract track params from hypo params.
 
     Parameters
     ----------
-    hypo_params : HYPO_TYPE namedtuple
+    hypo_params : HYPO_PARAMS_T namedtuple
 
     Returns
     -------
@@ -119,8 +121,8 @@ def power_axis(minval, maxval, n_bins, power):
 #@numba.jit(nopython=True, nogil=True, fastmath=True, cache=True, parallel=True)
 def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
                r_inter_pos, photons_per_meter):
-    # Fill in the Z matrix the length of the track if there is overlap of the
-    # track with a bin ... using ugly (but numba-fiable?) nested loops
+    """Fill in the Z matrix the length of the track if there is overlap of the
+    track with a bin ... using ugly (but numba-fiable?) nested loops"""
     for i in range(phi_inter.shape[0]):
         phi = phi_inter[i]
         if phi[0] < 0 and phi[1] < 0:
@@ -382,14 +384,14 @@ class Hypo(object):
 
     Parameters
     ----------
-    params : HYPO_TYPE
+    params : HYPO_PARAMS_T
 
     cascade_e_scale, track_e_scale : float
 
     """
     def __init__(self, params, cascade_e_scale=1, track_e_scale=1):
-        if not isinstance(params, HYPO_TYPE):
-            params = HYPO_TYPE(*params)
+        if not isinstance(params, HYPO_PARAMS_T):
+            params = HYPO_PARAMS_T(*params)
         self.params = params
 
         # Convert track energy to length by (ToDo check this)

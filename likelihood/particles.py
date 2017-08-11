@@ -7,11 +7,11 @@ from __future__ import absolute_import, division
 import numpy as np
 
 
-__all__ = ['SPEED_OF_LIGHT', 'Particle', 'ParticleArray']
+__all__ = ['SPEED_OF_LIGHT_M_PER_NS', 'Particle', 'ParticleArray']
 
 
-SPEED_OF_LIGHT = 0.29979
-"""speed of light in units of m/ns"""
+SPEED_OF_LIGHT_M_PER_NS = 0.299792458
+"""Speed of light in units of m/ns"""
 
 
 class Particle(object):
@@ -78,8 +78,9 @@ class Particle(object):
     @property
     def lt(self):
         if self.forward:
-            return [self.t, self.t + self.dt/SPEED_OF_LIGHT]
-        return [self.t - self.dt / SPEED_OF_LIGHT, self.t]
+            return [self.t, self.t + self.dt / SPEED_OF_LIGHT_M_PER_NS]
+        return [self.t - self.dt / SPEED_OF_LIGHT_M_PER_NS, self.t]
+
     @property
     def lx(self):
         if self.forward:

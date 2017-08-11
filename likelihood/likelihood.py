@@ -14,7 +14,8 @@ from __future__ import absolute_import, division
 
 from argparse import ArgumentParser
 from collections import namedtuple
-from itertools import izip
+from copy import deepcopy
+from itertools import izip, product
 from os.path import expanduser, expandvars, isfile
 
 import h5py
@@ -26,9 +27,9 @@ import numpy as np
 import pyfits
 from pyswarm import pso
 from scipy.special import gammaln
-#from scipy.stats import norm
 
-from hypothesis.hypo_fast import FTYPE, HYPO_TYPE, Hypo
+from hypothesis.hypo_fast import (FTYPE, HYPO_PARAMS_T, event_to_hypo_params,
+                                  Hypo)
 from particles import ParticleArray
 
 
@@ -52,9 +53,11 @@ N_PHI_BINS = 20
 NOISE_CHARGE = 0.00000025
 CASCADE_E_SCALE = 10 #2.
 TRACK_E_SCALE = 10 #20.
-N_SCAN_POINTS = 20
+NUM_SCAN_POINTS = 20
+HYPO_T = Hypo
+CMAP = 'YlGnBu_r'
 
-ABS_BOUNDS = HYPO_TYPE(
+ABS_BOUNDS = HYPO_PARAMS_T(
     t=(-1000, 1e6),
     x=(-1000, 1000),
     y=(-1000, 1000),
@@ -62,18 +65,22 @@ ABS_BOUNDS = HYPO_TYPE(
     track_azimuth=(0, 2*np.pi),
     track_zenith=(-np.pi, np.pi),
     track_energy=(0, 1e3),
-    cascade_energy=(0, 1e3),
+    cascade_azimuth=(0, 2*np.pi),
+    cascade_zenith=(-np.pi, np.pi),
+    cascade_energy=(0, 1e3)
 )
 """Absolute bounds for scanning / minimizer to work within"""
 
-REL_BOUNDS = HYPO_TYPE(
-    t=300,
-    x=100,
-    y=100,
-    z=100,
+REL_BOUNDS = HYPO_PARAMS_T(
+    t=(-300, 300),
+    x=(-100, 100),
+    y=(-100, 100),
+    z=(-100, 100),
     track_azimuth=None,
     track_zenith=None,
     track_energy=None,
+    cascade_azimuth=None,
+    cascade_zenith=None,
     cascade_energy=None
 )
 """Relative bounds defined about "truth" values for scanning / minimization"""
@@ -84,14 +91,14 @@ MIN_USE_RELATIVE_BOUNDS = True
 SCAN_USE_RELATIVE_BOUNDS = True
 """Whether scanning is to use relative bounds (where defined)"""
 
-MIN_DIMS = ('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
-            'track_energy')
+MIN_DIMS = [] #('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
+#                'track_energy')
 """Which dimensions to plug into minimizer (dims not fixed to truth)"""
 
 SCAN_DIM_SETS = (
     't', 'x', 'y', 'z', 'track_zenith', 'track_azimuth', 'track_energy',
-    ('t', 'x'), ('t', 'y'), ('t', 'z'), ('x', 'z'),
-    ('track_zenith', 'track_azimuth'), ('track_zenith', 'z')
+    #('t', 'x'), ('t', 'y'), ('t', 'z'), ('x', 'z'),
+    #('track_zenith', 'track_azimuth'), ('track_zenith', 'z')
 )
 """Which dimensions to scan. Tuples specify 2+ dimension scans"""
 
@@ -316,7 +323,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
 
     Parameters
     ----------
-    hypo : hypo_fast.Hypo
+    hypo : HYPO_T
     event : Event namedtuple
     ic_photon_info : dict
     dc_photon_info : dict
@@ -417,17 +424,17 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
     return llh
 
 
-def llh_scan(llh_func, event, dims, scan_values, nominal_params=None,
-             llh_func_kwargs=None):
+def scan(llh_func, event, dims, scan_values, nominal_params=None,
+         llh_func_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
 
     Parameters
     ----------
     llh_func : callable
         Function used to compute a likelihood. Must take ``hypo`` and ``event``
-        as first two arguments, where ``hypo`` is a :class:`hypo_fast.Hypo`
-        object and ``event`` is the argument passed here. Function must return
-        just one value (the ``llh``)
+        as first two arguments, where ``hypo`` is a HYPO_T object and ``event``
+        is the argument passed here. Function must return just one value (the
+        ``llh``)
 
     event : Event
         Event for which to get likelihoods
@@ -439,7 +446,7 @@ def llh_scan(llh_func, event, dims, scan_values, nominal_params=None,
     scan_values : iterable of floats, or iterable thereof
         Values to set for the dimension being scanned.
 
-    nominal_params : None or HYPO_TYPE namedtuple
+    nominal_params : None or HYPO_PARAMS_T namedtuple
         Nominal values for all param values. The value for the params being
         scanned are irrelevant, as this is replaced with each value from
         `scan_values`. Therefore this is optional if _all_ parameters are
@@ -454,7 +461,7 @@ def llh_scan(llh_func, event, dims, scan_values, nominal_params=None,
         Likelihoods corresponding to each value in product(*scan_values).
 
     """
-    all_params = HYPO_TYPE._fields
+    all_params = HYPO_PARAMS_T._fields
 
     # Need list of strings (dim names). If we just have a string, make it the
     # first element of a single-element tuple.
@@ -469,7 +476,7 @@ def llh_scan(llh_func, event, dims, scan_values, nominal_params=None,
 
     if nominal_params is None:
         #assert len(dims) == len(all_params)
-        nominal_params = HYPO_TYPE(*([np.nan]*len(all_params)))
+        nominal_params = HYPO_PARAMS_T(*([np.nan]*len(all_params)))
 
     # Make nominal into a list so we can mutate its values as we scan
     params = list(nominal_params)
@@ -490,8 +497,8 @@ def llh_scan(llh_func, event, dims, scan_values, nominal_params=None,
             params[pidx] = pval
             uniques[idx].add(pval)
 
-        hypo = HYPO_TYPE(params=params, cascade_e_scale=CASCADE_E_SCALE,
-                         track_e_scale=TRACK_E_SCALE)
+        hypo = HYPO_PARAMS_T(params=params, cascade_e_scale=CASCADE_E_SCALE,
+                             track_e_scale=TRACK_E_SCALE)
         llh = llh_func(hypo, event, **llh_func_kwargs)
         all_llh.append(llh)
 
@@ -589,29 +596,13 @@ def main(events_fpath, start_index=None, stop_index=None):
     for idx, event in enumerate(events[start_index:stop_index]):
         print 'working on event #%i / event ID %d' % (idx, event.event)
 
-        # Truth values from the event
-        track = event.track
-
-        print 'True event info:'
-        print 'time = %.2f ns' % event.neutrino.t
-        print ('vertex = (%.2f, %.2f, %.2f)'
-               % (event.neutrino.x, event.neutrino.y, event.neutrino.z))
-        print ('theta, phi = (%.2f, %.2f)'
-               % (event.neutrino.theta, event.neutrino.phi))
-        print ('E_cascade, E_track (GeV) = %.2f, %.2f'
-               % (event.cascade.energy, event.track.energy))
-        print 'n hits = %i' % len(t)
-        print 't hits: .', t
-
-        cmap = 'YlGnBu_r'
-
         llh_func_kwargs = dict(event=event,
                                detector_geometry=detector_geometry,
                                ic_photon_info=ic_photon_info,
                                dc_photon_info=dc_photon_info)
 
         truth_params = event_to_hypo_params(event)
-        llh_truth = get_llh(hypo=truth_hypo, **llh_func_kwargs)
+        llh_truth = get_llh(hypo=HYPO_PARAMS_T(truth_params), **llh_func_kwargs)
 
         if MIN_DIMS:
             print 'Will minimize following dimension(s): %s' % MIN_DIMS
@@ -619,7 +610,7 @@ def main(events_fpath, start_index=None, stop_index=None):
 
             variable_dims = []
             fixed_dims = []
-            for dim in HYPO_TYPE._fields:
+            for dim in HYPO_PARAMS_T._fields:
                 if dim in MIN_DIMS:
                     variable_dims.append(dim)
                 else:
@@ -627,10 +618,15 @@ def main(events_fpath, start_index=None, stop_index=None):
 
             lower_bounds = []
             upper_bounds = []
-
-            if MIN_USE_RELATIVE_BOUNDS:
-                lower_bounds = []
-                upper_bounds = []
+            for dim in MIN_DIMS:
+                if MIN_USE_RELATIVE_BOUNDS and dim in REL_BOUNDS:
+                    nom_val = getattr(truth_params, dim)
+                    lower = nom_val + REL_BOUNDS[0]
+                    upper = nom_val + REL_BOUNDS[1]
+                else:
+                    lower, upper = ABS_BOUNDS[dim]
+                lower_bounds.append(lower)
+                upper_bounds.append(upper)
 
             def get_llh_partial(args):
                 pass
@@ -641,59 +637,71 @@ def main(events_fpath, start_index=None, stop_index=None):
                                minfunc=1e-1,
                                debug=True)
 
-            print 'truth at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple(truth)
-            print 'with llh = %.2f' % llh_truth
-            print 'optimum at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple([p for p in xopt1])
-            print 'with llh = %.2f\n' % fopt1
+            #print 'truth at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple(truth)
+            #print 'with llh = %.2f' % llh_truth
+            #print 'optimum at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple([p for p in xopt1])
+            #print 'with llh = %.2f\n' % fopt1
 
         if SCAN_DIM_SETS:
             for dims in SCAN_DIM_SETS:
                 if isinstance(dims, basestring):
                     dims = [dims]
 
-                nominal_params = deepcopy(truth_hypo)
+                nominal_params = deepcopy(truth_params)
                 scan_values = []
                 for dim in dims:
+                    if SCAN_USE_RELATIVE_BOUNDS and dim in REL_BOUNDS:
+                        nom_val = getattr(nominal_params, dim)
+                        lower = nom_val + REL_BOUNDS[0]
+                        upper = nom_val + REL_BOUNDS[1]
+                    else:
+                        lower, upper = ABS_BOUNDS[dim]
+                    scan_values.append(
+                        np.linspace(lower, upper, NUM_SCAN_POINTS)
+                    )
 
+                llh = scan(llh_func=get_llh, event=event, dims=dims,
+                           scan_values=scan_values,
+                           nominal_params=nominal_params,
+                           llh_func_kwargs=llh_func_kwargs)
 
-                llh = llh_scan(get_llh, llh_func_kwargs=llh_func_kwargs)
-                z_vs = np.linspace(neutrino.z - 50, neutrino.z + 50, N_SCAN_POINTS)
+                #z_vs = np.linspace(neutrino.z - 50, neutrino.z + 50, NUM_SCAN_POINTS)
 
-                llhs = []
-                noises = []
-                for z_v in z_vs:
-                    print 'testing z = %.2f' % z_v
-                    my_hypo = Hypo(neutrino.t, neutrino.x, neutrino.y, z_v,
-                                   theta=neutrino.theta, phi=neutrino.phi,
-                                   track_energy=track.energy,
-                                   cascade_energy=cascade.energy,
-                                   cascade_e_scale=CASCADE_E_SCALE,
-                                   track_e_scale=TRACK_E_SCALE)
-                    my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges,
-                                        phi_bin_edges)
-                    llh, noise = get_llh(hypo=my_hypo, t=t, x=x, y=y, z=z, q=q,
-                                         string=strings, om=oms,
-                                         ic_photon_info=ic_photon_info,
-                                         dc_photon_info=dc_photon_info)
-                    llhs.append(llh)
-                    noises.append(noise)
+                #llhs = []
+                #noises = []
+                #for z_v in z_vs:
+                #    print 'testing z = %.2f' % z_v
+                #    my_hypo = HYPO_T(neutrino.t, neutrino.x, neutrino.y, z_v,
+                #                     theta=neutrino.theta, phi=neutrino.phi,
+                #                     track_energy=track.energy,
+                #                     cascade_energy=cascade.energy,
+                #                     cascade_e_scale=CASCADE_E_SCALE,
+                #                     track_e_scale=TRACK_E_SCALE)
+                #    my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges,
+                #                        phi_bin_edges)
+                #    llh, noise = get_llh(hypo=my_hypo, t=t, x=x, y=y, z=z, q=q,
+                #                         string=strings, om=oms,
+                #                         ic_photon_info=ic_photon_info,
+                #                         dc_photon_info=dc_photon_info)
+                #    llhs.append(llh)
+                #    noises.append(noise)
 
-                if not plot:
-                    return
+                #if not plot:
+                #    return
 
-                plt.clf()
-                fig = plt.figure()
-                ax = fig.add_subplot(111)
-                ax.plot(z_vs, llhs)
-                ax.set_ylabel('llh')
-                ax.set_xlabel('Vertex z (m)')
-                # Truth
-                ax.axvline(neutrino.z, color='r')
-                ax.axvline(events.ml_recos[event_idx].vertex[3], color='g')
-                ax.axvline(events.spe_recos[event_idx].vertex[3], color='m')
-                ax.set_title('Event %i, E_cascade = %.2f GeV, E_track = %.2f GeV'
-                             % (evt, cascade.energy, track.energy))
-                plt.savefig('z_%s.png' % evt, dpi=150)
+                #plt.clf()
+                #fig = plt.figure()
+                #ax = fig.add_subplot(111)
+                #ax.plot(z_vs, llhs)
+                #ax.set_ylabel('llh')
+                #ax.set_xlabel('Vertex z (m)')
+                ## Truth
+                #ax.axvline(neutrino.z, color='r')
+                #ax.axvline(events.ml_recos[event_idx].vertex[3], color='g')
+                #ax.axvline(events.spe_recos[event_idx].vertex[3], color='m')
+                #ax.set_title('Event %i, E_cascade = %.2f GeV, E_track = %.2f GeV'
+                #             % (evt, cascade.energy, track.energy))
+                #plt.savefig('z_%s.png' % evt, dpi=150)
 
 
                 #    if do_xz:
@@ -704,7 +712,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                 #        llhs = []
                 #        for z_v in z_vs:
                 #            for x_v in x_vs:
-                #                my_hypo = Hypo(neutrino.t, x_v, neutrino.y, z_v,
+                #                my_hypo = HYPO_T(neutrino.t, x_v, neutrino.y, z_v,
                 #                               theta=neutrino.theta, phi=neutrino.phi,
                 #                               track_energy=track.energy,
                 #                               cascade_energy=cascade.energy,
@@ -733,7 +741,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                 #        xx, yy = np.meshgrid(x_edges, z_edges)
                 #        fig = plt.figure()
                 #        ax = fig.add_subplot(111)
-                #        ax.pcolormesh(xx, yy, llhs, cmap=cmap)
+                #        ax.pcolormesh(xx, yy, llhs, cmap=CMAP)
                 #        ax.set_ylabel('Vertex z (m)')
                 #        ax.set_xlabel('Vertex x (m)')
                 #        ax.set_xlim((x_edges[0], x_edges[-1]))
