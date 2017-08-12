@@ -17,7 +17,7 @@ from retro import FTYPE, SPEED_OF_LIGHT_M_PER_NS
 
 SPEED_OF_LIGHT = SPEED_OF_LIGHT_M_PER_NS * 1e9
 TRACK_LENGTH_PER_GEV = 15 / 3.3
-PHOTONS_PER_METER = 2451.4544553
+TRACK_PHOTONS_PER_M = 2451.4544553
 CASCADE_PHOTONS_PER_GEV = 12805.3383311
 
 UITYPE = np.uint64
@@ -160,7 +160,7 @@ class SegmentedHypo(object):
 
         # Precalculate (nphotons.py) to avoid icetray
         self.cascade_photons = cascade_energy * CASCADE_PHOTONS_PER_GEV
-        self.track_photons = self.track_length * PHOTONS_PER_METER
+        self.track_photons = self.track_length * TRACK_PHOTONS_PER_M
         self.tot_photons = self.cascade_photons + self.track_photons
 
         # Defaults
@@ -205,6 +205,7 @@ class SegmentedHypo(object):
         self.phi_scaling_factor = self.n_phi_bins / np.pi / 2.
         self.phi_bin_width = 2. * np.pi / self.n_phi_bins
 
+    #@profile
     def set_dom_location(self, t_dom=0, x_dom=0, y_dom=0, z_dom=0):
         """Change the track vertex to be relative to a DOM at a given position.
 
@@ -224,19 +225,13 @@ class SegmentedHypo(object):
 
         orig_number_of_incr = self.number_of_increments
 
-        # Define bin edges
+        # Create initial time array, using the midpoints of each time increment
         incr_by_2 = self.time_increment / 2
-        self.t_start = self.t - incr_by_2
-        shifted_t_max = self.t_max - incr_by_2
-        self.number_of_increments = (
-            int(np.ceil((shifted_t_max - self.t_start) / self.time_increment))
-        )
-        self.t_stop = self.t_start + self.number_of_increments * self.time_increment
+        self.t_array_init = np.arange( self.t - incr_by_2, min(self.t_max, self.track_length / SPEED_OF_LIGHT + self.t) - incr_by_2, self.time_increment, FTYPE)
+        self.t_array_init[0] = self.t
 
-        #print 'relative start time: %.17e' % (self.t_start - self.t)
-        #print 'relative stop  time: %.17e' % (self.t_stop - self.t)
-        #print 'time increment     : %.17e' % ((self.t_stop - self.t_start) / self.number_of_increments)
-        #print 'num increments     : %d' % self.number_of_increments
+        # Set the number of time increments in the track
+        self.number_of_increments = len(self.t_array_init)
 
         # Invalidate arrays if they changed shape
         if self.number_of_increments != orig_number_of_incr:
@@ -248,17 +243,12 @@ class SegmentedHypo(object):
         positions along the track, using information from __init__.
 
         """
+        # Create array with variables
         if self.recreate_arrays:
             self.variables_array = np.empty((8, self.number_of_increments),
                                             FTYPE)
 
-        self.variables_array[T_VAR_IX, :] = np.linspace(self.t_start,
-                                                        self.t_stop,
-                                                        self.number_of_increments)
-
-        # Since we shifted by ``(time_increment / 2)``, reset first value to
-        # avoid negative times
-        self.variables_array[T_VAR_IX, 0] = self.t
+        self.variables_array[T_VAR_IX, :] = self.t_array_init
 
         relative_time = self.variables_array[T_VAR_IX, :] - self.t
 
@@ -283,7 +273,7 @@ class SegmentedHypo(object):
             self.values_array = np.empty((3, self.number_of_increments), FTYPE)
 
         # Add track photons
-        self.values_array[PHOT_VAL_IX, :] = self.segment_length * PHOTONS_PER_METER
+        self.values_array[PHOT_VAL_IX, :] = self.segment_length * TRACK_PHOTONS_PER_M
 
         # TODO: should this be += to include both track and cascade photons at
         # 0? Or are all track photons accounted for at the "bin center" which
