@@ -31,9 +31,10 @@ from scipy.special import gammaln
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, Event, FTYPE, HypoParams10D, HYPO_PARAMS_T,
-                   PhotonInfo, Pulses)
-from hypo_fast import event_to_hypo_params, Hypo
+from retro import (BinningCoords, event_to_hypo_params, Event, Events, FTYPE,
+                   HypoParams10D, HYPO_PARAMS_T, PhotonInfo, Pulses)
+import hypo_fast
+import hypo_vector
 from particles import ParticleArray
 
 
@@ -60,7 +61,7 @@ NOISE_CHARGE = 0.00000025
 CASCADE_E_SCALE = 10 #2.
 TRACK_E_SCALE = 10 #20.
 NUM_SCAN_POINTS = 20
-HYPO_T = Hypo
+HYPO_T = hypo_fast.Hypo
 CMAP = 'YlGnBu_r'
 
 ABS_BOUNDS = HypoParams10D(
@@ -150,166 +151,6 @@ def fill_photon_info(fpath, dom, scale=1, photon_info=None):
 
     return photon_info, bin_edges
 
-
-class Events(object):
-    """Container for events extracted from an HDF5 file.
-
-    Parameters
-    ----------
-    events_fpath : string
-        Path to HDF5 file
-
-    """
-    def __init__(self, events_fpath):
-        self.events = []
-        self._num_events = 0
-        self.pulses = None
-        self.pulse_event_boundaries = None
-        self.int_type = None
-        self.load(events_fpath)
-
-    def load(self, events_fpath):
-        """Load events from file, populating `self`.
-
-        Parameters
-        ----------
-        events_fpath : string
-            Path to HDF5 file
-
-        """
-        print 'loading events from path "%s"' % events_fpath
-        with h5py.File(expand(events_fpath)) as h5:
-            print h5
-            pulses = h5[PULSE_SERIES]
-            pulse_events = pulses['Event']
-            self.pulses = Pulses(
-                strings=pulses['string'],
-                oms=pulses['om'],
-                times=pulses['time'],
-                charges=pulses['charge'],
-            )
-
-            # Calculate the first index into the pulses array for each unique
-            # event
-            self.pulse_event_boundaries = [0]
-            self.pulse_event_boundaries.extend(
-                np.where(np.diff(pulse_events))[0]
-            )
-
-            self.interactions = h5['I3MCWeightDict']['InteractionType']
-
-            nu = h5['trueNeutrino']
-            self.neutrinos = ParticleArray(
-                evt=nu['Event'],
-                t=nu['time'],
-                x=nu['x'],
-                y=nu['y'],
-                z=nu['z'],
-                zenith=nu['zenith'],
-                azimuth=nu['azimuth'],
-                energy=nu['energy'],
-                length=None,
-                pdg=nu['type'],
-                color='r',
-                linestyle=':',
-                label='Neutrino'
-            )
-            mu = h5['trueMuon']
-            self.tracks = ParticleArray(
-                evt=mu['Event'],
-                t=mu['time'],
-                x=mu['x'],
-                y=mu['y'],
-                z=mu['z'],
-                zenith=mu['zenith'],
-                azimuth=mu['azimuth'],
-                energy=mu['energy'],
-                length=mu['length'],
-                forward=True,
-                color='b',
-                linestyle='-',
-                label='track'
-            )
-            cascade = h5['trueCascade']
-            self.cascades = ParticleArray(
-                evt=cascade['Event'],
-                t=cascade['time'],
-                x=cascade['x'],
-                y=cascade['y'],
-                z=cascade['z'],
-                zenith=cascade['zenith'],
-                azimuth=cascade['azimuth'],
-                energy=cascade['energy'],
-                length=None,
-                color='y',
-                label='cascade'
-            )
-            reco = h5[ML_RECO_NAME]
-            self.ml_recos = ParticleArray(
-                evt=reco['Event'],
-                t=reco['time'],
-                x=reco['x'],
-                y=reco['y'],
-                z=reco['z'],
-                zenith=reco['zenith'],
-                azimuth=reco['azimuth'],
-                energy=reco['energy'],
-                length=None,
-                color='g',
-                label='Multinest'
-            )
-            reco = h5[SPE_RECO_NAME]
-            self.spe_recos = ParticleArray(
-                evt=reco['Event'],
-                t=reco['time'],
-                x=reco['x'],
-                y=reco['y'],
-                z=reco['z'],
-                zenith=reco['zenith'],
-                azimuth=reco['azimuth'],
-                color='m',
-                label='SPE'
-            )
-        self.events = self.neutrinos.evt
-        self._num_events = len(self.events)
-
-    def __len__(self):
-        return self._num_events
-
-    def __iter__(self):
-        for idx in xrange(self._num_events):
-            yield self[idx]
-
-    def __getitem__(self, idx):
-        if isinstance(idx, slice):
-            # Convert slice into (start, stop, step) tuple
-            range_args = idx.indices(len(self))
-            return [self[i] for i in xrange(*range_args)]
-
-        neutrino = self.neutrinos[idx]
-        event = neutrino.evt
-        pulse_start_idx = self.pulse_event_boundaries[idx]
-        if idx < self._num_events - 1:
-            pulse_stop_idx = self.pulse_event_boundaries[idx + 1]
-        else:
-            pulse_stop_idx = None
-        slc = slice(pulse_start_idx, pulse_stop_idx)
-        event = Event(
-            event=event,
-            pulses=Pulses(
-                strings=self.pulses.strings[slc],
-                oms=self.pulses.oms[slc],
-                times=self.pulses.times[slc],
-                charges=self.pulses.charges[slc]
-            ),
-            interaction=self.interactions[idx],
-            neutrino=self.neutrinos[idx],
-            track=self.tracks[idx],
-            cascade=self.cascades[idx],
-            ml_reco=self.ml_recos[idx],
-            spe_reco=self.spe_recos[idx]
-        )
-        return event
 
 #@profile
 def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):

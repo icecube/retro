@@ -16,7 +16,7 @@ from retro import FTYPE, SPEED_OF_LIGHT_M_PER_NS
 
 
 SPEED_OF_LIGHT = SPEED_OF_LIGHT_M_PER_NS * 1e9
-TRACK_LENGTH_PER_GEV = 15 / 3.3
+TRACK_LENGTH_M_PER_GEV = 15 / 3.3
 TRACK_PHOTONS_PER_M = 2451.4544553
 CASCADE_PHOTONS_PER_GEV = 12805.3383311
 
@@ -156,7 +156,7 @@ class SegmentedHypo(object):
         self.speed_z = SPEED_OF_LIGHT * cos_theta_v
 
         # Cconvert track energy to length
-        self.track_length = track_energy * TRACK_LENGTH_PER_GEV
+        self.track_length = track_energy * TRACK_LENGTH_M_PER_GEV
 
         # Precalculate (nphotons.py) to avoid icetray
         self.cascade_photons = cascade_energy * CASCADE_PHOTONS_PER_GEV
@@ -227,7 +227,7 @@ class SegmentedHypo(object):
 
         # Create initial time array, using the midpoints of each time increment
         incr_by_2 = self.time_increment / 2
-        self.t_array_init = np.arange( self.t - incr_by_2, min(self.t_max, self.track_length / SPEED_OF_LIGHT + self.t) - incr_by_2, self.time_increment, FTYPE)
+        self.t_array_init = np.arange(self.t - incr_by_2, min(self.t_max, self.track_length / SPEED_OF_LIGHT + self.t) - incr_by_2, self.time_increment, FTYPE)
         self.t_array_init[0] = self.t
 
         # Set the number of time increments in the track

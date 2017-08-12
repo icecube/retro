@@ -91,7 +91,7 @@ def main():
 
     print 'total_residual = ', (z - z_matrix).sum() / z.sum()
     print ''
-    return
+    #return
 
     # Create differential matrix
     z_diff = z_matrix - z
@@ -126,7 +126,7 @@ def main():
     # plot the track as a line
     x_0, y_0, z_0 = my_hypo.track.point(my_hypo.track.t0)
     #print 'track vertex', x_0, y_0, z_0
-    x_e, y_e, z_e  = my_hypo.track.point(my_hypo.track.t0 + my_hypo.track.dt)
+    x_e, y_e, z_e = my_hypo.track.point(my_hypo.track.t0 + my_hypo.track.dt)
     ax.plot([x_0, x_e], [y_0, y_e], zs=[z_0, z_e])
     ax.plot([-plt_lim, -plt_lim], [y_0, y_e], zs=[z_0, z_e], alpha=0.3, c='k')
     ax.plot([x_0, x_e], [plt_lim, plt_lim], zs=[z_0, z_e], alpha=0.3, c='k')

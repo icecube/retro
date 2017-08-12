@@ -2,12 +2,11 @@
 Perform fast(er) exact analytical hypothesis photon expectations.
 """
 
-# pylint: disable=invalid-name, line-too-long
+# pylint: disable=print-statement, wrong-import-position, invalid-name, line-too-long
 
 
 from __future__ import absolute_import, division
 
-from collections import namedtuple
 import os
 from os.path import abspath, dirname
 import time
@@ -18,86 +17,11 @@ import numpy as np
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (BinningCoords, FTYPE, SPEED_OF_LIGHT_M_PER_NS,
-                   HYPO_PARAMS_T, HypoParams8D, PI_BY_TWO, TrackParams, TWO_PI)
+                   HYPO_PARAMS_T, hypo_to_track_params, PI_BY_TWO, TWO_PI)
 from sparse import Sparse
 
 
-__all__ = ['event_to_hypo_params', 'hypo_to_track_params', 'power_axis',
-           'Track', 'Hypo']
-
-
-def event_to_hypo_params(event):
-    """Convert an event to hypothesis params, for purposes of defining "truth"
-    hypothesis.
-
-    For now, only works with HypoParams8D.
-
-    Parameters
-    ----------
-    event : likelihood.Event namedtuple
-
-    Returns
-    -------
-    params : HYPO_PARAMS_T namedtuple
-
-    """
-    assert HYPO_PARAMS_T is HypoParams8D
-
-    track_energy = event.track.energy
-    cascade_energy = event.cascade.energy
-    #if event.interaction == 1: # charged current
-    #    track_energy = event.neutrino.energy
-    #    cascade_energy = 0
-    #else: # neutral current (2)
-    #    track_energy = 0
-    #    cascade_energy = event.neutrino.energy
-
-    hypo_params = HYPO_PARAMS_T(
-        t=event.neutrino.t,
-        x=event.neutrino.x,
-        y=event.neutrino.y,
-        z=event.neutrino.z,
-        track_azimuth=event.neutrino.azimuth,
-        track_zenith=event.neutrino.zenith,
-        track_energy=track_energy,
-        cascade_energy=cascade_energy
-    )
-
-    return hypo_params
-
-
-def hypo_to_track_params(hypo_params):
-    """Extract track params from hypo params.
-
-    Parameters
-    ----------
-    hypo_params : HYPO_PARAMS_T namedtuple
-
-    Returns
-    -------
-    track_params : TrackParams namedtuple
-
-    """
-    track_params = TrackParams(
-        t=hypo_params.t,
-        x=hypo_params.x,
-        y=hypo_params.y,
-        z=hypo_params.z,
-        zenith=hypo_params.track_zenith,
-        azimuth=hypo_params.track_azimuth,
-        length=FTYPE(15 / 3.3 * hypo_params.track_energy)
-    )
-    return track_params
-
-
-def power_axis(minval, maxval, n_bins, power):
-    """JVS's power axis, reverse engeneered"""
-    inv_power = 1/power
-    liner_edges = np.linspace(np.power(minval, inv_power),
-                              np.power(maxval, inv_power),
-                              n_bins + 1)
-    bin_edges = np.power(liner_edges, power)
-    return bin_edges
+__all__ = ['inner_loop', 'Track', 'Hypo']
 
 
 #@numba.jit(nopython=False, nogil=True, fastmath=True, cache=True, parallel=True)
