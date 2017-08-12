@@ -13,6 +13,7 @@ At the moment, these likelihoods can be single points or 1d or 2d scans.
 from __future__ import absolute_import, division
 
 from argparse import ArgumentParser
+from collections import OrderedDict
 from copy import deepcopy
 from itertools import izip, product
 import os
@@ -112,7 +113,7 @@ def expand(p):
     """Expand path"""
     return expanduser(expandvars(p))
 
-@profile
+#@profile
 def fill_photon_info(fpath, dom, scale=1, photon_info=None):
     """Fill photon info namedtuple-of-dictionaries from FITS file.
 
@@ -310,7 +311,7 @@ class Events(object):
         )
         return event
 
-@profile
+#@profile
 def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
     """Get log likelihood.
 
@@ -416,7 +417,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
 
     return llh
 
-@profile
+#@profile
 def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
          llh_func_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
@@ -505,7 +506,7 @@ def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
     return all_llh
 
 
-@profile
+#@profile
 def main(events_fpath, start_index=None, stop_index=None):
     """Perform scans and minimization for events.
 
@@ -593,7 +594,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                               theta=bin_edges.theta,
                               phi=np.linspace(0, 2*np.pi))
 
-    # --- load detector geometry array ---
+    # Load detector geometry array
     detector_geometry = np.load(DETECTOR_GEOM_FILE)
 
     # Iterate through events
@@ -611,6 +612,8 @@ def main(events_fpath, start_index=None, stop_index=None):
         truth_hypo.set_binning(bin_edges)
         llh_truth = get_llh(hypo=truth_hypo, event=event, **llh_func_kwargs)
         print 'llh at truth = %.2f' % llh_truth
+
+        min_results = None
 
         if MIN_DIMS:
             print 'Will minimize following dimension(s): %s' % MIN_DIMS
@@ -644,15 +647,13 @@ def main(events_fpath, start_index=None, stop_index=None):
                                minfunc=1e-1,
                                debug=True)
 
-            #print 'truth at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple(truth)
-            #print 'with llh = %.2f' % llh_truth
-            #print 'optimum at t=%.2f, x=%.2f, y=%.2f, z=%.2f, theta=%.2f, phi=%.2f' % tuple([p for p in xopt1])
-            #print 'with llh = %.2f\n' % fopt1
+        scan_results = None
 
         if SCAN_DIM_SETS:
             print 'Will scan following sets of dimensions: %s' % str(SCAN_DIM_SETS)
+            scan_results = OrderedDict()
             for dims in SCAN_DIM_SETS:
-                print 'Scanning dimension(s) %s...' % str(dims)
+                print 'Scanning dimension(s): %s...' % str(dims)
                 if isinstance(dims, basestring):
                     dims = [dims]
 
@@ -673,6 +674,8 @@ def main(events_fpath, start_index=None, stop_index=None):
                            scan_values=scan_values, bin_edges=bin_edges,
                            nominal_params=nominal_params,
                            llh_func_kwargs=llh_func_kwargs)
+
+                scan_results[tuple(dims)] = llh
 
                 #z_vs = np.linspace(neutrino.z - 50, neutrino.z + 50, NUM_SCAN_POINTS)
 

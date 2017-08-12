@@ -22,8 +22,8 @@ TWO_PI = FTYPE(2*np.pi)
 PI_BY_TWO = FTYPE(np.pi / 2)
 
 HypoParams8D = namedtuple(typename='HypoParams8D', # pylint: disable=invalid-name
-                          field_names=('t', 'x', 'y', 'z', 'track_azimuth',
-                                       'track_zenith', 'track_energy',
+                          field_names=('t', 'x', 'y', 'z', 'track_zenith',
+                                       'track_azimuth', 'track_energy',
                                        'cascade_energy'))
 
 HypoParams10D = namedtuple(typename='HypoParams10D', # pylint: disable=invalid-name

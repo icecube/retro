@@ -8,11 +8,15 @@ Perform fast(er) exact analytical hypothesis photon expectations.
 from __future__ import absolute_import, division
 
 from collections import namedtuple
+import os
+from os.path import abspath, dirname
 import time
 
 import numba # pylint: disable=unused-import
 import numpy as np
 
+if __name__ == '__main__' and __package__ is None:
+    os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (BinningCoords, FTYPE, SPEED_OF_LIGHT_M_PER_NS,
                    HYPO_PARAMS_T, HypoParams8D, PI_BY_TWO, TrackParams, TWO_PI)
 from sparse import Sparse
@@ -96,7 +100,7 @@ def power_axis(minval, maxval, n_bins, power):
     return bin_edges
 
 
-@numba.jit(nopython=True, nogil=True, fastmath=True, cache=True, parallel=True)
+#@numba.jit(nopython=False, nogil=True, fastmath=True, cache=True, parallel=True)
 def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
                r_inter_pos, photons_per_meter):
     """Fill in the Z matrix the length of the track if there is overlap of the
@@ -533,7 +537,7 @@ class Hypo(object):
         #print 'corr r took %.2f'%((end_t-start_t)*1000)
         return np.array(intervals, dtype=FTYPE)
 
-    @profile
+    #@profile
     def get_matrices(self, Dt=0, Dx=0, Dy=0, Dz=0):
         """Calculate the matrices for a given DOM hit, i.e.,
         DOM 3D position + hit time.
