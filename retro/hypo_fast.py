@@ -14,7 +14,7 @@ import numba # pylint: disable=unused-import
 import numpy as np
 
 from retro import (BinningCoords, FTYPE, SPEED_OF_LIGHT_M_PER_NS,
-                   HYPO_PARAMS_T, HypoParams8D, PI_BY_TWO, TrackParams)
+                   HYPO_PARAMS_T, HypoParams8D, PI_BY_TWO, TrackParams, TWO_PI)
 from sparse import Sparse
 
 
@@ -39,12 +39,14 @@ def event_to_hypo_params(event):
     """
     assert HYPO_PARAMS_T is HypoParams8D
 
-    if event.interaction == 1: # charged current
-        track_energy = event.neutrino.energy
-        cascade_energy = 0
-    else: # neutral current (2)
-        track_energy = 0
-        cascade_energy = event.neutrino.energy
+    track_energy = event.track.energy
+    cascade_energy = event.cascade.energy
+    #if event.interaction == 1: # charged current
+    #    track_energy = event.neutrino.energy
+    #    cascade_energy = 0
+    #else: # neutral current (2)
+    #    track_energy = 0
+    #    cascade_energy = event.neutrino.energy
 
     hypo_params = HYPO_PARAMS_T(
         t=event.neutrino.t,
@@ -94,7 +96,7 @@ def power_axis(minval, maxval, n_bins, power):
     return bin_edges
 
 
-#@numba.jit(nopython=True, nogil=True, fastmath=True, cache=True, parallel=True)
+@numba.jit(nopython=True, nogil=True, fastmath=True, cache=True, parallel=True)
 def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
                r_inter_pos, photons_per_meter):
     """Fill in the Z matrix the length of the track if there is overlap of the
@@ -383,6 +385,7 @@ class Hypo(object):
 
         self.bin_edges = None
         self.bin_centers = None
+        self.shape = tuple([])
 
     def set_binning(self, bin_edges): #t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
         """Set the binning of the spherical coordinates with bin_edges.
@@ -530,6 +533,7 @@ class Hypo(object):
         #print 'corr r took %.2f'%((end_t-start_t)*1000)
         return np.array(intervals, dtype=FTYPE)
 
+    @profile
     def get_matrices(self, Dt=0, Dx=0, Dy=0, Dz=0):
         """Calculate the matrices for a given DOM hit, i.e.,
         DOM 3D position + hit time.
@@ -670,8 +674,6 @@ class Hypo(object):
         theta_bin = self.get_bin(theta0, self.bin_edges.theta)
         phi_bin = self.get_bin(phi0, self.bin_edges.phi)
         if None not in (t_bin, r_bin, theta_bin, phi_bin):
-            print [p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5]
-            print [n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons]
             # Weighted average of corr length from track and cascade, while
             # assuming 0.5 for cascade right now
             p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average(

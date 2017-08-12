@@ -101,7 +101,7 @@ MIN_DIMS = [] #('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
 """Which dimensions to plug into minimizer (dims not fixed to truth)"""
 
 SCAN_DIM_SETS = (
-    't', 'x', 'y', 'z', 'track_zenith', 'track_azimuth', 'track_energy',
+    't', 'x', #'y', 'z', 'track_zenith', 'track_azimuth', 'track_energy',
     #('t', 'x'), ('t', 'y'), ('t', 'z'), ('x', 'z'),
     #('track_zenith', 'track_azimuth'), ('track_zenith', 'z')
 )
@@ -112,7 +112,7 @@ def expand(p):
     """Expand path"""
     return expanduser(expandvars(p))
 
-
+@profile
 def fill_photon_info(fpath, dom, scale=1, photon_info=None):
     """Fill photon info namedtuple-of-dictionaries from FITS file.
 
@@ -310,7 +310,7 @@ class Events(object):
         )
         return event
 
-
+@profile
 def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
     """Get log likelihood.
 
@@ -374,7 +374,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
 
             # Accept this fraction as isotropic light
             dir_fraction = map_length**2
-            print 'map length = ', dir_fraction
+            #print 'map length = ', dir_fraction
             #iso_fraction = 1. - dir_fraction
 
             # whats the cos(psi) between track direction and map?
@@ -416,7 +416,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
 
     return llh
 
-
+@profile
 def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
          llh_func_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
@@ -454,6 +454,9 @@ def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
         Likelihoods corresponding to each value in product(*scan_values).
 
     """
+    if llh_func_kwargs is None:
+        llh_func_kwargs = {}
+
     all_params = HYPO_PARAMS_T._fields
 
     # Need list of strings (dim names). If we just have a string, make it the
@@ -492,6 +495,7 @@ def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
 
         hypo = HYPO_T(params=params, cascade_e_scale=CASCADE_E_SCALE,
                       track_e_scale=TRACK_E_SCALE)
+        hypo.set_binning(bin_edges)
         llh = llh_func(hypo, event, **llh_func_kwargs)
         all_llh.append(llh)
 
@@ -501,6 +505,7 @@ def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
     return all_llh
 
 
+@profile
 def main(events_fpath, start_index=None, stop_index=None):
     """Perform scans and minimization for events.
 
@@ -595,8 +600,7 @@ def main(events_fpath, start_index=None, stop_index=None):
     for idx, event in enumerate(events[start_index:stop_index]):
         print 'working on event #%i / event ID %d' % (idx, event.event)
 
-        llh_func_kwargs = dict(event=event,
-                               detector_geometry=detector_geometry,
+        llh_func_kwargs = dict(detector_geometry=detector_geometry,
                                ic_photon_info=ic_photon_info,
                                dc_photon_info=dc_photon_info)
 
@@ -605,7 +609,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                             cascade_e_scale=CASCADE_E_SCALE,
                             track_e_scale=TRACK_E_SCALE)
         truth_hypo.set_binning(bin_edges)
-        llh_truth = get_llh(hypo=truth_hypo, **llh_func_kwargs)
+        llh_truth = get_llh(hypo=truth_hypo, event=event, **llh_func_kwargs)
         print 'llh at truth = %.2f' % llh_truth
 
         if MIN_DIMS:
@@ -622,12 +626,12 @@ def main(events_fpath, start_index=None, stop_index=None):
             lower_bounds = []
             upper_bounds = []
             for dim in MIN_DIMS:
-                if MIN_USE_RELATIVE_BOUNDS and REL_BOUNDS[dim] is not None:
+                if MIN_USE_RELATIVE_BOUNDS and getattr(REL_BOUNDS, dim) is not None:
                     nom_val = getattr(truth_params, dim)
-                    lower = nom_val + REL_BOUNDS[dim][0]
-                    upper = nom_val + REL_BOUNDS[dim][1]
+                    lower = nom_val + getattr(REL_BOUNDS, dim)[0]
+                    upper = nom_val + getattr(REL_BOUNDS, dim)[1]
                 else:
-                    lower, upper = ABS_BOUNDS[dim]
+                    lower, upper = getattr(ABS_BOUNDS, dim)
                 lower_bounds.append(lower)
                 upper_bounds.append(upper)
 
@@ -646,20 +650,21 @@ def main(events_fpath, start_index=None, stop_index=None):
             #print 'with llh = %.2f\n' % fopt1
 
         if SCAN_DIM_SETS:
-            print 'Will scan following sets of dimensions: %s' % SCAN_DIM_SETS
+            print 'Will scan following sets of dimensions: %s' % str(SCAN_DIM_SETS)
             for dims in SCAN_DIM_SETS:
+                print 'Scanning dimension(s) %s...' % str(dims)
                 if isinstance(dims, basestring):
                     dims = [dims]
 
                 nominal_params = deepcopy(truth_params)
                 scan_values = []
                 for dim in dims:
-                    if SCAN_USE_RELATIVE_BOUNDS and REL_BOUNDS[dim] is not None:
+                    if SCAN_USE_RELATIVE_BOUNDS and getattr(REL_BOUNDS, dim) is not None:
                         nom_val = getattr(nominal_params, dim)
-                        lower = nom_val + REL_BOUNDS[dim][0]
-                        upper = nom_val + REL_BOUNDS[dim][1]
+                        lower = nom_val + getattr(REL_BOUNDS, dim)[0]
+                        upper = nom_val + getattr(REL_BOUNDS, dim)[1]
                     else:
-                        lower, upper = ABS_BOUNDS[dim]
+                        lower, upper = getattr(ABS_BOUNDS, dim)
                     scan_values.append(
                         np.linspace(lower, upper, NUM_SCAN_POINTS)
                     )
