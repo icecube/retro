@@ -164,7 +164,7 @@ class Track(object):
         """return point on track for a given time"""
         # make sure time is valid
         assert (self.t0 <= t) and (t <= self.t0 + self.dt)
-        dt = (t - self.t0)
+        dt = t - self.t0
         dr = SPEED_OF_LIGHT_M_PER_NS * dt
         x = self.x0 + dr * self.sintheta * self.cosphi
         y = self.y0 + dr * self.sintheta * self.sinphi
@@ -187,10 +187,11 @@ class Track(object):
             return self._tb
 
         self._tb = (
-            self.t0 - (self.x0 * self.sintheta * self.cosphi
-                       + self.y0 * self.sintheta * self.sinphi
-                       + self.z0 * self.costheta)
-        ) / SPEED_OF_LIGHT_M_PER_NS
+            self.t0
+            - (self.x0 * self.sintheta * self.cosphi
+               + self.y0 * self.sintheta * self.sinphi
+               + self.z0 * self.costheta) / SPEED_OF_LIGHT_M_PER_NS
+        )
 
         return self._tb
 
@@ -205,11 +206,11 @@ class Track(object):
                 or self.zenith == np.pi):
             return self.t0
 
-        rho = ((- self.costheta * (self.x0*self.x0 + self.y0*self.y0)
+        rho = ((- self.costheta * (self.x0**2 + self.y0**2)
                 + self.sintheta * self.z0 * (self.x0 * self.cosphi + self.y0 * self.sinphi))
                /
                (+ self.sintheta * self.costheta * (self.x0 * self.cosphi + self.y0 * self.sinphi)
-                - self.z0 * self.sintheta*self.sintheta))
+                - self.z0 * (self.sintheta**2)))
 
         self._ts = self.t0 + rho / SPEED_OF_LIGHT_M_PER_NS
 
@@ -236,11 +237,11 @@ class Track(object):
 
     def get_M(self, T):
         """helper function"""
-        S = (- self.x0*self.x0 * self.sintheta*self.sintheta * self.sinphi*self.sinphi
-             - self.y0*self.y0 * self.cosphi*self.cosphi * self.sintheta*self.sintheta
-             + 2*self.x0 * self.y0 * self.sinphi * self.sintheta*self.sintheta * self.cosphi
-             + np.tan(T)**2 * (+ (self.x0*self.x0 + self.y0*self.y0) * self.costheta*self.costheta
-                               + self.z0*self.z0 * self.sintheta*self.sintheta
+        S = (- self.x0**2 * self.sintheta**2 * self.sinphi**2
+             - self.y0**2 * self.cosphi**2 * self.sintheta**2
+             + 2*self.x0 * self.y0 * self.sinphi * self.sintheta**2 * self.cosphi
+             + np.tan(T)**2 * (+ (self.x0**2 + self.y0**2) * self.costheta**2
+                               + self.z0**2 * self.sintheta**2
                                - 2*self.z0 * self.sintheta * self.costheta * (
                                    self.x0 * self.cosphi + self.y0 * self.sinphi
                                )))
@@ -251,7 +252,7 @@ class Track(object):
     def rho_of_theta_neg(self, T):
         """track parameter rho for a given theta, solution 1"""
         M = self.get_M(T)
-        d = -self.sintheta*self.sintheta + self.costheta*self.costheta * np.tan(T)**2
+        d = -self.sintheta**2 + self.costheta**2 * np.tan(T)**2
         if d == 0:
             return np.inf
 
@@ -265,7 +266,7 @@ class Track(object):
     def rho_of_theta_pos(self, T):
         """track parameter rho for a given theta, solution 2"""
         M = self.get_M(T)
-        d = -self.sintheta*self.sintheta + self.costheta*self.costheta * np.tan(T)**2
+        d = -self.sintheta**2 + self.costheta**2 * np.tan(T)**2
         if d == 0:
             return np.inf
 
@@ -273,16 +274,17 @@ class Track(object):
                + self.y0 * self.sinphi * self.sintheta
                - self.z0 * self.costheta * np.tan(T)**2
                - M) / d
+
         return rho
 
     def get_A(self, R):
         """helper function"""
         S = (
-            R*R
-            + self.x0*self.x0 * (self.cosphi*self.cosphi * self.sintheta*self.sintheta - 1)
-            + self.y0*self.y0 * (self.sinphi*self.sinphi * self.sintheta*self.sintheta - 1)
-            + self.z0*self.z0 * (self.costheta*self.costheta - 1)
-            + 2*self.x0 * self.y0 * self.sinphi * self.sintheta*self.sintheta * self.cosphi
+            R**2
+            + self.x0**2 * (self.cosphi**2 * self.sintheta**2 - 1)
+            + self.y0**2 * (self.sinphi**2 * self.sintheta**2 - 1)
+            + self.z0**2 * (self.costheta**2 - 1)
+            + 2*self.x0 * self.y0 * self.sinphi * self.sintheta**2 * self.cosphi
             + 2*self.x0 * self.z0 * self.cosphi * self.sintheta * self.costheta
             + 2*self.y0 * self.z0 * self.sinphi * self.sintheta * self.costheta
         )
