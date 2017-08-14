@@ -182,10 +182,10 @@ class SegmentedHypo(object):
 
         self.origin = coord
 
-        self.t = self.t - coord.t
-        self.x = self.x - coord.x
-        self.y = self.y - coord.y
-        self.z = self.z - coord.z
+        self.t = self.t - self.origin.t
+        self.x = self.x - self.origin.x
+        self.y = self.y - self.origin.y
+        self.z = self.z - self.origin.z
 
         orig_number_of_incr = self.number_of_increments
 
@@ -211,7 +211,7 @@ class SegmentedHypo(object):
 
         if self.recreate_arrays:
             self.indices_array = np.empty(
-                (4, self.number_of_increments),
+                (len(BinningCoords._fields), self.number_of_increments),
                 UITYPE
             )
             self.values_array = np.empty(
@@ -252,7 +252,7 @@ class SegmentedHypo(object):
         var_theta = var_z / var_r
         var_phi = np.arctan2(var_y, var_x) % TWO_PI
 
-        self.indices_array[T_IDX_IX, :] = relative_time * self.t_scaling_factor
+        self.indices_array[T_IDX_IX, :] = self.t_array_init * self.t_scaling_factor
         self.indices_array[R_IDX_IX, :] = np.sqrt(var_r * self.r_scaling_factor)
         self.indices_array[THETA_IDX_IX, :] = (1 - var_theta) * self.theta_scaling_factor
         self.indices_array[PHI_IDX_IX, :] = var_phi * self.track_azimuth_scaling_factor
