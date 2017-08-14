@@ -1,7 +1,7 @@
-# pylint: disable=print-statement, wrong-import-position, line-too-long
+# pylint: disable=wrong-import-position, line-too-long
 
 
-from __future__ import absolute_import, division
+from __future__ import absolute_import, division, print_function
 
 import math
 import os
@@ -23,59 +23,11 @@ N_FTYPE = numba.float32 if FTYPE is np.float32 else numba.float64
 N_ITYPE = numba.int64
 N_UITYPE = numba.uint16 if UITYPE is np.uint16 else numba.uint64
 
-
-#CLASS_DTYPE_SPEC = [
-#    ('t_v', N_FTYPE),
-#    ('x_v', N_FTYPE),
-#    ('y_v', N_FTYPE),
-#    ('z_v', N_FTYPE),
-#
-#    ('time_increment', N_FTYPE),
-#    ('segment_length', N_FTYPE),
-#
-#    ('speed_x', N_FTYPE),
-#    ('speed_y', N_FTYPE),
-#    ('speed_z', N_FTYPE),
-#    ('track_length', N_FTYPE),
-#    ('cascade_photons', N_FTYPE),
-#    ('track_photons', N_FTYPE),
-#    ('tot_photons', N_FTYPE),
-#
-#    ('t_scaling_factor', N_FTYPE),
-#    ('r_scaling_factor', N_FTYPE),
-#    ('theta_scaling_factor', N_FTYPE),
-#    ('track_azimuth_scaling_factor', N_FTYPE),
-#    ('phi_bin_width', N_FTYPE),
-#
-#    ('t', N_FTYPE),
-#    ('x', N_FTYPE),
-#    ('y', N_FTYPE),
-#    ('z', N_FTYPE),
-#
-#    ('t_start', N_FTYPE),
-#    ('t_stop', N_FTYPE),
-#    ('number_of_increments', N_ITYPE),
-#    ('recreate_arrays', numba.boolean),
-#
-#    ('variables_array', N_FTYPE[:, :]),
-#    ('indices_array', N_UITYPE[:, :]),
-#    ('values_array', N_FTYPE[:, :]),
-#]
-
-# Define indices for accessing rows of `variables_array`
-T_VAR_IX = 0
-X_VAR_IX = 1
-Y_VAR_IX = 2
-Z_VAR_IX = 3
-R_VAR_IX = 4
-TRCK_ZEN_VAR_IX = 5
-PHI_VAR_IX = 6
-
 # Define indices for accessing rows of `indices_array`
-T_IDX_IX = 0
-R_IDX_IX = 1
-THETA_IDX_IX = 2
-PHI_IDX_IX = 3
+T_IDX_IX = BinningCoords._fields.index('t')
+R_IDX_IX = BinningCoords._fields.index('r')
+THETA_IDX_IX = BinningCoords._fields.index('theta')
+PHI_IDX_IX = BinningCoords._fields.index('phi')
 
 # Define indices for accessing rows of `values_array`
 PHOT_VAL_IX = 0
@@ -88,7 +40,8 @@ def update_arrays(indices_array, values_array,
                   number_of_increments, t_array_init, t, x, y, z, speed_x,
                   speed_y, speed_z, t_scaling_factor, r_scaling_factor,
                   theta_scaling_factor, track_azimuth_scaling_factor, segment_length,
-                  cascade_photons, track_zenith, track_azimuth, phi_bin_width):
+                  cascade_photons, track_zenith, track_azimuth, phi_bin_width,
+                  track_photons_per_m):
     for seg_idx in range(number_of_increments):
         var_t = t_array_init[seg_idx]
         relative_time = var_t - t
@@ -99,14 +52,6 @@ def update_arrays(indices_array, values_array,
         var_theta = var_z / var_r
         var_phi = math.atan2(var_y, var_x) % TWO_PI
 
-        #variables_array[T_VAR_IX, seg_idx] = var_t
-        #variables_array[X_VAR_IX, seg_idx] = var_x
-        #variables_array[Y_VAR_IX, seg_idx] = var_y
-        #variables_array[Z_VAR_IX, seg_idx] = var_z
-        #variables_array[R_VAR_IX, seg_idx] = var_r
-        #variables_array[TRCK_ZEN_VAR_IX, seg_idx] = var_theta
-        #variables_array[PHI_VAR_IX, seg_idx] = var_phi
-
         indices_array[T_IDX_IX, seg_idx] = var_t * t_scaling_factor
         indices_array[R_IDX_IX, seg_idx] = math.sqrt(var_r * r_scaling_factor)
         indices_array[THETA_IDX_IX, seg_idx] = (1 - var_theta) * theta_scaling_factor
@@ -114,7 +59,7 @@ def update_arrays(indices_array, values_array,
         indices_array[PHI_IDX_IX, seg_idx] = ind_phi
 
         # Add track photons
-        values_array[PHOT_VAL_IX, seg_idx] = segment_length * TRACK_PHOTONS_PER_M
+        values_array[PHOT_VAL_IX, seg_idx] = segment_length * track_photons_per_m
 
         # TODO: should this be += to include both track and cascade photons at
         # 0? Or are all track photons accounted for at the "bin center" which
@@ -130,8 +75,6 @@ def update_arrays(indices_array, values_array,
     values_array[PHOT_VAL_IX, 0] = cascade_photons
 
 
-# TODO: jitclass makes this go insanely slow. What's the deal with that?
-#@numba.jitclass(CLASS_DTYPE_SPEC)
 class SegmentedHypo(object):
     """
     Create hypo using individual segments and retrieve matrix that contains
@@ -141,43 +84,50 @@ class SegmentedHypo(object):
     Parameters
     ----------
     params : HYPO_PARAMS_T
-
-    track_e_scale
-        ?
-
-    cascade_e_scale
-        ?
-
+    track_e_scale : float
+    cascade_e_scale : float
     time_increment
         If using constant time increments, length of time between photon
         dumps (ns)
 
     """
-    def __init__(self, params, cascade_e_scale=1, track_e_scale=1,
+    def __init__(self, params, origin=None, cascade_e_scale=1, track_e_scale=1,
                  time_increment=1):
         if not isinstance(params, HYPO_PARAMS_T):
             params = HYPO_PARAMS_T(*params)
-        self.params = params
+        self.t = params.t
+        self.x = params.x
+        self.y = params.y
+        self.z = params.z
+        self.track_zenith = params.track_zenith
+        self.track_azimuth = params.track_azimuth
+        self.track_energy = params.track_energy
+        self.cascade_energy = params.cascade_energy
 
         # Declare "constants"
         self.time_increment = time_increment
         self.segment_length = self.time_increment * SPEED_OF_LIGHT_M_PER_NS
+        self.track_photons_per_m = TRACK_PHOTONS_PER_M * track_e_scale
+        self.cascade_photons_per_gev = CASCADE_PHOTONS_PER_GEV * cascade_e_scale
 
-        c_sin_zen = SPEED_OF_LIGHT_M_PER_NS * math.sin(self.params.track_zenith)
-        self.speed_x = c_sin_zen * math.cos(self.params.track_azimuth)
-        self.speed_y = c_sin_zen * math.sin(self.params.track_azimuth)
-        self.speed_z = SPEED_OF_LIGHT_M_PER_NS * math.cos(self.params.track_zenith)
+        c_sin_zen = SPEED_OF_LIGHT_M_PER_NS * math.sin(self.track_zenith)
+        self.speed_x = c_sin_zen * math.cos(self.track_azimuth)
+        self.speed_y = c_sin_zen * math.sin(self.track_azimuth)
+        self.speed_z = SPEED_OF_LIGHT_M_PER_NS * math.cos(self.track_zenith)
 
         self.track_length = params.track_energy * TRACK_M_PER_GEV
 
-        self.cascade_photons = params.cascade_energy * CASCADE_PHOTONS_PER_GEV
-        self.track_photons = self.track_length * TRACK_PHOTONS_PER_M
+        self.cascade_photons = params.cascade_energy * self.cascade_photons_per_gev
+        self.track_photons = self.track_length * self.track_photons_per_m
         self.tot_photons = self.cascade_photons + self.track_photons
 
         # Default values
         self.number_of_increments = 0
         self.recreate_arrays = True
-        self.dom_coord = None
+        self.origin = None
+
+        if origin is not None:
+            self.set_origin(coord=origin)
 
     def set_binning(self, start, stop, num_bins):
         """Define binnings of spherical coordinates assuming: linear binning in
@@ -215,26 +165,27 @@ class SegmentedHypo(object):
         self.phi_bin_width = TWO_PI / self.num_bins.phi
 
     #@profile
-    def set_dom_location(self, coord):
-        """Change the track vertex to be relative to a DOM at a given position.
+    def set_origin(self, coord):
+        """Change the vertex to be relative to ``coord`` (e.g. a hit on DOM at
+        the given position).
 
         Parameters
         ----------
         coord : TimeSpaceCoord or convertible thereto
 
         """
-        if coord == self.dom_coord:
+        if coord == self.origin:
             return
 
         if not isinstance(coord, TimeSpaceCoord):
             coord = TimeSpaceCoord(*coord)
 
-        self.dom_coord = coord
+        self.origin = coord
 
-        self.t = self.params.t - coord.t
-        self.x = self.params.x - coord.x
-        self.y = self.params.y - coord.y
-        self.z = self.params.z - coord.z
+        self.t = self.t - coord.t
+        self.x = self.x - coord.x
+        self.y = self.y - coord.y
+        self.z = self.z - coord.z
 
         orig_number_of_incr = self.number_of_increments
 
@@ -256,14 +207,9 @@ class SegmentedHypo(object):
         positions along the track, using information from __init__.
 
         """
-        self.set_dom_location(coord=hit_dom_coord)
+        self.set_origin(coord=hit_dom_coord)
 
-        # Create array with variables
         if self.recreate_arrays:
-            #self.variables_array = np.empty(
-            #    (8, self.number_of_increments),
-            #    FTYPE
-            #)
             self.indices_array = np.empty(
                 (4, self.number_of_increments),
                 UITYPE
@@ -292,24 +238,11 @@ class SegmentedHypo(object):
                           self.track_azimuth_scaling_factor,
                           self.segment_length,
                           self.cascade_photons,
-                          self.params.track_zenith,
-                          self.params.track_azimuth,
-                          self.phi_bin_width)
+                          self.track_zenith,
+                          self.track_azimuth,
+                          self.phi_bin_width,
+                          self.track_photons_per_m)
             return
-
-        #self.variables_array[T_VAR_IX, :] = self.t_array_init
-        #relative_time = self.variables_array[T_VAR_IX, :] - self.t
-        #self.variables_array[X_VAR_IX, :] = self.x + self.speed_x * relative_time
-        #self.variables_array[Y_VAR_IX, :] = self.y + self.speed_y * relative_time
-        #self.variables_array[Z_VAR_IX, :] = self.z + self.speed_z * relative_time
-        #self.variables_array[R_VAR_IX, :] = np.sqrt(np.square(self.variables_array[X_VAR_IX, :]) + np.square(self.variables_array[Y_VAR_IX, :]) + np.square(self.variables_array[Z_VAR_IX, :]))
-        #self.variables_array[TRCK_ZEN_VAR_IX, :] = self.variables_array[Z_VAR_IX, :] / self.variables_array[R_VAR_IX, :]
-        #self.variables_array[PHI_VAR_IX, :] = np.arctan2(self.variables_array[Y_VAR_IX, :], self.variables_array[X_VAR_IX, :]) % TWO_PI
-
-        #self.indices_array[T_IDX_IX, :] = self.variables_array[T_VAR_IX, :] * self.t_scaling_factor
-        #self.indices_array[R_IDX_IX, :] = np.sqrt(self.variables_array[R_VAR_IX, :] * self.r_scaling_factor)
-        #self.indices_array[THETA_IDX_IX, :] = (1 - self.variables_array[TRCK_ZEN_VAR_IX, :]) * self.theta_scaling_factor
-        #self.indices_array[PHI_IDX_IX, :] = self.variables_array[PHI_VAR_IX, :] * self.track_azimuth_scaling_factor
 
         relative_time = self.t_array_init - self.t
         var_x = self.x + self.speed_x * relative_time
@@ -325,7 +258,7 @@ class SegmentedHypo(object):
         self.indices_array[PHI_IDX_IX, :] = var_phi * self.track_azimuth_scaling_factor
 
         # Add track photons
-        self.values_array[PHOT_VAL_IX, :] = self.segment_length * TRACK_PHOTONS_PER_M
+        self.values_array[PHOT_VAL_IX, :] = self.segment_length * self.track_photons_per_m
 
         # TODO: should this be += to include both track and cascade photons at
         # 0? Or are all track photons accounted for at the "bin center" which
@@ -335,11 +268,11 @@ class SegmentedHypo(object):
         self.values_array[PHOT_VAL_IX, 0] = self.cascade_photons
 
         # Add track theta values
-        self.values_array[TRCK_ZEN_VAL_IX, :] = self.params.track_zenith
+        self.values_array[TRCK_ZEN_VAL_IX, :] = self.track_zenith
 
         # Add delta phi values
         self.values_array[DTRCK_AZ_VAL_IX, :] = np.abs(
-            self.params.track_azimuth
+            self.track_azimuth
             - (self.indices_array[PHI_IDX_IX, :] * self.phi_bin_width
                + (self.phi_bin_width / 2))
         )

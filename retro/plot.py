@@ -1,30 +1,28 @@
 #!/usr/bin/env python
 
-# pylint: disable=print-statement, wrong-import-position
+# pylint: disable=wrong-import-position
 
 
 from __future__ import absolute_import, division, print_function
 
-import math
 import os
 from os.path import abspath, dirname
 import time
 
 import matplotlib as mpl
 mpl.use('Agg')
+import matplotlib.colors as colors
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (BinningCoords, binspec_to_edges, FTYPE, HypoParams8D,
                    TimeSpaceCoord)
-from hypo_vector import SegmentedHypo
+from hypo_vector import R_IDX_IX, SegmentedHypo
 from hypo_fast import Hypo
 
-#@profile
+
 def main():
     # Binning defined as same as that used for CLsim
     bin_start = BinningCoords(t=0, r=0, theta=0, phi=0)
@@ -69,32 +67,28 @@ def main():
     z_values = hypo_approx.values_array
     z_matrix = np.zeros(num_bins, dtype=FTYPE)
 
-    for col in xrange(hypo_approx.number_of_increments):
-        idx = (int(z_indices[0, col]),
-               int(z_indices[1, col]),
-               int(z_indices[2, col]),
-               int(z_indices[3, col]))
-        if z_indices[1, col] < hypo_approx.bin_max.r:
-            z_matrix[idx] += z_values[0, col]
+    for incr_idx in xrange(hypo_approx.number_of_increments):
+        zmat_idx = tuple(z_indices[:, incr_idx])
+        if z_indices[R_IDX_IX, incr_idx] < hypo_approx.bin_max.r:
+            z_matrix[zmat_idx] += z_values[0, incr_idx]
 
     print('total number of photons in kevin z_matrix ='
           ' %i (%.2f %%)'
-          %(z_matrix.sum(), z_matrix.sum() / hypo_ana_fast.tot_photons * 100))
+          % (z_matrix.sum(), z_matrix.sum() / hypo_ana_fast.tot_photons * 100))
 
     print('')
 
     print('total_residual = ', (z - z_matrix).sum() / z.sum())
 
     print('')
-    #return
 
-    # Create differential matrix
+    # Create difference matrix
     z_diff = z_matrix - z
 
-    # Create percent differnt matrix
-    z_per = np.zeros_like(z_matrix)
+    # Create fractional difference matrix
+    z_fractdiff = np.zeros_like(z_matrix)
     mask = z != 0
-    z_per[mask] = z_matrix[mask] / z[mask] -1
+    z_fractdiff[mask] = z_matrix[mask] / z[mask] - 1
 
     # Plot setup
     fig = plt.figure(figsize=(10, 10))
@@ -127,10 +121,10 @@ def main():
     ax.plot([x_0, x_e], [plt_lim, plt_lim], zs=[z_0, z_e], alpha=0.3, c='k')
     ax.plot([x_0, x_e], [y_0, y_e], zs=[-plt_lim, -plt_lim], alpha=0.3, c='k')
 
-    print('Making first plot')
+    print('Plotting differences in photon counts')
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.r)
     zz = z_diff.sum(axis=(2, 3))
-    z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
+    z_vmax = np.abs(zz).max()
     mg = ax2.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax2.set_xlabel('t')
     ax2.set_ylabel('r')
@@ -138,7 +132,7 @@ def main():
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.theta)
     zz = z_diff.sum(axis=(1, 3))
-    z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
+    z_vmax = np.abs(zz).max()
     mg = ax3.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax3.set_xlabel('t')
     ax3.set_ylabel(r'$\theta$')
@@ -147,7 +141,7 @@ def main():
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.phi)
     zz = z_diff.sum(axis=(1, 2))
-    z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
+    z_vmax = np.abs(zz).max()
     mg = ax4.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax4.set_xlabel('t')
     ax4.set_ylabel(r'$\phi$')
@@ -158,26 +152,28 @@ def main():
     ax3.grid(True, 'both', color='g')
     ax4.grid(True, 'both', color='g')
 
+    fig.suptitle('Differences in photon counts: approx - analytic')
+
     plt.show()
-    plt.savefig('hypo_diff11.png', dpi=300)
+    plt.savefig('hypo_diff.png', dpi=300)
 
     # Clear colorbars
     cb2.remove()
     cb3.remove()
     cb4.remove()
 
-    print('Making second plot')
+    print('Plotting fractional differences in photon counts')
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.r)
-    zz = z_per.sum(axis=(2, 3))
-    z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
+    zz = z_fractdiff.sum(axis=(2, 3))
+    z_vmax = np.abs(zz).max()
     mg = ax2.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax2.set_xlabel('t')
     ax2.set_ylabel('r')
     cb2 = plt.colorbar(mg, ax=ax2)
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.theta)
-    zz = z_per.sum(axis=(1, 3))
-    z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
+    zz = z_fractdiff.sum(axis=(1, 3))
+    z_vmax = np.abs(zz).max()
     mg = ax3.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax3.set_xlabel('t')
     ax3.set_ylabel(r'$\theta$')
@@ -185,8 +181,8 @@ def main():
     cb3 = plt.colorbar(mg, ax=ax3)
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.phi)
-    zz = z_per.sum(axis=(1, 2))
-    z_vmax = np.maximum(np.abs(np.min(zz)), np.max(zz))
+    zz = z_fractdiff.sum(axis=(1, 2))
+    z_vmax = np.abs(zz).max()
     mg = ax4.pcolormesh(tt, yy, zz.T, vmin=-z_vmax, vmax=z_vmax, cmap=cmap)
     ax4.set_xlabel('t')
     ax4.set_ylabel(r'$\phi$')
@@ -197,8 +193,11 @@ def main():
     ax3.grid(True, 'both', color='g')
     ax4.grid(True, 'both', color='g')
 
+    fig.suptitle('Fractional differences in photon counts:'
+                 ' (approx - analytic) / analytic')
+
     plt.show()
-    plt.savefig('hypo_per11.png', dpi=300)
+    plt.savefig('hypo_fractdiff.png', dpi=300)
 
     # Clear colorbars
     cb2.remove()
@@ -211,28 +210,48 @@ def main():
     cmap.set_under('w')
     cmap.set_bad('w')
 
-    print('Making third plot')
+    zz_approx_23 = z_matrix.sum(axis=(2, 3))
+    zz_approx_13 = z_matrix.sum(axis=(1, 3))
+    zz_approx_12 = z_matrix.sum(axis=(1, 2))
+
+    zz_ana_23 = z.sum(axis=(2, 3))
+    zz_ana_13 = z.sum(axis=(1, 3))
+    zz_ana_12 = z.sum(axis=(1, 2))
+
+    vmin_23 = min(zz_approx_23[zz_approx_23 > 0].min(),
+                  zz_ana_23[zz_ana_23 > 0].min())
+    vmin_13 = min(zz_approx_13[zz_approx_13 > 0].min(),
+                  zz_ana_13[zz_ana_13 > 0].min())
+    vmin_12 = min(zz_approx_12[zz_approx_12 > 0].min(),
+                  zz_ana_12[zz_ana_12 > 0].min())
+
+    vmax_23 = max(zz_approx_23.max(), zz_ana_23.max())
+    vmax_13 = max(zz_approx_13.max(), zz_ana_13.max())
+    vmax_12 = max(zz_approx_12.max(), zz_ana_12.max())
+
+    print("Plotting approximate method's photon counts")
+
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.r)
-    zz = z_matrix.sum(axis=(2, 3))
-    z_vmax = np.partition(zz.flatten(), -2)[-2]
-    mg = ax2.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
+    mg = ax2.pcolormesh(tt, yy, zz_approx_23.T,
+                        norm=colors.LogNorm(vmin=vmin_23, vmax=vmax_23),
+                        cmap=cmap)
     ax2.set_xlabel('t')
     ax2.set_ylabel('r')
     cb2 = plt.colorbar(mg, ax=ax2)
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.theta)
-    zz = z_matrix.sum(axis=(1, 3))
-    z_vmax = np.partition(zz.flatten(), -2)[-2]
-    mg = ax3.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
+    mg = ax3.pcolormesh(tt, yy, zz_approx_13.T,
+                        norm=colors.LogNorm(vmin=vmin_13, vmax=vmax_13),
+                        cmap=cmap)
     ax3.set_xlabel('t')
     ax3.set_ylabel(r'$\theta$')
     ax3.set_ylim((0, np.pi))
     cb3 = plt.colorbar(mg, ax=ax3)
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.phi)
-    zz = z_matrix.sum(axis=(1, 2))
-    z_vmax = np.partition(zz.flatten(), -2)[-2]
-    mg = ax4.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
+    mg = ax4.pcolormesh(tt, yy, zz_approx_12.T,
+                        norm=colors.LogNorm(vmin=vmin_12, vmax=vmax_12),
+                        cmap=cmap)
     ax4.set_xlabel('t')
     ax4.set_ylabel(r'$\phi$')
     ax4.set_ylim((0, 2*np.pi))
@@ -242,47 +261,51 @@ def main():
     ax3.grid(True, 'both', color='g')
     ax4.grid(True, 'both', color='g')
 
+    fig.suptitle('Photon counts, approximate method')
+
     plt.show()
-    plt.savefig('hypo_kevin11.png', dpi=300)
+    plt.savefig('hypo_photon_counts_approx.png', dpi=300)
 
     # Clear colorbars
     cb2.remove()
     cb3.remove()
     cb4.remove()
 
-    print('Making fourth plot')
+    print("Plotting analytical method's photon counts")
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.r)
-    zz = z.sum(axis=(2, 3))
-    z_vmax = np.partition(zz.flatten(), -2)[-2]
-    mg = ax2.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
+    mg = ax2.pcolormesh(tt, yy, zz_ana_23.T,
+                        norm=colors.LogNorm(vmin=vmin_23, vmax=vmax_23),
+                        cmap=cmap)
     ax2.set_xlabel('t')
     ax2.set_ylabel('r')
     cb2 = plt.colorbar(mg, ax=ax2)
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.theta)
-    zz = z.sum(axis=(1, 3))
-    z_vmax = np.partition(zz.flatten(), -2)[-2]
-    mg = ax3.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
+    mg = ax3.pcolormesh(tt, yy, zz_ana_13.T,
+                        norm=colors.LogNorm(vmin=vmin_13, vmax=vmax_13),
+                        cmap=cmap)
     ax3.set_xlabel('t')
     ax3.set_ylabel(r'$\theta$')
     ax3.set_ylim((0, np.pi))
     cb3 = plt.colorbar(mg, ax=ax3)
 
     tt, yy = np.meshgrid(bin_edges.t, bin_edges.phi)
-    zz = z.sum(axis=(1, 2))
-    z_vmax = np.partition(zz.flatten(), -2)[-2]
-    mg = ax4.pcolormesh(tt, yy, zz.T, vmax=z_vmax, cmap=cmap)
+    mg = ax4.pcolormesh(tt, yy, zz_ana_12.T,
+                        norm=colors.LogNorm(vmin=vmin_12, vmax=vmax_12),
+                        cmap=cmap)
     ax4.set_xlabel('t')
     ax4.set_ylabel(r'$\phi$')
     ax4.set_ylim((0, 2*np.pi))
     cb4 = plt.colorbar(mg, ax=ax4)
+
+    fig.suptitle('Photon counts, analytic method')
 
     ax2.grid(True, 'both', color='g')
     ax3.grid(True, 'both', color='g')
     ax4.grid(True, 'both', color='g')
 
     plt.show()
-    plt.savefig('hypo_philipp11.png', dpi=300)
+    plt.savefig('hypo_photon_counts_ana.png', dpi=300)
 
     # Clear colorbars
     cb2.remove()

@@ -2,10 +2,10 @@
 Perform fast(er) exact analytical hypothesis photon expectations.
 """
 
-# pylint: disable=print-statement, wrong-import-position, invalid-name, line-too-long
+# pylint: disable=wrong-import-position, invalid-name, line-too-long
 
 
-from __future__ import absolute_import, division
+from __future__ import absolute_import, division, print_function
 
 import os
 from os.path import abspath, dirname
@@ -16,9 +16,10 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, FTYPE, SPEED_OF_LIGHT_M_PER_NS,
-                   HYPO_PARAMS_T, hypo_to_track_params, PI_BY_TWO,
-                   TimeSpaceCoord, TRACK_M_PER_GEV, TWO_PI)
+from retro import (BinningCoords, CASCADE_PHOTONS_PER_GEV, FTYPE,
+                   SPEED_OF_LIGHT_M_PER_NS, HYPO_PARAMS_T,
+                   hypo_to_track_params, PI_BY_TWO, TimeSpaceCoord,
+                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TWO_PI)
 from sparse import Sparse
 
 
@@ -26,18 +27,21 @@ __all__ = ['inner_loop', 'Track', 'Hypo']
 
 
 #@numba.jit(nopython=False, nogil=True, fastmath=True, cache=True, parallel=True)
+#@profile
 def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
-               r_inter_pos, photons_per_meter):
+               r_inter_pos, track_photons_per_m):
     """Fill in the Z matrix the length of the track if there is overlap of the
     track with a bin ... using ugly (but numba-fiable?) nested loops"""
     for i in range(phi_inter.shape[0]):
         phi = phi_inter[i]
         if phi[0] < 0 and phi[1] < 0:
             continue
+
         for m in range(theta_inter_neg.shape[0]):
             theta = theta_inter_neg[m]
             if theta[0] < 0 and theta[1] < 0:
                 continue
+
             for j in range(r_inter_neg.shape[0]):
                 r = r_inter_neg[j]
                 if r[0] < 0 and r[1] < 0:
@@ -47,7 +51,8 @@ def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z[k, j, m, i] += length * photons_per_meter
+                    z[k, j, m, i] += length * track_photons_per_m
+
             for j in range(r_inter_pos.shape[0]):
                 r = r_inter_pos[j]
                 if r[0] < 0 and r[1] < 0:
@@ -57,11 +62,13 @@ def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z[k, j, m, i] += length * photons_per_meter
+                    z[k, j, m, i] += length * track_photons_per_m
+
         for m in range(theta_inter_pos.shape[0]):
             theta = theta_inter_pos[m]
             if theta[0] < 0 and theta[1] < 0:
                 continue
+
             for j in range(r_inter_neg.shape[0]):
                 r = r_inter_neg[j]
                 if r[0] < 0 and r[1] < 0:
@@ -71,7 +78,8 @@ def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z[k, j, m, i] += length * photons_per_meter
+                    z[k, j, m, i] += length * track_photons_per_m
+
             for j in range(r_inter_pos.shape[0]):
                 r = r_inter_pos[j]
                 if r[0] < 0 and r[1] < 0:
@@ -81,7 +89,7 @@ def inner_loop(z, k, phi_inter, theta_inter_neg, theta_inter_pos, r_inter_neg,
                 B = min(r[1], theta[1], phi[1])
                 if A <= B:
                     length = B - A
-                    z[k, j, m, i] += length * photons_per_meter
+                    z[k, j, m, i] += length * track_photons_per_m
     return z
 
 
@@ -96,21 +104,34 @@ class Track(object):
     origin : TimeSpaceCoord
 
     """
-    def __init__(self, params, origin=(0,)*4):
-        self.params = params
+    def __init__(self, params, origin=None):
+        self.t = params.t
+        self.x = params.x
+        self.y = params.y
+        self.z = params.z
+        self.zenith = params.zenith
+        self.azimuth = params.azimuth
+        self.energy = params.energy
 
         # Track length is derived from its energy
-        self.length = params.energy * TRACK_M_PER_GEV
+        self.length = self.energy * TRACK_M_PER_GEV
 
         # Pre-calculated quantities
         self.dt = self.length / SPEED_OF_LIGHT_M_PER_NS
-        self.sinphi = np.sin(self.params.azimuth)
-        self.cosphi = np.cos(self.params.azimuth)
-        self.tanphi = np.tan(self.params.azimuth)
-        self.sintheta = np.sin(self.params.zenith)
-        self.costheta = np.cos(self.params.zenith)
+        self.sinphi = np.sin(self.azimuth)
+        self.cosphi = np.cos(self.azimuth)
+        self.tanphi = np.tan(self.azimuth)
+        self.sintheta = np.sin(self.zenith)
+        self.costheta = np.cos(self.zenith)
+
+        # Default values so "caching" logic doesn't break, and/or forces an
+        # error if properties are accessed before they are meaningfully defined
         self.origin = None
-        self.set_origin(origin)
+        self.t0, self.x0, self.y0, self.z0 = (None,)*4
+        self._tb, self._ts = (None,)*2
+
+        if origin is not None:
+            self.set_origin(coord=origin)
 
     def set_origin(self, coord):
         """Displace track
@@ -130,10 +151,14 @@ class Track(object):
 
         # Define relative coordinates
 
-        self.t0 = self.params.t - self.origin.t
-        self.x0 = self.params.x - self.origin.x
-        self.y0 = self.params.y - self.origin.y
-        self.z0 = self.params.z - self.origin.z
+        self.t0 = self.t - self.origin.t
+        self.x0 = self.x - self.origin.x
+        self.y0 = self.y - self.origin.y
+        self.z0 = self.z - self.origin.z
+
+        # Invalidate cached property values
+
+        self._tb, self._ts = (None,)*2
 
     def point(self, t):
         """return point on track for a given time"""
@@ -158,19 +183,26 @@ class Track(object):
     @property
     def tb(self):
         """closest time to origin (smallest R)"""
-        result = (
+        if self._tb is not None:
+            return self._tb
+
+        self._tb = (
             self.t0 - (self.x0 * self.sintheta * self.cosphi
                        + self.y0 * self.sintheta * self.sinphi
                        + self.z0 * self.costheta)
         ) / SPEED_OF_LIGHT_M_PER_NS
-        return result
+
+        return self._tb
 
     @property
     def ts(self):
         """time with smallest theta"""
+        if self._ts is not None:
+            return self._ts
+
         if ((self.x0 == self.y0 == self.z0 == 0)
-                or self.params.zenith == 0
-                or self.params.zenith == np.pi):
+                or self.zenith == 0
+                or self.zenith == np.pi):
             return self.t0
 
         rho = ((- self.costheta * (self.x0*self.x0 + self.y0*self.y0)
@@ -179,22 +211,28 @@ class Track(object):
                (+ self.sintheta * self.costheta * (self.x0 * self.cosphi + self.y0 * self.sinphi)
                 - self.z0 * self.sintheta*self.sintheta))
 
-        return self.t0 + rho / SPEED_OF_LIGHT_M_PER_NS
+        self._ts = self.t0 + rho / SPEED_OF_LIGHT_M_PER_NS
+
+        return self._ts
 
     def rho_of_t(self, t):
         if t < self.t0 or t > self.t0 + self.dt:
-            return -1
-        return (t - self.t0) * SPEED_OF_LIGHT_M_PER_NS
+            rho_of_t = -1
+        else:
+            rho_of_t = (t - self.t0) * SPEED_OF_LIGHT_M_PER_NS
+
+        return rho_of_t
 
     def rho_of_phi(self, phi):
         """track parameter rho for a give phi"""
-        sin = np.sin(phi)
-        cos = np.cos(phi)
-        result = (
-            (sin * self.x0 - cos * self.y0)
-            / (cos * self.sinphi * self.sintheta - sin * self.cosphi * self.sintheta)
+        sinphi = np.sin(phi)
+        cosphi = np.cos(phi)
+        rho_of_phi = (
+            (sinphi * self.x0 - cosphi * self.y0)
+            / (cosphi * self.sinphi * self.sintheta
+               - sinphi * self.cosphi * self.sintheta)
         )
-        return result
+        return rho_of_phi
 
     def get_M(self, T):
         """helper function"""
@@ -288,25 +326,43 @@ class Hypo(object):
     cascade_e_scale, track_e_scale : float
 
     """
-    def __init__(self, params, cascade_e_scale=1, track_e_scale=1):
+    def __init__(self, params, origin=None, cascade_e_scale=1,
+                 track_e_scale=1):
         if not isinstance(params, HYPO_PARAMS_T):
             params = HYPO_PARAMS_T(*params)
-        self.params = params
+        self.t = params.t
+        self.x = params.x
+        self.y = params.y
+        self.z = params.z
+        self.track_zenith = params.track_zenith
+        self.track_azimuth = params.track_azimuth
+        self.track_energy = params.track_energy
+        self.cascade_energy = params.cascade_energy
 
-        # Convert track energy to length by (ToDo check this)
+        self.cascade_e_scale = cascade_e_scale
+        self.track_e_scale = track_e_scale
+
         track_params = hypo_to_track_params(params)
         self.track = Track(track_params)
 
-        # Precalculate (from nphotons.py) to avoid icetray
-        self.photons_per_meter = 2451.4544553 * track_e_scale
-        photons_per_gev_cascade = 12805.3383311 * cascade_e_scale
-        self.cascade_photons = params.cascade_energy * photons_per_gev_cascade
-        self.track_photons = self.track.length * self.photons_per_meter
+        self.track_photons_per_m = TRACK_PHOTONS_PER_M * track_e_scale
+        self.cascade_photons_per_gev = CASCADE_PHOTONS_PER_GEV * cascade_e_scale
+
+        self.cascade_photons = self.cascade_energy * self.cascade_photons_per_gev
+        self.track_photons = self.track.length * self.track_photons_per_m
         self.tot_photons = self.cascade_photons + self.track_photons
 
         self.bin_edges = None
         self.bin_centers = None
         self.shape = tuple([])
+
+        self.photon_counts = None
+        self.photon_corr_len = None
+        self.photon_corr_phi = None
+        self.photon_corr_theta = None
+
+        if origin is not None:
+            self.set_origin(coord=origin)
 
     def set_binning(self, bin_edges):
         """Set the binning of the spherical coordinates with bin_edges.
@@ -324,6 +380,9 @@ class Hypo(object):
             phi=0.5 * (bin_edges.phi[:-1] + bin_edges.phi[1:])
         )
         self.shape = BinningCoords(*(len(dim) for dim in self.bin_centers))
+
+    def set_origin(self, coord):
+        self.track.set_origin(coord)
 
     # -- Coordinate transforms -- #
 
@@ -386,7 +445,7 @@ class Hypo(object):
             else:
                 intervals.append([-1, -1])
         end_t = time.time()
-        #print 'corr theta took %.2f'%((end_t-start_t)*1000)
+        #print('corr theta took %.2f'%((end_t-start_t)*1000))
         return np.array(intervals, dtype=FTYPE)
 
     def correlate_phi(self, bin_edges, t, rho_extent):
@@ -427,7 +486,7 @@ class Hypo(object):
             else:
                 intervals.append([-1, -1])
         end_t = time.time()
-        #print 'corr phi took %.2f'%((end_t-start_t)*1000)
+        #print('corr phi took %.2f'%((end_t-start_t)*1000))
         return np.array(intervals, dtype=FTYPE)
 
     def correlate_r(self, bin_edges, t, pos):
@@ -451,7 +510,7 @@ class Hypo(object):
             else:
                 intervals.append([-1, -1])
         end_t = time.time()
-        #print 'corr r took %.2f'%((end_t-start_t)*1000)
+        #print('corr r took %.2f'%((end_t-start_t)*1000))
         return np.array(intervals, dtype=FTYPE)
 
     #@profile
@@ -475,7 +534,7 @@ class Hypo(object):
         """
         # Set the origin of the spherical coordinate system to the DOM hit
         # position
-        self.track.set_origin(hit_dom_coord)
+        self.track.set_origin(coord=hit_dom_coord)
 
         # Closest point (r inflection point)
         tb = self.track.tb
@@ -558,7 +617,7 @@ class Hypo(object):
                 photon_counts = inner_loop(photon_counts, k, phi_inter,
                                            theta_inter_neg, theta_inter_pos,
                                            r_inter_neg, r_inter_pos,
-                                           self.photons_per_meter)
+                                           self.track_photons_per_m)
                 end_t2 = time.time()
                 t_inner_loop += end_t2 - start_t2
 
@@ -567,13 +626,13 @@ class Hypo(object):
         # add angles:
         for element in photon_counts:
             idx, _ = element
-            theta = self.track.params.zenith
+            theta = self.track.zenith
             phi = self.bin_centers.phi[idx[-1]]
-            #delta_phi = np.abs(self.track.params.azimuth - phi)%(TWO_PI)
+            #delta_phi = np.abs(self.track.azimuth - phi)%(TWO_PI)
             # calculate same way as in photon propapgation (CLsim)
-            delta = np.abs(phi - self.track.params.azimuth)
+            delta = np.abs(phi - self.track.azimuth)
             delta_phi = delta if delta <= np.pi else TWO_PI - delta
-            #delta_phi = np.pi - np.abs((np.abs(phi - self.track.params.azimuth)  - np.pi))
+            #delta_phi = np.pi - np.abs((np.abs(phi - self.track.azimuth)  - np.pi))
             photon_corr_theta[idx] = theta
             photon_corr_phi[idx] = delta_phi
             # set corr. length for tracks to 1.0, i.e. totally directed
