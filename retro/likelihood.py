@@ -17,7 +17,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from itertools import izip, product
 import os
-from os.path import abspath, dirname, expanduser, expandvars, isfile, join
+from os.path import abspath, dirname, isfile, join
 
 import h5py
 import matplotlib as mpl
@@ -31,8 +31,9 @@ from scipy.special import gammaln
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, event_to_hypo_params, Event, Events, FTYPE,
-                   HypoParams10D, HYPO_PARAMS_T, PhotonInfo, Pulses)
+from retro import (BinningCoords, event_to_hypo_params, Event, Events, expand,
+                   FTYPE, HypoParams10D, HYPO_PARAMS_T, PhotonInfo, Pulses,
+                   TimeSpaceCoord)
 import hypo_fast
 import hypo_vector
 from particles import ParticleArray
@@ -40,18 +41,15 @@ from particles import ParticleArray
 
 IC_TABLE_FPATH_PROTO = (
     '/data/icecube/retro_tables/full1000'
-    '/retro_nevts1000_IC_DOM%i_r_cz_t_angles.fits'
+    '/retro_nevts1000_IC_DOM{:d}_r_cz_t_angles.fits'
 )
 
 DC_TABLE_FPATH_PROTO = (
     '/data/icecube/retro_tables/full1000'
-    '/retro_nevts1000_DC_DOM%i_r_cz_t_angles.fits'
+    '/retro_nevts1000_DC_DOM{:d}_r_cz_t_angles.fits'
 )
 
-PULSE_SERIES = 'SRTInIcePulses'
-ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
-SPE_RECO_NAME = 'SPEFit2'
-DETECTOR_GEOM_FILE = join(dirname(__file__), 'data', 'geo_array.npy')
+DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
 DFLT_EVENTS_FPATH = (
     '/fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600'
     '/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5'
@@ -98,8 +96,7 @@ MIN_USE_RELATIVE_BOUNDS = True
 SCAN_USE_RELATIVE_BOUNDS = True
 """Whether scanning is to use relative bounds (where defined)"""
 
-MIN_DIMS = [] #('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
-#                'track_energy')
+MIN_DIMS = [] #('t x y z track_zenith track_azimuth track_energy'.split())
 """Which dimensions to plug into minimizer (dims not fixed to truth)"""
 
 SCAN_DIM_SETS = (
@@ -110,29 +107,34 @@ SCAN_DIM_SETS = (
 """Which dimensions to scan. Tuples specify 2+ dimension scans"""
 
 
-def expand(p):
-    """Expand path"""
-    return expanduser(expandvars(p))
-
 #@profile
-def fill_photon_info(fpath, dom, scale=1, photon_info=None):
+def fill_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
     """Fill photon info namedtuple-of-dictionaries from FITS file.
 
     Parameters
     ----------
     fpath : string
-    dom : int
+        Path to FITS file corresponding to the passed ``dom_depth_index``.
+
+    dom_depth_index : int
         Depth index (e.g. from 0 to 59)
-    norm : float
-    dom_eff : float
-    photon_info : None or PhotonInfo
+
+    scale : float
+        Scaling factor to apply to the photon counts from the table, e.g. for
+        DOM efficiency.
+
+    photon_info : None or PhotonInfo namedtuple of dicts
         If None, creates a new PhotonInfo namedtuple with empty dicts to fill.
         If one is provided, the existing component dictionaries are updated.
 
     Returns
     -------
-    photon_info : PhotonInfo namedtuple
+    photon_info : PhotonInfo namedtuple of dicts
+        Tuple fields are 'count', 'theta', 'phi', and 'length'. Each dict is
+        keyed by `dom_depth_index` and values are the arrays loaded from the FITS file.
+
     bin_edges : BinningCoords namedtuple
+        Each element of the tuple is an array of bin edges.
 
     """
     # pylint: disable=no-member
@@ -140,10 +142,14 @@ def fill_photon_info(fpath, dom, scale=1, photon_info=None):
         photon_info = PhotonInfo(*([{}]*len(PhotonInfo._fields)))
 
     with pyfits.open(expand(fpath)) as table:
-        photon_info.count[dom] = table[0].data * scale
-        photon_info.theta[dom] = table[1].data
-        photon_info.phi[dom] = table[2].data
-        photon_info.length[dom] = table[3].data
+        if scale == 1:
+            photon_info.count[dom_depth_index] = table[0].data
+        else:
+            photon_info.count[dom_depth_index] = table[0].data * scale
+
+        photon_info.theta[dom_depth_index] = table[1].data
+        photon_info.phi[dom_depth_index] = table[2].data
+        photon_info.length[dom_depth_index] = table[3].data
 
         # Note that we invert (reverse and multiply by -1) time edges
         bin_edges = BinningCoords(t=-table[4].data[::-1], r=table[5].data,
@@ -153,15 +159,21 @@ def fill_photon_info(fpath, dom, scale=1, photon_info=None):
 
 
 #@profile
-def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
+def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
+            detailed_info_list=None):
     """Get log likelihood.
 
     Parameters
     ----------
     hypo : HYPO_T
-    event : Event namedtuple
-    ic_photon_info : dict
-    dc_photon_info : dict
+    event : retro.Event namedtuple or convertible thereto
+    detector_geometry : numpy.ndarray
+    ic_photon_info : retro.PhotonInfo namedtuple or convertible thereto
+    dc_photon_info : retro.PhotonInfo namedtuple or convertible thereto
+    detailed_info_list : None or appendable sequence
+        If a list is provided, it is appended with a dict containing detailed
+        info from the calculation useful, e.g., for debugging. If ``None`` is
+        passed, no detailed info is made available.
 
     Returns
     -------
@@ -169,48 +181,51 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
 
     """
     llh = 0
-    n_noise = 0
+    noise_counts = 0
 
     # Loop over pulses (aka hits)
     for string, om, pulse_time, pulse_charge in izip(*event.pulses):
         x, y, z = detector_geometry[string, om]
 
+        hit_dom_coord = TimeSpaceCoord(t=pulse_time, x=x, y=y, z=z)
+
         # Get the photon expectations of the hypothesis in the DOM-hit
         # coordinates
-        n_phot, photon_theta, photon_phi, photon_length = hypo.get_matrices(
-            Dt=pulse_time, Dx=x, Dy=y, Dz=z
-        )
+        hypo.compute_matrices(hit_dom_coord=hit_dom_coord)
 
         # Get the retro table for the pulse
-        retro_idx = om - 1
-        if string < 79:
-            # these are ordinary icecube strings
-            n_phot_map = ic_photon_info.count[retro_idx]
-            photon_theta_map = ic_photon_info.theta[retro_idx]
-            photon_phi_map = ic_photon_info.phi[retro_idx]
-            photon_length_map = ic_photon_info.length[retro_idx]
+
+        # String indices 0-78 (numbers 1-79) are ordinary IceCube strings
+        if 0 <= string <= 78:
+            photon_counts_map = ic_photon_info.count[om]
+            photon_corr_theta_map = ic_photon_info.theta[om]
+            photon_corr_phi_map = ic_photon_info.phi[om]
+            photon_corr_len_map = ic_photon_info.length[om]
+        # String indices 79-85 (numbers 80-86) are ordinary DeepCore strings
+        elif 79 <= string <= 85:
+            photon_counts_map = dc_photon_info.count[om]
+            photon_corr_theta_map = dc_photon_info.theta[om]
+            photon_corr_phi_map = dc_photon_info.phi[om]
+            photon_corr_len_map = dc_photon_info.length[om]
         else:
-            # these are deepocre strings
-            n_phot_map = dc_photon_info.count[retro_idx]
-            photon_theta_map = dc_photon_info.theta[retro_idx]
-            photon_phi_map = dc_photon_info.phi[retro_idx]
-            photon_length_map = dc_photon_info.length[retro_idx]
+            raise ValueError('Unhandled string index %d (number %d)'
+                             % (string, string + 1))
 
         # Get max llh between z_matrix and gamma_map
         # noise probability?
         expected_charge = 0
-        for photon_idx, hypo_count in n_phot:
+        for photon_idx, hypo_count in hypo.photon_counts:
             # These two agles need to be inverted, because we're
             # backpropagating but want to match to forward-propagating photons
-            hypo_theta = np.pi - photon_theta[photon_idx]
-            hypo_phi = np.pi - photon_phi[photon_idx]
-            #hypo_legth = photon_length[photon_idx]
+            hypo_theta = np.pi - hypo.photon_corr_theta[photon_idx]
+            hypo_phi = np.pi - hypo.photon_corr_phi[photon_idx]
+            #hypo_legth = hypo.photon_corr_length[photon_idx]
 
             # Get map
-            map_count = n_phot_map[photon_idx[0:3]]
-            map_theta = photon_theta_map[photon_idx[0:3]]
-            map_phi = photon_phi_map[photon_idx[0:3]]
-            map_length = photon_length_map[photon_idx[0:3]]
+            map_count = photon_counts_map[photon_idx[0:3]]
+            map_theta = photon_corr_theta_map[photon_idx[0:3]]
+            map_phi = photon_corr_phi_map[photon_idx[0:3]]
+            map_length = photon_corr_len_map[photon_idx[0:3]]
 
             # Assume source is totally directed at 0.73 rad (cherenkov angle)
 
@@ -248,13 +263,16 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info):
             expected_charge += total_charge * accept_dir
 
         if expected_charge < NOISE_CHARGE:
-            n_noise += 1
+            noise_counts += 1
 
         expected_charge = max(NOISE_CHARGE, expected_charge)
         pulse_llh = -(pulse_charge * np.log(expected_charge)
                       - expected_charge
                       - gammaln(pulse_charge + 1))
         llh += pulse_llh
+
+    if detailed_info_list is not None:
+        detailed_info_list.append(dict(noise_counts=noise_counts))
 
     return llh
 
@@ -396,13 +414,13 @@ def main(events_fpath, start_index=None, stop_index=None):
 
     # Read in the actual tables
     ref_bin_edges = None
-    for dom in range(60):
+    for dom_depth_index in range(60):
         # IceCube (non-DeepCore) tables
-        fpath = IC_TABLE_FPATH_PROTO % dom
+        fpath = IC_TABLE_FPATH_PROTO.format(dom_depth_index)
         if isfile(fpath):
             ic_photon_info, bin_edges = fill_photon_info(
                 fpath=fpath,
-                dom=dom,
+                dom_depth_index=dom_depth_index,
                 scale=norm * dom_eff_ic,
                 photon_info=ic_photon_info
             )
@@ -412,14 +430,15 @@ def main(events_fpath, start_index=None, stop_index=None):
                 for test, ref in zip(bin_edges, ref_bin_edges):
                     assert np.array_equal(test, ref)
         else:
-            print 'No table for IC DOM depth index %i found at path "%s"' % (dom, fpath)
+            print ('No table for IC DOM depth index %i found at path "%s"'
+                   % (dom_depth_index, fpath))
 
         # DeepCore tables
-        fpath = DC_TABLE_FPATH_PROTO % dom
+        fpath = DC_TABLE_FPATH_PROTO.format(dom_depth_index)
         if isfile(fpath):
             dc_photon_info, bin_edges = fill_photon_info(
                 fpath=fpath,
-                dom=dom,
+                dom_depth_index=dom_depth_index,
                 scale=norm * dom_eff_dc,
                 photon_info=dc_photon_info
             )
@@ -429,7 +448,8 @@ def main(events_fpath, start_index=None, stop_index=None):
                 for test, ref in zip(bin_edges, ref_bin_edges):
                     assert np.array_equal(test, ref)
         else:
-            print 'No table for IC DOM depth index %i found at path "%s"' % (dom, fpath)
+            print ('No table for IC DOM depth index %i found at path "%s"'
+                   % (dom_depth_index, fpath))
 
     bin_edges = BinningCoords(t=bin_edges.t, r=bin_edges.r,
                               theta=bin_edges.theta,

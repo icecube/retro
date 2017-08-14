@@ -17,7 +17,8 @@ import numpy as np
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (BinningCoords, FTYPE, SPEED_OF_LIGHT_M_PER_NS,
-                   HYPO_PARAMS_T, hypo_to_track_params, PI_BY_TWO, TWO_PI)
+                   HYPO_PARAMS_T, hypo_to_track_params, PI_BY_TWO,
+                   TimeSpaceCoord, TRACK_M_PER_GEV, TWO_PI)
 from sparse import Sparse
 
 
@@ -91,56 +92,48 @@ class Track(object):
 
     Parameters
     ----------
-    params : TrackParams namedtuple
+    params : TrackParams
+    origin : TimeSpaceCoord
 
     """
-    def __init__(self, params):
+    def __init__(self, params, origin=(0,)*4):
         self.params = params
 
-        # Vertex position, direction, and length
-        self.t_v = params.t
-        self.x_v = params.x
-        self.y_v = params.y
-        self.z_v = params.z
-        self.theta = params.zenith
-        self.phi = params.azimuth
-        self.length = params.length
+        # Track length is derived from its energy
+        self.length = params.energy * TRACK_M_PER_GEV
 
         # Pre-calculated quantities
         self.dt = self.length / SPEED_OF_LIGHT_M_PER_NS
-        self.sinphi = np.sin(self.phi)
-        self.cosphi = np.cos(self.phi)
-        self.tanphi = np.tan(self.phi)
-        self.sintheta = np.sin(self.theta)
-        self.costheta = np.cos(self.theta)
-        self.set_origin(0, 0, 0, 0)
+        self.sinphi = np.sin(self.params.azimuth)
+        self.cosphi = np.cos(self.params.azimuth)
+        self.tanphi = np.tan(self.params.azimuth)
+        self.sintheta = np.sin(self.params.zenith)
+        self.costheta = np.cos(self.params.zenith)
+        self.origin = None
+        self.set_origin(origin)
 
-    def set_origin(self, t, x, y, z):
-        """ displace track """
-        self.t_o = t
-        self.x_o = x
-        self.y_o = y
-        self.z_o = z
+    def set_origin(self, coord):
+        """Displace track
 
-    @property
-    def t0(self):
-        """ transalted t """
-        return self.t_v - self.t_o
+        Parameters
+        ----------
+        coord : TimeSpaceCoord namedtuple
 
-    @property
-    def x0(self):
-        """ translated x """
-        return self.x_v - self.x_o
+        """
+        if coord == self.origin:
+            return
 
-    @property
-    def y0(self):
-        """ translated y """
-        return self.y_v - self.y_o
+        if not isinstance(coord, TimeSpaceCoord):
+            coord = TimeSpaceCoord(*coord)
 
-    @property
-    def z0(self):
-        """ translated z """
-        return self.z_v - self.z_o
+        self.origin = coord
+
+        # Define relative coordinates
+
+        self.t0 = self.params.t - self.origin.t
+        self.x0 = self.params.x - self.origin.x
+        self.y0 = self.params.y - self.origin.y
+        self.z0 = self.params.z - self.origin.z
 
     def point(self, t):
         """return point on track for a given time"""
@@ -176,8 +169,8 @@ class Track(object):
     def ts(self):
         """time with smallest theta"""
         if ((self.x0 == self.y0 == self.z0 == 0)
-                or self.theta == 0
-                or self.theta == np.pi):
+                or self.params.zenith == 0
+                or self.params.zenith == np.pi):
             return self.t0
 
         rho = ((- self.costheta * (self.x0*self.x0 + self.y0*self.y0)
@@ -315,12 +308,12 @@ class Hypo(object):
         self.bin_centers = None
         self.shape = tuple([])
 
-    def set_binning(self, bin_edges): #t_bin_edges, r_bin_edges, theta_bin_edges, phi_bin_edges):
+    def set_binning(self, bin_edges):
         """Set the binning of the spherical coordinates with bin_edges.
 
         Parameters
         ----------
-        bin_edges : likelihood.BinningCoords namedtuple
+        bin_edges : BinningCoords
 
         """
         self.bin_edges = bin_edges
@@ -462,30 +455,29 @@ class Hypo(object):
         return np.array(intervals, dtype=FTYPE)
 
     #@profile
-    def get_matrices(self, Dt=0, Dx=0, Dy=0, Dz=0):
+    def compute_matrices(self, hit_dom_coord):
         """Calculate the matrices for a given DOM hit, i.e.,
         DOM 3D position + hit time.
 
         Parameters
         ----------
-        Dt
-            DOM hit time (ns)
-        Dx, Dy, Dz
-            DOM position (m)
+        hit_dom_coord : TimeSpaceCoord or convertible thereto
+            Hit position in time and space.
 
         Returns
         -------
         matrix in t, r, theta, phi
-        n_photons = number of photons
-        p_theta = source direction in theta
-        p_phi = delta phi direction of source
-        p_length = correlation of photons
+        photon_counts = number of photons
+        photon_corr_theta = source direction in theta
+        photon_corr_phi = delta phi direction of source
+        photon_corr_len = correlation of photons
 
         """
-        # set the origin of the spherical coords. to the DOM hit pos.
-        self.track.set_origin(Dt, Dx, Dy, Dz)
+        # Set the origin of the spherical coordinate system to the DOM hit
+        # position
+        self.track.set_origin(hit_dom_coord)
 
-        # closest point (r inflection point)
+        # Closest point (r inflection point)
         tb = self.track.tb
         if tb >= self.track.t0 and tb < self.track.t0 + self.track.dt:
             xb, yb, zb = self.track.point(tb)
@@ -498,10 +490,10 @@ class Hypo(object):
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
         # the big matrix z
-        n_photons = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        p_theta = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        p_phi = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        p_length = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_counts = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_corr_theta = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_corr_phi = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_corr_len = Sparse(shape=self.shape, default=0, dtype=FTYPE)
 
         start_t = time.time()
         t_inner_loop = 0
@@ -563,29 +555,29 @@ class Hypo(object):
                 corr_loop += end_t3 - start_t3
 
                 start_t2 = time.time()
-                n_photons = inner_loop(n_photons, k, phi_inter,
-                                       theta_inter_neg, theta_inter_pos,
-                                       r_inter_neg, r_inter_pos,
-                                       self.photons_per_meter)
+                photon_counts = inner_loop(photon_counts, k, phi_inter,
+                                           theta_inter_neg, theta_inter_pos,
+                                           r_inter_neg, r_inter_pos,
+                                           self.photons_per_meter)
                 end_t2 = time.time()
                 t_inner_loop += end_t2 - start_t2
 
         end_t = time.time()
 
         # add angles:
-        for element in n_photons:
+        for element in photon_counts:
             idx, _ = element
-            theta = self.track.theta
+            theta = self.track.params.zenith
             phi = self.bin_centers.phi[idx[-1]]
-            #delta_phi = np.abs(self.track.phi - phi)%(TWO_PI)
+            #delta_phi = np.abs(self.track.params.azimuth - phi)%(TWO_PI)
             # calculate same way as in photon propapgation (CLsim)
-            delta = np.abs(phi - self.track.phi)
+            delta = np.abs(phi - self.track.params.azimuth)
             delta_phi = delta if delta <= np.pi else TWO_PI - delta
-            #delta_phi = np.pi - np.abs((np.abs(phi - self.track.phi)  - np.pi))
-            p_theta[idx] = theta
-            p_phi[idx] = delta_phi
+            #delta_phi = np.pi - np.abs((np.abs(phi - self.track.params.azimuth)  - np.pi))
+            photon_corr_theta[idx] = theta
+            photon_corr_phi[idx] = delta_phi
             # set corr. length for tracks to 1.0, i.e. totally directed
-            p_length[idx] = 1.0
+            photon_corr_len[idx] = 1.0
 
         # add cascade as point:
         # get bin at self.track.t0, ...
@@ -604,13 +596,16 @@ class Hypo(object):
         if None not in (t_bin, r_bin, theta_bin, phi_bin):
             # Weighted average of corr length from track and cascade, while
             # assuming 0.5 for cascade right now
-            p_length[t_bin, r_bin, theta_bin, phi_bin] = np.average(
-                [p_length[t_bin, r_bin, theta_bin, phi_bin], 0.5],
-                weights=[n_photons[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons]
+            photon_corr_len[t_bin, r_bin, theta_bin, phi_bin] = np.average(
+                [photon_corr_len[t_bin, r_bin, theta_bin, phi_bin], 0.5],
+                weights=[photon_counts[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons]
             )
-            n_photons[t_bin, r_bin, theta_bin, phi_bin] += self.cascade_photons
+            photon_counts[t_bin, r_bin, theta_bin, phi_bin] += self.cascade_photons
 
-        return n_photons, p_theta, p_phi, p_length
+        self.photon_counts = photon_counts
+        self.photon_corr_theta = photon_corr_theta
+        self.photon_corr_phi = photon_corr_phi
+        self.photon_corr_len = photon_corr_len
 
     @staticmethod
     def get_bin(val, bin_edges):
