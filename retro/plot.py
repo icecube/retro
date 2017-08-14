@@ -48,9 +48,8 @@ def main():
           % ((time.time() - t0)*1000))
 
     z = np.zeros(num_bins)
-    for hit in hypo_ana_fast.photon_counts:
-        idx, count = hit
-        z[idx] = count
+    for bin_idx, count in hypo_ana_fast.photon_counts:
+        z[bin_idx] = count
     print('total number of photons in philipp z matrix = %i (%0.2f %%)'
           % (z.sum(), z.sum() / hypo_ana_fast.tot_photons * 100))
 
@@ -58,21 +57,24 @@ def main():
 
     # kevin array
     t0 = time.time()
-    hypo_approx = SegmentedHypo(params=hypo_params, time_increment=1)
+    hypo_approx = SegmentedHypo(params=hypo_params, time_increment=0.1)
     hypo_approx.set_binning(start=bin_start, stop=bin_stop, num_bins=num_bins)
     hypo_approx.compute_matrices(hit_dom_coord)
 
-    z_indices = hypo_approx.indices_array
-    z_values = hypo_approx.values_array
-    z_matrix = np.zeros(num_bins, dtype=FTYPE)
-
-    for incr_idx in xrange(hypo_approx.number_of_increments):
-        zmat_idx = tuple(z_indices[:, incr_idx])
-        if z_indices[IDX_R_IX, incr_idx] < hypo_approx.bin_max.r:
-            z_matrix[zmat_idx] += z_values[0, incr_idx]
-
     print('took %5.2f ms to calculate kevin z matrix'
           % ((time.time() - t0)*1000))
+
+    z_matrix = np.zeros(num_bins)
+    for bin_idx, info in hypo_approx.photon_info.iteritems():
+        z_matrix[bin_idx] = info.count
+
+    #z_indices = hypo_approx.indices_array
+    #z_values = hypo_approx.values_array
+    #z_matrix = np.zeros(num_bins, dtype=FTYPE)
+    #for incr_idx in xrange(hypo_approx.number_of_increments):
+    #    zmat_idx = tuple(z_indices[:, incr_idx])
+    #    if z_indices[IDX_R_IX, incr_idx] < hypo_approx.bin_max.r:
+    #        z_matrix[zmat_idx] += z_values[0, incr_idx]
 
     print('total number of photons in kevin z_matrix ='
           ' %i (%.2f %%)'
@@ -314,6 +316,8 @@ def main():
     cb3.remove()
     cb4.remove()
 
+    return hypo_ana_fast, hypo_approx
+
 
 if __name__ == '__main__':
-    main()
+    hypo_ana_fast, hypo_approx = main()

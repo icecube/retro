@@ -20,7 +20,7 @@ from retro import (BinningCoords, CASCADE_PHOTONS_PER_GEV, FTYPE,
                    SPEED_OF_LIGHT_M_PER_NS, HYPO_PARAMS_T,
                    hypo_to_track_params, PI_BY_TWO, TimeSpaceCoord,
                    TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TWO_PI)
-from sparse import Sparse
+from retro.sparse import Sparse
 
 
 __all__ = ['inner_loop', 'Track', 'Hypo']
@@ -359,9 +359,9 @@ class Hypo(object):
         self.shape = tuple([])
 
         self.photon_counts = None
-        self.photon_corr_len = None
-        self.photon_corr_phi = None
-        self.photon_corr_theta = None
+        self.photon_avg_len = None
+        self.photon_avg_phi = None
+        self.photon_avg_theta = None
 
         if origin is not None:
             self.set_origin(coord=origin)
@@ -529,9 +529,9 @@ class Hypo(object):
         -------
         matrix in t, r, theta, phi
         photon_counts = number of photons
-        photon_corr_theta = source direction in theta
-        photon_corr_phi = delta phi direction of source
-        photon_corr_len = correlation of photons
+        photon_avg_theta = source direction in theta
+        photon_avg_phi = delta phi direction of source
+        photon_avg_len = correlation of photons
 
         """
         # Set the origin of the spherical coordinate system to the DOM hit
@@ -552,13 +552,13 @@ class Hypo(object):
 
         # the big matrix z
         photon_counts = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        photon_corr_theta = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        photon_corr_phi = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        photon_corr_len = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_avg_theta = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_avg_phi = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_avg_len = Sparse(shape=self.shape, default=0, dtype=FTYPE)
 
         start_t = time.time()
         t_inner_loop = 0
-        corr_loop = 0
+        avg_loop = 0
         # iterate over time bins
         total_rho = 0
         for k in range(len(self.bin_edges.t) - 1):
@@ -613,7 +613,7 @@ class Hypo(object):
                 r_inter_neg = self.correlate_r(self.bin_edges.r, track_r_extent_neg, False)
                 r_inter_pos = self.correlate_r(self.bin_edges.r, track_r_extent_pos, True)
                 end_t3 = time.time()
-                corr_loop += end_t3 - start_t3
+                avg_loop += end_t3 - start_t3
 
                 start_t2 = time.time()
                 photon_counts = inner_loop(photon_counts, k, phi_inter,
@@ -635,10 +635,10 @@ class Hypo(object):
             delta = np.abs(phi - self.track.azimuth)
             delta_phi = delta if delta <= np.pi else TWO_PI - delta
             #delta_phi = np.pi - np.abs((np.abs(phi - self.track.azimuth)  - np.pi))
-            photon_corr_theta[idx] = theta
-            photon_corr_phi[idx] = delta_phi
+            photon_avg_theta[idx] = theta
+            photon_avg_phi[idx] = delta_phi
             # set corr. length for tracks to 1.0, i.e. totally directed
-            photon_corr_len[idx] = 1.0
+            photon_avg_len[idx] = 1.0
 
         # add cascade as point:
         # get bin at self.track.t0, ...
@@ -657,16 +657,16 @@ class Hypo(object):
         if None not in (t_bin, r_bin, theta_bin, phi_bin):
             # Weighted average of corr length from track and cascade, while
             # assuming 0.5 for cascade right now
-            photon_corr_len[t_bin, r_bin, theta_bin, phi_bin] = np.average(
-                [photon_corr_len[t_bin, r_bin, theta_bin, phi_bin], 0.5],
+            photon_avg_len[t_bin, r_bin, theta_bin, phi_bin] = np.average(
+                [photon_avg_len[t_bin, r_bin, theta_bin, phi_bin], 0.5],
                 weights=[photon_counts[t_bin, r_bin, theta_bin, phi_bin], self.cascade_photons]
             )
             photon_counts[t_bin, r_bin, theta_bin, phi_bin] += self.cascade_photons
 
         self.photon_counts = photon_counts
-        self.photon_corr_theta = photon_corr_theta
-        self.photon_corr_phi = photon_corr_phi
-        self.photon_corr_len = photon_corr_len
+        self.photon_avg_theta = photon_avg_theta
+        self.photon_avg_phi = photon_avg_phi
+        self.photon_avg_len = photon_avg_len
 
     @staticmethod
     def get_bin(val, bin_edges):

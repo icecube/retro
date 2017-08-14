@@ -198,15 +198,15 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         # String indices 0-78 (numbers 1-79) are ordinary IceCube strings
         if 0 <= string <= 78:
             photon_counts_map = ic_photon_info.count[om]
-            photon_corr_theta_map = ic_photon_info.theta[om]
-            photon_corr_phi_map = ic_photon_info.phi[om]
-            photon_corr_len_map = ic_photon_info.length[om]
+            photon_avg_theta_map = ic_photon_info.theta[om]
+            photon_avg_phi_map = ic_photon_info.phi[om]
+            photon_avg_len_map = ic_photon_info.length[om]
         # String indices 79-85 (numbers 80-86) are ordinary DeepCore strings
         elif 79 <= string <= 85:
             photon_counts_map = dc_photon_info.count[om]
-            photon_corr_theta_map = dc_photon_info.theta[om]
-            photon_corr_phi_map = dc_photon_info.phi[om]
-            photon_corr_len_map = dc_photon_info.length[om]
+            photon_avg_theta_map = dc_photon_info.theta[om]
+            photon_avg_phi_map = dc_photon_info.phi[om]
+            photon_avg_len_map = dc_photon_info.length[om]
         else:
             raise ValueError('Unhandled string index %d (number %d)'
                              % (string, string + 1))
@@ -217,15 +217,15 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         for photon_idx, hypo_count in hypo.photon_counts:
             # These two agles need to be inverted because we're backpropagating
             # but want to match to forward-propagating photons
-            hypo_theta = np.pi - hypo.photon_corr_theta[photon_idx]
-            hypo_phi = np.pi - hypo.photon_corr_phi[photon_idx]
-            #hypo_legth = hypo.photon_corr_length[photon_idx]
+            hypo_theta = np.pi - hypo.photon_avg_theta[photon_idx]
+            hypo_phi = np.pi - hypo.photon_avg_phi[photon_idx]
+            #hypo_legth = hypo.photon_avg_length[photon_idx]
 
             # Get map
             map_count = photon_counts_map[photon_idx[0:3]]
-            map_theta = photon_corr_theta_map[photon_idx[0:3]]
-            map_phi = photon_corr_phi_map[photon_idx[0:3]]
-            map_length = photon_corr_len_map[photon_idx[0:3]]
+            map_theta = photon_avg_theta_map[photon_idx[0:3]]
+            map_phi = photon_avg_phi_map[photon_idx[0:3]]
+            map_length = photon_avg_len_map[photon_idx[0:3]]
 
             # Assume source is totally directed at 0.73 rad (cherenkov angle)
 

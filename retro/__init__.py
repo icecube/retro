@@ -21,11 +21,11 @@ __all__ = ['FTYPE', 'UITYPE', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
            'TimeSpaceCoord', 'expand', 'event_to_hypo_params',
            'hypo_to_track_params', 'power_axis', 'Events']
 
-
 # -- Datatypes to use -- #
 
-FTYPE = np.float32
+FTYPE = np.float64
 """Datatype to use for explicitly-typed floating point numbers"""
+print(FTYPE)
 
 UITYPE = np.uint16
 """Datatype to use for explicitly-typed unsigned integers"""

@@ -36,5 +36,5 @@ class Sparse(object):
             del self._data[index]
 
     def __iter__(self):
-        for key, val in self._data.items():
+        for key, val in self._data.iteritems():
             yield key, val

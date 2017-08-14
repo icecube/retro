@@ -6,6 +6,7 @@ from __future__ import absolute_import, division, print_function
 import math
 import os
 from os.path import abspath, dirname
+import time
 
 import numba
 import numpy as np
@@ -13,8 +14,9 @@ import numpy as np
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (BinningCoords, CASCADE_PHOTONS_PER_GEV, FTYPE,
-                   HYPO_PARAMS_T, SPEED_OF_LIGHT_M_PER_NS, TimeSpaceCoord,
-                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TWO_PI, UITYPE)
+                   HYPO_PARAMS_T, PhotonInfo, SPEED_OF_LIGHT_M_PER_NS,
+                   TimeSpaceCoord, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M,
+                   TWO_PI, UITYPE)
 
 
 NUMBA_UPDATE_ARRAYS = False
@@ -51,7 +53,6 @@ def update_arrays(indices_array, values_array,
         var_z = z + speed_z * relative_time
         var_r = np.sqrt(var_x**2 + var_y**2 + var_z**2)
         var_theta = var_z / var_r
-        #var_phi = math.atan2(var_y, var_x) % TWO_PI
         var_phi = np.arctan2(var_y, var_x) % TWO_PI
 
         indices_array[IDX_T_IX, seg_idx] = var_t * t_scaling_factor
@@ -106,16 +107,21 @@ class SegmentedHypo(object):
         self.track_energy = params.track_energy
         self.cascade_energy = params.cascade_energy
 
-        # Declare "constants"
+        # Directions
+        sin_trck_zen = math.sin(self.track_zenith)
+        self.track_dir_x = sin_trck_zen * math.cos(self.track_azimuth)
+        self.track_dir_y = sin_trck_zen * math.sin(self.track_azimuth)
+        self.track_dir_z = math.cos(self.track_azimuth)
+
         self.time_increment = time_increment
         self.segment_length = self.time_increment * SPEED_OF_LIGHT_M_PER_NS
         self.track_photons_per_m = TRACK_PHOTONS_PER_M * track_e_scale
+        self.photons_per_segment = self.segment_length * self.track_photons_per_m
         self.cascade_photons_per_gev = CASCADE_PHOTONS_PER_GEV * cascade_e_scale
 
-        c_sin_zen = SPEED_OF_LIGHT_M_PER_NS * math.sin(self.track_zenith)
-        self.speed_x = c_sin_zen * math.cos(self.track_azimuth)
-        self.speed_y = c_sin_zen * math.sin(self.track_azimuth)
-        self.speed_z = SPEED_OF_LIGHT_M_PER_NS * math.cos(self.track_zenith)
+        self.speed_x = SPEED_OF_LIGHT_M_PER_NS * self.track_dir_x
+        self.speed_y = SPEED_OF_LIGHT_M_PER_NS * self.track_dir_y
+        self.speed_z = SPEED_OF_LIGHT_M_PER_NS * self.track_dir_z
 
         self.track_length = params.track_energy * TRACK_M_PER_GEV
 
@@ -128,9 +134,9 @@ class SegmentedHypo(object):
         self.recreate_arrays = True
         self.origin = None
         self.photon_counts = None
-        self.photon_corr_len = None
-        self.photon_corr_phi = None
-        self.photon_corr_theta = None
+        self.photon_avg_len = None
+        self.photon_avg_phi = None
+        self.photon_avg_theta = None
 
         if origin is not None:
             self.set_origin(coord=origin)
@@ -169,6 +175,7 @@ class SegmentedHypo(object):
         self.theta_scaling_factor = self.num_bins.theta / 2
         self.track_azimuth_scaling_factor = self.num_bins.phi / TWO_PI
         self.phi_bin_width = TWO_PI / self.num_bins.phi
+        self.phi_half_bin_width = TWO_PI / self.num_bins.phi / 2
 
     #@profile
     def set_origin(self, coord):
@@ -230,9 +237,8 @@ class SegmentedHypo(object):
                 order='C'
             )
             self.values_array = np.empty(
-                shape=(4, self.number_of_increments),
-                dtype=FTYPE,
-                order='C'
+                (len(PhotonInfo._fields), self.number_of_increments),
+                FTYPE
             )
             self.recreate_arrays = False
 
@@ -268,10 +274,61 @@ class SegmentedHypo(object):
         var_theta = var_z / var_r
         var_phi = np.arctan2(var_y, var_x) % TWO_PI
 
+        # Compute which bin index each segment is in
+
+        # NOTE: indices_array is uint type, so float values are truncated,
+        # should result in floor rounding
         self.indices_array[IDX_T_IX, :] = self.t_array_init * self.t_scaling_factor
         self.indices_array[IDX_R_IX, :] = np.sqrt(var_r * self.r_scaling_factor)
         self.indices_array[IDX_THETA_IX, :] = (1 - var_theta) * self.theta_scaling_factor
         self.indices_array[IDX_PHI_IX, :] = var_phi * self.track_azimuth_scaling_factor
+
+        # Count segments in each bin
+        t0 = time.time()
+        self.segment_counts = {}
+        for incr_idx in xrange(self.number_of_increments):
+            bin_idx = BinningCoords(*self.indices_array[:, incr_idx])
+            self.segment_counts[bin_idx] = (
+                1 + self.segment_counts.get(bin_idx, 0)
+            )
+
+        # NOTE: The approx. projected length of a unit vector (onto track
+        # dir) at Cherenkov angle for 1-100 GeV muon in ice with n ~ 1.78
+        # (~55.8 deg) projected onto track's direction: cos(55.8 deg) ~ 0.562.
+
+        # Stuff photon_info PhtonInfo namedtuples
+
+        self.photon_info = {}
+        for bin_idx, segment_count in self.segment_counts.items():
+            self.photon_info[bin_idx] = PhotonInfo(
+                count=segment_count * self.photons_per_segment,
+                theta=self.track_zenith,
+                phi=np.abs(
+                    self.track_azimuth
+                    - (bin_idx.phi*self.phi_bin_width + self.phi_half_bin_width)
+                ),
+                length=0.562
+            )
+
+        # TODO: should this be += to include both track and cascade photons at
+        # 0? Or are all track photons accounted for at the "bin center" which
+        # would be the first increment after 0?
+        #zero_bin_idx = BinningCoords(t=0, r=0, theta=0, phi=0)
+        zero_bin_idx = BinningCoords(*self.indices_array[:, 0])
+        if zero_bin_idx in self.photon_info:
+            orig_zero_bin_info = self.photon_info[zero_bin_idx]
+            count = (self.cascade_photons + orig_zero_bin_info.count)
+
+        print('zero bin before assignemnt:', orig_zero_bin_info)
+
+        self.photon_info[zero_bin_idx] = PhotonInfo(
+            count=count,
+            theta=0,
+            phi=0,
+            length=0
+        )
+        t1 = time.time()
+        print('time to fill dict:', t1 - t0)
 
         # Add track photons
         self.values_array[PHOT_CNT_IX, :] = self.segment_length * self.track_photons_per_m
@@ -287,23 +344,6 @@ class SegmentedHypo(object):
         self.values_array[PHOT_THETA_IX, :] = self.track_zenith
 
         # Add delta phi values
-        self.values_array[PHOT_PHI_IX, :] = np.abs(
-            self.track_azimuth
-            - (self.indices_array[IDX_PHI_IX, :] * self.phi_bin_width
-               + (self.phi_bin_width / 2))
-        )
+        self.values_array[PHOT_PHI_IX, :] = np.abs(self.track_azimuth - (self.indices_array[IDX_PHI_IX, :] * self.phi_bin_width + (self.phi_bin_width / 2)))
 
-        # The approx. length of a vector at Cherenkov angle for 1-100 GeV muon
-        # (~40 deg) projected onto track's direction: cos(40 deg) ~ 0.77
-        self.values_array[PHOT_LEN_IX, :] = 0.77
-
-        self.photon_counts = self.values_array[PHOT_CNT_IX, :]
-        self.photon_corr_len = self.values_array[PHOT_LEN_IX, :]
-        self.photon_corr_theta = self.values_array[PHOT_THETA_IX, :]
-        self.photon_corr_phi = self.values_array[PHOT_PHI_IX, :]
-
-    def __iter__(self):
-        if self.photon_counts is None:
-            raise ValueError('Matrices not computed yet, cannot iterate.')
-
-        
+        self.values_array[PHOT_LEN_IX, :] = 0.562
