@@ -13,6 +13,7 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D # pylint: disable=unused-import
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
