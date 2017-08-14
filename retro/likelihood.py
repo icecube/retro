@@ -215,8 +215,8 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         # noise probability?
         expected_charge = 0
         for photon_idx, hypo_count in hypo.photon_counts:
-            # These two agles need to be inverted, because we're
-            # backpropagating but want to match to forward-propagating photons
+            # These two agles need to be inverted because we're backpropagating
+            # but want to match to forward-propagating photons
             hypo_theta = np.pi - hypo.photon_corr_theta[photon_idx]
             hypo_phi = np.pi - hypo.photon_corr_phi[photon_idx]
             #hypo_legth = hypo.photon_corr_length[photon_idx]

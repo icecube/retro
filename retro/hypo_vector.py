@@ -24,18 +24,19 @@ N_ITYPE = numba.int64
 N_UITYPE = numba.uint16 if UITYPE is np.uint16 else numba.uint64
 
 # Define indices for accessing rows of `indices_array`
-T_IDX_IX = BinningCoords._fields.index('t')
-R_IDX_IX = BinningCoords._fields.index('r')
-THETA_IDX_IX = BinningCoords._fields.index('theta')
-PHI_IDX_IX = BinningCoords._fields.index('phi')
+IDX_T_IX = BinningCoords._fields.index('t')
+IDX_R_IX = BinningCoords._fields.index('r')
+IDX_THETA_IX = BinningCoords._fields.index('theta')
+IDX_PHI_IX = BinningCoords._fields.index('phi')
 
 # Define indices for accessing rows of `values_array`
-PHOT_VAL_IX = 0
-TRCK_ZEN_VAL_IX = 1
-DTRCK_AZ_VAL_IX = 2
+PHOT_CNT_IX = 0
+PHOT_LEN_IX = 1
+PHOT_THETA_IX = 2
+PHOT_PHI_IX = 3
 
 
-#@numba.jit(nopython=True, fastmath=True, parallel=True, cache=True)
+@numba.jit(nopython=True, fastmath=True, parallel=False, cache=True)
 def update_arrays(indices_array, values_array,
                   number_of_increments, t_array_init, t, x, y, z, speed_x,
                   speed_y, speed_z, t_scaling_factor, r_scaling_factor,
@@ -48,31 +49,32 @@ def update_arrays(indices_array, values_array,
         var_x = x + speed_x * relative_time
         var_y = y + speed_y * relative_time
         var_z = z + speed_z * relative_time
-        var_r = math.sqrt(var_x*var_x + var_y*var_y + var_z*var_z)
+        var_r = np.sqrt(var_x**2 + var_y**2 + var_z**2)
         var_theta = var_z / var_r
-        var_phi = math.atan2(var_y, var_x) % TWO_PI
+        #var_phi = math.atan2(var_y, var_x) % TWO_PI
+        var_phi = np.arctan2(var_y, var_x) % TWO_PI
 
-        indices_array[T_IDX_IX, seg_idx] = var_t * t_scaling_factor
-        indices_array[R_IDX_IX, seg_idx] = math.sqrt(var_r * r_scaling_factor)
-        indices_array[THETA_IDX_IX, seg_idx] = (1 - var_theta) * theta_scaling_factor
+        indices_array[IDX_T_IX, seg_idx] = var_t * t_scaling_factor
+        indices_array[IDX_R_IX, seg_idx] = np.sqrt(var_r * r_scaling_factor)
+        indices_array[IDX_THETA_IX, seg_idx] = (1 - var_theta) * theta_scaling_factor
         ind_phi = var_phi * track_azimuth_scaling_factor
-        indices_array[PHI_IDX_IX, seg_idx] = ind_phi
+        indices_array[IDX_PHI_IX, seg_idx] = ind_phi
 
         # Add track photons
-        values_array[PHOT_VAL_IX, seg_idx] = segment_length * track_photons_per_m
-
-        # TODO: should this be += to include both track and cascade photons at
-        # 0? Or are all track photons accounted for at the "bin center" which
-        # would be the first increment after 0?
+        values_array[PHOT_CNT_IX, seg_idx] = segment_length * track_photons_per_m
 
         # Add track theta values
-        values_array[TRCK_ZEN_VAL_IX, seg_idx] = track_zenith
+        values_array[PHOT_THETA_IX, seg_idx] = track_zenith
 
         # Add delta phi values
-        values_array[DTRCK_AZ_VAL_IX, seg_idx] = abs(track_azimuth - (ind_phi * phi_bin_width + (phi_bin_width / 2)))
+        values_array[PHOT_PHI_IX, seg_idx] = abs(track_azimuth - (ind_phi * phi_bin_width + (phi_bin_width / 2)))
+
+    # TODO: should this be += to include both track and cascade photons at
+    # 0? Or are all track photons accounted for at the "bin center" which
+    # would be the first increment after 0?
 
     # Set cascade photons in 0th sample location
-    values_array[PHOT_VAL_IX, 0] = cascade_photons
+    values_array[PHOT_CNT_IX, 0] = cascade_photons
 
 
 class SegmentedHypo(object):
@@ -125,6 +127,10 @@ class SegmentedHypo(object):
         self.number_of_increments = 0
         self.recreate_arrays = True
         self.origin = None
+        self.photon_counts = None
+        self.photon_corr_len = None
+        self.photon_corr_phi = None
+        self.photon_corr_theta = None
 
         if origin is not None:
             self.set_origin(coord=origin)
@@ -191,7 +197,15 @@ class SegmentedHypo(object):
 
         # Create initial time array, using the midpoints of each time increment
         half_incr = self.time_increment / 2
-        self.t_array_init = np.arange(self.t - half_incr, min(self.bin_max.t, self.track_length / SPEED_OF_LIGHT_M_PER_NS + self.t) - half_incr, self.time_increment, FTYPE)
+        self.t_array_init = np.arange(
+            self.t - half_incr,
+            min(
+                self.bin_max.t,
+                self.track_length / SPEED_OF_LIGHT_M_PER_NS + self.t
+            ) - half_incr,
+            self.time_increment,
+            dtype=FTYPE
+        )
         self.t_array_init[0] = self.t
 
         # Set the number of time increments in the track
@@ -211,12 +225,14 @@ class SegmentedHypo(object):
 
         if self.recreate_arrays:
             self.indices_array = np.empty(
-                (len(BinningCoords._fields), self.number_of_increments),
-                UITYPE
+                shape=(len(BinningCoords._fields), self.number_of_increments),
+                dtype=UITYPE,
+                order='C'
             )
             self.values_array = np.empty(
-                (3, self.number_of_increments),
-                FTYPE
+                shape=(4, self.number_of_increments),
+                dtype=FTYPE,
+                order='C'
             )
             self.recreate_arrays = False
 
@@ -252,27 +268,42 @@ class SegmentedHypo(object):
         var_theta = var_z / var_r
         var_phi = np.arctan2(var_y, var_x) % TWO_PI
 
-        self.indices_array[T_IDX_IX, :] = self.t_array_init * self.t_scaling_factor
-        self.indices_array[R_IDX_IX, :] = np.sqrt(var_r * self.r_scaling_factor)
-        self.indices_array[THETA_IDX_IX, :] = (1 - var_theta) * self.theta_scaling_factor
-        self.indices_array[PHI_IDX_IX, :] = var_phi * self.track_azimuth_scaling_factor
+        self.indices_array[IDX_T_IX, :] = self.t_array_init * self.t_scaling_factor
+        self.indices_array[IDX_R_IX, :] = np.sqrt(var_r * self.r_scaling_factor)
+        self.indices_array[IDX_THETA_IX, :] = (1 - var_theta) * self.theta_scaling_factor
+        self.indices_array[IDX_PHI_IX, :] = var_phi * self.track_azimuth_scaling_factor
 
         # Add track photons
-        self.values_array[PHOT_VAL_IX, :] = self.segment_length * self.track_photons_per_m
+        self.values_array[PHOT_CNT_IX, :] = self.segment_length * self.track_photons_per_m
 
         # TODO: should this be += to include both track and cascade photons at
         # 0? Or are all track photons accounted for at the "bin center" which
         # would be the first increment after 0?
 
         # Set cascade photons in 0th sample location
-        self.values_array[PHOT_VAL_IX, 0] = self.cascade_photons
+        self.values_array[PHOT_CNT_IX, 0] = self.cascade_photons
 
         # Add track theta values
-        self.values_array[TRCK_ZEN_VAL_IX, :] = self.track_zenith
+        self.values_array[PHOT_THETA_IX, :] = self.track_zenith
 
         # Add delta phi values
-        self.values_array[DTRCK_AZ_VAL_IX, :] = np.abs(
+        self.values_array[PHOT_PHI_IX, :] = np.abs(
             self.track_azimuth
-            - (self.indices_array[PHI_IDX_IX, :] * self.phi_bin_width
+            - (self.indices_array[IDX_PHI_IX, :] * self.phi_bin_width
                + (self.phi_bin_width / 2))
         )
+
+        # The approx. length of a vector at Cherenkov angle for 1-100 GeV muon
+        # (~40 deg) projected onto track's direction: cos(40 deg) ~ 0.77
+        self.values_array[PHOT_LEN_IX, :] = 0.77
+
+        self.photon_counts = self.values_array[PHOT_CNT_IX, :]
+        self.photon_corr_len = self.values_array[PHOT_LEN_IX, :]
+        self.photon_corr_theta = self.values_array[PHOT_THETA_IX, :]
+        self.photon_corr_phi = self.values_array[PHOT_PHI_IX, :]
+
+    def __iter__(self):
+        if self.photon_counts is None:
+            raise ValueError('Matrices not computed yet, cannot iterate.')
+
+        

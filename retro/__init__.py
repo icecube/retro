@@ -24,10 +24,10 @@ __all__ = ['FTYPE', 'UITYPE', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
 
 # -- Datatypes to use -- #
 
-FTYPE = np.float64
+FTYPE = np.float32
 """Datatype to use for explicitly-typed floating point numbers"""
 
-UITYPE = np.uint64
+UITYPE = np.uint16
 """Datatype to use for explicitly-typed unsigned integers"""
 
 # -- Default choices we've made -- #

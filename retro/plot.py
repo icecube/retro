@@ -20,7 +20,7 @@ if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (BinningCoords, binspec_to_edges, FTYPE, HypoParams8D,
                    TimeSpaceCoord)
-from hypo_vector import R_IDX_IX, SegmentedHypo
+from hypo_vector import IDX_R_IX, SegmentedHypo
 from hypo_fast import Hypo
 
 
@@ -61,8 +61,6 @@ def main():
     hypo_approx = SegmentedHypo(params=hypo_params, time_increment=1)
     hypo_approx.set_binning(start=bin_start, stop=bin_stop, num_bins=num_bins)
     hypo_approx.compute_matrices(hit_dom_coord)
-    print('took %5.2f ms to calculate kevin z matrix'
-          % ((time.time() - t0)*1000))
 
     z_indices = hypo_approx.indices_array
     z_values = hypo_approx.values_array
@@ -70,8 +68,11 @@ def main():
 
     for incr_idx in xrange(hypo_approx.number_of_increments):
         zmat_idx = tuple(z_indices[:, incr_idx])
-        if z_indices[R_IDX_IX, incr_idx] < hypo_approx.bin_max.r:
+        if z_indices[IDX_R_IX, incr_idx] < hypo_approx.bin_max.r:
             z_matrix[zmat_idx] += z_values[0, incr_idx]
+
+    print('took %5.2f ms to calculate kevin z matrix'
+          % ((time.time() - t0)*1000))
 
     print('total number of photons in kevin z_matrix ='
           ' %i (%.2f %%)'
