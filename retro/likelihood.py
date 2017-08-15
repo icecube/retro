@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# pylint: disable=print-statement, xrange-builtin, wrong-import-position
+# pylint: disable=wrong-import-position
 
 """
 Load retro tables into RAM, then tales of icecube hdf5 files with events (hits
@@ -31,22 +31,19 @@ from scipy.special import gammaln
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, event_to_hypo_params, Event, Events, expand,
+from retro import (BinningCoords, event_to_hypo_params, Events, expand,
                    FTYPE, HypoParams10D, HYPO_PARAMS_T, PhotonInfo, Pulses,
                    TimeSpaceCoord)
-import hypo_fast
-import hypo_vector
-from particles import ParticleArray
+import hypo_fast # pylint: disable=unused-import
+import hypo_vector # pylint: disable=unused-import
 
 
 IC_TABLE_FPATH_PROTO = (
-    '/data/icecube/retro_tables/full1000'
-    '/retro_nevts1000_IC_DOM{:d}_r_cz_t_angles.fits'
+    '{tables_dir:s}/retro_nevts1000_IC_DOM{dom:d}_r_cz_t_angles.fits'
 )
 
 DC_TABLE_FPATH_PROTO = (
-    '/data/icecube/retro_tables/full1000'
-    '/retro_nevts1000_DC_DOM{:d}_r_cz_t_angles.fits'
+    '{tables_dir:s}/retro_nevts1000_DC_DOM{dom:d}_r_cz_t_angles.fits'
 )
 
 DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
@@ -59,7 +56,7 @@ NOISE_CHARGE = 0.00000025
 CASCADE_E_SCALE = 10 #2.
 TRACK_E_SCALE = 10 #20.
 NUM_SCAN_POINTS = 20
-HYPO_T = hypo_fast.Hypo
+HYPO_T = hypo_vector.SegmentedHypo
 CMAP = 'YlGnBu_r'
 
 ABS_BOUNDS = HypoParams10D(
@@ -231,7 +228,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
 
             # Accept this fraction as isotropic light
             dir_fraction = map_length**2
-            #print 'map length = ', dir_fraction
+            #print('map length = ', dir_fraction)
             #iso_fraction = 1. - dir_fraction
 
             # whats the cos(psi) between track direction and map?
@@ -243,7 +240,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                         + (np.sin(hypo_theta) * np.sin(map_theta)
                            * np.cos(hypo_phi - map_phi)))
 
-            #print proj_dir
+            #print(proj_dir)
 
             # How close to 0.754 is it? Use this to get a Gaussian weight
             delta = -proj_dir - 0.754
@@ -366,13 +363,16 @@ def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
 
 
 #@profile
-def main(events_fpath, start_index=None, stop_index=None):
+def main(events_fpath, tables_dir, start_index=None, stop_index=None):
     """Perform scans and minimization for events.
 
     Parameters
     ----------
     events_fpath : string
         Path to events HDF5 file
+
+    tables_dir : string
+        Path to directory containing the retro tables
 
     start_index : None or int
         Event index (as ordered in events file) to start on. Specify 0 or
@@ -385,10 +385,9 @@ def main(events_fpath, start_index=None, stop_index=None):
 
     """
     # pylint: disable=no-member
-    #events_file_basename, _ = splitext(basename(events_fpath))
     events = Events(events_fpath)
 
-    print '%d events found' % len(events)
+    print('%d events found' % len(events))
 
     # --- load tables ---
 
@@ -416,7 +415,8 @@ def main(events_fpath, start_index=None, stop_index=None):
     ref_bin_edges = None
     for dom_depth_index in range(60):
         # IceCube (non-DeepCore) tables
-        fpath = IC_TABLE_FPATH_PROTO.format(dom_depth_index)
+        fpath = IC_TABLE_FPATH_PROTO.format(tables_dir=tables_dir,
+                                            dom=dom_depth_index)
         if isfile(fpath):
             ic_photon_info, bin_edges = fill_photon_info(
                 fpath=fpath,
@@ -430,11 +430,12 @@ def main(events_fpath, start_index=None, stop_index=None):
                 for test, ref in zip(bin_edges, ref_bin_edges):
                     assert np.array_equal(test, ref)
         else:
-            print ('No table for IC DOM depth index %i found at path "%s"'
-                   % (dom_depth_index, fpath))
+            print('No table for IC DOM depth index %i found at path "%s"'
+                  % (dom_depth_index, fpath))
 
         # DeepCore tables
-        fpath = DC_TABLE_FPATH_PROTO.format(dom_depth_index)
+        fpath = DC_TABLE_FPATH_PROTO.format(tables_dir=tables_dir,
+                                            dom=dom_depth_index)
         if isfile(fpath):
             dc_photon_info, bin_edges = fill_photon_info(
                 fpath=fpath,
@@ -448,8 +449,8 @@ def main(events_fpath, start_index=None, stop_index=None):
                 for test, ref in zip(bin_edges, ref_bin_edges):
                     assert np.array_equal(test, ref)
         else:
-            print ('No table for IC DOM depth index %i found at path "%s"'
-                   % (dom_depth_index, fpath))
+            print('No table for IC DOM depth index %i found at path "%s"'
+                  % (dom_depth_index, fpath))
 
     bin_edges = BinningCoords(t=bin_edges.t, r=bin_edges.r,
                               theta=bin_edges.theta,
@@ -460,7 +461,7 @@ def main(events_fpath, start_index=None, stop_index=None):
 
     # Iterate through events
     for idx, event in enumerate(events[start_index:stop_index]):
-        print 'working on event #%i / event ID %d' % (idx, event.event)
+        print('working on event #%i / event ID %d' % (idx, event.event))
 
         llh_func_kwargs = dict(detector_geometry=detector_geometry,
                                ic_photon_info=ic_photon_info,
@@ -472,12 +473,12 @@ def main(events_fpath, start_index=None, stop_index=None):
                             track_e_scale=TRACK_E_SCALE)
         truth_hypo.set_binning(bin_edges)
         llh_truth = get_llh(hypo=truth_hypo, event=event, **llh_func_kwargs)
-        print 'llh at truth = %.2f' % llh_truth
+        print('llh at truth = %.2f' % llh_truth)
 
         min_results = None
 
         if MIN_DIMS:
-            print 'Will minimize following dimension(s): %s' % MIN_DIMS
+            print('Will minimize following dimension(s): %s' % MIN_DIMS)
 
             variable_dims = []
             fixed_dims = []
@@ -511,10 +512,10 @@ def main(events_fpath, start_index=None, stop_index=None):
         scan_results = None
 
         if SCAN_DIM_SETS:
-            print 'Will scan following sets of dimensions: %s' % str(SCAN_DIM_SETS)
+            print('Will scan following sets of dimensions: %s' % str(SCAN_DIM_SETS))
             scan_results = OrderedDict()
             for dims in SCAN_DIM_SETS:
-                print 'Scanning dimension(s): %s...' % str(dims)
+                print('Scanning dimension(s): %s...' % str(dims))
                 if isinstance(dims, basestring):
                     dims = [dims]
 
@@ -543,7 +544,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                 #llhs = []
                 #noises = []
                 #for z_v in z_vs:
-                #    print 'testing z = %.2f' % z_v
+                #    print('testing z = %.2f' % z_v)
                 #    my_hypo = HYPO_T(neutrino.t, neutrino.x, neutrino.y, z_v,
                 #                     theta=neutrino.theta, phi=neutrino.phi,
                 #                     track_energy=track.energy,
@@ -597,7 +598,7 @@ def main(events_fpath, start_index=None, stop_index=None):
                 #                                     string=strings, om=oms,
                 #                                     ic_photon_info=ic_photon_info,
                 #                                     dc_photon_info=dc_photon_info)
-                #                print ' z = %.2f, x = %.2f : llh = %.2f' % (z_v, x_v, llh)
+                #                print(' z = %.2f, x = %.2f : llh = %.2f' % (z_v, x_v, llh))
                 #                llhs.append(llh)
                 #        plt.clf()
                 #        # [z, x]
@@ -643,6 +644,11 @@ def parse_args(description=__doc__):
         '--stop-index', default=None, type=int,
         help='''Event index offset for event to start with (0-indexed)'''
     )
+    parser.add_argument(
+        '--tables-dir', metavar='DIR', type=str,
+        default='/data/icecube/retro_tables/full1000',
+        help='''Directory containing retro tables''',
+    )
     args = parser.parse_args()
     return args
 
@@ -650,4 +656,4 @@ def parse_args(description=__doc__):
 if __name__ == '__main__':
     ARGS = parse_args()
     main(events_fpath=ARGS.file, start_index=ARGS.start_index,
-         stop_index=ARGS.stop_index)
+         stop_index=ARGS.stop_index, tables_dir=ARGS.tables_dir)

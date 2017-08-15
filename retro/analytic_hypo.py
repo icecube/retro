@@ -17,13 +17,23 @@ import numpy as np
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (BinningCoords, CASCADE_PHOTONS_PER_GEV, FTYPE,
-                   SPEED_OF_LIGHT_M_PER_NS, HYPO_PARAMS_T,
+                   SPEED_OF_LIGHT_M_PER_NS,
                    hypo_to_track_params, PI_BY_TWO, TimeSpaceCoord,
-                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TWO_PI)
+                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TrackParams, TWO_PI)
+from retro.hypo import Hypo
 from retro.sparse import Sparse
 
 
-__all__ = ['inner_loop', 'Track', 'Hypo']
+__all__ = ['inner_loop', 'Track', 'AnalyticHypo']
+
+
+# TODO: approx timings (total ~16 ms):
+# 36% : correlate_theta
+# 11% : correlate_phi
+# 10% : correlate_r
+# 32% : inner_loop
+#         Note that this is dominated by python stuff, not by operations on
+#         sparse arrays
 
 
 #@numba.jit(nopython=False, nogil=True, fastmath=True, cache=True, parallel=True)
@@ -105,24 +115,20 @@ class Track(object):
 
     """
     def __init__(self, params, origin=None):
-        self.t = params.t
-        self.x = params.x
-        self.y = params.y
-        self.z = params.z
-        self.zenith = params.zenith
-        self.azimuth = params.azimuth
-        self.energy = params.energy
+        if not isinstance(params, TrackParams):
+            params = TrackParams(*params)
+        self.params = params
 
         # Track length is derived from its energy
-        self.length = self.energy * TRACK_M_PER_GEV
+        self.length = self.params.energy * TRACK_M_PER_GEV
 
         # Pre-calculated quantities
         self.dt = self.length / SPEED_OF_LIGHT_M_PER_NS
-        self.sinphi = np.sin(self.azimuth)
-        self.cosphi = np.cos(self.azimuth)
-        self.tanphi = np.tan(self.azimuth)
-        self.sintheta = np.sin(self.zenith)
-        self.costheta = np.cos(self.zenith)
+        self.sinphi = np.sin(self.params.azimuth)
+        self.cosphi = np.cos(self.params.azimuth)
+        self.tanphi = np.tan(self.params.azimuth)
+        self.sintheta = np.sin(self.params.zenith)
+        self.costheta = np.cos(self.params.zenith)
 
         # Default values so "caching" logic doesn't break, and/or forces an
         # error if properties are accessed before they are meaningfully defined
@@ -151,10 +157,10 @@ class Track(object):
 
         # Define relative coordinates
 
-        self.t0 = self.t - self.origin.t
-        self.x0 = self.x - self.origin.x
-        self.y0 = self.y - self.origin.y
-        self.z0 = self.z - self.origin.z
+        self.t0 = self.params.t - self.origin.t
+        self.x0 = self.params.x - self.origin.x
+        self.y0 = self.params.y - self.origin.y
+        self.z0 = self.params.z - self.origin.z
 
         # Invalidate cached property values
 
@@ -202,8 +208,8 @@ class Track(object):
             return self._ts
 
         if ((self.x0 == self.y0 == self.z0 == 0)
-                or self.zenith == 0
-                or self.zenith == np.pi):
+                or self.params.zenith == 0
+                or self.params.zenith == np.pi):
             return self.t0
 
         rho = ((- self.costheta * (self.x0**2 + self.y0**2)
@@ -311,7 +317,7 @@ class Track(object):
         return rho
 
 
-class Hypo(object):
+class AnalyticHypo(Hypo):
     """
     Hypothesis for a given set of parameters from which one can retrieve maps
     (z-matrix) that contain the expected photon sources in each cell for a
@@ -330,20 +336,9 @@ class Hypo(object):
     """
     def __init__(self, params, origin=None, cascade_e_scale=1,
                  track_e_scale=1):
-        if not isinstance(params, HYPO_PARAMS_T):
-            params = HYPO_PARAMS_T(*params)
-        self.t = params.t
-        self.x = params.x
-        self.y = params.y
-        self.z = params.z
-        self.track_zenith = params.track_zenith
-        self.track_azimuth = params.track_azimuth
-        self.track_energy = params.track_energy
-        self.cascade_energy = params.cascade_energy
-
-        self.cascade_e_scale = cascade_e_scale
-        self.track_e_scale = track_e_scale
-
+        super(AnalyticHypo, self).__init__(params=params, origin=origin,
+                                           cascade_e_scale=cascade_e_scale,
+                                           track_e_scale=track_e_scale)
         track_params = hypo_to_track_params(params)
         self.track = Track(track_params)
 
@@ -354,10 +349,6 @@ class Hypo(object):
         self.track_photons = self.track.length * self.track_photons_per_m
         self.tot_photons = self.cascade_photons + self.track_photons
 
-        self.bin_edges = None
-        self.bin_centers = None
-        self.shape = tuple([])
-
         self.photon_counts = None
         self.photon_avg_len = None
         self.photon_avg_phi = None
@@ -366,24 +357,14 @@ class Hypo(object):
         if origin is not None:
             self.set_origin(coord=origin)
 
-    def set_binning(self, bin_edges):
-        """Set the binning of the spherical coordinates with bin_edges.
+    def set_origin(self, coord):
+        """Set origin of coordinate system to `coord`.
 
         Parameters
         ----------
-        bin_edges : BinningCoords
+        coord : BinningCoords namedtuple or convertible thereto
 
         """
-        self.bin_edges = bin_edges
-        self.bin_centers = BinningCoords(
-            t=0.5 * (bin_edges.t[:-1] + bin_edges.t[1:]),
-            r=0.5 * (bin_edges.r[:-1] + bin_edges.r[1:]),
-            theta=0.5 * (bin_edges.theta[:-1] + bin_edges.theta[1:]),
-            phi=0.5 * (bin_edges.phi[:-1] + bin_edges.phi[1:])
-        )
-        self.shape = BinningCoords(*(len(dim) for dim in self.bin_centers))
-
-    def set_origin(self, coord):
         self.track.set_origin(coord)
 
     # -- Coordinate transforms -- #
@@ -551,18 +532,18 @@ class Hypo(object):
             theta_inflection_point = self.ctheta(xs, ys, zs)
 
         # the big matrix z
-        photon_counts = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        photon_avg_theta = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        photon_avg_phi = Sparse(shape=self.shape, default=0, dtype=FTYPE)
-        photon_avg_len = Sparse(shape=self.shape, default=0, dtype=FTYPE)
+        photon_counts = Sparse(shape=self.num_bins, default=0, dtype=FTYPE)
+        photon_avg_theta = Sparse(shape=self.num_bins, default=0, dtype=FTYPE)
+        photon_avg_phi = Sparse(shape=self.num_bins, default=0, dtype=FTYPE)
+        photon_avg_len = Sparse(shape=self.num_bins, default=0, dtype=FTYPE)
 
         start_t = time.time()
         t_inner_loop = 0
         avg_loop = 0
         # iterate over time bins
         total_rho = 0
-        for k in range(len(self.bin_edges.t) - 1):
-            time_bin = [self.bin_edges.t[k], self.bin_edges.t[k+1]]
+        for k in range(self.num_bins.t):
+            time_bin = [self.bin_edges.t[k], self.bin_edges.t[k + 1]]
             # maximum extent:
             t_extent = self.track.extent(*time_bin)
 
@@ -626,15 +607,16 @@ class Hypo(object):
         end_t = time.time()
 
         # add angles:
+        track = self.track
         for element in photon_counts:
             idx, _ = element
-            theta = self.track.zenith
+            theta = track.params.zenith
             phi = self.bin_centers.phi[idx[-1]]
-            #delta_phi = np.abs(self.track.azimuth - phi)%(TWO_PI)
+            #delta_phi = np.abs(self.track.params.azimuth - phi)%(TWO_PI)
             # calculate same way as in photon propapgation (CLsim)
-            delta = np.abs(phi - self.track.azimuth)
+            delta = np.abs(phi - self.track.params.azimuth)
             delta_phi = delta if delta <= np.pi else TWO_PI - delta
-            #delta_phi = np.pi - np.abs((np.abs(phi - self.track.azimuth)  - np.pi))
+            #delta_phi = np.pi - np.abs((np.abs(phi - self.track.params.azimuth)  - np.pi))
             photon_avg_theta[idx] = theta
             photon_avg_phi[idx] = delta_phi
             # set corr. length for tracks to 1.0, i.e. totally directed
