@@ -15,8 +15,9 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, CASCADE_PHOTONS_PER_GEV,
-                   SPEED_OF_LIGHT_M_PER_NS, HYPO_PARAMS_T, TRACK_M_PER_GEV,
+from retro import (bin_edges_to_centers, BinningCoords, binspec_to_edges,
+                   CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS,
+                   HYPO_PARAMS_T, TimeSpaceCoord, TRACK_M_PER_GEV,
                    TRACK_PHOTONS_PER_M, TWO_PI)
 
 
@@ -37,35 +38,51 @@ class Hypo(object):
     """
     def __init__(self, params, origin=None, cascade_e_scale=1,
                  track_e_scale=1):
+        # Convert types of passed values to those expected internally
+
+        if origin is not None and not isinstance(origin, TimeSpaceCoord):
+            origin = TimeSpaceCoord(*origin)
         if not isinstance(params, HYPO_PARAMS_T):
             params = HYPO_PARAMS_T(*params)
+
+        # Store passed args as attrs
+
         self.params = params
-        self.track_length = params.track_energy * TRACK_M_PER_GEV
-        self.cascade_energy = params.cascade_energy
-
         self.origin = origin
+        self.cascade_e_scale = cascade_e_scale
+        self.track_e_scale = track_e_scale
 
-        # Directions
+        # Pre-compute info about track
+
+        self.track_length = params.track_energy * TRACK_M_PER_GEV
+
         sin_trck_zen = math.sin(self.params.track_zenith)
         self.track_dir_x = sin_trck_zen * math.cos(self.params.track_azimuth)
         self.track_dir_y = sin_trck_zen * math.sin(self.params.track_azimuth)
         self.track_dir_z = math.cos(self.params.track_zenith)
 
+        # TODO: make this actual muon speed, which depends on energy
         self.track_speed_x = SPEED_OF_LIGHT_M_PER_NS * self.track_dir_x
         self.track_speed_y = SPEED_OF_LIGHT_M_PER_NS * self.track_dir_y
         self.track_speed_z = SPEED_OF_LIGHT_M_PER_NS * self.track_dir_z
 
-        self.cascade_e_scale = cascade_e_scale
-        self.track_e_scale = track_e_scale
-
-        self.track_photons_per_m = TRACK_PHOTONS_PER_M * track_e_scale
-        self.cascade_photons_per_gev = CASCADE_PHOTONS_PER_GEV * cascade_e_scale
-
-        self.cascade_photons = (
-            self.cascade_energy * self.cascade_photons_per_gev
-        )
+        self.track_photons_per_m = TRACK_PHOTONS_PER_M * self.track_e_scale
         self.track_photons = self.track_length * self.track_photons_per_m
+
+        # Pre-compute info about cascade
+
+        self.cascade_photons_per_gev = (
+            CASCADE_PHOTONS_PER_GEV * self.cascade_e_scale
+        )
+        self.cascade_photons = (
+            self.params.cascade_energy * self.cascade_photons_per_gev
+        )
+
+        # Total track + cascade
+
         self.tot_photons = self.cascade_photons + self.track_photons
+
+        # Set default values for attrs computed by other methods/properties
 
         num_coords = len(BinningCoords._fields)
         self.bin_min, self.bin_max = [BinningCoords(*(np.nan,)*num_coords)]*2
@@ -75,12 +92,6 @@ class Hypo(object):
         self._bin_centers = None
         self._bin_widths = None
         self._bin_num_factors = None
-
-        self.photon_info = None
-        self.photon_counts = None
-        self.photon_avg_len = None
-        self.photon_avg_phi = None
-        self.photon_avg_theta = None
 
     def set_binning(self, start, stop, num_bins):
         """Define binnings of spherical coordinates assuming: linear binning in
@@ -112,29 +123,24 @@ class Hypo(object):
         self.num_bins = num_bins
 
         self._bin_edges = None
-        self._bin_widths = None
         self._bin_centers = None
+        self._bin_widths = None
         self._bin_num_factors = None
 
     @property
     def bin_edges(self):
         """BinningCoords of floats : bin edges"""
         if self._bin_edges is None:
-            self._bin_edges = BinningCoords(
-                *(np.linspace(l, r, n+1) for l, r, n in zip(self.bin_min,
-                                                            self.bin_max,
-                                                            self.num_bins))
-            )
+            self._bin_edges = binspec_to_edges(start=self.bin_min,
+                                               stop=self.bin_max,
+                                               num_bins=self.num_bins)
         return self._bin_edges
 
     @property
     def bin_centers(self):
         """BinningCoords of floats : bin centers"""
         if self._bin_centers is None:
-            bin_edges = self.bin_edges
-            self._bin_centers = BinningCoords(
-                *(0.5 * (dim[:-1] + dim[1:]) for dim in bin_edges)
-            )
+            self._bin_centers = bin_edges_to_centers(self.bin_edges)
         return self._bin_centers
 
     @property
@@ -154,8 +160,12 @@ class Hypo(object):
         if self._bin_num_factors is None:
             self._bin_num_factors = BinningCoords(
                 t=self.num_bins.t / (self.bin_max.t - self.bin_min.t),
-                r=self.num_bins.r * self.num_bins.r / self.bin_max.r,
-                theta=self.num_bins.theta / 2,
+                r=self.num_bins.r**2 / self.bin_max.r,
+                theta=0.5 * self.num_bins.theta,
                 phi=self.num_bins.phi / TWO_PI
             )
         return self._bin_num_factors
+
+    def compute_matrices(self, *args, **kwargs):
+        """Implement this method in subclasses of Hypo"""
+        raise NotImplementedError()

@@ -173,7 +173,7 @@ class SegmentedHypo(Hypo):
 
         self.photon_info = {}
         phi_bin_width = self.bin_widths.phi
-        phi_half_bin_width = 0.5 * self.bin_widths.phi
+        phi_half_bin_width = 0.5 * phi_bin_width
         for bin_idx, segment_count in segment_counts.iteritems():
             phi = abs(self.params.track_azimuth - (bin_idx.phi * phi_bin_width + phi_half_bin_width)) # pylint: disable=line-too-long
             count = segment_count * self.photons_per_segment

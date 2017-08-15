@@ -269,6 +269,35 @@ def binspec_to_edges(start, stop, num_bins):
     return edges
 
 
+def bin_edges_to_centers(bin_edges):
+    """Return bin centers, where center is defined in whatever space the
+    dimension is "regular."
+
+    E.g., r is binned regularly in r**2-space, so centers are computed as
+    averages in r**2-space but returned in r-space.
+
+    Parameters
+    ----------
+    bin_edges : BinningCoords namedtuple or convertible thereto
+
+    Returns
+    -------
+    bin_centers : BinningCoords
+
+    """
+    t = bin_edges.t
+    rsqaured = np.square(bin_edges.r)
+    costheta = np.cos(bin_edges.theta)
+    phi = bin_edges.phi
+    bin_centers = BinningCoords(
+        t=0.5 * (t[:-1] + t[1:]),
+        r=np.sqrt(0.5 * (rsqaured[:-1] + rsqaured[1:])),
+        theta=np.arccos(0.5 * (costheta[:-1] + costheta[1:])),
+        phi=0.5 * (phi[:-1] + phi[1:]),
+    )
+    return bin_centers
+
+
 class Events(object):
     """Container for events extracted from an HDF5 file.
 
@@ -400,14 +429,14 @@ class Events(object):
         return self._num_events
 
     def __iter__(self):
-        for idx in xrange(self._num_events):
+        for idx in range(self._num_events):
             yield self[idx]
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             # Convert slice into (start, stop, step) tuple
             range_args = idx.indices(len(self))
-            return [self[i] for i in xrange(*range_args)]
+            return [self[i] for i in range(*range_args)]
 
         neutrino = self.neutrinos[idx]
         event = neutrino.evt

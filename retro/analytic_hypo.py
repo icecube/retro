@@ -16,10 +16,9 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, CASCADE_PHOTONS_PER_GEV, FTYPE,
-                   SPEED_OF_LIGHT_M_PER_NS,
-                   hypo_to_track_params, PI_BY_TWO, TimeSpaceCoord,
-                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TrackParams, TWO_PI)
+from retro import (FTYPE, SPEED_OF_LIGHT_M_PER_NS, hypo_to_track_params,
+                   PI_BY_TWO, TimeSpaceCoord, TRACK_M_PER_GEV, TrackParams,
+                   TWO_PI)
 from retro.hypo import Hypo
 from retro.sparse import Sparse
 
@@ -342,13 +341,6 @@ class AnalyticHypo(Hypo):
         track_params = hypo_to_track_params(params)
         self.track = Track(track_params)
 
-        self.track_photons_per_m = TRACK_PHOTONS_PER_M * track_e_scale
-        self.cascade_photons_per_gev = CASCADE_PHOTONS_PER_GEV * cascade_e_scale
-
-        self.cascade_photons = self.cascade_energy * self.cascade_photons_per_gev
-        self.track_photons = self.track.length * self.track_photons_per_m
-        self.tot_photons = self.cascade_photons + self.track_photons
-
         self.photon_counts = None
         self.photon_avg_len = None
         self.photon_avg_phi = None
@@ -476,7 +468,7 @@ class AnalyticHypo(Hypo):
         """get the track parameter rho intervals, which lie inside bins"""
         start_t = time.time()
         intervals = []
-        for i in xrange(len(bin_edges) - 1):
+        for i in range(len(bin_edges) - 1):
             # get interval overlaps
             # from these two intervals:
             b = (bin_edges[i], bin_edges[i+1])
