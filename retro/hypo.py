@@ -165,6 +165,10 @@ class Hypo(object):
             )
         return self._bin_num_factors
 
+    def set_origin(self, coord):
+        """Implement this method in subclasses of Hypo"""
+        raise NotImplementedError()
+
     def compute_matrices(self, *args, **kwargs):
         """Implement this method in subclasses of Hypo"""
         raise NotImplementedError()

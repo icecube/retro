@@ -88,7 +88,8 @@ class SegmentedHypo(Hypo):
         self.y_rel = self.params.y - self.origin.y
         self.z_rel = self.params.z - self.origin.z
 
-        print(self.params.t, self.origin.t, self.t_rel)
+        print('params.t: %f, origin.t: %f, t_rel: %f'
+              % (self.params.t, self.origin.t, self.t_rel))
 
         orig_number_of_incr = self.number_of_increments
 

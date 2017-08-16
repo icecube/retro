@@ -27,9 +27,10 @@ from scipy.special import gammaln
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (FTYPE, HYPO_PARAMS_T, BinningCoords, Events, HypoParams10D,
+from retro import (FTYPE, HYPO_PARAMS_T, BinningCoords, HypoParams10D,
                    PhotonInfo, TimeSpaceCoord)
 from retro import event_to_hypo_params, expand
+from retro.events import Events
 from analytic_hypo import AnalyticHypo # pylint: disable=unused-import
 from segmented_hypo import SegmentedHypo # pylint: disable=unused-import
 
