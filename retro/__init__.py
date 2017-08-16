@@ -5,7 +5,7 @@ Basic module-wide definitions and simple types (namedtuples).
 
 from __future__ import absolute_import, division, print_function
 
-from collections import namedtuple
+from collections import namedtuple, Iterable, Mapping, Sequence
 from os.path import abspath, expanduser, expandvars
 
 import h5py
@@ -18,8 +18,10 @@ __all__ = ['FTYPE', 'UITYPE', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
            'DFLT_SPE_RECO_NAME', 'SPEED_OF_LIGHT_M_PER_NS', 'TWO_PI',
            'PI_BY_TWO', 'HypoParams8D', 'HypoParams10D', 'HYPO_PARAMS_T',
            'TrackParams', 'Event', 'Pulses', 'PhotonInfo', 'BinningCoords',
-           'TimeSpaceCoord', 'expand', 'event_to_hypo_params',
-           'hypo_to_track_params', 'power_axis', 'Events']
+           'TimeSpaceCoord', 'convert_to_namedtuple', 'expand',
+           'event_to_hypo_params', 'hypo_to_track_params', 'power_axis',
+           'Events']
+
 
 # -- Datatypes to use -- #
 
@@ -27,7 +29,7 @@ FTYPE = np.float64
 """Datatype to use for explicitly-typed floating point numbers"""
 print(FTYPE)
 
-UITYPE = np.uint16
+UITYPE = np.int64
 """Datatype to use for explicitly-typed unsigned integers"""
 
 # -- Default choices we've made -- #
@@ -114,6 +116,45 @@ TimeSpaceCoord = namedtuple( # pylint: disable=invalid-name
     typename='TimeSpaceCoord',
     field_names=('t', 'x', 'y', 'z'))
 """Time and space coordinates: t, x, y, z."""
+
+
+def convert_to_namedtuple(val, nt_type):
+    """Convert ``val`` to a namedtuple of type ``nt_type``.
+
+    If ``val`` is:
+    * ``nt_type``: return without conversion
+    * Mapping: instantiate an ``nt_type`` via ``**val``
+    * Iterable or Sequence: instantiate an ``nt_type`` via ``*val``
+
+    Parameters
+    ----------
+    val : nt_type, Mapping, Iterable, or Sequence
+        Value to be converted
+
+    nt_type : namedtuple type
+        Namedtuple type (class)
+
+    Returns
+    -------
+    nt_val : nt_type
+        ``val`` converted to ``nt_type``
+
+    Raises
+    ------
+    TypeError
+        If ``val`` is not one of the above-specified types.
+
+    """
+    if isinstance(val, nt_type):
+        return val
+
+    if isinstance(val, Mapping):
+        return nt_type(**val)
+
+    if isinstance(val, (Iterable, Sequence)):
+        return nt_type(*val)
+
+    raise TypeError('Cannot convert %s to %s' % (type(val), nt_type))
 
 
 def expand(p):

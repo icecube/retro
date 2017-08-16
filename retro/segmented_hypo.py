@@ -16,8 +16,9 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, FTYPE, PhotonInfo, SPEED_OF_LIGHT_M_PER_NS,
-                   TimeSpaceCoord, TWO_PI, UITYPE)
+from retro import FTYPE, UITYPE, BinningCoords, PhotonInfo, TimeSpaceCoord
+from retro import SPEED_OF_LIGHT_M_PER_NS, TWO_PI
+from retro import convert_to_namedtuple
 from retro.hypo import Hypo
 
 
@@ -65,8 +66,8 @@ class SegmentedHypo(Hypo):
 
     #@profile
     def set_origin(self, coord):
-        """Change the vertex to be relative to ``coord`` (e.g. a hit on DOM at
-        the given position).
+        """Change the vertex of the hypothesis to be relative to ``coord``
+        (e.g. ``coord`` would be a hit on DOM at that time & position).
 
         Parameters
         ----------
@@ -76,8 +77,9 @@ class SegmentedHypo(Hypo):
         if coord == self.origin:
             return
 
-        if not isinstance(coord, TimeSpaceCoord):
-            coord = TimeSpaceCoord(*coord)
+        coord = convert_to_namedtuple(coord, TimeSpaceCoord)
+
+        print('new origin being set:', coord)
 
         self.origin = coord
 
@@ -85,6 +87,8 @@ class SegmentedHypo(Hypo):
         self.x_rel = self.params.x - self.origin.x
         self.y_rel = self.params.y - self.origin.y
         self.z_rel = self.params.z - self.origin.z
+
+        print(self.params.t, self.origin.t, self.t_rel)
 
         orig_number_of_incr = self.number_of_increments
 
@@ -94,12 +98,21 @@ class SegmentedHypo(Hypo):
             self.t_rel - half_incr,
             min(
                 self.bin_max.t,
-                self.track_length / SPEED_OF_LIGHT_M_PER_NS + self.t_rel
+                self.track_lifetime + self.t_rel
             ) - half_incr,
             self.time_increment,
             dtype=FTYPE
         )
         self.t_array_init[0] = self.t_rel
+
+        print('self.bin_min.t:', self.bin_min.t)
+        print('self.bin_max.t:', self.bin_max.t)
+        print('self.origin.t:', self.origin.t)
+        print('self.track_lifetime:', self.track_lifetime)
+        print('self.t_rel:', self.t_rel)
+        print('t_array:', self.t_array_init)
+        print('t_array range: [%f, %f]'
+              % (self.t_array_init.min(), self.t_array_init.max()))
 
         # Set the number of time increments in the track
         self.number_of_increments = len(self.t_array_init)

@@ -10,7 +10,7 @@ At the moment, these likelihoods can be single points or 1d or 2d scans.
 """
 
 
-from __future__ import absolute_import, division
+from __future__ import absolute_import, division, print_function
 
 from argparse import ArgumentParser
 from collections import OrderedDict
@@ -19,10 +19,6 @@ from itertools import izip, product
 import os
 from os.path import abspath, dirname, isfile, join
 
-import h5py
-import matplotlib as mpl
-mpl.use('Agg')
-import matplotlib.pyplot as plt
 import numba # pylint: disable=unused-import
 import numpy as np
 import pyfits
@@ -31,11 +27,11 @@ from scipy.special import gammaln
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (BinningCoords, event_to_hypo_params, Events, expand,
-                   FTYPE, HypoParams10D, HYPO_PARAMS_T, PhotonInfo, Pulses,
-                   TimeSpaceCoord)
-import hypo_fast # pylint: disable=unused-import
-import hypo_vector # pylint: disable=unused-import
+from retro import (FTYPE, HYPO_PARAMS_T, BinningCoords, Events, HypoParams10D,
+                   PhotonInfo, TimeSpaceCoord)
+from retro import event_to_hypo_params, expand
+from analytic_hypo import AnalyticHypo # pylint: disable=unused-import
+from segmented_hypo import SegmentedHypo # pylint: disable=unused-import
 
 
 IC_TABLE_FPATH_PROTO = (
@@ -56,7 +52,7 @@ NOISE_CHARGE = 0.00000025
 CASCADE_E_SCALE = 10 #2.
 TRACK_E_SCALE = 10 #20.
 NUM_SCAN_POINTS = 20
-HYPO_T = hypo_vector.SegmentedHypo
+HYPO_T = SegmentedHypo
 CMAP = 'YlGnBu_r'
 
 ABS_BOUNDS = HypoParams10D(
@@ -211,18 +207,22 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         # Get max llh between z_matrix and gamma_map
         # noise probability?
         expected_charge = 0
-        for photon_idx, hypo_count in hypo.photon_counts:
+        for bin_idx, hypo_photon_info in hypo.photon_info.iteritems():
             # These two agles need to be inverted because we're backpropagating
             # but want to match to forward-propagating photons
-            hypo_theta = np.pi - hypo.photon_avg_theta[photon_idx]
-            hypo_phi = np.pi - hypo.photon_avg_phi[photon_idx]
-            #hypo_legth = hypo.photon_avg_length[photon_idx]
+            hypo_theta = np.pi - hypo_photon_info.theta
+            hypo_phi = np.pi - hypo_photon_info.phi
+
+            hypo_count = hypo_photon_info.count
+            hypo_legth = hypo_photon_info.length
 
             # Get map
-            map_count = photon_counts_map[photon_idx[0:3]]
-            map_theta = photon_avg_theta_map[photon_idx[0:3]]
-            map_phi = photon_avg_phi_map[photon_idx[0:3]]
-            map_length = photon_avg_len_map[photon_idx[0:3]]
+            print(bin_idx)
+            print(bin_idx[0:3])
+            map_count = photon_counts_map[bin_idx[0:3]]
+            map_theta = photon_avg_theta_map[bin_idx[0:3]]
+            map_phi = photon_avg_phi_map[bin_idx[0:3]]
+            map_length = photon_avg_len_map[bin_idx[0:3]]
 
             # Assume source is totally directed at 0.73 rad (cherenkov angle)
 
@@ -274,7 +274,7 @@ def get_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     return llh
 
 #@profile
-def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
+def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
          llh_func_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
 
@@ -295,6 +295,8 @@ def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
 
     scan_values : iterable of floats, or iterable thereof
         Values to set for the dimension being scanned.
+
+    bin_spec
 
     nominal_params : None or HYPO_PARAMS_T namedtuple
         Nominal values for all param values. The value for the params being
@@ -352,7 +354,7 @@ def scan(llh_func, event, dims, scan_values, bin_edges, nominal_params=None,
 
         hypo = HYPO_T(params=params, cascade_e_scale=CASCADE_E_SCALE,
                       track_e_scale=TRACK_E_SCALE)
-        hypo.set_binning(bin_edges)
+        hypo.set_binning(*bin_spec)
         llh = llh_func(hypo, event, **llh_func_kwargs)
         all_llh.append(llh)
 
@@ -406,9 +408,6 @@ def main(events_fpath, tables_dir, start_index=None, stop_index=None):
     dom_eff_ic = 0.25
     dom_eff_dc = 0.35
 
-    # Define phi bin edges, as these are ignored in the tables (symmetry)
-    phi_bin_edges = np.linspace(0, 2*np.pi, N_PHI_BINS + 1)
-
     ic_photon_info, dc_photon_info = None, None
 
     # Read in the actual tables
@@ -452,9 +451,15 @@ def main(events_fpath, tables_dir, start_index=None, stop_index=None):
             print('No table for IC DOM depth index %i found at path "%s"'
                   % (dom_depth_index, fpath))
 
-    bin_edges = BinningCoords(t=bin_edges.t, r=bin_edges.r,
+    bin_edges = BinningCoords(t=bin_edges.t,
+                              r=bin_edges.r,
                               theta=bin_edges.theta,
                               phi=np.linspace(0, 2*np.pi))
+
+    bin_min = BinningCoords(*(np.min(d) for d in bin_edges))
+    bin_max = BinningCoords(*(np.max(d) for d in bin_edges))
+    num_bins = BinningCoords(*(len(d) - 1 for d in bin_edges))
+    bin_spec = (bin_min, bin_max, num_bins)
 
     # Load detector geometry array
     detector_geometry = np.load(DETECTOR_GEOM_FILE)
@@ -471,7 +476,7 @@ def main(events_fpath, tables_dir, start_index=None, stop_index=None):
         truth_hypo = HYPO_T(params=truth_params,
                             cascade_e_scale=CASCADE_E_SCALE,
                             track_e_scale=TRACK_E_SCALE)
-        truth_hypo.set_binning(bin_edges)
+        truth_hypo.set_binning(*bin_spec)
         llh_truth = get_llh(hypo=truth_hypo, event=event, **llh_func_kwargs)
         print('llh at truth = %.2f' % llh_truth)
 
@@ -533,7 +538,7 @@ def main(events_fpath, tables_dir, start_index=None, stop_index=None):
                     )
 
                 llh = scan(llh_func=get_llh, event=event, dims=dims,
-                           scan_values=scan_values, bin_edges=bin_edges,
+                           scan_values=scan_values, bin_spec=bin_spec,
                            nominal_params=nominal_params,
                            llh_func_kwargs=llh_func_kwargs)
 

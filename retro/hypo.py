@@ -15,10 +15,11 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (bin_edges_to_centers, BinningCoords, binspec_to_edges,
-                   CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS,
-                   HYPO_PARAMS_T, TimeSpaceCoord, TRACK_M_PER_GEV,
-                   TRACK_PHOTONS_PER_M, TWO_PI)
+from retro import HYPO_PARAMS_T, BinningCoords, TimeSpaceCoord
+from retro import (CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS,
+                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TWO_PI)
+from retro import (bin_edges_to_centers, binspec_to_edges,
+                   convert_to_namedtuple)
 
 
 __all__ = ['Hypo']
@@ -40,10 +41,9 @@ class Hypo(object):
                  track_e_scale=1):
         # Convert types of passed values to those expected internally
 
-        if origin is not None and not isinstance(origin, TimeSpaceCoord):
-            origin = TimeSpaceCoord(*origin)
-        if not isinstance(params, HYPO_PARAMS_T):
-            params = HYPO_PARAMS_T(*params)
+        if origin is not None:
+            origin = convert_to_namedtuple(origin, TimeSpaceCoord)
+        params = convert_to_namedtuple(params, HYPO_PARAMS_T)
 
         # Store passed args as attrs
 
@@ -55,6 +55,8 @@ class Hypo(object):
         # Pre-compute info about track
 
         self.track_length = params.track_energy * TRACK_M_PER_GEV
+        # TODO: not simply linear; also, not correct speed here
+        self.track_lifetime = self.track_length / SPEED_OF_LIGHT_M_PER_NS
 
         sin_trck_zen = math.sin(self.params.track_zenith)
         self.track_dir_x = sin_trck_zen * math.cos(self.params.track_azimuth)
@@ -111,12 +113,9 @@ class Hypo(object):
             ``num_bins + 1`` bin edges).
 
         """
-        if not isinstance(start, BinningCoords):
-            start = BinningCoords(*start)
-        if not isinstance(stop, BinningCoords):
-            stop = BinningCoords(*stop)
-        if not isinstance(num_bins, BinningCoords):
-            num_bins = BinningCoords(*num_bins)
+        start = convert_to_namedtuple(start, BinningCoords)
+        stop = convert_to_namedtuple(stop, BinningCoords)
+        num_bins = convert_to_namedtuple(num_bins, BinningCoords)
 
         self.bin_min = start
         self.bin_max = stop

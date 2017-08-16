@@ -16,9 +16,9 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (FTYPE, SPEED_OF_LIGHT_M_PER_NS, hypo_to_track_params,
-                   PI_BY_TWO, TimeSpaceCoord, TRACK_M_PER_GEV, TrackParams,
-                   TWO_PI)
+from retro import FTYPE, TimeSpaceCoord, TrackParams
+from retro import PI_BY_TWO, TWO_PI, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV
+from retro import convert_to_namedtuple, hypo_to_track_params
 from retro.hypo import Hypo
 from retro.sparse import Sparse
 
@@ -114,9 +114,7 @@ class Track(object):
 
     """
     def __init__(self, params, origin=None):
-        if not isinstance(params, TrackParams):
-            params = TrackParams(*params)
-        self.params = params
+        self.params = convert_to_namedtuple(params, TrackParams)
 
         # Track length is derived from its energy
         self.length = self.params.energy * TRACK_M_PER_GEV
@@ -149,10 +147,7 @@ class Track(object):
         if coord == self.origin:
             return
 
-        if not isinstance(coord, TimeSpaceCoord):
-            coord = TimeSpaceCoord(*coord)
-
-        self.origin = coord
+        self.origin = convert_to_namedtuple(coord, TimeSpaceCoord)
 
         # Define relative coordinates
 
