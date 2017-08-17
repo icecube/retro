@@ -9,6 +9,7 @@ from collections import namedtuple, Iterable, Mapping, Sequence
 from os.path import abspath, expanduser, expandvars
 
 import numpy as np
+from scipy.special import gammaln
 
 
 __all__ = [
@@ -23,15 +24,17 @@ __all__ = [
     'FTYPE', 'UITYPE', 'HYPO_PARAMS_T',
 
     # Constants
-    'SPEED_OF_LIGHT_M_PER_NS', 'TWO_PI', 'PI_BY_TWO',
+    'SPEED_OF_LIGHT_M_PER_NS', 'PI', 'TWO_PI', 'PI_BY_TWO',
 
     # Pre-calculated values
     'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'CASCADE_PHOTONS_PER_GEV',
+    'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS',
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
-    'hypo_to_track_params', 'power_axis', 'binspec_to_edges',
-    'bin_edges_to_centers',
+    'hypo_to_track_params', 'powerspace', 'binspec_to_edges',
+    'bin_edges_to_centers', 'poisson_llh', 'spacetime_separation',
+    'generate_unique_ids'
 ]
 
 
@@ -70,7 +73,7 @@ TrackParams = namedtuple( # pylint: disable=invalid-name
 
 Event = namedtuple( # pylint: disable=invalid-name
     typename='Event',
-    field_names=('event', 'pulses', 'interaction', 'neutrino', 'track',
+    field_names=('event', 'uid', 'pulses', 'interaction', 'neutrino', 'track',
                  'cascade', 'ml_reco', 'spe_reco')
 )
 
@@ -101,7 +104,6 @@ TimeSpaceCoord = namedtuple( # pylint: disable=invalid-name
 
 FTYPE = np.float64
 """Datatype to use for explicitly-typed floating point numbers"""
-print(FTYPE)
 
 UITYPE = np.int64
 """Datatype to use for explicitly-typed unsigned integers"""
@@ -111,6 +113,9 @@ HYPO_PARAMS_T = HypoParams8D
 
 
 # -- Physical / mathematical constants -- #
+
+PI = FTYPE(np.pi)
+"""pi"""
 
 TWO_PI = FTYPE(2*np.pi)
 """2 * pi"""
@@ -122,17 +127,28 @@ SPEED_OF_LIGHT_M_PER_NS = FTYPE(0.299792458)
 """Speed of light in units of m/ns"""
 
 
-# -- Precalculated (using ``nphotons.py``) to avoid icetray -- #
+# -- Pre-calculated values -- #
 
 TRACK_M_PER_GEV = FTYPE(15 / 3.3)
 """Track length per energy, in units of m/GeV"""
 
 TRACK_PHOTONS_PER_M = FTYPE(2451.4544553)
-"""Track photons per length, in units of 1/m"""
+"""Track photons per length, in units of 1/m (see ``nphotons.py``)"""
 
 CASCADE_PHOTONS_PER_GEV = FTYPE(12805.3383311)
-"""Cascade photons per energy, in units of 1/GeV"""
+"""Cascade photons per energy, in units of 1/GeV (see ``nphotons.py``)"""
 
+# TODO: Is jitter same (or close enough to the same) for all DOMs? Is it
+#       different for DeepCore vs. non-DeepCore DOMs? Didn't see as much in
+#       section 3.3. of arXiv:1612.05093v2 so assuming same for now.
+
+# See arXiv:1612.05093v2, section 3.3
+IC_DOM_JITTER_NS = 1.7
+"""Timing jitter (stddev) for string 0-79 DOMs, in units of ns"""
+
+# See arXiv:1612.05093v2, section 3.3
+DC_DOM_JITTER_NS = 1.7
+"""Timing jitter (stddev) for DeepCore (strings 80-86) DOMs, in units of ns"""
 
 # -- Functions -- #
 
@@ -256,7 +272,7 @@ def hypo_to_track_params(hypo_params):
     return track_params
 
 
-def power_axis(start, stop, num_bins, power):
+def powerspace(start, stop, num_bins, power):
     """Create bin edges evenly spaced w.r.t. ``x**power``.
 
     Reverse engineered from JVS's power axis.
@@ -318,7 +334,7 @@ def binspec_to_edges(start, stop, num_bins):
 
     edges = BinningCoords(
         t=np.linspace(start.t, stop.t, num_bins.t + 1),
-        r=power_axis(start=start.r, stop=stop.r, num_bins=num_bins.r, power=2),
+        r=powerspace(start=start.r, stop=stop.r, num_bins=num_bins.r, power=2),
         theta=np.arccos(np.linspace(np.cos(start.theta),
                                     np.cos(stop.theta),
                                     num_bins.theta + 1)),
@@ -355,3 +371,57 @@ def bin_edges_to_centers(bin_edges):
         phi=0.5 * (phi[:-1] + phi[1:]),
     )
     return bin_centers
+
+
+def poisson_llh(expected, observed):
+    """Compute Poisson log-likelihood and center around zero.
+
+    Parameters
+    ----------
+    expected
+        Expected value(s)
+
+    observed
+        Observed value(s)
+
+    Returns
+    -------
+    llh
+        Log likelihood(s)
+
+    """
+    llh = observed * np.log(expected) - expected - gammaln(observed + 1)
+    return llh
+
+
+def spacetime_separation(dt, dx, dy, dz):
+    """Compute the separation between two events in spacetime. Negative values
+    are non-causal.
+
+    Parameters
+    ----------
+    dt, dx, dy, dz : numeric
+        Separation between events in ns (dt) and meters (dx, dy, and dz).
+
+    """
+    return SPEED_OF_LIGHT_M_PER_NS*dt - np.sqrt(dx**2 + dy**2 + dz**2)
+
+
+def generate_unique_ids(events):
+    """Generate unique IDs from `event` fields because people are lazy
+    inconsiderate assholes.
+
+    Parameters
+    ----------
+    events : array of int
+
+    Returns
+    -------
+    uids : array of int
+
+    """
+    uids = (
+        events
+        + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
+    ).astype(int)
+    return uids

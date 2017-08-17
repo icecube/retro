@@ -28,18 +28,19 @@ from analytic_hypo import AnalyticHypo
 
 def main():
     """Main"""
-    # Binning defined to be same as that used for CLsim
-    bin_min = BinningCoords(t=0, r=0, theta=0, phi=0)
-    bin_max = BinningCoords(t=500, r=200, theta=np.pi, phi=2*np.pi)
+    # Binning defined to be same as that used for clsim
+    bin_min = BinningCoords(t=-3000, r=0, theta=0, phi=0)
+    bin_max = BinningCoords(t=0, r=200, theta=np.pi, phi=2*np.pi)
     num_bins = BinningCoords(t=50, r=20, theta=50, phi=36)
 
     # An arbitrary hypothesis for testing
-    hypo_params = HypoParams8D(t=65, x=1, y=10, z=-50, track_zenith=1.08,
-                               track_azimuth=0.96, track_energy=20,
-                               cascade_energy=25)
+    hypo_params = HypoParams8D(
+        t=-1000, x=1, y=10, z=-50, track_zenith=1.08, track_azimuth=0.96,
+        track_energy=20, cascade_energy=25
+    )
 
     # An arbitrary hit coordinate for testing
-    hit_dom_coord = TimeSpaceCoord(t=50, x=0, y=10, z=0)
+    hit_dom_coord = TimeSpaceCoord(t=0, x=0, y=10, z=0)
 
     t0 = time.time()
     analytic_hypo = AnalyticHypo(hypo_params)
@@ -58,7 +59,7 @@ def main():
 
     # kevin array
     t0 = time.time()
-    segmented_hypo = SegmentedHypo(params=hypo_params, time_increment=1)
+    segmented_hypo = SegmentedHypo(params=hypo_params, time_increment=0.1)
     segmented_hypo.set_binning(start=bin_min, stop=bin_max, num_bins=num_bins)
     segmented_hypo.compute_matrices(hit_dom_coord)
 

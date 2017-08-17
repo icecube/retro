@@ -21,10 +21,11 @@ class Particle(object):
     forward : bool
         if the particle should be plotted forward or backards in time
     """
-    def __init__(self, evt, t, x, y, z, zenith, azimuth, energy=None, length=None,
+    def __init__(self, event, uid, t, x, y, z, zenith, azimuth, energy=None, length=None,
                  pdg=None, interaction=None, forward=False, color='r',
                  linestyle='--', label=''):
-        self.evt = evt
+        self.event = event
+        self.uid = uid
         self.t = t
         self.x = x
         self.y = y
@@ -39,6 +40,15 @@ class Particle(object):
         self.color = color
         self.linestyle = linestyle
         self.label = label
+
+    def __str__(self):
+        return ('event=%d uid=%d time=%f x=%f y=%f z=%f zenith=%f azimuth=%f'
+                ' energy=%f length=%s pdg=%s interaction=%s forward=%s'
+                ' color=%s linestyle=%s label=%s'
+                % (self.event, self.uid, self.t, self.x, self.y, self.z,
+                   self.zenith, self.azimuth, self.energy, self.length,
+                   self.pdg, self.interaction, self.forward, self.color,
+                   self.linestyle, self.label))
 
     @property
     def theta(self):
@@ -107,10 +117,11 @@ class ParticleArray(object):
     Container class for particles from arrays
     get_item will just return a particle object at that position
     """
-    def __init__(self, evt, t, x, y, z, zenith, azimuth, energy=None, length=None,
-                 pdg=None, interaction=None, forward=False, color='r',
-                 linestyle='--', label=''):
-        self.evt = evt
+    def __init__(self, event, uid, t, x, y, z, zenith, azimuth, energy=None,
+                 length=None, pdg=None, interaction=None, forward=False,
+                 color='r', linestyle='--', label=''):
+        self.event = event
+        self.uid = uid
         self.t = t
         self.x = x
         self.y = y
@@ -134,7 +145,8 @@ class ParticleArray(object):
             interaction = None
         else:
             interaction = self.interaction[idx]
-        return Particle(self.evt[idx],
+        return Particle(self.event[idx],
+                        self.uid[idx],
                         self.t[idx],
                         self.x[idx],
                         self.y[idx],
@@ -151,4 +163,4 @@ class ParticleArray(object):
                         self.label)
 
     def __len__(self):
-        return len(self.evt)
+        return len(self.uid)

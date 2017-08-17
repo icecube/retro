@@ -18,7 +18,7 @@ if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import DFLT_PULSE_SERIES, DFLT_ML_RECO_NAME, DFLT_SPE_RECO_NAME
 from retro import Event, Pulses
-from retro import expand
+from retro import expand, generate_unique_ids
 from retro.particles import ParticleArray
 
 
@@ -52,14 +52,13 @@ class Events(object):
             Path to HDF5 file
 
         """
-        print('loading events from path "%s"' % events_fpath)
+        print('Loading events from path "%s"' % events_fpath)
         with h5py.File(expand(events_fpath)) as h5:
             pulses = h5[pulse_series]
             pulse_events = pulses['Event']
             strings = pulses['string']
-            print('string range: [%d, %d]' % (np.min(strings), np.max(strings)))
             oms = pulses['om']
-            print('OM range: [%d, %d]' % (np.min(oms), np.max(oms)))
+
             # Note that string and om indices are one less than their numbers
             self.pulses = Pulses(
                 strings=strings - 1,
@@ -72,14 +71,15 @@ class Events(object):
             # event
             self.pulse_event_boundaries = [0]
             self.pulse_event_boundaries.extend(
-                np.where(np.diff(pulse_events))[0]
+                np.where(np.diff(pulse_events) != 0)[0]
             )
 
             self.interactions = h5['I3MCWeightDict']['InteractionType']
 
             nu = h5['trueNeutrino']
             self.neutrinos = ParticleArray(
-                evt=nu['Event'],
+                event=nu['Event'],
+                uid=generate_unique_ids(nu['Event']),
                 t=nu['time'],
                 x=nu['x'],
                 y=nu['y'],
@@ -95,7 +95,8 @@ class Events(object):
             )
             mu = h5['trueMuon']
             self.tracks = ParticleArray(
-                evt=mu['Event'],
+                event=mu['Event'],
+                uid=generate_unique_ids(mu['Event']),
                 t=mu['time'],
                 x=mu['x'],
                 y=mu['y'],
@@ -111,7 +112,8 @@ class Events(object):
             )
             cascade = h5['trueCascade']
             self.cascades = ParticleArray(
-                evt=cascade['Event'],
+                event=cascade['Event'],
+                uid=generate_unique_ids(cascade['Event']),
                 t=cascade['time'],
                 x=cascade['x'],
                 y=cascade['y'],
@@ -125,7 +127,8 @@ class Events(object):
             )
             reco = h5[ml_reco_name]
             self.ml_recos = ParticleArray(
-                evt=reco['Event'],
+                event=reco['Event'],
+                uid=generate_unique_ids(reco['Event']),
                 t=reco['time'],
                 x=reco['x'],
                 y=reco['y'],
@@ -139,7 +142,8 @@ class Events(object):
             )
             reco = h5[spe_reco_name]
             self.spe_recos = ParticleArray(
-                evt=reco['Event'],
+                event=reco['Event'],
+                uid=generate_unique_ids(reco['Event']),
                 t=reco['time'],
                 x=reco['x'],
                 y=reco['y'],
@@ -149,7 +153,8 @@ class Events(object):
                 color='m',
                 label='SPE'
             )
-        self.events = self.neutrinos.evt
+        self.events = self.neutrinos.event
+        self.uids = self.neutrinos.uid
         self._num_events = len(self.events)
 
     def __len__(self):
@@ -166,7 +171,8 @@ class Events(object):
             return [self[i] for i in range(*range_args)]
 
         neutrino = self.neutrinos[idx]
-        event = neutrino.evt
+        event = neutrino.event
+        uid = neutrino.uid
         pulse_start_idx = self.pulse_event_boundaries[idx]
 
         if idx < self._num_events - 1:
@@ -177,6 +183,7 @@ class Events(object):
         slc = slice(pulse_start_idx, pulse_stop_idx)
         event = Event(
             event=event,
+            uid=uid,
             pulses=Pulses(
                 strings=self.pulses.strings[slc],
                 oms=self.pulses.oms[slc],

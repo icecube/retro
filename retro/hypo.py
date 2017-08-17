@@ -17,7 +17,7 @@ if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import HYPO_PARAMS_T, BinningCoords, TimeSpaceCoord
 from retro import (CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS,
-                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, TWO_PI)
+                   TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, PI, TWO_PI)
 from retro import (bin_edges_to_centers, binspec_to_edges,
                    convert_to_namedtuple)
 
@@ -113,12 +113,22 @@ class Hypo(object):
             ``num_bins + 1`` bin edges).
 
         """
-        start = convert_to_namedtuple(start, BinningCoords)
-        stop = convert_to_namedtuple(stop, BinningCoords)
+        bin_min = convert_to_namedtuple(start, BinningCoords)
+        bin_max = convert_to_namedtuple(stop, BinningCoords)
         num_bins = convert_to_namedtuple(num_bins, BinningCoords)
+        assert bin_min.t < bin_max.t
+        assert bin_min.r == 0 < bin_max.r
+        assert 0 <= bin_min.theta < bin_max.theta <= PI
+        assert 0 <= bin_min.phi < bin_max.phi <= TWO_PI
 
-        self.bin_min = start
-        self.bin_max = stop
+        self.bin_min = bin_min
+        self.bin_max = bin_max
+        self.num_bins = num_bins
+
+        #print('start:', start)
+        #print('stop:', stop)
+        #print('num_bins:', num_bins)
+
         self.num_bins = num_bins
 
         self._bin_edges = None
@@ -130,9 +140,11 @@ class Hypo(object):
     def bin_edges(self):
         """BinningCoords of floats : bin edges"""
         if self._bin_edges is None:
-            self._bin_edges = binspec_to_edges(start=self.bin_min,
-                                               stop=self.bin_max,
-                                               num_bins=self.num_bins)
+            self._bin_edges = binspec_to_edges(
+                start=self.bin_min,
+                stop=self.bin_max,
+                num_bins=self.num_bins
+            )
         return self._bin_edges
 
     @property
@@ -159,10 +171,12 @@ class Hypo(object):
         if self._bin_num_factors is None:
             self._bin_num_factors = BinningCoords(
                 t=self.num_bins.t / (self.bin_max.t - self.bin_min.t),
-                r=self.num_bins.r**2 / self.bin_max.r,
-                theta=0.5 * self.num_bins.theta,
-                phi=self.num_bins.phi / TWO_PI
+                r=self.num_bins.r / math.sqrt(self.bin_max.r - self.bin_min.r),
+                theta=self.num_bins.theta / (math.cos(self.bin_min.theta)
+                                             - math.cos(self.bin_max.theta)),
+                phi=self.num_bins.phi / (self.bin_max.phi - self.bin_min.phi)
             )
+            #print('bin_num_factors:', self._bin_num_factors)
         return self._bin_num_factors
 
     def set_origin(self, coord):

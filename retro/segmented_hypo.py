@@ -18,7 +18,7 @@ if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import FTYPE, UITYPE, BinningCoords, PhotonInfo, TimeSpaceCoord
 from retro import SPEED_OF_LIGHT_M_PER_NS, TWO_PI
-from retro import convert_to_namedtuple
+from retro import convert_to_namedtuple, spacetime_separation
 from retro.hypo import Hypo
 
 
@@ -52,10 +52,12 @@ class SegmentedHypo(Hypo):
                                             track_e_scale=track_e_scale)
         self.time_increment = time_increment
         self.segment_length = self.time_increment * SPEED_OF_LIGHT_M_PER_NS
-        self.photons_per_segment = self.segment_length * self.track_photons_per_m
+        self.photons_per_segment = (
+            self.segment_length * self.track_photons_per_m
+        )
 
         # Default values
-        self.number_of_increments = 0
+        self.num_segments = 0
         self.allocate_arrays = True
         self.photon_info = None
         self.indices_array = None
@@ -79,47 +81,86 @@ class SegmentedHypo(Hypo):
 
         coord = convert_to_namedtuple(coord, TimeSpaceCoord)
 
-        print('new origin being set:', coord)
+        #print('new origin being set:', coord)
 
-        self.origin = coord
+        origin = coord
 
-        self.t_rel = self.params.t - self.origin.t
-        self.x_rel = self.params.x - self.origin.x
-        self.y_rel = self.params.y - self.origin.y
-        self.z_rel = self.params.z - self.origin.z
+        t_start_rel = self.params.t - origin.t
+        x_start_rel = self.params.x - origin.x
+        y_start_rel = self.params.y - origin.y
+        z_start_rel = self.params.z - origin.z
 
-        print('params.t: %f, origin.t: %f, t_rel: %f'
-              % (self.params.t, self.origin.t, self.t_rel))
+        st_sep = spacetime_separation(
+            dt=-t_start_rel,
+            dx=x_start_rel,
+            dy=y_start_rel,
+            dz=z_start_rel
+        )
+        #print('st_sep:', st_sep)
 
-        orig_number_of_incr = self.number_of_increments
+        if st_sep < 0:
+            raise ValueError('Origin would violate causality for this'
+                             ' hypothesis; refusing to set')
+
+        self.origin = origin
+        self.t_start_rel = t_start_rel
+        self.x_start_rel = x_start_rel
+        self.y_start_rel = y_start_rel
+        self.z_start_rel = z_start_rel
+        self.spacetime_separation = st_sep
+
+        t_end_rel = self.t_start_rel + self.track_lifetime
+        if t_end_rel > 0:
+            t_end_rel = 0
+
+        #print('params.t: %f, origin.t: %f, t_start_rel: %f'
+        #      % (self.params.t, self.origin.t, self.t_start_rel))
+        #print('self.bin_min.t:', self.bin_min.t)
+        #print('self.bin_max.t:', self.bin_max.t)
+        #print('self.origin.t:', self.origin.t)
+        #print('self.track_lifetime:', self.track_lifetime)
+        #print('self.t_start_rel:', self.t_start_rel)
+        #print('t_end_rel:', t_end_rel)
+
+        orig_num_segments = self.num_segments
 
         # Create initial time array, using the midpoints of each time increment
-        half_incr = self.time_increment / 2
-        self.t_array_init = np.arange(
-            self.t_rel - half_incr,
-            min(
-                self.bin_max.t,
-                self.track_lifetime + self.t_rel
-            ) - half_incr,
-            self.time_increment,
+        # (or the endpoint if the track is too short to hit the midpoint of the
+        # first bin)
+
+        half_incr = 0.5 * self.time_increment
+        track_end_half_segs = (t_end_rel - self.t_start_rel) // half_incr
+        #print('track_end_half_segs:', track_end_half_segs)
+        bin_max_half_segs = (self.bin_max.t - self.t_start_rel) // half_incr
+        #print('bin_max_half_segs:', bin_max_half_segs)
+        track_eff_end_half_segs = min(track_end_half_segs, bin_max_half_segs)
+        #print('track_eff_end_half_segs:', track_eff_end_half_segs)
+        self.num_segments = int(
+            0.5 * (track_eff_end_half_segs if (track_eff_end_half_segs % 2 == 0)
+                   else track_eff_end_half_segs - 1)
+        )
+        #print('num_segments:', self.num_segments)
+        track_eff_endtime = (
+            self.t_start_rel + self.num_segments * self.time_increment
+        )
+        #print('track_eff_endtime:', track_eff_endtime)
+        self.segment_midpoint_times = np.linspace(
+            self.t_start_rel - half_incr,
+            track_eff_endtime - half_incr,
+            self.num_segments + 1,
             dtype=FTYPE
         )
-        self.t_array_init[0] = self.t_rel
+        # The 0th element is not a midpoint at all, but the starting point of
+        # the track and the point where we'll store cascade info
+        self.segment_midpoint_times[0] = self.t_start_rel
 
-        print('self.bin_min.t:', self.bin_min.t)
-        print('self.bin_max.t:', self.bin_max.t)
-        print('self.origin.t:', self.origin.t)
-        print('self.track_lifetime:', self.track_lifetime)
-        print('self.t_rel:', self.t_rel)
-        print('t_array:', self.t_array_init)
-        print('t_array range: [%f, %f]'
-              % (self.t_array_init.min(), self.t_array_init.max()))
-
-        # Set the number of time increments in the track
-        self.number_of_increments = len(self.t_array_init)
+        #print('segment_midpoint_times:', self.segment_midpoint_times)
+        #print('segment_midpoint_times range: [%f, %f]'
+        #      % (self.segment_midpoint_times.min(),
+        #         self.segment_midpoint_times.max()))
 
         # Invalidate arrays if they changed shape
-        if self.number_of_increments != orig_number_of_incr:
+        if self.num_segments != orig_num_segments:
             self.allocate_arrays = True
 
     # TODO: approximate timings (total ~1 ms)
@@ -138,18 +179,18 @@ class SegmentedHypo(Hypo):
 
         if self.allocate_arrays:
             self.indices_array = np.empty(
-                shape=(len(BinningCoords._fields), self.number_of_increments),
+                shape=(len(BinningCoords._fields), self.num_segments + 1),
                 dtype=UITYPE,
                 order='C'
             )
             self.allocate_arrays = False
 
-        relative_time = self.t_array_init - self.t_rel
-        var_x = self.x_rel + self.track_speed_x * relative_time
-        var_y = self.y_rel + self.track_speed_y * relative_time
-        var_z = self.z_rel + self.track_speed_z * relative_time
+        relative_time = self.segment_midpoint_times - self.t_start_rel
+        var_x = self.x_start_rel + self.track_speed_x * relative_time
+        var_y = self.y_start_rel + self.track_speed_y * relative_time
+        var_z = self.z_start_rel + self.track_speed_z * relative_time
         var_r = np.sqrt(np.square(var_x) + np.square(var_y) + np.square(var_z))
-        var_theta = var_z / var_r
+        var_costheta = var_z / var_r
         var_phi = np.arctan2(var_y, var_x) % TWO_PI
 
         # Compute which bin index each segment is in
@@ -157,13 +198,13 @@ class SegmentedHypo(Hypo):
         # NOTE: indices_array is uint type, so float values are truncated,
         # should result in floor rounding
         self.indices_array[IDX_T_IX, :] = (
-            self.t_array_init * self.bin_num_factors.t
+            (self.segment_midpoint_times - self.bin_min.t) * self.bin_num_factors.t
         )
         self.indices_array[IDX_R_IX, :] = (
-            np.sqrt(var_r * self.bin_num_factors.r)
+            np.sqrt(var_r) * self.bin_num_factors.r
         )
         self.indices_array[IDX_THETA_IX, :] = (
-            (1 - var_theta) * self.bin_num_factors.theta
+            (1 - var_costheta) * self.bin_num_factors.theta
         )
         self.indices_array[IDX_PHI_IX, :] = (
             var_phi * self.bin_num_factors.phi
@@ -172,9 +213,9 @@ class SegmentedHypo(Hypo):
         # Count segments in each bin
         t0 = time.time()
         segment_counts = {}
-        for incr_idx in range(self.number_of_increments):
-            #bin_idx = BinningCoords(*self.indices_array[:, incr_idx])
-            vals = self.indices_array[:, incr_idx]
+        for segment_idx in range(self.num_segments):
+            #bin_idx = BinningCoords(*self.indices_array[:, segment_idx])
+            vals = self.indices_array[:, segment_idx]
             bin_idx = BinningCoords(*vals)
             previous_count = segment_counts.get(bin_idx, 0)
             segment_counts[bin_idx] = 1 + previous_count
@@ -195,32 +236,14 @@ class SegmentedHypo(Hypo):
             #p_info = (count, self.params.track_zenith, phi, 0.562)
             self.photon_info[bin_idx] = p_info
 
-        # TODO: should this be +=, average, or what to include both track and
-        # cascade photons at 0? Should there be any track at 0? Or are all
-        # track photons accounted for at the next "bin center" which would be
-        # the first increment after 0?
         first_bin_idx = BinningCoords(*self.indices_array[:, 0])
-        if False: #first_bin_idx in self.photon_info:
-            orig_first_bin_info = self.photon_info[first_bin_idx]
-            print('first bin, before assignemnt:', orig_first_bin_info)
-            first_bin_photon_info = PhotonInfo(
-                count=0.5 * (self.cascade_photons + orig_first_bin_info.count),
-                theta=orig_first_bin_info.theta,
-                phi=orig_first_bin_info.phi,
-                # Weighted average of 0 for cascade & existing track
-                length=(
-                    (orig_first_bin_info.length * orig_first_bin_info.count)
-                    / (self.cascade_photons + orig_first_bin_info.count)
-                )
-            )
-        else:
-            first_bin_photon_info = PhotonInfo(
-                count=self.cascade_photons,
-                theta=0,
-                phi=0,
-                length=0
-            )
+        first_bin_photon_info = PhotonInfo(
+            count=self.cascade_photons,
+            theta=0,
+            phi=0,
+            length=0
+        )
 
         self.photon_info[first_bin_idx] = first_bin_photon_info
 
-        print('time to fill dict: %.3f ms' % ((time.time() - t0)*1000))
+        #print('time to fill dict: %.3f ms' % ((time.time() - t0)*1000))
