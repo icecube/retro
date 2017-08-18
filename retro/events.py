@@ -9,7 +9,7 @@ file and accessing them in a consistent manner.
 from __future__ import absolute_import, division, print_function
 
 import os
-from os.path import abspath, dirname
+from os.path import abspath, basename, dirname
 
 import h5py
 import numpy as np
@@ -36,6 +36,7 @@ class Events(object):
     """
     def __init__(self, events_fpath):
         self.events = []
+        self.filename = None
         self._num_events = 0
         self.pulses = None
         self.pulse_event_boundaries = None
@@ -153,6 +154,7 @@ class Events(object):
                 color='m',
                 label='SPE'
             )
+        self.filename = basename(events_fpath)
         self.events = self.neutrinos.event
         self.uids = self.neutrinos.uid
         self._num_events = len(self.events)
@@ -182,6 +184,7 @@ class Events(object):
 
         slc = slice(pulse_start_idx, pulse_stop_idx)
         event = Event(
+            filename=self.filename,
             event=event,
             uid=uid,
             pulses=Pulses(

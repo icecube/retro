@@ -19,7 +19,7 @@ import cPickle as pickle
 from itertools import izip, product
 import math
 import os
-from os.path import abspath, dirname, isfile, join
+from os.path import abspath, dirname, isdir, isfile, join
 import time
 
 import numba # pylint: disable=unused-import
@@ -57,11 +57,16 @@ CASCADE_E_SCALE = 10 #2.
 TRACK_E_SCALE = 10 #20.
 NUM_SCAN_POINTS = 100
 HypoClass = SegmentedHypo
-LLH_USE_LENGTH = True
+LLH_USE_LENGTH = False
 LLH_USE_ANGLE = True
-CMAP = 'YlGnBu_r'
+LLH_USE_NOHIT = False
 
-RESULTS_DIR = 'results'
+RESULTS_DIR = (
+    'results_length_%d_angle_%d_nohit_%d'
+    % (LLH_USE_LENGTH, LLH_USE_ANGLE, LLH_USE_NOHIT)
+)
+if not isdir(RESULTS_DIR):
+    os.makedirs(RESULTS_DIR, mode=0o2777)
 
 ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
@@ -103,7 +108,7 @@ MIN_DIMS = [] #('t x y z track_zenith track_azimuth track_energy'.split())
 SCAN_DIM_SETS = (
     't', 'x', 'y', 'z', 'track_zenith', 'track_azimuth', 'track_energy',
     'cascade_energy',
-    ('t', 'x'), ('t', 'y'), ('t', 'z'), ('x', 'z'),
+    ('t', 'x'), ('t', 'y'), ('t', 'z'), ('x', 'y'), ('x', 'z'),
     ('track_zenith', 'track_azimuth'), ('track_zenith', 'z')
 )
 """Which dimensions to scan. Tuples specify 2+ dimension scans"""
@@ -425,9 +430,8 @@ def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
 
     all_llh = []
     for param_values in product(*scan_sequences):
-        for idx, (pidx, pval) in enumerate(izip(param_indices, param_values)):
+        for pidx, pval in izip(param_indices, param_values):
             params[pidx] = pval
-            #uniques[idx].add(pval)
 
         hypo = HypoClass(params=params, cascade_e_scale=CASCADE_E_SCALE,
                          track_e_scale=TRACK_E_SCALE)
@@ -441,7 +445,6 @@ def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
     return all_llh
 
 
-#@profile
 def main(events_fpath, tables_dir, geom_file, start_index=None,
          stop_index=None):
     """Perform scans and minimization for events.
@@ -609,7 +612,6 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
         if SCAN_DIM_SETS:
             print('Will scan following sets of dimensions: %s'
                   % str(SCAN_DIM_SETS))
-            scan_results = OrderedDict()
             for dims in SCAN_DIM_SETS:
                 print('Scanning dimension(s): %s...' % str(dims))
                 if isinstance(dims, basestring):
@@ -629,106 +631,35 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                         np.linspace(lower, upper, NUM_SCAN_POINTS)
                     )
 
-                llh = scan(llh_func=get_neg_llh, event=event, dims=dims,
-                           scan_values=scan_values, bin_spec=bin_spec,
-                           nominal_params=nominal_params,
-                           llh_func_kwargs=llh_func_kwargs)
+                neg_llh = scan(
+                    llh_func=get_neg_llh, event=event, dims=dims,
+                    scan_values=scan_values, bin_spec=bin_spec,
+                    nominal_params=nominal_params,
+                    llh_func_kwargs=llh_func_kwargs
+                )
 
+                datadump = OrderedDict([
+                    ('filename', event.filename),
+                    ('event', event.event),
+                    ('uid', event.uid),
+                    ('dims', dims),
+                    ('scan_values', scan_values),
+                    ('neg_llh', neg_llh),
+                    ('truth', tuple(getattr(truth_params, d) for d in dims)),
+                    ('LLH_USE_LENGTH', LLH_USE_LENGTH),
+                    ('LLH_USE_ANGLE', LLH_USE_ANGLE),
+                    ('LLH_USE_NOHIT', LLH_USE_NOHIT)
+                ])
                 fname = ('scan_results_event_%d_uid_%d_dims_%s.pkl'
                          % (event.event, event.uid, '_'.join(dims)))
                 fpath = join(RESULTS_DIR, fname)
-                pickle.dump(llh, file(fpath, 'wb'),
-                            pickle.HIGHEST_PROTOCOL)
+                pickle.dump(
+                    datadump,
+                    file(fpath, 'wb'),
+                    pickle.HIGHEST_PROTOCOL
+                )
                 print('saved scan to "%s"' % fpath)
             print('')
-
-                #z_vs = np.linspace(neutrino.z - 50, neutrino.z + 50, NUM_SCAN_POINTS)
-
-                #llhs = []
-                #noises = []
-                #for z_v in z_vs:
-                #    print('testing z = %.2f' % z_v)
-                #    my_hypo = HypoClass(neutrino.t, neutrino.x, neutrino.y, z_v,
-                #                        theta=neutrino.theta, phi=neutrino.phi,
-                #                        track_energy=track.energy,
-                #                        cascade_energy=cascade.energy,
-                #                        cascade_e_scale=CASCADE_E_SCALE,
-                #                        track_e_scale=TRACK_E_SCALE)
-                #    my_hypo.set_binning(t_bin_edges, r_bin_edges, theta_bin_edges,
-                #                        phi_bin_edges)
-                #    llh, noise = get_neg_llh(hypo=my_hypo, t=t, x=x, y=y, z=z, q=q,
-                #                         string=strings, om=oms,
-                #                         ic_photon_info=ic_photon_info,
-                #                         dc_photon_info=dc_photon_info)
-                #    llhs.append(llh)
-                #    noises.append(noise)
-
-                #if not plot:
-                #    return
-
-                #plt.clf()
-                #fig = plt.figure()
-                #ax = fig.add_subplot(111)
-                #ax.plot(z_vs, llhs)
-                #ax.set_ylabel('llh')
-                #ax.set_xlabel('Vertex z (m)')
-                ## Truth
-                #ax.axvline(neutrino.z, color='r')
-                #ax.axvline(events.ml_recos[event_idx].vertex[3], color='g')
-                #ax.axvline(events.spe_recos[event_idx].vertex[3], color='m')
-                #ax.set_title('Event %i, E_cascade = %.2f GeV, E_track = %.2f GeV'
-                #             % (evt, cascade.energy, track.energy))
-                #plt.savefig('z_%s.png' % evt, dpi=150)
-
-
-                #    if do_xz:
-                #        x_points = 51
-                #        y_points = 51
-                #        x_vs = np.linspace(neutrino.x - 150, neutrino.x + 150, x_points)
-                #        z_vs = np.linspace(neutrino.z - 100, neutrino.z + 100, y_points)
-                #        llhs = []
-                #        for z_v in z_vs:
-                #            for x_v in x_vs:
-                #                my_hypo = HypoClass(neutrino.t, x_v, neutrino.y, z_v,
-                #                                    theta=neutrino.theta, phi=neutrino.phi,
-                #                                    track_energy=track.energy,
-                #                                    cascade_energy=cascade.energy,
-                #                                    cascade_e_scale=CASCADE_E_SCALE,
-                #                                    track_e_scale=TRACK_E_SCALE)
-                #                my_hypo.set_binning(t_bin_edges, r_bin_edges,
-                #                                    theta_bin_edges, phi_bin_edges)
-                #                llh, noise = get_neg_llh(hypo=my_hypo, t=t, x=x, y=y, z=z, q=q,
-                #                                     string=strings, om=oms,
-                #                                     ic_photon_info=ic_photon_info,
-                #                                     dc_photon_info=dc_photon_info)
-                #                print(' z = %.2f, x = %.2f : llh = %.2f' % (z_v, x_v, llh))
-                #                llhs.append(llh)
-                #        plt.clf()
-                #        # [z, x]
-                #        llhs = np.array(llhs)
-                #        llhs = llhs.reshape(y_points, x_points)
-
-                #        x_edges = np.linspace(x_vs[0] - np.diff(x_vs)[0]/2.,
-                #                              x_vs[-1] + np.diff(x_vs)[0]/2.,
-                #                              len(x_vs) + 1)
-                #        z_edges = np.linspace(z_vs[0] - np.diff(z_vs)[0]/2.,
-                #                              z_vs[-1] + np.diff(z_vs)[0]/2.,
-                #                              len(z_vs) + 1)
-
-                #        xx, yy = np.meshgrid(x_edges, z_edges)
-                #        fig = plt.figure()
-                #        ax = fig.add_subplot(111)
-                #        ax.pcolormesh(xx, yy, llhs, cmap=CMAP)
-                #        ax.set_ylabel('Vertex z (m)')
-                #        ax.set_xlabel('Vertex x (m)')
-                #        ax.set_xlim((x_edges[0], x_edges[-1]))
-                #        ax.set_ylim((z_edges[0], z_edges[-1]))
-                #        #truth
-                #        ax.axvline(neutrino.x, color='r')
-                #        ax.axhline(neutrino.z, color='r')
-                #        ax.set_title('Event %i, E_cascade = %.2f GeV, E_track = %.2f GeV'
-                #                     % (evt, cascade.energy, track.energy))
-                #        plt.savefig('xz_%s.png' % evt, dpi=150)
 
 
 def parse_args(description=__doc__):

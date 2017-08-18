@@ -73,8 +73,8 @@ TrackParams = namedtuple( # pylint: disable=invalid-name
 
 Event = namedtuple( # pylint: disable=invalid-name
     typename='Event',
-    field_names=('event', 'uid', 'pulses', 'interaction', 'neutrino', 'track',
-                 'cascade', 'ml_reco', 'spe_reco')
+    field_names=('filename', 'event', 'uid', 'pulses', 'interaction',
+                 'neutrino', 'track', 'cascade', 'ml_reco', 'spe_reco')
 )
 
 Pulses = namedtuple( # pylint: disable=invalid-name
