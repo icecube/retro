@@ -58,10 +58,13 @@ class Hypo(object):
         # TODO: not simply linear; also, not correct speed here
         self.track_lifetime = self.track_length / SPEED_OF_LIGHT_M_PER_NS
 
-        sin_trck_zen = math.sin(self.params.track_zenith)
-        self.track_dir_x = sin_trck_zen * math.cos(self.params.track_azimuth)
-        self.track_dir_y = sin_trck_zen * math.sin(self.params.track_azimuth)
-        self.track_dir_z = math.cos(self.params.track_zenith)
+        normal_zen = PI - self.params.track_zenith
+        normal_az = -self.params.track_azimuth
+
+        sin_zen = math.sin(normal_zen)
+        self.track_dir_x = sin_zen * math.cos(normal_az)
+        self.track_dir_y = sin_zen * math.sin(normal_az)
+        self.track_dir_z = math.cos(normal_zen)
 
         # TODO: make this actual muon speed, which depends on energy
         self.track_speed_x = SPEED_OF_LIGHT_M_PER_NS * self.track_dir_x

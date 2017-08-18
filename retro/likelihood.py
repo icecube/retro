@@ -24,43 +24,36 @@ import time
 
 import numba # pylint: disable=unused-import
 import numpy as np
-import pyfits
 from pyswarm import pso
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS
 from retro import (FTYPE, HYPO_PARAMS_T, BinningCoords, HypoParams10D,
-                   PhotonInfo, TimeSpaceCoord)
-from retro import event_to_hypo_params, expand, poisson_llh
+                   TimeSpaceCoord)
+from retro import (IC_TABLE_FPATH_PROTO, DC_TABLE_FPATH_PROTO,
+                   DETECTOR_GEOM_FILE)
+from retro import (event_to_hypo_params, expand, extract_photon_info,
+                   poisson_llh)
 from retro.events import Events
-from analytic_hypo import AnalyticHypo # pylint: disable=unused-import
-from segmented_hypo import SegmentedHypo, IDX_R_IX # pylint: disable=unused-import
+from retro.analytic_hypo import AnalyticHypo # pylint: disable=unused-import
+from retro.segmented_hypo import SegmentedHypo # pylint: disable=unused-import
 
 
-IC_TABLE_FPATH_PROTO = (
-    '{tables_dir:s}/retro_nevts1000_IC_DOM{dom:d}_r_cz_t_angles.fits'
-)
-
-DC_TABLE_FPATH_PROTO = (
-    '{tables_dir:s}/retro_nevts1000_DC_DOM{dom:d}_r_cz_t_angles.fits'
-)
-
-DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
 DFLT_EVENTS_FPATH = (
     '/fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600'
     '/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5'
 )
 
-# Completely arbitrary first guesses
-EPS = 0.8
+# (Almost) completely arbitrary first guesses
+EPS = 0.0
 EPS_STAT = EPS
 EPS_CLSIM_LENGTH_BINNING = 2*EPS
 EPS_CLSIM_ANGLE_BINNING = EPS
 NOISE_CHARGE = 0.00000025 * 100
 CASCADE_E_SCALE = 1
 TRACK_E_SCALE = 1
-NUM_JITTER_SAMPLES = 5
+NUM_JITTER_SAMPLES = 3
 JITTER_SIGMA = 5
 
 N_PHI_BINS = 20
@@ -74,7 +67,7 @@ RESULTS_DIR = (
     'results_avgphot%d_nohit%d%s_cesc%d_tesc%d_noise%.1e_jitsamp%d%s'
     % (LLH_USE_AVGPHOT,
        LLH_USE_NOHIT,
-       '_eps%.1f' % EPS_STAT if LLH_USE_AVGPHOT else '',
+       '_eps%.1f' % EPS if LLH_USE_AVGPHOT else '',
        CASCADE_E_SCALE,
        TRACK_E_SCALE,
        NOISE_CHARGE,
@@ -82,7 +75,7 @@ RESULTS_DIR = (
        '_jitsig%d' % JITTER_SIGMA if NUM_JITTER_SAMPLES > 1 else '')
 )
 if not isdir(RESULTS_DIR):
-    os.makedirs(RESULTS_DIR, mode=0o2777)
+    os.makedirs(expand(RESULTS_DIR), mode=0o2777)
 
 ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
@@ -99,8 +92,8 @@ ABS_BOUNDS = HypoParams10D(
 """Absolute bounds for scanning / minimizer to work within"""
 
 REL_BOUNDS = HypoParams10D(
-    t=(-300, 300),
-    #t=(-1000, 1000),
+    #t=(-300, 300),
+    t=(-1000, 1000),
     x=(-100, 100),
     y=(-100, 100),
     z=(-100, 100),
@@ -143,57 +136,6 @@ SCAN_DIM_SETS = (
 
 
 #@profile
-def fill_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
-    """Fill photon info namedtuple-of-dictionaries from FITS file.
-
-    Parameters
-    ----------
-    fpath : string
-        Path to FITS file corresponding to the passed ``dom_depth_index``.
-
-    dom_depth_index : int
-        Depth index (e.g. from 0 to 59)
-
-    scale : float
-        Scaling factor to apply to the photon counts from the table, e.g. for
-        DOM efficiency.
-
-    photon_info : None or PhotonInfo namedtuple of dicts
-        If None, creates a new PhotonInfo namedtuple with empty dicts to fill.
-        If one is provided, the existing component dictionaries are updated.
-
-    Returns
-    -------
-    photon_info : PhotonInfo namedtuple of dicts
-        Tuple fields are 'count', 'theta', 'phi', and 'length'. Each dict is
-        keyed by `dom_depth_index` and values are the arrays loaded from the
-        FITS file.
-
-    bin_edges : BinningCoords namedtuple
-        Each element of the tuple is an array of bin edges.
-
-    """
-    # pylint: disable=no-member
-    if photon_info is None:
-        photon_info = PhotonInfo(*([{}]*len(PhotonInfo._fields)))
-
-    with pyfits.open(expand(fpath)) as table:
-        if scale == 1:
-            photon_info.count[dom_depth_index] = table[0].data
-        else:
-            photon_info.count[dom_depth_index] = table[0].data * scale
-
-        photon_info.theta[dom_depth_index] = table[1].data
-        photon_info.phi[dom_depth_index] = table[2].data
-        photon_info.length[dom_depth_index] = table[3].data
-
-        # Note that we invert (reverse and multiply by -1) time edges
-        bin_edges = BinningCoords(t=-table[4].data[::-1], r=table[5].data,
-                                  theta=table[6].data, phi=[])
-
-    return photon_info, bin_edges
-
-
 #@profile
 def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                 detailed_info_list=None):
@@ -213,7 +155,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
 
     Returns
     -------
-    neg_llh : float
+    llh : float
         Negative of the log likelihood
 
     """
@@ -307,6 +249,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                 try:
                     retro_prob = retrosim_photon_counts[retro_idx]
                 except:
+                    raise
                     continue
                 hypo_cell_expected_charge = hypo_count * retro_prob
 
@@ -314,7 +257,8 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                     hypo_length = hypo_photon_info.length
                     retro_length = retrosim_photon_avg_len[retro_idx]
                     length_weight = (
-                        (1 - abs(hypo_length - retro_length) + eps_length) / (1 + eps_length)
+                        (1 - abs(hypo_length - retro_length) + eps_length)
+                        / (1 + eps_length)
                     )
                     hypo_cell_expected_charge *= length_weight
 
@@ -367,7 +311,10 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                                          observed=pulse_charge)
             #print('pulse_neg_llh:', pulse_neg_llh)
             if pulse_neg_llh < best_pulse_neg_llh:
+                #print('llh %f better than %f' % (pulse_neg_llh, best_pulse_neg_llh))
                 best_pulse_neg_llh = pulse_neg_llh
+            #else:
+            #    print('llh %f worse than  %f' % (pulse_neg_llh, best_pulse_neg_llh))
 
         neg_llh += best_pulse_neg_llh
 
@@ -377,7 +324,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     #print('time to compute likelihood: %.5f ms' % ((time.time() - t0) * 1000))
     return neg_llh
 
-#@profile
+
 def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
          llh_func_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
@@ -528,11 +475,12 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
     ref_bin_edges = None
     for dom_depth_index in range(60):
         # IceCube (non-DeepCore) DOM retro tables
-        fpath = IC_TABLE_FPATH_PROTO.format(tables_dir=tables_dir,
-                                            dom=dom_depth_index)
+        fpath = IC_TABLE_FPATH_PROTO.format(
+            tables_dir=tables_dir, dom=dom_depth_index
+        )
         if isfile(fpath):
-            ic_photon_info, bin_edges = fill_photon_info(
-                fpath=fpath,
+            ic_photon_info, bin_edges = extract_photon_info(
+                fpath=expand(fpath),
                 dom_depth_index=dom_depth_index,
                 scale=norm * dom_eff_ic,
                 photon_info=ic_photon_info
@@ -550,8 +498,8 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
         fpath = DC_TABLE_FPATH_PROTO.format(tables_dir=tables_dir,
                                             dom=dom_depth_index)
         if isfile(fpath):
-            dc_photon_info, bin_edges = fill_photon_info(
-                fpath=fpath,
+            dc_photon_info, bin_edges = extract_photon_info(
+                fpath=expand(fpath),
                 dom_depth_index=dom_depth_index,
                 scale=norm * dom_eff_dc,
                 photon_info=dc_photon_info
@@ -680,8 +628,14 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     ('neg_llh', neg_llh),
                     ('truth', tuple(getattr(truth_params, d) for d in dims)),
                     ('LLH_USE_AVGPHOT', LLH_USE_AVGPHOT),
-                    #('LLH_USE_ANGLE', LLH_USE_ANGLE),
-                    ('LLH_USE_NOHIT', LLH_USE_NOHIT)
+                    ('LLH_USE_NOHIT', LLH_USE_NOHIT),
+                    ('JITTER_SIGMA', JITTER_SIGMA),
+                    ('NUM_JITTER_SAMPLES', NUM_JITTER_SAMPLES),
+                    ('CASCADE_E_SCALE', CASCADE_E_SCALE),
+                    ('TRACK_E_SCALE', TRACK_E_SCALE),
+                    ('N_PHI_BINS', N_PHI_BINS),
+                    ('EPS_ANGLE', EPS_STAT + EPS_CLSIM_ANGLE_BINNING),
+                    ('EPS_LENGTH', EPS_STAT + EPS_CLSIM_LENGTH_BINNING),
                 ])
                 fname = ('scan_results_event_%d_uid_%d_dims_%s.pkl'
                          % (event.event, event.uid, '_'.join(dims)))

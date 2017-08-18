@@ -6,8 +6,9 @@ Basic module-wide definitions and simple types (namedtuples).
 from __future__ import absolute_import, division, print_function
 
 from collections import namedtuple, Iterable, Mapping, Sequence
-from os.path import abspath, expanduser, expandvars
+from os.path import abspath, dirname, expanduser, expandvars, join
 
+import pyfits
 import numpy as np
 from scipy.special import gammaln
 
@@ -15,6 +16,7 @@ from scipy.special import gammaln
 __all__ = [
     # Defaults
     'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME', 'DFLT_SPE_RECO_NAME',
+    'IC_TABLE_FPATH_PROTO', 'DC_TABLE_FPATH_PROTO', 'DETECTOR_GEOM_FILE',
 
     # Type definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -34,7 +36,7 @@ __all__ = [
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
     'hypo_to_track_params', 'powerspace', 'binspec_to_edges',
     'bin_edges_to_centers', 'poisson_llh', 'spacetime_separation',
-    'generate_unique_ids'
+    'generate_unique_ids', 'extract_photon_info'
 ]
 
 
@@ -49,6 +51,18 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
+IC_TABLE_FPATH_PROTO = (
+    '{tables_dir:s}/retro_nevts1000_IC_DOM{dom:d}_r_cz_t_angles.fits'
+)
+"""String template for IceCube single-DOM final-level retro tables"""
+
+DC_TABLE_FPATH_PROTO = (
+    '{tables_dir:s}/retro_nevts1000_DC_DOM{dom:d}_r_cz_t_angles.fits'
+)
+"""String template for DeepCore single-DOM final-level retro tables"""
+
+DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
+"""Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
 # -- namedtuples for interface simplicity and consistency -- #
 
@@ -344,6 +358,34 @@ def binspec_to_edges(start, stop, num_bins):
     return edges
 
 
+def edges_to_binspec(edges):
+    """Convert bin edges to a binning specification (start, stop, and num_bins).
+
+    Note:
+    * t-bins are assumed to be linearly spaced in ``t``
+    * r-bins are assumed to be evenly spaced w.r.t. ``r**2``
+    * theta-bins are assumed to be evenly spaced w.r.t. ``cos(theta)``
+    * phi bins are assumed to be linearly spaced in ``phi``
+
+    Parameters
+    ----------
+    edges
+
+    Returns
+    -------
+    start : BinningCoords containing floats
+    stop : BinningCoords containing floats
+    num_bins : BinningCoords containing ints
+
+    """
+    dims = BinningCoords._fields
+    start = BinningCoords(np.min(getattr(edges, d)) for d in dims)
+    stop = BinningCoords(np.max(getattr(edges, d)) for d in dims)
+    num_bins = BinningCoords(len(getattr(edges, d)) - 1 for d in dims)
+
+    return start, stop, num_bins
+
+
 def bin_edges_to_centers(bin_edges):
     """Return bin centers, where center is defined in whatever space the
     dimension is "regular."
@@ -390,7 +432,8 @@ def poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    llh = observed * np.log(expected) - expected - gammaln(observed + 1)
+    #llh = observed * np.log(expected) - expected - gammaln(observed + 1)
+    llh = observed * np.log(expected) - gammaln(observed)
     return llh
 
 
@@ -425,3 +468,81 @@ def generate_unique_ids(events):
         + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
     ).astype(int)
     return uids
+
+
+def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
+    """Extract photon info from a FITS file stored during a retro simulation.
+
+    Parameters
+    ----------
+    fpath : string
+        Path to FITS file corresponding to the passed ``dom_depth_index``.
+
+    dom_depth_index : int
+        Depth index (e.g. from 0 to 59)
+
+    scale : float
+        Scaling factor to apply to the photon counts from the table, e.g. for
+        DOM efficiency.
+
+    photon_info : None or PhotonInfo namedtuple of dicts
+        If None, creates a new PhotonInfo namedtuple with empty dicts to fill.
+        If one is provided, the existing component dictionaries are updated.
+
+    Returns
+    -------
+    photon_info : PhotonInfo namedtuple of dicts
+        Tuple fields are 'count', 'theta', 'phi', and 'length'. Each dict is
+        keyed by `dom_depth_index` and values are the arrays loaded from the
+        FITS file.
+
+    bin_edges : BinningCoords namedtuple
+        Each element of the tuple is an array of bin edges.
+
+    """
+    # pylint: disable=no-member
+    if photon_info is None:
+        photon_info = PhotonInfo(*([{}]*len(PhotonInfo._fields)))
+
+    with pyfits.open(expand(fpath)) as table:
+        if scale == 1:
+            photon_info.count[dom_depth_index] = table[0].data
+        else:
+            photon_info.count[dom_depth_index] = table[0].data * scale
+
+        photon_info.theta[dom_depth_index] = table[1].data
+        photon_info.phi[dom_depth_index] = table[2].data
+        photon_info.length[dom_depth_index] = table[3].data
+
+        # Note that we invert (reverse and multiply by -1) time edges
+        bin_edges = BinningCoords(t=-table[4].data[::-1], r=table[5].data,
+                                  theta=table[6].data, phi=[])
+
+    return photon_info, bin_edges
+
+
+def spherical_volume(r0, r1, theta0, theta1, phi0, phi1):
+    """Find volume of a finite element defined in spherical coordinates.
+
+    Parameters
+    ----------
+    r0, r1 : float (provide in arbitrary but _same_ distance units)
+        Initial and final radii
+
+    theta0, theta1 : float (radians)
+        Initial and final zenith angle (defined as down from positive Z-axis)
+
+    phi0, phi1 : float (radians)
+        Initial and final azimuth angle (defined as positive from +X-axis
+        towards +Y-axis looking "down" (towards -Z direction)
+
+    Returns
+    -------
+    vol : float
+        Volume in the cube of the units that ``r0`` and ``r1`` are provided in.
+        E.g. if those are provided in meters, ``vol`` will be in units of m**3.
+
+    """
+    return np.abs(
+        (np.cos(theta0) - np.cos(theta1)) * (r1 - r0)**3 * (phi1 - phi0) / 3
+    )

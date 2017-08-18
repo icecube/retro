@@ -17,7 +17,7 @@ import numpy as np
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import FTYPE, UITYPE, BinningCoords, PhotonInfo, TimeSpaceCoord
-from retro import SPEED_OF_LIGHT_M_PER_NS, TWO_PI
+from retro import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
 from retro import convert_to_namedtuple, spacetime_separation
 from retro.hypo import Hypo
 
@@ -189,6 +189,9 @@ class SegmentedHypo(Hypo):
             )
             self.allocate_arrays = False
 
+        normal_zen = PI - self.params.track_zenith
+        normal_az = -self.params.track_azimuth % TWO_PI
+
         relative_time = self.segment_midpoint_times - self.t_start_rel
         var_x = self.x_start_rel + self.track_speed_x * relative_time
         var_y = self.y_start_rel + self.track_speed_y * relative_time
@@ -234,9 +237,9 @@ class SegmentedHypo(Hypo):
         phi_bin_width = self.bin_widths.phi
         phi_half_bin_width = 0.5 * phi_bin_width
         for bin_idx, segment_count in segment_counts.iteritems():
-            phi = abs(self.params.track_azimuth - (bin_idx.phi * phi_bin_width + phi_half_bin_width)) # pylint: disable=line-too-long
+            phi = abs(normal_az - (bin_idx.phi * phi_bin_width + phi_half_bin_width)) # pylint: disable=line-too-long
             count = segment_count * self.photons_per_segment
-            p_info = PhotonInfo(count=count, theta=self.params.track_zenith, phi=phi, length=0.562) # pylint: disable=line-too-long
+            p_info = PhotonInfo(count=count, theta=normal_zen, phi=phi, length=0.562) # pylint: disable=line-too-long
             #p_info = (count, self.params.track_zenith, phi, 0.562)
             self.photon_info[bin_idx] = p_info
 
