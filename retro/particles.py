@@ -1,17 +1,24 @@
+# pylint: disable=wrong-import-position
+
 """
+Particle and ParticleArray classes for storing and accessing info for
+neutrinos, tracks, cascades, etc.
 """
 
 
 from __future__ import absolute_import, division
 
+import os
+from os.path import abspath, dirname, isdir, isfile, join
+
 import numpy as np
 
+if __name__ == '__main__' and __package__ is None:
+    os.sys.path.append(dirname(dirname(abspath(__file__))))
+from retro import SPEED_OF_LIGHT_M_PER_NS
 
-__all__ = ['SPEED_OF_LIGHT_M_PER_NS', 'Particle', 'ParticleArray']
 
-
-SPEED_OF_LIGHT_M_PER_NS = 0.299792458
-"""Speed of light in units of m/ns"""
+__all__ = ['Particle', 'ParticleArray']
 
 
 class Particle(object):
@@ -21,9 +28,9 @@ class Particle(object):
     forward : bool
         if the particle should be plotted forward or backards in time
     """
-    def __init__(self, event, uid, t, x, y, z, zenith, azimuth, energy=None, length=None,
-                 pdg=None, interaction=None, forward=False, color='r',
-                 linestyle='--', label=''):
+    def __init__(self, event, uid, t, x, y, z, zenith, azimuth, energy=None,
+                 length=None, pdg=None, interaction=None, forward=False,
+                 color='r', linestyle='--', label=''):
         self.event = event
         self.uid = uid
         self.t = t

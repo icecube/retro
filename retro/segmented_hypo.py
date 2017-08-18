@@ -22,6 +22,10 @@ from retro import convert_to_namedtuple, spacetime_separation
 from retro.hypo import Hypo
 
 
+__all__ = ['IDX_T_IX', 'IDX_R_IX', 'IDX_THETA_IX', 'IDX_PHI_IX',
+           'SegmentedHypo']
+
+
 # Define indices for accessing rows of `indices_array`
 IDX_T_IX = BinningCoords._fields.index('t')
 IDX_R_IX = BinningCoords._fields.index('r')
@@ -45,8 +49,8 @@ class SegmentedHypo(Hypo):
         dumps (ns)
 
     """
-    def __init__(self, params, origin=None, cascade_e_scale=1, track_e_scale=1,
-                 time_increment=1):
+    def __init__(self, params, cascade_e_scale, track_e_scale, time_increment,
+                 origin=None):
         super(SegmentedHypo, self).__init__(params=params, origin=origin,
                                             cascade_e_scale=cascade_e_scale,
                                             track_e_scale=track_e_scale)
@@ -145,9 +149,9 @@ class SegmentedHypo(Hypo):
         )
         #print('track_eff_endtime:', track_eff_endtime)
         self.segment_midpoint_times = np.linspace(
-            self.t_start_rel - half_incr,
+            self.t_start_rel + half_incr,
             track_eff_endtime - half_incr,
-            self.num_segments + 1,
+            self.num_segments,
             dtype=FTYPE
         )
         # The 0th element is not a midpoint at all, but the starting point of
@@ -179,7 +183,7 @@ class SegmentedHypo(Hypo):
 
         if self.allocate_arrays:
             self.indices_array = np.empty(
-                shape=(len(BinningCoords._fields), self.num_segments + 1),
+                shape=(len(BinningCoords._fields), self.num_segments),
                 dtype=UITYPE,
                 order='C'
             )
@@ -198,7 +202,8 @@ class SegmentedHypo(Hypo):
         # NOTE: indices_array is uint type, so float values are truncated,
         # should result in floor rounding
         self.indices_array[IDX_T_IX, :] = (
-            (self.segment_midpoint_times - self.bin_min.t) * self.bin_num_factors.t
+            (self.segment_midpoint_times - self.bin_min.t)
+            * self.bin_num_factors.t
         )
         self.indices_array[IDX_R_IX, :] = (
             np.sqrt(var_r) * self.bin_num_factors.r
@@ -214,9 +219,8 @@ class SegmentedHypo(Hypo):
         t0 = time.time()
         segment_counts = {}
         for segment_idx in range(self.num_segments):
-            #bin_idx = BinningCoords(*self.indices_array[:, segment_idx])
-            vals = self.indices_array[:, segment_idx]
-            bin_idx = BinningCoords(*vals)
+            indices = self.indices_array[:, segment_idx]
+            bin_idx = BinningCoords(*indices)
             previous_count = segment_counts.get(bin_idx, 0)
             segment_counts[bin_idx] = 1 + previous_count
 
@@ -236,14 +240,24 @@ class SegmentedHypo(Hypo):
             #p_info = (count, self.params.track_zenith, phi, 0.562)
             self.photon_info[bin_idx] = p_info
 
-        first_bin_idx = BinningCoords(*self.indices_array[:, 0])
-        first_bin_photon_info = PhotonInfo(
-            count=self.cascade_photons,
-            theta=0,
-            phi=0,
-            length=0
-        )
+        # Average the cascade info into the first bin
+        bin_idx = BinningCoords(*self.indices_array[:, 0])
+        old = self.photon_info.get(bin_idx, None)
+        if old is None:
+            combined = PhotonInfo(
+                count=self.cascade_photons,
+                theta=0,
+                phi=0,
+                length=0
+            )
+        else:
+            combined = PhotonInfo(
+                count=old.count + self.cascade_photons,
+                theta=old.theta,
+                phi=old.phi,
+                length=0.5 * old.length
+            )
 
-        self.photon_info[first_bin_idx] = first_bin_photon_info
+        self.photon_info[bin_idx] = combined
 
         #print('time to fill dict: %.3f ms' % ((time.time() - t0)*1000))

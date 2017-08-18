@@ -51,19 +51,35 @@ DFLT_EVENTS_FPATH = (
     '/fastio/icecube/deepcore/data/MSU_sample/level5pt/numu/14600'
     '/icetray_hdf5/Level5pt_IC86.2013_genie_numu.014600.000000.hdf5'
 )
+
+# Completely arbitrary first guesses
+EPS = 0.8
+EPS_STAT = EPS
+EPS_CLSIM_LENGTH_BINNING = 2*EPS
+EPS_CLSIM_ANGLE_BINNING = EPS
+NOISE_CHARGE = 0.00000025 * 100
+CASCADE_E_SCALE = 1
+TRACK_E_SCALE = 1
+NUM_JITTER_SAMPLES = 5
+JITTER_SIGMA = 5
+
 N_PHI_BINS = 20
-NOISE_CHARGE = 0.00000025
-CASCADE_E_SCALE = 10 #2.
-TRACK_E_SCALE = 10 #20.
 NUM_SCAN_POINTS = 100
 HypoClass = SegmentedHypo
-LLH_USE_LENGTH = False
-LLH_USE_ANGLE = True
+HYPOCLASS_KWARGS = dict(time_increment=1)
+LLH_USE_AVGPHOT = False
 LLH_USE_NOHIT = False
 
 RESULTS_DIR = (
-    'results_length_%d_angle_%d_nohit_%d'
-    % (LLH_USE_LENGTH, LLH_USE_ANGLE, LLH_USE_NOHIT)
+    'results_avgphot%d_nohit%d%s_cesc%d_tesc%d_noise%.1e_jitsamp%d%s'
+    % (LLH_USE_AVGPHOT,
+       LLH_USE_NOHIT,
+       '_eps%.1f' % EPS_STAT if LLH_USE_AVGPHOT else '',
+       CASCADE_E_SCALE,
+       TRACK_E_SCALE,
+       NOISE_CHARGE,
+       NUM_JITTER_SAMPLES,
+       '_jitsig%d' % JITTER_SIGMA if NUM_JITTER_SAMPLES > 1 else '')
 )
 if not isdir(RESULTS_DIR):
     os.makedirs(RESULTS_DIR, mode=0o2777)
@@ -75,15 +91,16 @@ ABS_BOUNDS = HypoParams10D(
     z=(-1000, 1000),
     track_azimuth=(0, 2*np.pi),
     track_zenith=(-np.pi, np.pi),
-    track_energy=(0, 1e3),
+    track_energy=(0, 100),
     cascade_azimuth=(0, 2*np.pi),
     cascade_zenith=(-np.pi, np.pi),
-    cascade_energy=(0, 1e3)
+    cascade_energy=(0, 100)
 )
 """Absolute bounds for scanning / minimizer to work within"""
 
 REL_BOUNDS = HypoParams10D(
     t=(-300, 300),
+    #t=(-1000, 1000),
     x=(-100, 100),
     y=(-100, 100),
     z=(-100, 100),
@@ -106,10 +123,21 @@ MIN_DIMS = [] #('t x y z track_zenith track_azimuth track_energy'.split())
 """Which dimensions to plug into minimizer (dims not fixed to truth)"""
 
 SCAN_DIM_SETS = (
-    't', 'x', 'y', 'z', 'track_zenith', 'track_azimuth', 'track_energy',
+    't',
+    'x',
+    'y',
+    'z',
+    'track_zenith',
+    'track_azimuth',
+    'track_energy',
     'cascade_energy',
-    ('t', 'x'), ('t', 'y'), ('t', 'z'), ('x', 'y'), ('x', 'z'),
-    ('track_zenith', 'track_azimuth'), ('track_zenith', 'z')
+    #('t', 'x'),
+    #('t', 'y'),
+    #('t', 'z'),
+    #('x', 'y'),
+    #('x', 'z'),
+    #('track_zenith', 'track_azimuth'),
+    #('track_zenith', 'z'),
 )
 """Which dimensions to scan. Tuples specify 2+ dimension scans"""
 
@@ -194,13 +222,8 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     neg_llh = 0
     noise_counts = 0
 
-    # Completely arbitrary first guesses
-    eps_stat = 0.1
-    eps_clsim_length_binning = 0.1
-    eps_clsim_angle_binning = 0.1
-
-    eps_angle = eps_stat + eps_clsim_angle_binning
-    eps_length = eps_stat + eps_clsim_length_binning
+    eps_angle = EPS_STAT + EPS_CLSIM_ANGLE_BINNING
+    eps_length = EPS_STAT + EPS_CLSIM_LENGTH_BINNING
 
     ## Initialize with _all_ DOMs: tuples of (string, depth)
     #n_strings, n_doms = detector_geometry.shape[:2]
@@ -247,8 +270,15 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         # TODO: Jitter via e.g. smearing photons that go into retro tables
 
         best_pulse_neg_llh = np.inf
-        jitter_dts = np.linspace(-2*timing_jitter, 2*timing_jitter, 5)
-        #jitter_dts = [0]
+        if NUM_JITTER_SAMPLES == 0:
+            jitter_dts = [0]
+        else:
+            jitter_dts = np.linspace(
+                start=-JITTER_SIGMA*timing_jitter,
+                stop=+JITTER_SIGMA*timing_jitter,
+                num=NUM_JITTER_SAMPLES
+            )
+
         for jitter_dt in jitter_dts:
             hit_dom_coord = TimeSpaceCoord(
                 t=pulse_time + jitter_dt, x=x, y=y, z=z
@@ -280,18 +310,14 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                     continue
                 hypo_cell_expected_charge = hypo_count * retro_prob
 
-                if LLH_USE_LENGTH:
-                    hypo_legth = hypo_photon_info.length
+                if LLH_USE_AVGPHOT:
+                    hypo_length = hypo_photon_info.length
                     retro_length = retrosim_photon_avg_len[retro_idx]
                     length_weight = (
-                        (1 - abs(hypo_legth - retro_length) + eps_length)
-                        / (1 + eps_length)
+                        (1 - abs(hypo_length - retro_length) + eps_length) / (1 + eps_length)
                     )
                     hypo_cell_expected_charge *= length_weight
-                else:
-                    length_weight = 1
 
-                if LLH_USE_ANGLE:
                     ## These two agles need to be inverted because we're
                     ## backpropagating but want to match to forward-propagating
                     ## photons
@@ -308,17 +334,17 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                     # direction vector to account for it being a _reverse_
                     # simulation from DOM to cell, whereas hypo has photons
                     # start from cell and go outwards.
-                    neg_sin_retro_theta = -math.sin(retro_theta)
+                    neg_sin_retro_theta = math.sin(retro_theta)
                     retro_x = neg_sin_retro_theta * math.cos(retro_phi)
                     retro_y = neg_sin_retro_theta * math.sin(retro_phi)
-                    retro_z = -math.cos(retro_theta)
+                    retro_z = math.cos(retro_theta)
                     cos_alpha = (retro_x*hypo.track_dir_x
                                  + retro_y*hypo.track_dir_y
                                  + retro_z*hypo.track_dir_z)
 
                     angle_weight = (
-                        (0.5 + 0.5*cos_alpha + eps_angle)
-                        / (1 + eps_angle)
+                        (0.5 + 0.5*cos_alpha + eps_angle + (1 - retro_length))
+                        / (1 + eps_angle + (1 - retro_length))
                     )
                     hypo_cell_expected_charge *= angle_weight
                 else:
@@ -433,8 +459,12 @@ def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
         for pidx, pval in izip(param_indices, param_values):
             params[pidx] = pval
 
-        hypo = HypoClass(params=params, cascade_e_scale=CASCADE_E_SCALE,
-                         track_e_scale=TRACK_E_SCALE)
+        hypo = HypoClass(
+            params=params,
+            cascade_e_scale=CASCADE_E_SCALE,
+            track_e_scale=TRACK_E_SCALE,
+            **HYPOCLASS_KWARGS
+        )
         hypo.set_binning(*bin_spec)
         neg_llh = llh_func(hypo, event, **llh_func_kwargs)
         all_llh.append(neg_llh)
@@ -555,23 +585,26 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
 
     # Iterate through events
     for idx, event in enumerate(events[start_index:stop_index]):
-        print('working on event #%i / event ID %d' % (idx, event.event))
-        print('neutrino:', event.neutrino)
-        print('track:', event.track)
-        print('cascade:', event.cascade)
+        print('Working on event #%i / event ID %d' % (idx, event.event))
+        print('    neutrino:', event.neutrino)
+        print('    track:', event.track)
+        print('    cascade:', event.cascade)
 
         llh_func_kwargs = dict(detector_geometry=detector_geometry,
                                ic_photon_info=ic_photon_info,
                                dc_photon_info=dc_photon_info)
 
         truth_params = event_to_hypo_params(event)
-        truth_hypo = HypoClass(params=truth_params,
-                               cascade_e_scale=CASCADE_E_SCALE,
-                               track_e_scale=TRACK_E_SCALE)
+        truth_hypo = HypoClass(
+            params=truth_params,
+            cascade_e_scale=CASCADE_E_SCALE,
+            track_e_scale=TRACK_E_SCALE,
+            **HYPOCLASS_KWARGS
+        )
         truth_hypo.set_binning(*bin_spec)
         llh_truth = get_neg_llh(hypo=truth_hypo, event=event,
                                 **llh_func_kwargs)
-        print('llh at truth = %.2f' % -llh_truth)
+        print('llh at truth = %.2f' % llh_truth)
 
         if MIN_DIMS:
             print('Will minimize following dimension(s): %s' % MIN_DIMS)
@@ -646,8 +679,8 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     ('scan_values', scan_values),
                     ('neg_llh', neg_llh),
                     ('truth', tuple(getattr(truth_params, d) for d in dims)),
-                    ('LLH_USE_LENGTH', LLH_USE_LENGTH),
-                    ('LLH_USE_ANGLE', LLH_USE_ANGLE),
+                    ('LLH_USE_AVGPHOT', LLH_USE_AVGPHOT),
+                    #('LLH_USE_ANGLE', LLH_USE_ANGLE),
                     ('LLH_USE_NOHIT', LLH_USE_NOHIT)
                 ])
                 fname = ('scan_results_event_%d_uid_%d_dims_%s.pkl'

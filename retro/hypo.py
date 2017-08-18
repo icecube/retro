@@ -33,12 +33,12 @@ class Hypo(object):
     Parameters
     ----------
     params : HYPO_PARAMS_T
-    track_e_scale : float
     cascade_e_scale : float
+    track_e_scale : float
+    origin : None or BinningCoords namedtuple
 
     """
-    def __init__(self, params, origin=None, cascade_e_scale=1,
-                 track_e_scale=1):
+    def __init__(self, params, cascade_e_scale, track_e_scale, origin=None):
         # Convert types of passed values to those expected internally
 
         if origin is not None:
