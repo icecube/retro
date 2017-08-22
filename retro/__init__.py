@@ -35,8 +35,9 @@ __all__ = [
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
     'hypo_to_track_params', 'powerspace', 'binspec_to_edges',
-    'bin_edges_to_centers', 'poisson_llh', 'spacetime_separation',
-    'generate_unique_ids', 'extract_photon_info'
+    'bin_edges_to_binspec', 'bin_edges_to_centers', 'poisson_llh',
+    'spacetime_separation', 'generate_unique_ids', 'extract_photon_info',
+    'spherical_volume', 'sph2cart'
 ]
 
 
@@ -286,10 +287,11 @@ def hypo_to_track_params(hypo_params):
     return track_params
 
 
-def powerspace(start, stop, num_bins, power):
+def powerspace(start, stop, num, power):
     """Create bin edges evenly spaced w.r.t. ``x**power``.
 
-    Reverse engineered from JVS's power axis.
+    Reverse engineered from JVS's power axis, with arguments defined with
+    analogy to :function:`numpy.linspace`.
 
     Parameters
     ----------
@@ -299,22 +301,22 @@ def powerspace(start, stop, num_bins, power):
     stop : float
         Upper-most bin edge
 
-    num_bins : int
-        Number of bins (there are num_bins + 1 edges)
+    num : int
+        Number of edges (this defines ``num - 1`` bins)
 
     power : float
         Power-law to use for even spacing
 
     Returns
     -------
-    edges : numpy.ndarray of shape (1, num_bins)
-        Bin edges
+    edges : numpy.ndarray of shape (1, num)
+        Edges
 
     """
     inv_power = 1 / power
     liner_edges = np.linspace(np.power(start, inv_power),
                               np.power(stop, inv_power),
-                              num_bins + 1)
+                              num)
     bin_edges = np.power(liner_edges, power)
     return bin_edges
 
@@ -348,7 +350,8 @@ def binspec_to_edges(start, stop, num_bins):
 
     edges = BinningCoords(
         t=np.linspace(start.t, stop.t, num_bins.t + 1),
-        r=powerspace(start=start.r, stop=stop.r, num_bins=num_bins.r, power=2),
+        r=powerspace(start=start.r, stop=stop.r, num_bins=num_bins.r + 1,
+                     power=2),
         theta=np.arccos(np.linspace(np.cos(start.theta),
                                     np.cos(stop.theta),
                                     num_bins.theta + 1)),
@@ -358,7 +361,7 @@ def binspec_to_edges(start, stop, num_bins):
     return edges
 
 
-def edges_to_binspec(edges):
+def bin_edges_to_binspec(edges):
     """Convert bin edges to a binning specification (start, stop, and num_bins).
 
     Note:
@@ -379,9 +382,9 @@ def edges_to_binspec(edges):
 
     """
     dims = BinningCoords._fields
-    start = BinningCoords(np.min(getattr(edges, d)) for d in dims)
-    stop = BinningCoords(np.max(getattr(edges, d)) for d in dims)
-    num_bins = BinningCoords(len(getattr(edges, d)) - 1 for d in dims)
+    start = BinningCoords(*(np.min(getattr(edges, d)) for d in dims))
+    stop = BinningCoords(*(np.max(getattr(edges, d)) for d in dims))
+    num_bins = BinningCoords(*(len(getattr(edges, d)) - 1 for d in dims))
 
     return start, stop, num_bins
 
@@ -521,28 +524,47 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
     return photon_info, bin_edges
 
 
-def spherical_volume(r0, r1, theta0, theta1, phi0, phi1):
+def spherical_volume(dr, dcostheta, dphi):
     """Find volume of a finite element defined in spherical coordinates.
 
     Parameters
     ----------
-    r0, r1 : float (provide in arbitrary but _same_ distance units)
-        Initial and final radii
+    dr : float (in arbitrary distance units)
+        Difference between initial and final radii.
 
-    theta0, theta1 : float (radians)
-        Initial and final zenith angle (defined as down from positive Z-axis)
+    dcostheta : float
+        Difference between initial and final zenith angles' cosines (where
+        zenith angle is defined as out & down from +Z axis).
 
-    phi0, phi1 : float (radians)
-        Initial and final azimuth angle (defined as positive from +X-axis
-        towards +Y-axis looking "down" (towards -Z direction)
+    dphi : float (in units of radians)
+        Difference between initial and final azimuth angle (defined as positive
+        from +X-axis towards +Y-axis looking "down" on the XY-plane (i.e.,
+        looking in -Z direction).
 
     Returns
     -------
     vol : float
-        Volume in the cube of the units that ``r0`` and ``r1`` are provided in.
-        E.g. if those are provided in meters, ``vol`` will be in units of m**3.
+        Volume in units of the cube of the units that ``dr`` is provided in.
+        E.g. if those are provided in meters, ``vol`` will be in units of `m^3`.
 
     """
-    return np.abs(
-        (np.cos(theta0) - np.cos(theta1)) * (r1 - r0)**3 * (phi1 - phi0) / 3
-    )
+    return np.abs(dcostheta * dr**3 * dphi / 3)
+
+
+def sph2cart(r, theta, phi):
+    """Convert spherical coordinates to Cartesian.
+
+    Parameters
+    ----------
+    r, theta, phi : numeric
+
+    Returns
+    -------
+    x, y, z
+
+    """
+    z = r * np.cos(theta)
+    sintheta = np.sin(theta)
+    x = r * sintheta * np.cos(phi)
+    y = r * sintheta * np.sin(phi)
+    return x, y, z

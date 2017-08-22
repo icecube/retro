@@ -33,8 +33,8 @@ from retro import (FTYPE, HYPO_PARAMS_T, BinningCoords, HypoParams10D,
                    TimeSpaceCoord)
 from retro import (IC_TABLE_FPATH_PROTO, DC_TABLE_FPATH_PROTO,
                    DETECTOR_GEOM_FILE)
-from retro import (event_to_hypo_params, expand, extract_photon_info,
-                   poisson_llh)
+from retro import (bin_edges_to_binspec, event_to_hypo_params, expand,
+                   extract_photon_info, poisson_llh)
 from retro.events import Events
 from retro.analytic_hypo import AnalyticHypo # pylint: disable=unused-import
 from retro.segmented_hypo import SegmentedHypo # pylint: disable=unused-import
@@ -46,21 +46,21 @@ DFLT_EVENTS_FPATH = (
 )
 
 # (Almost) completely arbitrary first guesses
-EPS = 0.0
+EPS = 1.0
 EPS_STAT = EPS
-EPS_CLSIM_LENGTH_BINNING = 2*EPS
+EPS_CLSIM_LENGTH_BINNING = EPS
 EPS_CLSIM_ANGLE_BINNING = EPS
 NOISE_CHARGE = 0.00000025 * 100
-CASCADE_E_SCALE = 1
+CASCADE_E_SCALE = 100
 TRACK_E_SCALE = 1
-NUM_JITTER_SAMPLES = 3
+NUM_JITTER_SAMPLES = 1
 JITTER_SIGMA = 5
 
-N_PHI_BINS = 20
+N_PHI_BINS = 40
 NUM_SCAN_POINTS = 100
 HypoClass = SegmentedHypo
 HYPOCLASS_KWARGS = dict(time_increment=1)
-LLH_USE_AVGPHOT = False
+LLH_USE_AVGPHOT = True
 LLH_USE_NOHIT = False
 
 RESULTS_DIR = (
@@ -92,8 +92,8 @@ ABS_BOUNDS = HypoParams10D(
 """Absolute bounds for scanning / minimizer to work within"""
 
 REL_BOUNDS = HypoParams10D(
-    #t=(-300, 300),
-    t=(-1000, 1000),
+    t=(-300, 300),
+    #t=(-1000, 1000),
     x=(-100, 100),
     y=(-100, 100),
     z=(-100, 100),
@@ -212,7 +212,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         # TODO: Jitter via e.g. smearing photons that go into retro tables
 
         best_pulse_neg_llh = np.inf
-        if NUM_JITTER_SAMPLES == 0:
+        if NUM_JITTER_SAMPLES == 1:
             jitter_dts = [0]
         else:
             jitter_dts = np.linspace(
@@ -248,14 +248,16 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                 retro_idx = (bin_idx.t, bin_idx.r, bin_idx.theta)
                 try:
                     retro_prob = retrosim_photon_counts[retro_idx]
-                except:
-                    raise
+                except IndexError:
                     continue
                 hypo_cell_expected_charge = hypo_count * retro_prob
 
                 if LLH_USE_AVGPHOT:
+                    #print('hypo_cell_expected_charge 0:',
+                    #      hypo_cell_expected_charge)
                     hypo_length = hypo_photon_info.length
                     retro_length = retrosim_photon_avg_len[retro_idx]
+                    #print('retro_length:', retro_length, 'hypo_length:', hypo_length)
                     length_weight = (
                         (1 - abs(hypo_length - retro_length) + eps_length)
                         / (1 + eps_length)
@@ -286,11 +288,19 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                                  + retro_y*hypo.track_dir_y
                                  + retro_z*hypo.track_dir_z)
 
+                    #print('retro_x:', retro_x,          'retro_y:', retro_y,          'retro_z:', retro_z)
+                    #print('hypo_x :', hypo.track_dir_x, 'hypo_y :', hypo.track_dir_y, 'hypo_z :', hypo.track_dir_z)
+                    #print('cos_alpha:', cos_alpha)
+
                     angle_weight = (
                         (0.5 + 0.5*cos_alpha + eps_angle + (1 - retro_length))
                         / (1 + eps_angle + (1 - retro_length))
                     )
+                    #print('length_weight:', length_weight)
+                    #print('angle_weight: ', angle_weight)
                     hypo_cell_expected_charge *= angle_weight
+                    #print('hypo_cell_expected_charge 1:',
+                    #      hypo_cell_expected_charge)
                 else:
                     angle_weight = 1
 
@@ -521,12 +531,7 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
         theta=bin_edges.theta,
         phi=np.linspace(0, 2*np.pi, N_PHI_BINS + 1)
     )
-
-    # Generate bin_spec (used by hypotheses) based on the edges from tables
-    bin_min = BinningCoords(*(np.min(d) for d in bin_edges))
-    bin_max = BinningCoords(*(np.max(d) for d in bin_edges))
-    num_bins = BinningCoords(*(len(d) - 1 for d in bin_edges))
-    bin_spec = (bin_min, bin_max, num_bins)
+    bin_spec = bin_edges_to_binspec(bin_edges)
 
     # Load detector geometry array
     detector_geometry = np.load(geom_file)
@@ -636,6 +641,7 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     ('N_PHI_BINS', N_PHI_BINS),
                     ('EPS_ANGLE', EPS_STAT + EPS_CLSIM_ANGLE_BINNING),
                     ('EPS_LENGTH', EPS_STAT + EPS_CLSIM_LENGTH_BINNING),
+                    ('NOISE_CHARGE', NOISE_CHARGE),
                 ])
                 fname = ('scan_results_event_%d_uid_%d_dims_%s.pkl'
                          % (event.event, event.uid, '_'.join(dims)))

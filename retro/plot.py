@@ -39,11 +39,18 @@ def main():
         track_energy=20, cascade_energy=25
     )
 
+    hypo_params_inv = HypoParams8D(
+        t=-1000, x=1, y=10, z=-50, track_zenith=np.pi - 1.08,
+        track_azimuth=-0.96,
+        track_energy=20, cascade_energy=25
+    )
+
     # An arbitrary hit coordinate for testing
     hit_dom_coord = TimeSpaceCoord(t=0, x=0, y=10, z=0)
 
     t0 = time.time()
-    analytic_hypo = AnalyticHypo(hypo_params)
+    analytic_hypo = AnalyticHypo(hypo_params, cascade_e_scale=1,
+                                 track_e_scale=1)
     analytic_hypo.set_binning(start=bin_min, stop=bin_max, num_bins=num_bins)
     analytic_hypo.compute_matrices(hit_dom_coord=hit_dom_coord)
     print('took %5.2f ms to calculate philipp z matrix'
@@ -59,7 +66,8 @@ def main():
 
     # kevin array
     t0 = time.time()
-    segmented_hypo = SegmentedHypo(params=hypo_params, time_increment=0.1)
+    segmented_hypo = SegmentedHypo(params=hypo_params_inv, cascade_e_scale=1,
+                                   track_e_scale=1, time_increment=1)
     segmented_hypo.set_binning(start=bin_min, stop=bin_max, num_bins=num_bins)
     segmented_hypo.compute_matrices(hit_dom_coord)
 
