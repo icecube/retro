@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 # pylint: disable=wrong-import-position
 
 """
@@ -34,9 +33,11 @@ from retro import (FTYPE, HYPO_PARAMS_T, BinningCoords, HypoParams10D,
 from retro import (IC_TABLE_FPATH_PROTO, DC_TABLE_FPATH_PROTO,
                    DETECTOR_GEOM_FILE)
 from retro import (bin_edges_to_binspec, event_to_hypo_params, expand,
-                   extract_photon_info, poisson_llh)
+                   extract_photon_info, poisson_llh,
+                   get_primary_interaction_str)
 from retro.events import Events
 from retro.analytic_hypo import AnalyticHypo # pylint: disable=unused-import
+from retro.plot_1d_scan import plot_1d_scan
 from retro.segmented_hypo import SegmentedHypo # pylint: disable=unused-import
 
 
@@ -60,7 +61,7 @@ N_PHI_BINS = 40
 NUM_SCAN_POINTS = 100
 HypoClass = SegmentedHypo
 HYPOCLASS_KWARGS = dict(time_increment=1)
-LLH_USE_AVGPHOT = True
+LLH_USE_AVGPHOT = False
 LLH_USE_NOHIT = False
 
 RESULTS_DIR = (
@@ -146,8 +147,8 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     hypo : HypoClass
     event : retro.Event namedtuple or convertible thereto
     detector_geometry : numpy.ndarray
-    ic_photon_info : retro.PhotonInfo namedtuple or convertible thereto
-    dc_photon_info : retro.PhotonInfo namedtuple or convertible thereto
+    ic_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
+    dc_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
     detailed_info_list : None or appendable sequence
         If a list is provided, it is appended with a dict containing detailed
         info from the calculation useful, e.g., for debugging. If ``None`` is
@@ -186,18 +187,18 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         if 0 <= string <= 78:
             timing_jitter = IC_DOM_JITTER_NS
             # Get the retro table corresponding to the hit DOM
-            retrosim_photon_counts = ic_photon_info.count[om]
-            retrosim_photon_avg_theta = ic_photon_info.theta[om]
-            retrosim_photon_avg_deltaphi = ic_photon_info.phi[om]
-            retrosim_photon_avg_len = ic_photon_info.length[om]
+            retro_photon_survival_prob = ic_photon_info.survival_prob[om]
+            retro_photon_avg_theta = ic_photon_info.theta[om]
+            retro_photon_avg_deltaphi = ic_photon_info.deltaphi[om]
+            retro_photon_avg_len = ic_photon_info.length[om]
         # String indices 79-85 (numbers 80-86) are DeepCore strings
         elif 79 <= string <= 85:
             timing_jitter = DC_DOM_JITTER_NS
             # Get the retro table corresponding to the hit DOM
-            retrosim_photon_counts = dc_photon_info.count[om]
-            retrosim_photon_avg_theta = dc_photon_info.theta[om]
-            retrosim_photon_avg_deltaphi = dc_photon_info.phi[om]
-            retrosim_photon_avg_len = dc_photon_info.length[om]
+            retro_photon_survival_prob = dc_photon_info.survival_prob[om]
+            retro_photon_avg_theta = dc_photon_info.theta[om]
+            retro_photon_avg_deltaphi = dc_photon_info.deltaphi[om]
+            retro_photon_avg_len = dc_photon_info.length[om]
         else:
             raise ValueError('Unhandled string index %d (number %d)'
                              % (string, string + 1))
@@ -247,17 +248,20 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                 # Get retro simulation table
                 retro_idx = (bin_idx.t, bin_idx.r, bin_idx.theta)
                 try:
-                    retro_prob = retrosim_photon_counts[retro_idx]
+                    retro_survival_prob = (
+                        retro_photon_survival_prob[retro_idx]
+                    )
                 except IndexError:
                     continue
-                hypo_cell_expected_charge = hypo_count * retro_prob
+                hypo_cell_expected_charge = hypo_count * retro_survival_prob
 
                 if LLH_USE_AVGPHOT:
                     #print('hypo_cell_expected_charge 0:',
                     #      hypo_cell_expected_charge)
                     hypo_length = hypo_photon_info.length
-                    retro_length = retrosim_photon_avg_len[retro_idx]
-                    #print('retro_length:', retro_length, 'hypo_length:', hypo_length)
+                    retro_length = retro_photon_avg_len[retro_idx]
+                    #print('retro_length:', retro_length, 'hypo_length:',
+                    #      hypo_length)
                     length_weight = (
                         (1 - abs(hypo_length - retro_length) + eps_length)
                         / (1 + eps_length)
@@ -270,9 +274,9 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                     #hypo_theta = np.pi - hypo_photon_info.theta
                     #hypo_phi = np.pi - hypo_photon_info.phi
 
-                    retro_theta = retrosim_photon_avg_theta[retro_idx]
+                    retro_theta = retro_photon_avg_theta[retro_idx]
                     retro_phi = (
-                        bin_idx.phi + retrosim_photon_avg_deltaphi[retro_idx]
+                        bin_idx.phi + retro_photon_avg_deltaphi[retro_idx]
                     )
 
                     # alpha is smallest angle between retro avg photon angle
@@ -288,8 +292,10 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                                  + retro_y*hypo.track_dir_y
                                  + retro_z*hypo.track_dir_z)
 
-                    #print('retro_x:', retro_x,          'retro_y:', retro_y,          'retro_z:', retro_z)
-                    #print('hypo_x :', hypo.track_dir_x, 'hypo_y :', hypo.track_dir_y, 'hypo_z :', hypo.track_dir_z)
+                    #print('retro_x:', retro_x, 'retro_y:', retro_y,
+                    #      'retro_z:', retro_z)
+                    #print('hypo_x :', hypo.track_dir_x, 'hypo_y :',
+                    #      hypo.track_dir_y, 'hypo_z :', hypo.track_dir_z)
                     #print('cos_alpha:', cos_alpha)
 
                     angle_weight = (
@@ -321,10 +327,12 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                                          observed=pulse_charge)
             #print('pulse_neg_llh:', pulse_neg_llh)
             if pulse_neg_llh < best_pulse_neg_llh:
-                #print('llh %f better than %f' % (pulse_neg_llh, best_pulse_neg_llh))
+                #print('llh %f better than %f'
+                #      % (pulse_neg_llh, best_pulse_neg_llh))
                 best_pulse_neg_llh = pulse_neg_llh
             #else:
-            #    print('llh %f worse than  %f' % (pulse_neg_llh, best_pulse_neg_llh))
+            #    print('llh %f worse than  %f'
+            #          % (pulse_neg_llh, best_pulse_neg_llh))
 
         neg_llh += best_pulse_neg_llh
 
@@ -538,10 +546,13 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
 
     # Iterate through events
     for idx, event in enumerate(events[start_index:stop_index]):
-        print('Working on event #%i / event ID %d' % (idx, event.event))
-        print('    neutrino:', event.neutrino)
-        print('    track:', event.track)
-        print('    cascade:', event.cascade)
+        primary_interaction_str = get_primary_interaction_str(event)
+
+        print('Working on event #%i / event UID %d' % (idx, event.uid))
+        print('  %s, %.1f GeV' % (primary_interaction_str,
+                                  event.neutrino.energy))
+        print('    track   :', event.track)
+        print('    cascade :', event.cascade)
 
         llh_func_kwargs = dict(detector_geometry=detector_geometry,
                                ic_photon_info=ic_photon_info,
@@ -628,6 +639,8 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     ('filename', event.filename),
                     ('event', event.event),
                     ('uid', event.uid),
+                    ('neutrino_energy', event.neutrino.energy),
+                    ('primary_interaction', primary_interaction_str),
                     ('dims', dims),
                     ('scan_values', scan_values),
                     ('neg_llh', neg_llh),
@@ -652,6 +665,8 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     pickle.HIGHEST_PROTOCOL
                 )
                 print('saved scan to "%s"' % fpath)
+
+            plot_1d_scan(dir=RESULTS_DIR, event=event.event, uid=event.uid)
             print('')
 
 

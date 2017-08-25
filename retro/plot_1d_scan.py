@@ -19,7 +19,11 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import expand, HypoParams8D
+from retro import HypoParams8D
+from retro import expand, get_primary_interaction_tex
+
+
+__all__ = ['FNAME_TEMPLATE', 'parse_args', 'plot_1d_scan']
 
 
 FNAME_TEMPLATE = 'scan_results_event_{event}_uid_{uid}_dims_{param}.pkl'
@@ -44,7 +48,7 @@ def parse_args(description=__doc__):
     return args
 
 
-def main(dir, event, uid):
+def plot_1d_scan(dir, event, uid):
     """main"""
     #scan_files = glob(expand(dirpath) + '/*_uid_%d_*' % uid)
 
@@ -96,26 +100,28 @@ def main(dir, event, uid):
             ax.legend(loc='best')
 
     if scan['LLH_USE_AVGPHOT']:
-        llhname = r'Poisson & Avg. $\gamma$ LLH'
+        llhname = r'LLH from counts including avg. photon'
         eps = (r', $\epsilon_{\rm ang}$=%.1f, $\epsilon_{\rm len}$=%.1f'
                % (scan['EPS_ANGLE'], scan['EPS_LENGTH']))
     else:
-        llhname = 'Poisson-only LLH'
+        llhname = 'LLH from simple counts'
         eps = ''
-    if scan['JITTER_SIGMA'] > 1:
+    if scan['NUM_JITTER_SAMPLES'] > 1:
         jitter_sigmas = r' $\sigma_{\rm jitter}$=%d,' % scan['JITTER_SIGMA']
     else:
         jitter_sigmas = ''
 
+    prim_int_tex = get_primary_interaction_tex(scan['primary_interaction'])
+
     fig.suptitle(
-        r'%s%s'
+        r'Event %s: %.1f GeV $%s$; %s%s'
         r'$q_{\rm noise}$=%.1e,'
         '%s'
         r' $N_{\rm samp,jitter}=$%d,'
         r' escale$_{\rm cscd}$=%d,'
         r' escale$_{\rm trck}$=%d'
         '%s'
-        % (llhname, '\n',
+        % (scan['uid'], scan['neutrino_energy'], prim_int_tex, llhname, '\n',
            scan['NOISE_CHARGE'],
            jitter_sigmas,
            scan['NUM_JITTER_SAMPLES'],
@@ -126,10 +132,12 @@ def main(dir, event, uid):
     )
 
     plt.tight_layout(rect=(0, 0, 1, 0.92))
-
-    plt.draw()
-    plt.show()
+    fbasename = 'scan_results_event_%d_uid_%d_1d' % (event, uid)
+    fig.savefig(join(dir, fbasename + '.png'), dpi=300)
+    fig.savefig(join(dir, fbasename + '.pdf'))
+    #plt.draw()
+    #plt.show()
 
 
 if __name__ == '__main__':
-    main(**vars(parse_args()))
+    plot_1d_scan(**vars(parse_args()))

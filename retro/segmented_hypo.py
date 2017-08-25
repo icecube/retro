@@ -16,7 +16,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import FTYPE, UITYPE, BinningCoords, PhotonInfo, TimeSpaceCoord
+from retro import FTYPE, UITYPE, BinningCoords, HypoPhotonInfo, TimeSpaceCoord
 from retro import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
 from retro import convert_to_namedtuple, spacetime_separation
 from retro.hypo import Hypo
@@ -239,7 +239,7 @@ class SegmentedHypo(Hypo):
         for bin_idx, segment_count in segment_counts.iteritems():
             phi = abs(normal_az - (bin_idx.phi * phi_bin_width + phi_half_bin_width)) # pylint: disable=line-too-long
             count = segment_count * self.photons_per_segment
-            p_info = PhotonInfo(count=count, theta=normal_zen, phi=phi, length=0.562) # pylint: disable=line-too-long
+            p_info = HypoPhotonInfo(count=count, theta=normal_zen, phi=phi, length=0.562) # pylint: disable=line-too-long
             #p_info = (count, self.params.track_zenith, phi, 0.562)
             self.photon_info[bin_idx] = p_info
 
@@ -247,14 +247,14 @@ class SegmentedHypo(Hypo):
         bin_idx = BinningCoords(*self.indices_array[:, 0])
         old = self.photon_info.get(bin_idx, None)
         if old is None:
-            combined = PhotonInfo(
+            combined = HypoPhotonInfo(
                 count=self.cascade_photons,
                 theta=0,
                 phi=0,
                 length=0
             )
         else:
-            combined = PhotonInfo(
+            combined = HypoPhotonInfo(
                 count=old.count + self.cascade_photons,
                 theta=old.theta,
                 phi=old.phi,

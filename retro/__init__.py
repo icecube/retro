@@ -20,7 +20,7 @@ __all__ = [
 
     # Type definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
-    'PhotonInfo', 'BinningCoords', 'TimeSpaceCoord',
+    'RetroPhotonInfo', 'HypoPhotonInfo', 'BinningCoords', 'TimeSpaceCoord',
 
     # Type selections
     'FTYPE', 'UITYPE', 'HYPO_PARAMS_T',
@@ -37,7 +37,8 @@ __all__ = [
     'hypo_to_track_params', 'powerspace', 'binspec_to_edges',
     'bin_edges_to_binspec', 'bin_edges_to_centers', 'poisson_llh',
     'spacetime_separation', 'generate_unique_ids', 'extract_photon_info',
-    'spherical_volume', 'sph2cart'
+    'spherical_volume', 'sph2cart', 'get_primary_interaction_str',
+    'get_primary_interaction_tex'
 ]
 
 
@@ -97,11 +98,29 @@ Pulses = namedtuple( # pylint: disable=invalid-name
     field_names=('strings', 'oms', 'times', 'charges')
 )
 
-PhotonInfo = namedtuple( # pylint: disable=invalid-name
-    typename='PhotonInfo',
+RetroPhotonInfo = namedtuple( # pylint: disable=invalid-name
+    typename='RetroPhotonInfo',
+    field_names=('survival_prob', 'theta', 'deltaphi', 'length')
+)
+"""Info contained in (original) retro tables: Photon survival probability
+(survival_prob) and average photon direction and length (theta, deltaphi,
+length). `deltaphi` is the direction in the azimuthal direction relative to
+the bin center's azimuth (phi) direction. Note that directions are expected to
+follow "standard" spherical coordinates where direction of vector is the
+direciton in which it points, NOT the direction from which it comes (as is the
+astro / IceCube convention). Intended to contain dictionaries with DOM depth
+index as keys and arrays as values."""
+
+HypoPhotonInfo = namedtuple( # pylint: disable=invalid-name
+    typename='HypoPhotonInfo',
     field_names=('count', 'theta', 'phi', 'length')
 )
-"""Intended to contain dictionaries with DOM depth number as keys"""
+"""Info contained in (original) retro tables: Photon survival probability
+(survival_prob) and average photon direction and length (theta, phi, length).
+Note that directions are expected to follow "standard" spherical coordinates
+where direction of vector is the direciton in which it points, NOT the
+direction from which it comes (as is the astro / IceCube convention). Intended
+to contain dictionaries with DOM depth index as keys and arrays as values."""
 
 BinningCoords = namedtuple( # pylint: disable=invalid-name
     typename='BinningCoords',
@@ -147,10 +166,10 @@ SPEED_OF_LIGHT_M_PER_NS = FTYPE(0.299792458)
 TRACK_M_PER_GEV = FTYPE(15 / 3.3)
 """Track length per energy, in units of m/GeV"""
 
-TRACK_PHOTONS_PER_M = FTYPE(2451.4544553)
+TRACK_PHOTONS_PER_M = FTYPE(2451.4544553 * 10)
 """Track photons per length, in units of 1/m (see ``nphotons.py``)"""
 
-CASCADE_PHOTONS_PER_GEV = FTYPE(12805.3383311)
+CASCADE_PHOTONS_PER_GEV = FTYPE(12805.3383311 * 10 * 0.6)
 """Cascade photons per energy, in units of 1/GeV (see ``nphotons.py``)"""
 
 # TODO: Is jitter same (or close enough to the same) for all DOMs? Is it
@@ -350,8 +369,7 @@ def binspec_to_edges(start, stop, num_bins):
 
     edges = BinningCoords(
         t=np.linspace(start.t, stop.t, num_bins.t + 1),
-        r=powerspace(start=start.r, stop=stop.r, num_bins=num_bins.r + 1,
-                     power=2),
+        r=powerspace(start=start.r, stop=stop.r, num=num_bins.r + 1, power=2),
         theta=np.arccos(np.linspace(np.cos(start.theta),
                                     np.cos(stop.theta),
                                     num_bins.theta + 1)),
@@ -474,7 +492,8 @@ def generate_unique_ids(events):
 
 
 def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
-    """Extract photon info from a FITS file stored during a retro simulation.
+    """Extract photon info from a FITS file containing a (t, r, theta)-binned
+    table.
 
     Parameters
     ----------
@@ -485,41 +504,52 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
         Depth index (e.g. from 0 to 59)
 
     scale : float
-        Scaling factor to apply to the photon counts from the table, e.g. for
-        DOM efficiency.
+        Scaling factor to apply to the photon survival probability from the
+        table, e.g. for DOM efficiency.
 
-    photon_info : None or PhotonInfo namedtuple of dicts
-        If None, creates a new PhotonInfo namedtuple with empty dicts to fill.
-        If one is provided, the existing component dictionaries are updated.
+    photon_info : None or RetroPhotonInfo namedtuple of dicts
+        If None, creates a new RetroPhotonInfo namedtuple with empty dicts to
+        fill. If one is provided, the existing component dictionaries are
+        updated.
 
     Returns
     -------
-    photon_info : PhotonInfo namedtuple of dicts
-        Tuple fields are 'count', 'theta', 'phi', and 'length'. Each dict is
-        keyed by `dom_depth_index` and values are the arrays loaded from the
-        FITS file.
+    photon_info : RetroPhotonInfo namedtuple of dicts
+        Tuple fields are 'survival_prob', 'theta', 'phi', and 'length'. Each
+        dict is keyed by `dom_depth_index` and values are the arrays loaded
+        from the FITS file.
 
     bin_edges : BinningCoords namedtuple
         Each element of the tuple is an array of bin edges.
 
     """
     # pylint: disable=no-member
+    assert 0 < scale <= 1
+
     if photon_info is None:
-        photon_info = PhotonInfo(*([{}]*len(PhotonInfo._fields)))
+        empty_dicts = []
+        for _ in RetroPhotonInfo._fields:
+            empty_dicts.append({})
+        photon_info = RetroPhotonInfo(*empty_dicts)
 
     with pyfits.open(expand(fpath)) as table:
         if scale == 1:
-            photon_info.count[dom_depth_index] = table[0].data
+            photon_info.survival_prob[dom_depth_index] = table[0].data
         else:
-            photon_info.count[dom_depth_index] = table[0].data * scale
+            photon_info.survival_prob[dom_depth_index] = table[0].data * scale
 
         photon_info.theta[dom_depth_index] = table[1].data
-        photon_info.phi[dom_depth_index] = table[2].data
+        photon_info.deltaphi[dom_depth_index] = table[2].data
         photon_info.length[dom_depth_index] = table[3].data
 
-        # Note that we invert (reverse and multiply by -1) time edges
-        bin_edges = BinningCoords(t=-table[4].data[::-1], r=table[5].data,
-                                  theta=table[6].data, phi=[])
+        # Note that we invert (reverse and multiply by -1) time edges; also,
+        # no phi edges are defined in these tables.
+        bin_edges = BinningCoords(
+            t=-table[4].data[::-1],
+            r=table[5].data,
+            theta=table[6].data,
+            phi=np.array([])
+        )
 
     return photon_info, bin_edges
 
@@ -568,3 +598,61 @@ def sph2cart(r, theta, phi):
     x = r * sintheta * np.cos(phi)
     y = r * sintheta * np.sin(phi)
     return x, y, z
+
+
+def get_primary_interaction_str(event):
+    """Produce simple string representation of event's primary neutrino and
+    interaction type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavintstr : string
+
+    """
+    pdg = int(event.neutrino.pdg)
+    barnobar = {-1: r'bar', 1: ''}[np.sign(pdg)]
+    flav = {12: r'nue', 14: r'numu', 16: r'nutau'}[abs(pdg)]
+    int_type = {None: '', 1: r'_cc', 2: r'_nc'}[int(event.interaction)]
+    return flav + barnobar + int_type
+
+
+def get_primary_interaction_tex(event):
+    """Produce latex representation of event's primary neutrino and interaction
+    type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavinttex : string
+
+    """
+    if isinstance(event, (tuple, Event)):
+        prim_int_str = get_primary_interaction_str(event)
+    elif isinstance(event, basestring):
+        prim_int_str = event
+    else:
+        raise TypeError('Unhandled type %s for argument `event`' % type(event))
+
+    if prim_int_str.startswith('nue'):
+        tex = r'\nu_e'
+    elif prim_int_str.startswith('numu'):
+        tex = r'\nu_\mu'
+    elif prim_int_str.startswith('nutau'):
+        tex = r'\nu_\tau'
+
+    if 'bar' in prim_int_str:
+        tex = r'\bar' + tex
+
+    if prim_int_str.endswith('_cc'):
+        tex += r'\,CC'
+    elif prim_int_str.endswith('_nc'):
+        tex += r'\,NC'
+
+    return tex
