@@ -6,10 +6,12 @@ Basic module-wide definitions and simple types (namedtuples).
 from __future__ import absolute_import, division, print_function
 
 from collections import namedtuple, Iterable, Mapping, Sequence
+import math
 from os.path import abspath, dirname, expanduser, expandvars, join
 
-import pyfits
+import numba
 import numpy as np
+import pyfits
 from scipy.special import gammaln
 
 
@@ -581,6 +583,7 @@ def spherical_volume(dr, dcostheta, dphi):
     return np.abs(dcostheta * dr**3 * dphi / 3)
 
 
+@numba.jit(nopython=True, nogil=True, cache=True, error_model='numpy')
 def sph2cart(r, theta, phi):
     """Convert spherical coordinates to Cartesian.
 
@@ -593,11 +596,40 @@ def sph2cart(r, theta, phi):
     x, y, z
 
     """
-    z = r * np.cos(theta)
-    sintheta = np.sin(theta)
-    x = r * sintheta * np.cos(phi)
-    y = r * sintheta * np.sin(phi)
+    x = np.empty_like(r)
+    y = np.empty_like(r)
+    z = np.empty_like(r)
+    for r_, theta_, phi_, x_, y_, z_ in zip(r.flat, theta.flat, phi.flat,
+                                            x.flat, y.flat, z.flat):
+        z_ = r_ * math.cos(theta_)
+        rsintheta = r_ * math.sin(theta_)
+        x_ = rsintheta * math.cos(phi_)
+        y_ = rsintheta * math.sin(phi_)
     return x, y, z
+
+
+#@numba.vectorize(nopython=True, target='cpu')
+#def sph2cart(r, theta, phi):
+#    """Convert spherical coordinates to Cartesian.
+#
+#    Parameters
+#    ----------
+#    r, theta, phi
+#        Spherical coordinates: radius, theta (zenith angle, defined as "out"
+#        from the +z-axis), and phi (azimuth angle, defined as positive from
+#        +x-axis to +y-axix)
+#
+#    Returns
+#    -------
+#    x, y, z
+#        Cartesian coordinates
+#
+#    """
+#    z = r * np.cos(theta)
+#    rsintheta = r * np.sin(theta)
+#    x = rsintheta * np.cos(phi)
+#    y = rsintheta * np.sin(phi)
+#    return x, y, z
 
 
 def get_primary_interaction_str(event):

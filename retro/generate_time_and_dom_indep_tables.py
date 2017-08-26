@@ -217,8 +217,11 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
         # same (approx.) depth
 
         for dom_depth_idx in dom_depth_indices:
-            if test and dom_depth_idx not in [28, 29, 30]:
+            #if test and dom_depth_idx not in [28, 29, 30]:
+            if test and dom_depth_idx not in [29]:
                 continue
+            print('table_kind: %s, dom_depth_idx: %s'
+                  % (table_kind, dom_depth_idx))
 
             # Get the (x, y, z) coords for all DOMs of this type and at this
             # depth index
@@ -234,10 +237,10 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                 fpath=expand(fpath), dom_depth_index=dom_depth_idx
             )
 
-            p_survival_prob = photon_info.survival_prob[dom_depth_idx]
-            p_theta = photon_info.theta[dom_depth_idx]
-            p_deltaphi = photon_info.deltaphi[dom_depth_idx]
-            p_length = photon_info.length[dom_depth_idx]
+            p_survival_prob = photon_info.survival_prob[dom_depth_idx].astype(np.float32)
+            p_theta = photon_info.theta[dom_depth_idx].astype(np.float32)
+            p_deltaphi = photon_info.deltaphi[dom_depth_idx].astype(np.float32)
+            p_length = photon_info.length[dom_depth_idx].astype(np.float32)
             if test:
                 print('p_survival_prob range:', p_survival_prob.min(),
                       p_survival_prob.max())
@@ -298,17 +301,22 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             t_indep_p_info_upsamp_shape = tuple(t_indep_p_info_upsamp_shape)
 
             # Create p_phi from nphi phi-bin centers and p_deltaphi
-            p_phi = np.array([phi + p_deltaphi for phi in phi_upsamp_centers])
+            p_phi = np.empty(p_info_w_phi_shape, dtype=np.float32)
+            for idx, phi in enumerate(phi_upsamp_centers):
+                p_phi[idx, ...] = np.float32(phi) + p_deltaphi
+            #p_phi = np.array([phi + p_deltaphi for phi in phi_upsamp_centers])
 
             # Convert avg photon info to Cartesian coordinates
+            print(p_length.dtype, p_theta.dtype, p_phi.dtype)
             p_x, p_y, p_z = sph2cart(r=p_length, theta=p_theta, phi=p_phi)
 
             # Weighted-average out the time dimension (since we prepended a phi
-            # axis, time axis is now one more than in original retro tables)
+            # axis, time axis is now one more than in originaTrupl retro tables)
             t_indep_p_x = np.zeros(t_indep_p_info_shape)
             t_indep_p_y = np.zeros(t_indep_p_info_shape)
             t_indep_p_z = np.zeros(t_indep_p_info_shape)
 
+            # TODO: the following take 60% of the time!
             t_indep_p_x[mask] = (
                 (p_x * weights).sum(axis=1 + RETRO_T_IDX)[mask] * scale
             )
@@ -423,8 +431,11 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             # the coordinates and aggregating the expected survival
             # probabilities  and average photon info in the Cartesian grid
             for str_idx, string_dom_xyz in enumerate(subdet_depth_dom_coords):
-                if test and str_idx not in [25, 26, 34, 35, 36, 44, 45]:
+                #if test and str_idx not in [25, 26, 34, 35, 36, 44, 45]:
+                if test and str_idx not in [35]:
                     continue
+                print('table_kind: %s, dom_depth_idx: %s, str_idx: %s'
+                      % (table_kind, dom_depth_idx, str_idx))
 
                 string_x, string_y, dom_z = string_dom_xyz
                 x_rel_centers = (string_x - x_upsamp_centers).flatten()
@@ -540,8 +551,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
     ]
     test_str = '_test' if test else ''
     fbasename = (
-        'qdeficit_cart_table_%dx%dx%d_os_r%d_zen%d%s'
-        % (nx, ny, nz, oversample_r, oversample_theta, test_str)
+        'qdeficit_cart_table_%dx%dx%d_osr%d_ostheta%d_nphi%d%s'
+        % (nx, ny, nz, oversample_r, oversample_theta, nphi, test_str)
         )
     for array, name in arrays_names:
         fname = '%s_%s.fits' % (fbasename, name)
@@ -550,6 +561,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
         hdu.writeto(fpath, clobber=True)
 
     if test:
+        return
         #import matplotlib as mpl
         #mpl.use('Agg')
         import matplotlib.pyplot as plt
@@ -623,8 +635,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             fig.savefig(fname + '.png', dpi=300)
             fig.savefig(fname + '.pdf')
 
-        plt.draw()
-        plt.show()
+        #plt.draw()
+        #plt.show()
 
 
 if __name__ == '__main__':
