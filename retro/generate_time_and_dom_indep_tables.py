@@ -23,6 +23,7 @@ from __future__ import absolute_import, division, print_function
 from argparse import ArgumentParser
 import os
 from os.path import abspath, dirname, join
+import time
 
 import numpy as np
 import pyfits
@@ -203,6 +204,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
     doms_used = []
 
     for table_kind in ['ic', 'dc']:
+        det_start_time = time.time()
         if table_kind == 'ic':
             table_fpath_proto = IC_TABLE_FPATH_PROTO
             dom_depth_indices = range(60)
@@ -217,6 +219,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
         # same (approx.) depth
 
         for dom_depth_idx in dom_depth_indices:
+            det_depth_start_time = time.time()
             #if test and dom_depth_idx not in [28, 29, 30]:
             if test and dom_depth_idx not in [29]:
                 continue
@@ -304,10 +307,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             p_phi = np.empty(p_info_w_phi_shape, dtype=np.float32)
             for idx, phi in enumerate(phi_upsamp_centers):
                 p_phi[idx, ...] = np.float32(phi) + p_deltaphi
-            #p_phi = np.array([phi + p_deltaphi for phi in phi_upsamp_centers])
 
             # Convert avg photon info to Cartesian coordinates
-            print(p_length.dtype, p_theta.dtype, p_phi.dtype)
             p_x, p_y, p_z = sph2cart(r=p_length, theta=p_theta, phi=p_phi)
 
             # Weighted-average out the time dimension (since we prepended a phi
@@ -434,6 +435,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                 #if test and str_idx not in [25, 26, 34, 35, 36, 44, 45]:
                 if test and str_idx not in [35]:
                     continue
+                det_depth_string_start_time = time.time()
                 print('table_kind: %s, dom_depth_idx: %s, str_idx: %s'
                       % (table_kind, dom_depth_idx, str_idx))
 
@@ -533,6 +535,13 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                 avg_photon_x += tmp_ag_x
                 avg_photon_y += tmp_ag_y
                 avg_photon_z += tmp_ag_z
+
+                print('time for det/depth/string (innermost) loop: %f sec'
+                      % (time.time() - det_depth_string_start_time))
+            print('time for det/depth loop: %f sec'
+                  % (time.time() - det_depth_start_time))
+        print('time for det loop: %f sec'
+              % (time.time() - det_start_time))
 
     doms_used = np.array(doms_used)
 
