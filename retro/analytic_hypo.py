@@ -16,7 +16,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import FTYPE, TimeSpaceCoord, TrackParams
+from retro import FTYPE, TimeCartCoord, TrackParams
 from retro import PI_BY_TWO, TWO_PI, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV
 from retro import convert_to_namedtuple, hypo_to_track_params
 from retro.hypo import Hypo
@@ -110,7 +110,7 @@ class Track(object):
     Parameters
     ----------
     params : TrackParams
-    origin : TimeSpaceCoord
+    origin : TimeCartCoord
 
     """
     def __init__(self, params, origin=None):
@@ -141,13 +141,13 @@ class Track(object):
 
         Parameters
         ----------
-        coord : TimeSpaceCoord namedtuple
+        coord : TimeCartCoord namedtuple
 
         """
         if coord == self.origin:
             return
 
-        self.origin = convert_to_namedtuple(coord, TimeSpaceCoord)
+        self.origin = convert_to_namedtuple(coord, TimeCartCoord)
 
         # Define relative coordinates
 
@@ -490,7 +490,7 @@ class AnalyticHypo(Hypo):
 
         Parameters
         ----------
-        hit_dom_coord : TimeSpaceCoord or convertible thereto
+        hit_dom_coord : TimeCartCoord or convertible thereto
             Hit position in time and space.
 
         Returns

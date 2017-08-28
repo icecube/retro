@@ -28,8 +28,8 @@ from pyswarm import pso
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS
-from retro import (FTYPE, HYPO_PARAMS_T, BinningCoords, HypoParams10D,
-                   TimeSpaceCoord)
+from retro import (FTYPE, HYPO_PARAMS_T, TimeSphCoord, HypoParams10D,
+                   TimeCartCoord)
 from retro import (IC_TABLE_FPATH_PROTO, DC_TABLE_FPATH_PROTO,
                    DETECTOR_GEOM_FILE)
 from retro import (bin_edges_to_binspec, event_to_hypo_params, expand,
@@ -80,9 +80,9 @@ if not isdir(RESULTS_DIR):
 
 ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
-    x=(-1000, 1000),
-    y=(-1000, 1000),
-    z=(-1000, 1000),
+    x=(-700, 700),
+    y=(-650, 650),
+    z=(-650, 650),
     track_azimuth=(0, 2*np.pi),
     track_zenith=(-np.pi, np.pi),
     track_energy=(0, 100),
@@ -137,9 +137,8 @@ SCAN_DIM_SETS = (
 
 
 #@profile
-#@profile
 def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
-                detailed_info_list=None):
+                t_dom_indep_table=None, detailed_info_list=None):
     """Get log likelihood.
 
     Parameters
@@ -149,6 +148,15 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     detector_geometry : numpy.ndarray
     ic_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
     dc_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
+    t_dom_indep_tables : dict of numpy.ndarray
+        Time- and DOM-independent tables in Cartesian coordinates. Dict has
+        format
+          {'survival_prob': numpy.ndarray,
+           'avg_photon_x': numpy.ndarray,
+           'avg_photon_y': numpy.ndarray,
+           'avg_photon_z': numpy.ndarray
+           'binning': }
+         For now, it is assumed that the values are in the range...
     detailed_info_list : None or appendable sequence
         If a list is provided, it is appended with a dict containing detailed
         info from the calculation useful, e.g., for debugging. If ``None`` is
@@ -164,6 +172,8 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
 
     neg_llh = 0
     noise_counts = 0
+
+    # TODO: get 
 
     eps_angle = EPS_STAT + EPS_CLSIM_ANGLE_BINNING
     eps_length = EPS_STAT + EPS_CLSIM_LENGTH_BINNING
@@ -184,7 +194,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         x, y, z = detector_geometry[string_om]
 
         # String indices 0-78 (numbers 1-79) are ordinary IceCube strings
-        if 0 <= string <= 78:
+        if 0 <= string < 79:
             timing_jitter = IC_DOM_JITTER_NS
             # Get the retro table corresponding to the hit DOM
             retro_photon_survival_prob = ic_photon_info.survival_prob[om]
@@ -192,7 +202,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
             retro_photon_avg_deltaphi = ic_photon_info.deltaphi[om]
             retro_photon_avg_len = ic_photon_info.length[om]
         # String indices 79-85 (numbers 80-86) are DeepCore strings
-        elif 79 <= string <= 85:
+        elif 79 <= string < 86:
             timing_jitter = DC_DOM_JITTER_NS
             # Get the retro table corresponding to the hit DOM
             retro_photon_survival_prob = dc_photon_info.survival_prob[om]
@@ -223,7 +233,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
             )
 
         for jitter_dt in jitter_dts:
-            hit_dom_coord = TimeSpaceCoord(
+            hit_dom_coord = TimeCartCoord(
                 t=pulse_time + jitter_dt, x=x, y=y, z=z
             )
 
@@ -533,7 +543,7 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
 
     # Take bin edges from those stored in retro tables but also add phi bins
     # manually since no phi dependence in retro tables
-    bin_edges = BinningCoords(
+    bin_edges = TimeSphCoord(
         t=bin_edges.t,
         r=bin_edges.r,
         theta=bin_edges.theta,

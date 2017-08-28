@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position, range-builtin-not-iterating, too-many-locals, too-many-statements
+# pylint: disable=wrong-import-position, range-builtin-not-iterating, too-many-locals, too-many-statements, line-too-long
 
 """
 Create time- and DOM-independent "whole-detector" retro table.
@@ -119,13 +119,23 @@ def parse_args(description=__doc__):
         '--test', action='store_true',
         help='''Run a simple test using a single DOM'''
     )
+    parser.add_argument(
+        '--plot', action='store_true',
+        help='''Plot tables. Very slow if nx*ny*nz is larger than ~10k'''
+    )
+    parser.add_argument(
+        '--interactive', action='store_true',
+        help='''If --plot is specified, this displays the plots to the user
+        before exiting. This has no effect if --plot is not specified.'''
+    )
     args = parser.parse_args()
     return args
 
-#@profile
+
 def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                                        oversample_r, oversample_theta, nphi,
-                                       tables_dir, geom_file, test=False):
+                                       tables_dir, geom_file, test=False,
+                                       plot=False, interactive=False):
     """Generate time- and DOM-independent tables. Note that these tables are in
     Cartesian coordinates, defining nx x ny x nz voxels. One table contains the
     photon survival probability for each voxel (which can be > 1 since photons
@@ -136,8 +146,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
         Lower and upper limits for volume that will be divided.
 
     nx, ny, nz : int
-        Number of voxels in each dimension. Note that there will be e.g. ``nx +
-        1`` bin edges in the x-dimension.
+        Number of voxels in each dimension. Note that there will be e.g.
+        ``nx + 1`` bin edges in the x-dimension.
 
     oversample_r, oversample_theta : int >= 1
         Number of times to subdivide original retro tables' r- and
@@ -161,7 +171,16 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
         Only compute for single DOM, produce extra debugging messages, and
         produce quiver plot for generated table.
 
+    plot : bool
+        Whether to produce plots of the table (this is not recommended for
+        ``nx*ny*nz`` much larger than 10,000)
+
+    interactive : bool
+        If plotting, displays the plot to the user. This flag has no effect if
+        ``plot=False``
+
     """
+    start_time = time.time()
     if test:
         print('xlims:', xlims)
         print('ylims:', ylims)
@@ -275,9 +294,10 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
     # dimensions we're summing over for the Cartesian time- and DOM-independent
     # retro table)
     one_minus_survival_prob = np.ones(shape=shape, dtype=CALC_FTYPE)
+
+    # Overall normalizion applied after looping through all DOMs for avg.
+    # photon (i.e., p_x, p_y, p_z components)
     binned_p_survival_prob_by_vol = np.zeros(shape=shape, dtype=CALC_FTYPE)
-    """overall normalizion that is applied after looping through all DOMs for
-    avg. photon (i.e., p_x, p_y, p_z components)"""
 
     # Average photon direction & length in the bin, encoded as a single vector
     # with x-, y-, and z-components
@@ -298,6 +318,9 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
     p_x = None
     p_y = None
     p_z = None
+
+    end_setup_time = time.time()
+    print('Setup time: %.3f sec' % (end_setup_time - start_time))
 
     for table_kind in ['ic', 'dc']:
         det_start_time = time.time()
@@ -440,7 +463,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                 (phi_upsamp_grid, r_upsamp_centers_grid, theta_upsamp_centers_grid) = np.meshgrid(phi_upsamp_centers, r_upsamp_centers, theta_upsamp_centers, indexing='ij')
                 x_rel_upsamp_centers = np.empty_like(r_upsamp_centers_grid)
                 y_rel_upsamp_centers = np.empty_like(r_upsamp_centers_grid)
-                z_rel_upsamp_centers = np.empty_like(r_upsamp_centers_grid) 
+                z_rel_upsamp_centers = np.empty_like(r_upsamp_centers_grid)
                 sph2cart(r=r_upsamp_centers_grid, theta=theta_upsamp_centers_grid, phi=phi_upsamp_grid,
                          x=x_rel_upsamp_centers, y=y_rel_upsamp_centers, z=z_rel_upsamp_centers)
                 if test:
@@ -449,7 +472,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                     print('z_rel_upsamp_centers range:', z_rel_upsamp_centers.min(), z_rel_upsamp_centers.max())
 
                 dcostheta_upsamp, dr_upsamp = np.meshgrid(np.diff(r_upsamp_edges), np.diff(costheta_upsamp_edges), indexing='ij')
-                vol_upsamp = np.broadcast_to(spherical_volume( dr=dr_upsamp, dcostheta=dcostheta_upsamp, dphi=2*np.pi / nphi), t_indep_p_info_upsamp_shape)
+                vol_upsamp = np.broadcast_to(spherical_volume(dr=dr_upsamp, dcostheta=dcostheta_upsamp, dphi=2*np.pi / nphi), t_indep_p_info_upsamp_shape)
 
                 t_indep_p_survival_prob_by_vol_upsamp = np.empty(t_indep_p_info_upsamp_shape)
                 p_x_by_sp_by_vol_upsamp = np.empty(t_indep_p_info_upsamp_shape)
@@ -466,11 +489,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                 for theta_subbin in range(oversample_theta):
                     theta_slice = slice(theta_subbin, None, oversample_theta)
                     idx = (phi_slice, r_slice, theta_slice)
-
                     t_indep_p_survival_prob_by_vol = t_indep_p_survival_prob * vol_upsamp[idx]
-
                     t_indep_p_survival_prob_by_vol_upsamp[idx] = t_indep_p_survival_prob_by_vol
-
                     p_x_by_sp_by_vol_upsamp[idx] = t_indep_p_x * t_indep_p_survival_prob_by_vol
                     p_y_by_sp_by_vol_upsamp[idx] = t_indep_p_y * t_indep_p_survival_prob_by_vol
                     p_z_by_sp_by_vol_upsamp[idx] = t_indep_p_z * t_indep_p_survival_prob_by_vol
@@ -484,7 +504,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             # probabilities  and average photon info in the Cartesian grid
             for str_idx, string_dom_xyz in enumerate(subdet_depth_dom_coords):
                 #if test and str_idx not in [35]:
-                if test and str_idx not in [25, 26, 34, 35, 36, 44, 45]:
+                if test and str_idx not in [25, 26, 34, 35, 36, 44, 45] + range(79, 86):
                     continue
                 det_depth_string_start_time = time.time()
                 print('table_kind: %s, dom_depth_idx: %s, str_idx: %s'
@@ -509,67 +529,16 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
                     binned_sp_by_vol=binned_p_survival_prob_by_vol,
                     one_minus_survival_prob=one_minus_survival_prob
                 )
-                #if test:
-                #    print('not_x:', not_x)
-                #    print('not_y:', not_y)
-                #    print('not_z:', not_z)
-                #    print('count:', count)
-                #    print('np.sum(vol_mask):', np.sum(vol_mask))
-                #    bins = set(bins)
-                #    print('len(bins):', len(bins))
-                #    print('len(set(bins)):', len(bins))
-                #    #print('bins:', bins)
-                #sys.exit()
-                #tmp_binned_vol, _ = np.histogramdd((x_centers, y_centers, z_centers), bins=(nx, ny, nz), range=(xlims, ylims, zlims), normed=False, weights=vol_upsamp.flatten())
 
-                # For a single DOM, the survival probability in each voxel
-                # is the volume-weighted average of the component survival
-                # probabilities. Compute this by histogramming the
-                # vol-weighted survival probabilities and then normalize by
-                # dividing by the total volume accumulated in each
-                # histogram bin.
-                #tmp_binned_p_survival_prob_by_vol, _ = np.histogramdd((x_centers, y_centers, z_centers), bins=(nx, ny, nz), range=(xlims, ylims, zlims), normed=False, weights=t_indep_p_survival_prob_by_vol_upsamp.flatten())
-
-                #binned_p_survival_prob_by_vol += tmp_binned_p_survival_prob_by_vol
-
-                #mask = tmp_binned_vol != 0
-                #normed_surv_prob = (tmp_binned_p_survival_prob_by_vol[mask] / tmp_binned_vol[mask])
-
-                #if test:
-                #    print('')
-                #    print('mask.sum():', mask.sum())
-                #    print('t_indep_p_survival_prob_by_vol_upsamp.max():',
-                #          t_indep_p_survival_prob_by_vol_upsamp.max())
-                #    print('tmp_binned_p_survival_prob_by_vol.max():',
-                #          tmp_binned_p_survival_prob_by_vol.max())
-                #    print('tmp_binned_vol range:', tmp_binned_vol.min(),
-                #          tmp_binned_vol.max())
-                #    print('normed_surv_prob range:', normed_surv_prob.min(),
-                #          normed_surv_prob.max())
-                #    print('')
-
-                #one_minus_survival_prob[mask] *= 1 - normed_surv_prob
-
-                # The average photon that survives for a voxel is the
-                # ((survival probability) x (volume))-weighted average of
-                # the average photons from each spherical volume element
-                # that falls within the voxel.
-                #tmp_ag_x, _ = np.histogramdd((x_centers, y_centers, z_centers), bins=(nx, ny, nz), range=(xlims, ylims, zlims), normed=False, weights=p_x_by_sp_by_vol_upsamp)
-                #tmp_ag_y, _ = np.histogramdd((x_centers, y_centers, z_centers), bins=(nx, ny, nz), range=(xlims, ylims, zlims), normed=False, weights=p_y_by_sp_by_vol_upsamp)
-                #tmp_ag_z, _ = np.histogramdd((x_centers, y_centers, z_centers), bins=(nx, ny, nz), range=(xlims, ylims, zlims), normed=False, weights=p_z_by_sp_by_vol_upsamp)
-                #if test:
-                #    print('tmp_ag_x.max():', tmp_ag_x.max())
-
-                #avg_photon_x += tmp_ag_x
-                #avg_photon_y += tmp_ag_y
-                #avg_photon_z += tmp_ag_z
-
-                print('time for det/depth/string (innermost) loop: %f sec'
+                print('time for det/depth/string (innermost) loop: %.3f sec'
                       % (time.time() - det_depth_string_start_time))
-            print('time for det/depth loop: %f sec'
+            print('time for det/depth loop: %.3f sec'
                   % (time.time() - det_depth_start_time))
-        print('time for det loop: %f sec'
+        print('time for det loop: %.3f sec'
               % (time.time() - det_start_time))
+
+    end_loop_time = time.time()
+    print('looping took a total of %.3f sec' % (end_loop_time - end_setup_time))
 
     doms_used = np.array(doms_used)
 
@@ -591,16 +560,16 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
         'qdeficit_cart_table_%dx%dx%d_osr%d_ostheta%d_nphi%d%s'
         % (nx, ny, nz, oversample_r, oversample_theta, nphi, test_str)
         )
-    #if test:
-    #    return
     for array, name in arrays_names:
         fname = '%s_%s.fits' % (fbasename, name)
         fpath = join(tables_dir, fname)
         hdu = pyfits.PrimaryHDU(array.astype(np.float32))
         hdu.writeto(fpath, clobber=True)
 
-    if test:
-        #return
+    end_save_time = time.time()
+    print('saving to disk took %.3f sec' % (end_save_time - end_loop_time))
+
+    if plot:
         import matplotlib as mpl
         mpl.use('Agg')
         import matplotlib.pyplot as plt
@@ -674,8 +643,10 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             fig.savefig(fname + '.png', dpi=300)
             fig.savefig(fname + '.pdf')
 
-        #plt.draw()
-        #plt.show()
+        print('plotting took %.3f sec' % (time.time() - end_save_time))
+        if interactive:
+            plt.draw()
+            plt.show()
 
 
 if __name__ == '__main__':

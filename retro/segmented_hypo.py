@@ -16,7 +16,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import FTYPE, UITYPE, BinningCoords, HypoPhotonInfo, TimeSpaceCoord
+from retro import FTYPE, UITYPE, BinningCoords, HypoPhotonInfo, TimeCartCoord
 from retro import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
 from retro import convert_to_namedtuple, spacetime_separation
 from retro.hypo import Hypo
@@ -77,13 +77,13 @@ class SegmentedHypo(Hypo):
 
         Parameters
         ----------
-        coord : TimeSpaceCoord or convertible thereto
+        coord : TimeCartCoord or convertible thereto
 
         """
         if coord == self.origin:
             return
 
-        coord = convert_to_namedtuple(coord, TimeSpaceCoord)
+        coord = convert_to_namedtuple(coord, TimeCartCoord)
 
         #print('new origin being set:', coord)
 

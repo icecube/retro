@@ -21,7 +21,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import BinningCoords, HypoParams8D, TimeSpaceCoord
+from retro import BinningCoords, HypoParams8D, TimeCartCoord
 from segmented_hypo import SegmentedHypo
 from analytic_hypo import AnalyticHypo
 
@@ -46,7 +46,7 @@ def main():
     )
 
     # An arbitrary hit coordinate for testing
-    hit_dom_coord = TimeSpaceCoord(t=0, x=0, y=10, z=0)
+    hit_dom_coord = TimeCartCoord(t=0, x=0, y=10, z=0)
 
     t0 = time.time()
     analytic_hypo = AnalyticHypo(hypo_params, cascade_e_scale=1,

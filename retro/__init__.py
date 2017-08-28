@@ -22,7 +22,7 @@ __all__ = [
 
     # Type definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
-    'RetroPhotonInfo', 'HypoPhotonInfo', 'BinningCoords', 'TimeSpaceCoord',
+    'RetroPhotonInfo', 'HypoPhotonInfo', 'TimeSphCoord', 'TimeCartCoord',
 
     # Type selections
     'FTYPE', 'UITYPE', 'HYPO_PARAMS_T',
@@ -124,14 +124,14 @@ where direction of vector is the direciton in which it points, NOT the
 direction from which it comes (as is the astro / IceCube convention). Intended
 to contain dictionaries with DOM depth index as keys and arrays as values."""
 
-BinningCoords = namedtuple( # pylint: disable=invalid-name
-    typename='BinningCoords',
+TimeSphCoord = namedtuple( # pylint: disable=invalid-name
+    typename='TimeSphCoord',
     field_names=('t', 'r', 'theta', 'phi')
 )
 """Binning coordinates."""
 
-TimeSpaceCoord = namedtuple( # pylint: disable=invalid-name
-    typename='TimeSpaceCoord',
+TimeCartCoord = namedtuple( # pylint: disable=invalid-name
+    typename='TimeCartCoord',
     field_names=('t', 'x', 'y', 'z'))
 """Time and space coordinates: t, x, y, z."""
 
@@ -353,23 +353,23 @@ def binspec_to_edges(start, stop, num_bins):
 
     Parameters
     ----------
-    start : BinningCoords containing floats
-    stop : BinningCoords containing floats
-    num_bins : BinningCoords containing ints
+    start : TimeSphCoord containing floats
+    stop : TimeSphCoord containing floats
+    num_bins : TimeSphCoord containing ints
 
     Returns
     -------
-    edges : BinningCoords containing arrays of floats
+    edges : TimeSphCoord containing arrays of floats
 
     """
-    if not isinstance(start, BinningCoords):
-        start = BinningCoords(*start)
-    if not isinstance(stop, BinningCoords):
-        stop = BinningCoords(*stop)
-    if not isinstance(num_bins, BinningCoords):
-        num_bins = BinningCoords(*num_bins)
+    if not isinstance(start, TimeSphCoord):
+        start = TimeSphCoord(*start)
+    if not isinstance(stop, TimeSphCoord):
+        stop = TimeSphCoord(*stop)
+    if not isinstance(num_bins, TimeSphCoord):
+        num_bins = TimeSphCoord(*num_bins)
 
-    edges = BinningCoords(
+    edges = TimeSphCoord(
         t=np.linspace(start.t, stop.t, num_bins.t + 1),
         r=powerspace(start=start.r, stop=stop.r, num=num_bins.r + 1, power=2),
         theta=np.arccos(np.linspace(np.cos(start.theta),
@@ -396,15 +396,15 @@ def bin_edges_to_binspec(edges):
 
     Returns
     -------
-    start : BinningCoords containing floats
-    stop : BinningCoords containing floats
-    num_bins : BinningCoords containing ints
+    start : TimeSphCoord containing floats
+    stop : TimeSphCoord containing floats
+    num_bins : TimeSphCoord containing ints
 
     """
-    dims = BinningCoords._fields
-    start = BinningCoords(*(np.min(getattr(edges, d)) for d in dims))
-    stop = BinningCoords(*(np.max(getattr(edges, d)) for d in dims))
-    num_bins = BinningCoords(*(len(getattr(edges, d)) - 1 for d in dims))
+    dims = TimeSphCoord._fields
+    start = TimeSphCoord(*(np.min(getattr(edges, d)) for d in dims))
+    stop = TimeSphCoord(*(np.max(getattr(edges, d)) for d in dims))
+    num_bins = TimeSphCoord(*(len(getattr(edges, d)) - 1 for d in dims))
 
     return start, stop, num_bins
 
@@ -418,18 +418,18 @@ def bin_edges_to_centers(bin_edges):
 
     Parameters
     ----------
-    bin_edges : BinningCoords namedtuple or convertible thereto
+    bin_edges : TimeSphCoord namedtuple or convertible thereto
 
     Returns
     -------
-    bin_centers : BinningCoords
+    bin_centers : TimeSphCoord
 
     """
     t = bin_edges.t
     rsqaured = np.square(bin_edges.r)
     costheta = np.cos(bin_edges.theta)
     phi = bin_edges.phi
-    bin_centers = BinningCoords(
+    bin_centers = TimeSphCoord(
         t=0.5 * (t[:-1] + t[1:]),
         r=np.sqrt(0.5 * (rsqaured[:-1] + rsqaured[1:])),
         theta=np.arccos(0.5 * (costheta[:-1] + costheta[1:])),
@@ -521,7 +521,7 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
         dict is keyed by `dom_depth_index` and values are the arrays loaded
         from the FITS file.
 
-    bin_edges : BinningCoords namedtuple
+    bin_edges : TimeSphCoord namedtuple
         Each element of the tuple is an array of bin edges.
 
     """
@@ -546,7 +546,7 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.
-        bin_edges = BinningCoords(
+        bin_edges = TimeSphCoord(
             t=-table[4].data[::-1],
             r=table[5].data,
             theta=table[6].data,

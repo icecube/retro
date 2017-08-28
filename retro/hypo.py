@@ -15,7 +15,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import HYPO_PARAMS_T, BinningCoords, TimeSpaceCoord
+from retro import HYPO_PARAMS_T, BinningCoords, TimeCartCoord
 from retro import (CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS,
                    TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, PI, TWO_PI)
 from retro import (bin_edges_to_centers, binspec_to_edges,
@@ -42,7 +42,7 @@ class Hypo(object):
         # Convert types of passed values to those expected internally
 
         if origin is not None:
-            origin = convert_to_namedtuple(origin, TimeSpaceCoord)
+            origin = convert_to_namedtuple(origin, TimeCartCoord)
         params = convert_to_namedtuple(params, HYPO_PARAMS_T)
 
         # Store passed args as attrs
