@@ -583,8 +583,8 @@ def spherical_volume(dr, dcostheta, dphi):
     return np.abs(dcostheta * dr**3 * dphi / 3)
 
 
-@numba.jit(nopython=True, nogil=True, cache=True, error_model='numpy')
-def sph2cart(r, theta, phi):
+@numba.jit(nopython=True, nogil=True, cache=True, parallel=True)
+def sph2cart(r, theta, phi, x, y, z):
     """Convert spherical coordinates to Cartesian.
 
     Parameters
@@ -596,19 +596,28 @@ def sph2cart(r, theta, phi):
     x, y, z
 
     """
-    x = np.empty_like(r)
-    y = np.empty_like(r)
-    z = np.empty_like(r)
-    for r_, theta_, phi_, x_, y_, z_ in zip(r.flat, theta.flat, phi.flat,
-                                            x.flat, y.flat, z.flat):
-        z_ = r_ * math.cos(theta_)
-        rsintheta = r_ * math.sin(theta_)
-        x_ = rsintheta * math.cos(phi_)
-        y_ = rsintheta * math.sin(phi_)
-    return x, y, z
+    r_shape = r.shape
+    #x = np.empty_like(r)
+    #y = np.empty_like(r)
+    #z = np.empty_like(r)
+    num_elements = int(np.prod(np.array(r_shape)))
+    r_flat = r.flat
+    theta_flat = theta.flat
+    phi_flat = phi.flat
+    x_flat = x.flat
+    y_flat = y.flat
+    z_flat = z.flat
+    for idx in range(num_elements): #, (r_, theta_, phi_) in enumerate(zip(r.flat, theta.flat, phi.flat)):
+        rfi = r_flat[idx]
+        tfi = theta_flat[idx]
+        pfi = phi_flat[idx]
+        rsintheta = rfi * math.sin(tfi)
+        x_flat[idx] = rsintheta * math.cos(pfi)
+        y_flat[idx] = rsintheta * math.sin(pfi)
+        z_flat[idx] = rfi * math.cos(tfi)
 
 
-#@numba.vectorize(nopython=True, target='cpu')
+#@numba.jit(nopython=True, nogil=True, cache=True, parallel=True)
 #def sph2cart(r, theta, phi):
 #    """Convert spherical coordinates to Cartesian.
 #
