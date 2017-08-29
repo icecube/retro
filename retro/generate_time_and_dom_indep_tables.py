@@ -261,15 +261,15 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             # resulting tables not be flipped in Z direction. Is there
             # something I'm missing as to convention for tables that would
             # cause this???
-            xbin = int(np.floor((-x_ + xb0rel) * xbscale))
+            xbin = int(np.floor((x_ + xb0rel) * xbscale))
             if xbin < 0 or xbin >= nx:
                 continue
 
-            ybin = int(np.floor((-y_ + yb0rel) * ybscale))
+            ybin = int(np.floor((y_ + yb0rel) * ybscale))
             if ybin < 0 or ybin >= ny:
                 continue
 
-            zbin = int(np.floor((-z_ + zb0rel) * zbscale))
+            zbin = int(np.floor((z_ + zb0rel) * zbscale))
             if zbin < 0 or zbin >= nz:
                 continue
 
@@ -323,6 +323,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
     print('Setup time: %.3f sec' % (end_setup_time - start_time))
 
     for table_kind in ['ic', 'dc']:
+        if test and table_kind != 'ic':
+            continue
         det_start_time = time.time()
         if table_kind == 'ic':
             table_fpath_proto = IC_TABLE_FPATH_PROTO
@@ -339,8 +341,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
 
         for dom_depth_idx in dom_depth_indices:
             det_depth_start_time = time.time()
-            #if test and dom_depth_idx not in [29]:
-            if test and dom_depth_idx not in [28, 29, 30]:
+            #if test and dom_depth_idx not in [28, 29, 30]:
+            if test and dom_depth_idx not in [50]:
                 continue
             print('table_kind: %s, dom_depth_idx: %s'
                   % (table_kind, dom_depth_idx))
@@ -503,8 +505,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
             # the coordinates and aggregating the expected survival
             # probabilities  and average photon info in the Cartesian grid
             for str_idx, string_dom_xyz in enumerate(subdet_depth_dom_coords):
-                #if test and str_idx not in [35]:
-                if test and str_idx not in [25, 26, 34, 35, 36, 44, 45] + range(79, 86):
+                #if test and str_idx not in [25, 26, 34, 35, 36, 44, 45] + range(79, 86):
+                if test and str_idx not in [35]:
                     continue
                 det_depth_string_start_time = time.time()
                 print('table_kind: %s, dom_depth_idx: %s, str_idx: %s'

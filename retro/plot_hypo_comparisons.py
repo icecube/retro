@@ -26,7 +26,7 @@ from segmented_hypo import SegmentedHypo
 from analytic_hypo import AnalyticHypo
 
 
-def main():
+def plot_hypo_comparisons():
     """Main"""
     # Binning defined to be same as that used for clsim
     bin_min = BinningCoords(t=-3000, r=0, theta=0, phi=0)
@@ -323,4 +323,4 @@ def main():
 
 
 if __name__ == '__main__':
-    analytic_hypo, segmented_hypo = main()
+    analytic_hypo, segmented_hypo = plot_hypo_comparisons()
