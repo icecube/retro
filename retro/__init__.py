@@ -556,6 +556,7 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
     return photon_info, bin_edges
 
 
+@numba.jit(nopython=True, nogil=True, cache=True)
 def spherical_volume(dr, dcostheta, dphi):
     """Find volume of a finite element defined in spherical coordinates.
 
@@ -580,7 +581,7 @@ def spherical_volume(dr, dcostheta, dphi):
         E.g. if those are provided in meters, ``vol`` will be in units of `m^3`.
 
     """
-    return np.abs(dcostheta * dr**3 * dphi / 3)
+    return dcostheta * dr**3 * dphi / 3
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
@@ -589,32 +590,78 @@ def sph2cart(r, theta, phi, x, y, z):
 
     Parameters
     ----------
-    r, theta, phi : numeric
+    r, theta, phi : numeric of same shape
 
-    Returns
-    -------
-    x, y, z
+    x, y, z : numpy.ndarrays of same shape as `r`, `theta`, `phi`
+        Result is stored in these arrays.
 
     """
-    r_shape = r.shape
-    #x = np.empty_like(r)
-    #y = np.empty_like(r)
-    #z = np.empty_like(r)
-    num_elements = int(np.prod(np.array(r_shape)))
+    shape = r.shape
+    num_elements = int(np.prod(np.array(shape)))
     r_flat = r.flat
     theta_flat = theta.flat
     phi_flat = phi.flat
     x_flat = x.flat
     y_flat = y.flat
     z_flat = z.flat
-    for idx in range(num_elements): #, (r_, theta_, phi_) in enumerate(zip(r.flat, theta.flat, phi.flat)):
-        rfi = r_flat[idx]
-        tfi = theta_flat[idx]
-        pfi = phi_flat[idx]
-        rsintheta = rfi * math.sin(tfi)
-        x_flat[idx] = rsintheta * math.cos(pfi)
-        y_flat[idx] = rsintheta * math.sin(pfi)
-        z_flat[idx] = rfi * math.cos(tfi)
+    for idx in range(num_elements):
+        rf = r_flat[idx]
+        tf = theta_flat[idx]
+        pf = phi_flat[idx]
+        rsintheta = rf * math.sin(tf)
+        x_flat[idx] = rsintheta * math.cos(pf)
+        y_flat[idx] = rsintheta * math.sin(pf)
+        z_flat[idx] = rf * math.cos(tf)
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def pol2cart(r, theta, x, y):
+    """Convert plane polar (r, theta) to Cartesian (x, y) Coordinates.
+
+    Parameters
+    ----------
+    r, theta : numeric of same shape
+
+    x, y : numpy.ndarrays of same shape as `r`, `theta`
+        Result is stored in these arrays.
+
+    """
+    shape = r.shape
+    num_elements = int(np.prod(np.array(shape)))
+    r_flat = r.flat
+    theta_flat = theta.flat
+    x_flat = x.flat
+    y_flat = y.flat
+    for idx in range(num_elements):
+        rf = r_flat[idx]
+        tf = theta_flat[idx]
+        x_flat[idx] = rf * math.cos(tf)
+        y_flat[idx] = rf * math.sin(tf)
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def cart2pol(x, y, r, theta):
+    """Convert plane Cartesian (x, y) to plane polar (r, theta) Coordinates.
+
+    Parameters
+    ----------
+    x, y : numeric of same shape
+
+    r, theta : numpy.ndarrays of same shape as `x`, `y`
+        Result is stored in these arrays.
+
+    """
+    shape = x.shape
+    num_elements = int(np.prod(np.array(shape)))
+    x_flat = x.flat
+    y_flat = y.flat
+    r_flat = r.flat
+    theta_flat = theta.flat
+    for idx in range(num_elements):
+        xfi = x_flat[idx]
+        yfi = y_flat[idx]
+        r_flat[idx] = math.sqrt(xfi*xfi + yfi*yfi)
+        theta_flat[idx] = math.atan2(yfi, xfi)
 
 
 #@numba.jit(nopython=True, nogil=True, cache=True, parallel=True)

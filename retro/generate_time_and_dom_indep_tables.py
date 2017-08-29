@@ -28,13 +28,13 @@ import time
 import numba
 import numpy as np
 import pyfits
-from scipy.ndimage.filters import gaussian_filter
+#from scipy.ndimage.filters import gaussian_filter
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (DETECTOR_GEOM_FILE, DC_TABLE_FPATH_PROTO,
                    IC_TABLE_FPATH_PROTO)
-from retro import (expand, extract_photon_info, powerspace, spherical_volume,
+from retro import (expand, extract_photon_info, pol2cart, spherical_volume,
                    sph2cart)
 
 
@@ -158,50 +158,61 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
         print('xlims:', xlims)
         print('ylims:', ylims)
         print('zlims:', zlims)
-    assert oversample_r >= 1
-    assert oversample_theta >= 1
-    assert int(oversample_r) == oversample_r
-    assert int(oversample_theta) == oversample_theta
-    oversample_r = int(oversample_r)
-    oversample_theta = int(oversample_theta)
 
     tables_dir = expand(tables_dir)
-    shape = (nx, ny, nz)
-    xb0, xb1 = np.float32(np.min(xlims)), np.float32(np.max(xlims))
-    yb0, yb1 = np.float32(np.min(ylims)), np.float32(np.max(ylims))
-    zb0, zb1 = np.float32(np.min(zlims)), np.float32(np.max(zlims))
-    xbscale = np.float32(1 / ((xb1 - xb0) / nx))
-    ybscale = np.float32(1 / ((yb1 - yb0) / ny))
-    zbscale = np.float32(1 / ((zb1 - zb0) / nz))
+
+    xyz_shape = (nx, ny, nz)
+    xb0, xb1 = CALC_FTYPE(np.min(xlims)), CALC_FTYPE(np.max(xlims))
+    yb0, yb1 = CALC_FTYPE(np.min(ylims)), CALC_FTYPE(np.max(ylims))
+    zb0, zb1 = CALC_FTYPE(np.min(zlims)), CALC_FTYPE(np.max(zlims))
+    xbscale = CALC_FTYPE(1 / ((xb1 - xb0) / nx))
+    ybscale = CALC_FTYPE(1 / ((yb1 - yb0) / ny))
+    zbscale = CALC_FTYPE(1 / ((zb1 - zb0) / nz))
+    cart_bin_vol = (xb1 - xb0) * (yb1 - yb0) * (zb1 - zb0)
     if test:
         print('xbinstuff:', xb0, xb1, nx, xbscale)
         print('ybinstuff:', yb0, yb1, ny, ybscale)
         print('zbinstuff:', zb0, zb1, nz, zbscale)
 
+    # Total survival probability in each voxel
+    one_minus_survival_prob = np.ones(shape=xyz_shape, dtype=CALC_FTYPE)
+
+    # Overall normalizion applied after looping through all DOMs for avg.
+    # photon (i.e., p_x, p_y, p_z components)
+    binned_p_survival_prob_by_vol = np.zeros(shape=xyz_shape, dtype=CALC_FTYPE)
+
+    # Average photon direction & length in the bin, encoded as a single vector
+    # with x-, y-, and z-components
+    avg_photon_x = np.zeros(shape=xyz_shape, dtype=CALC_FTYPE)
+    avg_photon_y = np.zeros(shape=xyz_shape, dtype=CALC_FTYPE)
+    avg_photon_z = np.zeros(shape=xyz_shape, dtype=CALC_FTYPE)
+
+    # Load detector geometry
+    detector_geometry = np.load(geom_file)
+
+    # Phi bins are not defined in the tables, so these are constants that can
+    # be defined outside the loops
+    phi_edges = np.linspace(0, 2*np.pi, nphi + 1)
+    phi_centers = 0.5 * (phi_edges[:-1] + phi_edges[1:])
+
     @numba.jit(nopython=True, nogil=True, cache=True)
-    def bin_quantities(x_rel, y_rel, z_rel,
+    def bin_quantities(x_edges_mg, y_edges_mg, z_edges_mg,
                        x_offset, y_offset, z_offset,
-                       vol, survival_prob_by_vol,
-                       p_x, p_y, p_z,
-                       binned_p_x, binned_p_y, binned_p_z,
-                       binned_sp_by_vol,
+                       bin_vols, survival_prob, p_x, p_y, p_z,
+                       binned_p_x, binned_p_y, binned_p_z, binned_sp_by_vol,
                        one_minus_survival_prob):
         """Bin various quantities in one step (rather tha multiple calls to
         `numpy.histogramdd`.
 
         Parameters
         ----------
-        x_rel, y_rel, z_rel : numpy.ndarray, all same shape
+        x_edges_mg, y_edges_mg, z_edges : numpy.ndarray, all same shape
             Relative coordinates where the data values lie
 
         x_offset, y_offset, z_offset : float
             Offset for the relative coordinates to translate to detector
 
-        vol : numpy.ndarray, same shape as `x`, `y`, and `z`
-            Volume represented by each coordinate (i.e. that of the spherical
-            volume element being binned)
-
-        survival_prob_by_vol : numpy.ndarray, same shape as `x`, `y`, and `z`
+        survival_prob : numpy.ndarray, same shape as `x`, `y`, and `z`
             Survival probability of a photon at this coordinate
 
         p_x, p_y, p_z : numpy.ndarray, same shape as `x`, `y`, and `z`
@@ -222,36 +233,72 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
         """
         vol_mask = np.zeros((nx, ny, nz), dtype=np.int8)
         binned_vol = np.zeros((nx, ny, nz), dtype=CALC_FTYPE)
-        xb0rel = x_offset - xb0
-        yb0rel = y_offset - yb0
-        zb0rel = z_offset - zb0
+        xbshift = x_offset - xb0
+        ybshift = y_offset - yb0
+        zbshift = z_offset - zb0
 
-        for x_, y_, z_, vol_, sp_by_vol_, p_x_, p_y_, p_z_ in zip(
-                x_rel.flat, y_rel.flat, z_rel.flat, vol.flat,
-                survival_prob_by_vol.flat, p_x.flat, p_y.flat, p_z.flat):
+        for idx0 in range(nphi):
+            slice0 = slice(idx0, idx0 + 2)
+            for idx1 in range(n_rbins):
+                slice1 = slice(idx1, idx1 + 2)
+                for idx2 in range(n_thetabins):
+                    slice2 = slice(idx2, idx2 + 2)
+                    three_d_slice = (slice0, slice1, slice2)
+                    three_d_idx = (idx0, idx1, idx2)
 
-            # NOTE / TODO: inverting x y and z here because this makes
-            # resulting tables not be flipped in Z direction. Is there
-            # something I'm missing as to convention for tables that would
-            # cause this???
-            xbin = int(np.floor((x_ + xb0rel) * xbscale))
-            if xbin < 0 or xbin >= nx:
-                continue
+                    x = x_edges_mg[three_d_slice]
+                    xb_min = int((np.min(x) + xbshift) * xbscale)
+                    xb_max = int((np.max(x) + xbshift) * xbscale)
+                    if xb_max < 0 or xb_min >= nx:
+                        continue
 
-            ybin = int(np.floor((y_ + yb0rel) * ybscale))
-            if ybin < 0 or ybin >= ny:
-                continue
+                    y = y_edges_mg[three_d_slice]
+                    yb_min = int((np.min(y) + ybshift) * ybscale)
+                    yb_max = int((np.max(y) + ybshift) * ybscale)
+                    if yb_max < 0 or yb_min >= ny:
+                        continue
 
-            zbin = int(np.floor((z_ + zb0rel) * zbscale))
-            if zbin < 0 or zbin >= nz:
-                continue
+                    z = z_edges_mg[three_d_slice]
+                    zb_min = int((np.min(z) + zbshift) * zbscale)
+                    zb_max = int((np.max(z) + zbshift) * zbscale)
+                    if zb_max < 0 or zb_min >= nz:
+                        continue
 
-            vol_mask[xbin, ybin, zbin] = 1
-            binned_vol[xbin, ybin, zbin] += vol_
-            binned_sp_by_vol[xbin, ybin, zbin] += sp_by_vol_
-            binned_p_x[xbin, ybin, zbin] += p_x_
-            binned_p_y[xbin, ybin, zbin] += p_y_
-            binned_p_z[xbin, ybin, zbin] += p_z_
+                    # TODO: more advanced intersection volume calculation?
+                    vol = bin_vols[three_d_idx]
+                    if vol < 0:
+                        print('three_d_idx:', three_d_idx)
+                        print('vol:', vol)
+                        raise Exception
+
+                    sp = survival_prob[three_d_idx]
+                    if sp < 0:
+                        print('three_d_idx:', three_d_idx)
+                        print('sp:', sp)
+                        raise Exception
+
+                    sp_by_vol = sp * vol
+                    p_x_ = p_x[three_d_idx]
+                    p_y_ = p_y[three_d_idx]
+                    p_z_ = p_z[three_d_idx]
+
+                    # Loop through all Cartesian bins that hold some part of
+                    # the spherical volume element, and figure out the overlap.
+                    for xbin in range(max(0, xb_min), min(nx, xb_max + 1)):
+                        for ybin in range(max(0, yb_min), min(ny, yb_max + 1)):
+                            for zbin in range(max(0, zb_min), min(nz, zb_max + 1)):
+                                bin_idx = (xbin, ybin, zbin)
+
+                                vol_mask[bin_idx] = 1
+                                binned_vol[bin_idx] += vol
+                                binned_sp_by_vol[bin_idx] += sp_by_vol
+                                binned_p_x[bin_idx] += p_x_
+                                binned_p_y[bin_idx] += p_y_
+                                binned_p_z[bin_idx] += p_z_
+
+        print('binned_vol range:', binned_vol.min(), binned_vol.max())
+        print('binned_sp_by_vol range:', binned_sp_by_vol.min(), binned_sp_by_vol.max())
+        print('one_minus_survival_prob range:', one_minus_survival_prob.min(), one_minus_survival_prob.max())
 
         flat_vol = binned_vol.flat
         flat_one_minus_sp = one_minus_survival_prob.flat
@@ -262,38 +309,11 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
                     CALC_FTYPE(1) - flat_sp_by_vol[idx] / flat_vol[idx]
                 )
 
-    # Total survival probability in each voxel (can be > 1 since same event can
-    # cause hits at multiple times and/or multiple DOMs, both of which are
-    # dimensions we're summing over for the Cartesian time- and DOM-independent
-    # retro table)
-    one_minus_survival_prob = np.ones(shape=shape, dtype=CALC_FTYPE)
-
-    # Overall normalizion applied after looping through all DOMs for avg.
-    # photon (i.e., p_x, p_y, p_z components)
-    binned_p_survival_prob_by_vol = np.zeros(shape=shape, dtype=CALC_FTYPE)
-
-    # Average photon direction & length in the bin, encoded as a single vector
-    # with x-, y-, and z-components
-    avg_photon_x = np.zeros(shape=shape, dtype=CALC_FTYPE)
-    avg_photon_y = np.zeros(shape=shape, dtype=CALC_FTYPE)
-    avg_photon_z = np.zeros(shape=shape, dtype=CALC_FTYPE)
-
-    # Load detector geometry
-    detector_geometry = np.load(geom_file)
-
-    # Phi bins are not defined in the tables, so these are constants that can
-    # be defined outside the loops
-    phi_upsamp_edges = np.linspace(0, 2*np.pi, nphi + 1)
-    phi_upsamp_centers = 0.5 * (phi_upsamp_edges[:-1] + phi_upsamp_edges[1:])
+    end_setup_time = time.time()
+    print('Setup time: %.3f sec' % (end_setup_time - start_time))
 
     doms_used = []
     binning_hash = None
-    p_x = None
-    p_y = None
-    p_z = None
-
-    end_setup_time = time.time()
-    print('Setup time: %.3f sec' % (end_setup_time - start_time))
 
     for table_kind in ['ic', 'dc']:
         if test and table_kind != 'ic':
@@ -322,20 +342,16 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
             # Get the (x, y, z) coords for all DOMs of this type and at this
             # depth index
-            subdet_depth_dom_coords = detector_geometry[strings_slice, dom_depth_idx, ...]
+            subdet_depth_dom_coords = detector_geometry[strings_slice, dom_depth_idx, :]
 
             # Load the 4D table for the DOM type / depth index
-            fpath = table_fpath_proto.format(
-                tables_dir=tables_dir, dom=dom_depth_idx
-            )
-            photon_info, bin_edges = extract_photon_info(
-                fpath=expand(fpath), dom_depth_index=dom_depth_idx
-            )
+            fpath = expand(table_fpath_proto.format(tables_dir=tables_dir, dom=dom_depth_idx))
+            photon_info, bin_edges = extract_photon_info(fpath=fpath, dom_depth_index=dom_depth_idx)
 
-            p_survival_prob = photon_info.survival_prob[dom_depth_idx].astype(np.float32)
-            p_theta = photon_info.theta[dom_depth_idx].astype(np.float32)
-            p_deltaphi = photon_info.deltaphi[dom_depth_idx].astype(np.float32)
-            p_length = photon_info.length[dom_depth_idx].astype(np.float32)
+            p_survival_prob = photon_info.survival_prob[dom_depth_idx].astype(CALC_FTYPE)
+            p_theta = photon_info.theta[dom_depth_idx].astype(CALC_FTYPE)
+            p_deltaphi = photon_info.deltaphi[dom_depth_idx].astype(CALC_FTYPE)
+            p_length = photon_info.length[dom_depth_idx].astype(CALC_FTYPE)
             if test:
                 print('p_survival_prob range:', p_survival_prob.min(),
                       p_survival_prob.max())
@@ -349,130 +365,81 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
             # either of two directions, ergo how directional the average photon
             # is must be reduced
             #assert np.all(p_deltaphi <= np.pi/2)
-            p_length *= np.cos(p_deltaphi)
-            p_deltaphi = np.full_like(a=p_deltaphi, fill_value=0)
+            #p_length *= np.abs(np.cos(p_deltaphi))
+            p_deltaphi = np.zeros_like(p_deltaphi)
 
             orig_p_info_shape = p_survival_prob.shape
-            p_info_w_phi_shape = (nphi,) + orig_p_info_shape
-
-            # Marginalize out time for photon survival probabilities; this
-            # implementes, effectively, the logic
-            #   ``Prob(t0 or t1 or ... or tN)``
-            t_indep_p_survival_prob = 1 - (1 - p_survival_prob).prod(axis=RETRO_T_IDX)
-            if test:
-                print('t_indep_p_survival_prob.max():',
-                      t_indep_p_survival_prob.max())
-
-            # Broadcast p_theta and p_length--which currently have 3
-            # dimensions, representing (t, r, theta)--to 4D, (phi, t, r, theta)
-            p_theta = np.broadcast_to(p_theta, p_info_w_phi_shape)
-            p_length = np.broadcast_to(p_length, p_info_w_phi_shape)
-
-            # Do the same for p_survival_prob, which will be used as the
-            # weights for averaging the average photon properties over time
-            weights = np.broadcast_to(p_survival_prob, p_info_w_phi_shape)
-            t_indep_weights = weights.sum(axis=1 + RETRO_T_IDX)
-            mask = t_indep_weights != 0
-            scale = 1 / t_indep_weights[mask]
-
             t_indep_p_info_shape = tuple([nphi] + [orig_p_info_shape[d] for d in range(3) if d != RETRO_T_IDX])
 
-            t_indep_p_info_upsamp_shape = [nphi]
-            for d in range(3):
-                if d == RETRO_T_IDX:
-                    continue
-                elif d == RETRO_R_IDX:
-                    oversample = oversample_r
-                elif d == RETRO_THETA_IDX:
-                    oversample = oversample_theta
-                t_indep_p_info_upsamp_shape.append(oversample * orig_p_info_shape[d])
-            t_indep_p_info_upsamp_shape = tuple(t_indep_p_info_upsamp_shape)
+            # Marginalize out time for photon survival probabilities; this
+            # implements, effectively, the logic
+            #   ``Prob(t0 or t1 or ... or tN)``
+            t_indep_p_survival_prob = 1 - (1 - p_survival_prob).prod(axis=RETRO_T_IDX)
 
-            # Create p_phi from nphi phi-bin centers and p_deltaphi
-            p_phi = np.empty(p_info_w_phi_shape, dtype=np.float32)
-            for idx, phi in enumerate(phi_upsamp_centers):
-                p_phi[idx, ...] = np.float32(phi) + p_deltaphi
+            # Marginalize out time for (p_length, p_theta) by converting to
+            # Cartesian coordinates and performing an average weighted by
+            # survival probability
 
-            # Convert avg photon info to Cartesian coordinates
-            if p_x is None:
-                p_x = np.empty_like(p_length)
-                p_y = np.empty_like(p_length)
-                p_z = np.empty_like(p_length)
-            sph2cart(r=p_length, theta=p_theta, phi=p_phi, x=p_x, y=p_y, z=p_z)
+            p_z, p_rho = np.empty_like(p_length), np.empty_like(p_length)
+            pol2cart(r=p_length, theta=p_theta, x=p_z, y=p_rho)
+            print('p_length range:', p_length.min(), p_length.max())
+            print('p_theta range:', p_theta.min(), p_theta.max())
+            print('p_z range:', p_z.min(), p_z.max())
+            print('p_rho range:', p_rho.min(), p_rho.max())
 
-            # Weighted-average out the time dimension (since we prepended a phi
-            # axis, time axis is now one more than in originaTrupl retro tables)
-            t_indep_p_x = np.zeros(t_indep_p_info_shape)
-            t_indep_p_y = np.zeros(t_indep_p_info_shape)
-            t_indep_p_z = np.zeros(t_indep_p_info_shape)
+            mask = t_indep_p_survival_prob != 0
+            scale = 1 / t_indep_p_survival_prob[mask]
 
-            # TODO: the following take 60% of the time!
-            t_indep_p_x[mask] = (p_x * weights).sum(axis=1 + RETRO_T_IDX)[mask] * scale
-            t_indep_p_y[mask] = (p_y * weights).sum(axis=1 + RETRO_T_IDX)[mask] * scale
-            t_indep_p_z[mask] = (p_z * weights).sum(axis=1 + RETRO_T_IDX)[mask] * scale
+            t_indep_p_z = np.zeros_like(t_indep_p_survival_prob)
+            t_indep_p_rho = np.zeros_like(t_indep_p_survival_prob)
+
+            t_indep_p_z[mask] = (p_z * p_survival_prob).sum(axis=RETRO_T_IDX)[mask] * scale
+            t_indep_p_rho[mask] = (p_rho * p_survival_prob).sum(axis=RETRO_T_IDX)[mask] * scale
+
+            # Broadcast the survival probability and Cartesian components of
+            # the average photon # (binned in plane-polar coordinates) to
+            # spherical-polar coordinates, computing the x- and y-components
+            t_indep_p_survival_prob = np.broadcast_to(t_indep_p_survival_prob, t_indep_p_info_shape)
+            t_indep_p_z = np.broadcast_to(t_indep_p_z, t_indep_p_info_shape)
+            t_indep_p_x = np.empty(t_indep_p_info_shape, dtype=CALC_FTYPE)
+            t_indep_p_y = np.empty(t_indep_p_info_shape, dtype=CALC_FTYPE)
+            for phi_idx, phi in enumerate(phi_centers):
+                t_indep_p_x[phi_idx, ...] = t_indep_p_rho * np.cos(phi)
+                t_indep_p_y[phi_idx, ...] = t_indep_p_rho * np.sin(phi)
+
+            if test:
+                print('t_indep_p_survival_prob.shape:', t_indep_p_survival_prob.shape)
+                print('t_indep_p_survival_prob.dtype:', t_indep_p_survival_prob.dtype)
+                print('t_indep_p_survival_prob range:', t_indep_p_survival_prob.min(), t_indep_p_survival_prob.max())
+                print('t_indep_p_x.shape:', t_indep_p_x.shape)
+                print('t_indep_p_x range:', t_indep_p_x.min(), t_indep_p_x.max())
+                print('t_indep_p_y range:', t_indep_p_y.min(), t_indep_p_y.max())
+                print('t_indep_p_z range:', t_indep_p_z.min(), t_indep_p_z.max())
+                print('t_indep_p_rho range:', t_indep_p_rho.min(), t_indep_p_rho.max())
 
             new_binning_hash = 1 #hash(bin_edges)
             if new_binning_hash != binning_hash:
                 binning_hash = new_binning_hash
-                # Subdivide macro cells into micro cells for achieving higher
-                # accuracy in trransferring their survival probabilities and avg
-                # photon vectors to the Cartesian grid
-                r_upsamp_edges = np.concatenate([powerspace(start=a, stop=b, num=oversample_r + 1, power=2)[:-1] for a, b in zip(bin_edges.r[:-1], bin_edges.r[1:])] + [[bin_edges.r[-1]]]) # include final bin edge
 
-                costheta_edges = np.cos(bin_edges.theta)
-                costheta_upsamp_edges = np.concatenate([np.linspace(start=a, stop=b, num=oversample_theta + 1)[:-1] for a, b in zip(costheta_edges[:-1], costheta_edges[1:])] + [[costheta_edges[-1]]]) # include final bin edge
+                phi_edges_mg, r_edges_mg, theta_edges_mg = np.meshgrid(phi_edges, bin_edges.r, bin_edges.theta, indexing='ij')
 
-                # TODO: is the actual midpoint the right choice for ``r`` here?
-                # E.g., center of mass will have dependence on range on theta and
-                # phi of the volume element. This would be more correct in some
-                # sense but more difficult to treat and for a "ring" the result is
-                # erroneous for transferring to Cartesian coordinates. Maybe
-                # instead just enforce that there be a minimum number of bins in
-                # each dimension, so we avoid such corner cases, and can get away
-                # with doing the "simple" thing as it's a reasonable approximation.
-                r_upsamp_centers = 0.5 * (r_upsamp_edges[:-1] + r_upsamp_edges[1:])
-                costheta_upsamp_centers = 0.5 * (costheta_upsamp_edges[:-1] + costheta_upsamp_edges[1:])
-                theta_upsamp_centers = np.arccos(costheta_upsamp_centers)
+                phi_widths = np.abs(np.diff(phi_edges))
+                r_widths = np.abs(np.diff(bin_edges.r))
+                costheta_widths = np.abs(np.diff(bin_edges.theta))
 
-                # Convert upsampled bin centers to Cartesian coordinates
-                (phi_upsamp_grid, r_upsamp_centers_grid, theta_upsamp_centers_grid) = np.meshgrid(phi_upsamp_centers, r_upsamp_centers, theta_upsamp_centers, indexing='ij')
-                x_rel_upsamp_centers = np.empty_like(r_upsamp_centers_grid)
-                y_rel_upsamp_centers = np.empty_like(r_upsamp_centers_grid)
-                z_rel_upsamp_centers = np.empty_like(r_upsamp_centers_grid)
-                sph2cart(r=r_upsamp_centers_grid, theta=theta_upsamp_centers_grid, phi=phi_upsamp_grid,
-                         x=x_rel_upsamp_centers, y=y_rel_upsamp_centers, z=z_rel_upsamp_centers)
-                if test:
-                    print('x_rel_upsamp_centers range:', x_rel_upsamp_centers.min(), x_rel_upsamp_centers.max())
-                    print('y_rel_upsamp_centers range:', y_rel_upsamp_centers.min(), y_rel_upsamp_centers.max())
-                    print('z_rel_upsamp_centers range:', z_rel_upsamp_centers.min(), z_rel_upsamp_centers.max())
+                phi_widths_mg, r_widths_mg, costheta_widths_mg = np.meshgrid(phi_widths, r_widths, costheta_widths, indexing='ij')
 
-                dcostheta_upsamp, dr_upsamp = np.meshgrid(np.diff(r_upsamp_edges), np.diff(costheta_upsamp_edges), indexing='ij')
-                vol_upsamp = np.broadcast_to(spherical_volume(dr=dr_upsamp, dcostheta=dcostheta_upsamp, dphi=2*np.pi / nphi), t_indep_p_info_upsamp_shape)
+                bin_vols = spherical_volume(dr=r_widths_mg, dcostheta=costheta_widths_mg, dphi=phi_widths_mg)
+                print('bin_vols.shape:', bin_vols.shape)
+                print('bin_vols[(300, 12, 26)]:', bin_vols[(300, 12, 26)])
 
-                t_indep_p_survival_prob_by_vol_upsamp = np.empty(t_indep_p_info_upsamp_shape)
-                p_x_by_sp_by_vol_upsamp = np.empty(t_indep_p_info_upsamp_shape)
-                p_y_by_sp_by_vol_upsamp = np.empty(t_indep_p_info_upsamp_shape)
-                p_z_by_sp_by_vol_upsamp = np.empty(t_indep_p_info_upsamp_shape)
+                n_rbins = len(bin_edges.r) - 1
+                n_thetabins = len(bin_edges.theta) - 1
 
-            # Slice up the upsampled grid into chunks the same size as the
-            # original and work on one such chunk at a time (the sizes will
-            # match, making numpy operations possible). This performs an
-            # interleaved tiling.
-            phi_slice = slice(None)
-            for r_subbin in range(oversample_r):
-                r_slice = slice(r_subbin, None, oversample_r)
-                for theta_subbin in range(oversample_theta):
-                    theta_slice = slice(theta_subbin, None, oversample_theta)
-                    idx = (phi_slice, r_slice, theta_slice)
-                    t_indep_p_survival_prob_by_vol = t_indep_p_survival_prob * vol_upsamp[idx]
-                    t_indep_p_survival_prob_by_vol_upsamp[idx] = t_indep_p_survival_prob_by_vol
-                    p_x_by_sp_by_vol_upsamp[idx] = t_indep_p_x * t_indep_p_survival_prob_by_vol
-                    p_y_by_sp_by_vol_upsamp[idx] = t_indep_p_y * t_indep_p_survival_prob_by_vol
-                    p_z_by_sp_by_vol_upsamp[idx] = t_indep_p_z * t_indep_p_survival_prob_by_vol
-
-            if test:
-                print('t_indep_p_survival_prob_by_vol_upsamp.max():',
-                      t_indep_p_survival_prob_by_vol_upsamp.max())
+                x_edges_mg = np.empty_like(r_edges_mg)
+                y_edges_mg = np.empty_like(r_edges_mg)
+                z_edges_mg = np.empty_like(r_edges_mg)
+                sph2cart(r=r_edges_mg, theta=theta_edges_mg, phi=phi_edges_mg, x=x_edges_mg, y=y_edges_mg, z=z_edges_mg)
 
             # Loop through all of the DOMs in this subdetector index, shifting
             # the coordinates and aggregating the expected survival
@@ -486,18 +453,15 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
                       % (table_kind, dom_depth_idx, str_idx))
 
                 string_x, string_y, dom_z = string_dom_xyz
-                doms_used.append([string_x, string_y, dom_z])
+                doms_used.append(string_dom_xyz)
 
                 bin_quantities(
-                    x_rel=x_rel_upsamp_centers,
-                    y_rel=y_rel_upsamp_centers,
-                    z_rel=z_rel_upsamp_centers,
+                    x_edges_mg=x_edges_mg, y_edges_mg=y_edges_mg,
+                    z_edges_mg=z_edges_mg,
                     x_offset=string_x, y_offset=string_y, z_offset=dom_z,
-                    vol=vol_upsamp,
-                    survival_prob_by_vol=t_indep_p_survival_prob_by_vol_upsamp,
-                    p_x=p_x_by_sp_by_vol_upsamp,
-                    p_y=p_y_by_sp_by_vol_upsamp,
-                    p_z=p_z_by_sp_by_vol_upsamp,
+                    bin_vols=bin_vols,
+                    survival_prob=t_indep_p_survival_prob,
+                    p_x=t_indep_p_x, p_y=t_indep_p_y, p_z=t_indep_p_z,
                     binned_p_x=avg_photon_x,
                     binned_p_y=avg_photon_y,
                     binned_p_z=avg_photon_z,
@@ -517,6 +481,16 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
     doms_used = np.array(doms_used)
 
+    print('binned_p_survival_prob_by_vol range:',
+          binned_p_survival_prob_by_vol.min(),
+          binned_p_survival_prob_by_vol.max())
+
+    print('one_minus_survival_prob range:',
+          one_minus_survival_prob.min(),
+          one_minus_survival_prob.max())
+
+    print('')
+
     mask = binned_p_survival_prob_by_vol != 0
     scale = 1 / binned_p_survival_prob_by_vol[mask]
     avg_photon_x[mask] *= scale
@@ -525,8 +499,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
     survival_prob = 1 - one_minus_survival_prob
 
-    if smooth:
-        gaussian_filter(survival_prob, 
+    #if smooth:
+    #    gaussian_filter(survival_prob,
     arrays_names = [
         (survival_prob, 'survival_prob'),
         (avg_photon_x, 'avg_photon_x'),
@@ -534,97 +508,16 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
         (avg_photon_z, 'avg_photon_z')
     ]
     test_str = '_test' if test else ''
-    fbasename = (
-        'qdeficit_cart_table_%dx%dx%d_osr%d_ostheta%d_nphi%d%s'
-        % (nx, ny, nz, oversample_r, oversample_theta, nphi, test_str)
-        )
+    fbasename = ('time_dom_indep_cart_table_%dx%dx%d_nphi%d%s'
+                 % (nx, ny, nz, nphi, test_str))
     for array, name in arrays_names:
         fname = '%s_%s.fits' % (fbasename, name)
         fpath = join(tables_dir, fname)
-        hdu = pyfits.PrimaryHDU(array.astype(np.float32))
+        hdu = pyfits.PrimaryHDU(array.astype(TABLE_FTYPE))
         hdu.writeto(fpath, clobber=True)
 
     end_save_time = time.time()
     print('saving to disk took %.3f sec' % (end_save_time - end_loop_time))
-
-    if plot:
-        import matplotlib as mpl
-        mpl.use('Agg')
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.mplot3d import Axes3D # pylint: disable=unused-variable
-
-        x_half_bw = (xlims[1] - xlims[0]) / nx / 2
-        y_half_bw = (ylims[1] - ylims[0]) / ny / 2
-        z_half_bw = (zlims[1] - zlims[0]) / nz / 2
-        x, y, z = np.meshgrid(
-            np.linspace(xlims[0] + x_half_bw, xlims[1] - x_half_bw, nx),
-            np.linspace(ylims[0] + y_half_bw, ylims[1] - y_half_bw, ny),
-            np.linspace(zlims[0] + z_half_bw, zlims[1] - z_half_bw, nz),
-            indexing='ij'
-        )
-
-        print('survival_prob.max:', survival_prob.max())
-
-        print('x.shape:', x.shape)
-        mask = survival_prob > 0.0001
-        print('number of non-zero counts:', np.sum(mask))
-        print('at x:', (x[mask].min(), x[mask].max()))
-        print('at y:', (y[mask].min(), y[mask].max()))
-        print('at z:', (z[mask].min(), z[mask].max()))
-        length = np.sqrt(avg_photon_x**2 + avg_photon_y**2 + avg_photon_z**2)
-        mask = length > 0.001
-        print('number of avg_photon len > 0.001:', np.sum(mask))
-        print('maxlen:', length.max())
-
-        fig1 = plt.figure(1, figsize=(12, 12), dpi=72)
-        fig1.clf()
-        ax1 = fig1.add_subplot(111, projection='3d')
-        ax1.quiver(
-            x[mask], y[mask], z[mask],
-            avg_photon_x[mask]*100,
-            avg_photon_y[mask]*100,
-            avg_photon_z[mask]*100,
-            alpha=0.7
-        )
-        ax1.plot(
-            doms_used[:, 0], doms_used[:, 1], doms_used[:, 2],
-            marker='o', linestyle='none', markersize=2, color='k'
-        )
-
-        fig2 = plt.figure(2, figsize=(12, 12), dpi=72)
-        fig2.clf()
-        ax2 = fig2.add_subplot(111, projection='3d')
-        ax2.plot(
-            doms_used[:, 0], doms_used[:, 1], doms_used[:, 2],
-            marker='o', markersize=2, linestyle='none', color='k'
-        )
-        mask = survival_prob > 0.001
-        ax2.scatter(
-            x[mask], y[mask], z[mask], c=survival_prob[mask],
-            cmap='YlOrBr',
-            alpha=0.3
-        )
-
-        for ax, title in [(ax1, 'Average surviving photon'),
-                          (ax2, 'Survival probability')]:
-            ax.set_xlim(xlims)
-            ax.set_ylim(ylims)
-            ax.set_zlim(zlims)
-            ax.set_xlabel('x (m)')
-            ax.set_ylabel('y (m)')
-            ax.set_zlabel('z (m)')
-            ax.set_title(title)
-
-        for fig, name in [(fig1, 'avg_photon'), (fig2, 'survival_prob')]:
-            fig.tight_layout()
-            fname = join(tables_dir, fbasename + '_' + name)
-            fig.savefig(fname + '.png', dpi=300)
-            fig.savefig(fname + '.pdf')
-
-        print('plotting took %.3f sec' % (time.time() - end_save_time))
-        if interactive:
-            plt.draw()
-            plt.show()
 
 
 if __name__ == '__main__':

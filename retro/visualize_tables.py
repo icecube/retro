@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, no-member
 
 """
 3D visualization of a time- and DOM-independent table
@@ -11,7 +11,7 @@ from __future__ import absolute_import, division, print_function
 from argparse import ArgumentParser
 from copy import deepcopy
 import os
-from os.path import abspath, dirname, isdir, isfile, join
+from os.path import abspath, dirname, join
 
 import numpy as np
 import pyfits
@@ -23,7 +23,7 @@ from retro import DETECTOR_GEOM_FILE
 
 
 DOM_RADIUS_M = 0.3302
-TEST_DOM_COORD = [46.29000092,  -34.88000107, -350.05999756]
+TEST_DOM_COORD = [46.29000092, -34.88000107, -350.05999756]
 
 
 
@@ -86,7 +86,7 @@ def main(tables_dir, tables_basename, geom_file, plot_slices=True,
         (-650, 650), # y
         (-650, 650)  # z
     ])
-    nx, ny, nz = [100]*3
+    nx, ny, nz = [500]*3
     ds = yt.load_uniform_grid(data, domain_dimensions=(nx, ny, nz), bbox=bbox,
                               nprocs=4)
 
@@ -97,7 +97,7 @@ def main(tables_dir, tables_basename, geom_file, plot_slices=True,
     sphere_kwargs = dict(
         radius=(5*DOM_RADIUS_M, 'cm'),
         coord_system='data',
-        circle_args=dict(color=(0, 0.8, 0), linewidth=1, alpha=0.3, facecolor=(0,0.8,0))
+        circle_args=dict(color=(0, 0.8, 0), linewidth=1, alpha=0.3)
     )
 
     if plot_projections:
@@ -121,9 +121,9 @@ def main(tables_dir, tables_basename, geom_file, plot_slices=True,
     if plot_slices:
         skw = deepcopy(sphere_kwargs)
         skw['circle_args']['color'] = 'black'
-        skw['circle_args']['facecolor'] = 'black'
         for normal in ['x', 'y', 'z']:
-            slc = yt.SlicePlot(ds, normal=normal, fields='density', center=TEST_DOM_COORD)
+            slc = yt.SlicePlot(ds, normal=normal, fields='density',
+                               center=TEST_DOM_COORD)
             slc.set_cmap('density', 'octarine')
             #slc.set_log('density', False)
             if 'test' in tables_basename:
