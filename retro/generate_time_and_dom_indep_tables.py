@@ -28,6 +28,7 @@ import time
 import numba
 import numpy as np
 import pyfits
+from scipy.ndimage.filters import gaussian_filter
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
@@ -88,20 +89,9 @@ def parse_args(description=__doc__):
         help='''Number of time-independent Cartesian z bins'''
     )
     parser.add_argument(
-        '--oversample-r', type=int, required=True,
-        help='''Subdivide original retro tables' r- and theta-binning this many
-        times before placing in time-independent Cartesian binning.'''
-    )
-    parser.add_argument(
-        '--oversample-theta', type=int, required=True,
-        help='''Subdivide original retro tables' r- and theta-binning this many
-        times before placing in time-independent Cartesian binning.'''
-    )
-    parser.add_argument(
         '--nphi', type=int, required=True,
-        help='''Number of phi bins to use (retro tables are currently
-        independent of phi, so --oversample has no effect on the phi
-        dimension).'''
+        help='''Number of phi bins to use (retro tables input to this script
+        are currently independent of phi).'''
     )
     parser.add_argument(
         '--tables-dir', metavar='DIR', type=str,
@@ -119,23 +109,12 @@ def parse_args(description=__doc__):
         '--test', action='store_true',
         help='''Run a simple test using a single DOM'''
     )
-    parser.add_argument(
-        '--plot', action='store_true',
-        help='''Plot tables. Very slow if nx*ny*nz is larger than ~10k'''
-    )
-    parser.add_argument(
-        '--interactive', action='store_true',
-        help='''If --plot is specified, this displays the plots to the user
-        before exiting. This has no effect if --plot is not specified.'''
-    )
     args = parser.parse_args()
     return args
 
 
-def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
-                                       oversample_r, oversample_theta, nphi,
-                                       tables_dir, geom_file, test=False,
-                                       plot=False, interactive=False):
+def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
+                                       tables_dir, geom_file, test=False):
     """Generate time- and DOM-independent tables. Note that these tables are in
     Cartesian coordinates, defining nx x ny x nz voxels. One table contains the
     photon survival probability for each voxel (which can be > 1 since photons
@@ -148,12 +127,6 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
     nx, ny, nz : int
         Number of voxels in each dimension. Note that there will be e.g.
         ``nx + 1`` bin edges in the x-dimension.
-
-    oversample_r, oversample_theta : int >= 1
-        Number of times to subdivide original retro tables' r- and
-        theta-binning prior to populating the time-independent Cartesian table.
-        Presumably the larger oversample_{r,theta}, the more accurate the
-        transfer of information will be (and the longer it will take).
 
     nphi : int >= 4
         Number of phi bins. It doesn't make sense for this to be a small
@@ -551,6 +524,9 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz,
     avg_photon_z[mask] *= scale
 
     survival_prob = 1 - one_minus_survival_prob
+
+    if smooth:
+        gaussian_filter(survival_prob, 
     arrays_names = [
         (survival_prob, 'survival_prob'),
         (avg_photon_x, 'avg_photon_x'),

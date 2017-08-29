@@ -583,7 +583,7 @@ def spherical_volume(dr, dcostheta, dphi):
     return np.abs(dcostheta * dr**3 * dphi / 3)
 
 
-@numba.jit(nopython=True, nogil=True, cache=True, parallel=True)
+@numba.jit(nopython=True, nogil=True, cache=True)
 def sph2cart(r, theta, phi, x, y, z):
     """Convert spherical coordinates to Cartesian.
 
