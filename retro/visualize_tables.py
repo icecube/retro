@@ -86,7 +86,7 @@ def main(tables_dir, tables_basename, geom_file, plot_slices=True,
         (-650, 650), # y
         (-650, 650)  # z
     ])
-    nx, ny, nz = [500]*3
+    nx, ny, nz = [100]*3
     ds = yt.load_uniform_grid(data, domain_dimensions=(nx, ny, nz), bbox=bbox,
                               nprocs=4)
 

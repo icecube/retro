@@ -206,6 +206,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
         Parameters
         ----------
+        x_edges, y_edges, z_edges
         x_edges_mg, y_edges_mg, z_edges : numpy.ndarray, all same shape
             Relative coordinates where the data values lie
 
@@ -247,35 +248,25 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
                     three_d_idx = (idx0, idx1, idx2)
 
                     x = x_edges_mg[three_d_slice]
-                    xb_min = int((np.min(x) + xbshift) * xbscale)
-                    xb_max = int((np.max(x) + xbshift) * xbscale)
-                    if xb_max < 0 or xb_min >= nx:
+                    xbmin = int((np.min(x) + xbshift) * xbscale)
+                    xbmax = int((np.max(x) + xbshift) * xbscale)
+                    if xbmax < 0 or xbmin >= nx:
                         continue
 
                     y = y_edges_mg[three_d_slice]
-                    yb_min = int((np.min(y) + ybshift) * ybscale)
-                    yb_max = int((np.max(y) + ybshift) * ybscale)
-                    if yb_max < 0 or yb_min >= ny:
+                    ybmin = int((np.min(y) + ybshift) * ybscale)
+                    ybmax = int((np.max(y) + ybshift) * ybscale)
+                    if ybmax < 0 or ybmin >= ny:
                         continue
 
                     z = z_edges_mg[three_d_slice]
-                    zb_min = int((np.min(z) + zbshift) * zbscale)
-                    zb_max = int((np.max(z) + zbshift) * zbscale)
-                    if zb_max < 0 or zb_min >= nz:
+                    zbmin = int((np.min(z) + zbshift) * zbscale)
+                    zbmax = int((np.max(z) + zbshift) * zbscale)
+                    if zbmax < 0 or zbmin >= nz:
                         continue
 
-                    # TODO: more advanced intersection volume calculation?
                     vol = bin_vols[three_d_idx]
-                    if vol < 0:
-                        print('three_d_idx:', three_d_idx)
-                        print('vol:', vol)
-                        raise Exception
-
                     sp = survival_prob[three_d_idx]
-                    if sp < 0:
-                        print('three_d_idx:', three_d_idx)
-                        print('sp:', sp)
-                        raise Exception
 
                     sp_by_vol = sp * vol
                     p_x_ = p_x[three_d_idx]
@@ -284,11 +275,26 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
                     # Loop through all Cartesian bins that hold some part of
                     # the spherical volume element, and figure out the overlap.
-                    for xbin in range(max(0, xb_min), min(nx, xb_max + 1)):
-                        for ybin in range(max(0, yb_min), min(ny, yb_max + 1)):
-                            for zbin in range(max(0, zb_min), min(nz, zb_max + 1)):
-                                bin_idx = (xbin, ybin, zbin)
-
+                    xbmin = max(0, xbmin)
+                    ybmin = max(0, ybmin)
+                    zbmin = max(0, zbmin)
+                    xbmax = min(nx, xbmax + 1)
+                    ybmax = min(ny, ybmax + 1)
+                    zbmax = min(nz, zbmax + 1)
+                    for xb in range(xbmin, xbmax):
+                        #x_rel_center = 0.5 * (x_edges[xb] + x_edges[xb+1]) - x_offset
+                        for yb in range(ybmin, ybmax):
+                            #y_rel_center = 0.5 * (y_edges[yb] + y_edges[yb+1]) - y_offset
+                            for zb in range(zbmin, zbmax):
+                                #z_rel_center = 0.5 * (z_edges[zb] + z_edges[zb+1]) - z_offset
+                                #r_center = np.sqrt(x_rel_center*x_rel_center +
+                                #                   y_rel_center*y_rel_center +
+                                #                   z_rel_center*z_rel_center)
+                                #phi_center = 
+                                #theta_center = 
+                                # TODO: more advanced intersection volume
+                                # calculation? E.g., antialiazing by subsampling?
+                                bin_idx = (xb, yb, zb)
                                 vol_mask[bin_idx] = 1
                                 binned_vol[bin_idx] += vol
                                 binned_sp_by_vol[bin_idx] += sp_by_vol
@@ -296,18 +302,12 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
                                 binned_p_y[bin_idx] += p_y_
                                 binned_p_z[bin_idx] += p_z_
 
-        print('binned_vol range:', binned_vol.min(), binned_vol.max())
-        print('binned_sp_by_vol range:', binned_sp_by_vol.min(), binned_sp_by_vol.max())
-        print('one_minus_survival_prob range:', one_minus_survival_prob.min(), one_minus_survival_prob.max())
-
         flat_vol = binned_vol.flat
         flat_one_minus_sp = one_minus_survival_prob.flat
         flat_sp_by_vol = binned_sp_by_vol.flat
         for idx, mask in enumerate(vol_mask.flat):
-            if mask > 0:
-                flat_one_minus_sp[idx] *= (
-                    CALC_FTYPE(1) - flat_sp_by_vol[idx] / flat_vol[idx]
-                )
+            if mask == 1:
+                flat_one_minus_sp[idx] *= 1 - flat_sp_by_vol[idx] / flat_vol[idx]
 
     end_setup_time = time.time()
     print('Setup time: %.3f sec' % (end_setup_time - start_time))
@@ -335,6 +335,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
         for dom_depth_idx in dom_depth_indices:
             det_depth_start_time = time.time()
             #if test and dom_depth_idx not in [28, 29, 30]:
+            #if test and dom_depth_idx not in [48, 49, 50]:
             if test and dom_depth_idx not in [50]:
                 continue
             print('table_kind: %s, dom_depth_idx: %s'
@@ -347,6 +348,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
             # Load the 4D table for the DOM type / depth index
             fpath = expand(table_fpath_proto.format(tables_dir=tables_dir, dom=dom_depth_idx))
             photon_info, bin_edges = extract_photon_info(fpath=fpath, dom_depth_index=dom_depth_idx)
+            print('bin_edges:', bin_edges)
 
             p_survival_prob = photon_info.survival_prob[dom_depth_idx].astype(CALC_FTYPE)
             p_theta = photon_info.theta[dom_depth_idx].astype(CALC_FTYPE)
@@ -421,17 +423,18 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
             if new_binning_hash != binning_hash:
                 binning_hash = new_binning_hash
 
-                phi_edges_mg, r_edges_mg, theta_edges_mg = np.meshgrid(phi_edges, bin_edges.r, bin_edges.theta, indexing='ij')
+                phi_edges_mg, r_edges_mg, theta_edges_mg = np.meshgrid(
+                    phi_edges, bin_edges.r, bin_edges.theta,
+                    indexing='ij'
+                )
 
                 phi_widths = np.abs(np.diff(phi_edges))
                 r_widths = np.abs(np.diff(bin_edges.r))
-                costheta_widths = np.abs(np.diff(bin_edges.theta))
+                costheta_widths = np.abs(np.diff(np.cos(bin_edges.theta)))
 
                 phi_widths_mg, r_widths_mg, costheta_widths_mg = np.meshgrid(phi_widths, r_widths, costheta_widths, indexing='ij')
 
                 bin_vols = spherical_volume(dr=r_widths_mg, dcostheta=costheta_widths_mg, dphi=phi_widths_mg)
-                print('bin_vols.shape:', bin_vols.shape)
-                print('bin_vols[(300, 12, 26)]:', bin_vols[(300, 12, 26)])
 
                 n_rbins = len(bin_edges.r) - 1
                 n_thetabins = len(bin_edges.theta) - 1
@@ -439,13 +442,14 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
                 x_edges_mg = np.empty_like(r_edges_mg)
                 y_edges_mg = np.empty_like(r_edges_mg)
                 z_edges_mg = np.empty_like(r_edges_mg)
-                sph2cart(r=r_edges_mg, theta=theta_edges_mg, phi=phi_edges_mg, x=x_edges_mg, y=y_edges_mg, z=z_edges_mg)
+                sph2cart(r=r_edges_mg, theta=theta_edges_mg, phi=phi_edges_mg,
+                         x=x_edges_mg, y=y_edges_mg, z=z_edges_mg)
 
             # Loop through all of the DOMs in this subdetector index, shifting
             # the coordinates and aggregating the expected survival
             # probabilities  and average photon info in the Cartesian grid
             for str_idx, string_dom_xyz in enumerate(subdet_depth_dom_coords):
-                #if test and str_idx not in [25, 26, 34, 35, 36, 44, 45] + range(79, 86):
+                #if test and str_idx not in [25, 26, 34, 35, 36, 44, 45]:
                 if test and str_idx not in [35]:
                     continue
                 det_depth_string_start_time = time.time()
@@ -481,15 +485,14 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
     doms_used = np.array(doms_used)
 
-    print('binned_p_survival_prob_by_vol range:',
-          binned_p_survival_prob_by_vol.min(),
-          binned_p_survival_prob_by_vol.max())
-
-    print('one_minus_survival_prob range:',
-          one_minus_survival_prob.min(),
-          one_minus_survival_prob.max())
-
-    print('')
+    if test:
+        print('binned_p_survival_prob_by_vol range:',
+              binned_p_survival_prob_by_vol.min(),
+              binned_p_survival_prob_by_vol.max())
+        print('one_minus_survival_prob range:',
+              one_minus_survival_prob.min(),
+              one_minus_survival_prob.max())
+        print('')
 
     mask = binned_p_survival_prob_by_vol != 0
     scale = 1 / binned_p_survival_prob_by_vol[mask]

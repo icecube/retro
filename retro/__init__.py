@@ -606,12 +606,12 @@ def sph2cart(r, theta, phi, x, y, z):
     z_flat = z.flat
     for idx in range(num_elements):
         rf = r_flat[idx]
-        tf = theta_flat[idx]
-        pf = phi_flat[idx]
-        rsintheta = rf * math.sin(tf)
-        x_flat[idx] = rsintheta * math.cos(pf)
-        y_flat[idx] = rsintheta * math.sin(pf)
-        z_flat[idx] = rf * math.cos(tf)
+        thetaf = theta_flat[idx]
+        phif = phi_flat[idx]
+        rho = rf * math.sin(thetaf)
+        x_flat[idx] = rho * math.cos(phif)
+        y_flat[idx] = rho * math.sin(phif)
+        z_flat[idx] = rf * math.cos(thetaf)
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
