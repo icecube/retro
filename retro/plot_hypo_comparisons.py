@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, too-many-locals, too-many-statements, redefined-outer-name
 
 """
 Make plots for a single hypothesis, comparing segmented to analytic hypotheses.
@@ -21,7 +21,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import BinningCoords, HypoParams8D, TimeCartCoord
+from retro import HypoParams8D, TimeSphCoord, TimeCart3DCoord
 from segmented_hypo import SegmentedHypo
 from analytic_hypo import AnalyticHypo
 
@@ -29,9 +29,9 @@ from analytic_hypo import AnalyticHypo
 def plot_hypo_comparisons():
     """Main"""
     # Binning defined to be same as that used for clsim
-    bin_min = BinningCoords(t=-3000, r=0, theta=0, phi=0)
-    bin_max = BinningCoords(t=0, r=200, theta=np.pi, phi=2*np.pi)
-    num_bins = BinningCoords(t=50, r=20, theta=50, phi=36)
+    bin_min = TimeSphCoord(t=-3000, r=0, theta=0, phi=0)
+    bin_max = TimeSphCoord(t=0, r=200, theta=np.pi, phi=2*np.pi)
+    num_bins = TimeSphCoord(t=50, r=20, theta=50, phi=36)
 
     # An arbitrary hypothesis for testing
     hypo_params = HypoParams8D(
@@ -46,7 +46,7 @@ def plot_hypo_comparisons():
     )
 
     # An arbitrary hit coordinate for testing
-    hit_dom_coord = TimeCartCoord(t=0, x=0, y=10, z=0)
+    hit_dom_coord = TimeCart3DCoord(t=0, x=0, y=10, z=0)
 
     t0 = time.time()
     analytic_hypo = AnalyticHypo(hypo_params, cascade_e_scale=1,
@@ -323,4 +323,4 @@ def plot_hypo_comparisons():
 
 
 if __name__ == '__main__':
-    analytic_hypo, segmented_hypo = plot_hypo_comparisons()
+    analytic_hypo, segmented_hypo = plot_hypo_comparisons() # pylint: disable=invalid-name

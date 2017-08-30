@@ -16,7 +16,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import FTYPE, UITYPE, BinningCoords, HypoPhotonInfo, TimeCartCoord
+from retro import FTYPE, UITYPE, HypoPhotonInfo, TimeSphCoord, TimeCart3DCoord
 from retro import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
 from retro import convert_to_namedtuple, spacetime_separation
 from retro.hypo import Hypo
@@ -27,10 +27,10 @@ __all__ = ['IDX_T_IX', 'IDX_R_IX', 'IDX_THETA_IX', 'IDX_PHI_IX',
 
 
 # Define indices for accessing rows of `indices_array`
-IDX_T_IX = BinningCoords._fields.index('t')
-IDX_R_IX = BinningCoords._fields.index('r')
-IDX_THETA_IX = BinningCoords._fields.index('theta')
-IDX_PHI_IX = BinningCoords._fields.index('phi')
+IDX_T_IX = TimeSphCoord._fields.index('t')
+IDX_R_IX = TimeSphCoord._fields.index('r')
+IDX_THETA_IX = TimeSphCoord._fields.index('theta')
+IDX_PHI_IX = TimeSphCoord._fields.index('phi')
 
 
 class SegmentedHypo(Hypo):
@@ -77,13 +77,13 @@ class SegmentedHypo(Hypo):
 
         Parameters
         ----------
-        coord : TimeCartCoord or convertible thereto
+        coord : TimeCart3DCoord or convertible thereto
 
         """
         if coord == self.origin:
             return
 
-        coord = convert_to_namedtuple(coord, TimeCartCoord)
+        coord = convert_to_namedtuple(coord, TimeCart3DCoord)
 
         #print('new origin being set:', coord)
 
@@ -183,7 +183,7 @@ class SegmentedHypo(Hypo):
 
         if self.allocate_arrays:
             self.indices_array = np.empty(
-                shape=(len(BinningCoords._fields), self.num_segments),
+                shape=(len(TimeSphCoord._fields), self.num_segments),
                 dtype=UITYPE,
                 order='C'
             )
@@ -223,7 +223,7 @@ class SegmentedHypo(Hypo):
         segment_counts = {}
         for segment_idx in range(self.num_segments):
             indices = self.indices_array[:, segment_idx]
-            bin_idx = BinningCoords(*indices)
+            bin_idx = TimeSphCoord(*indices)
             previous_count = segment_counts.get(bin_idx, 0)
             segment_counts[bin_idx] = 1 + previous_count
 
@@ -244,7 +244,7 @@ class SegmentedHypo(Hypo):
             self.photon_info[bin_idx] = p_info
 
         # Average the cascade info into the first bin
-        bin_idx = BinningCoords(*self.indices_array[:, 0])
+        bin_idx = TimeSphCoord(*self.indices_array[:, 0])
         old = self.photon_info.get(bin_idx, None)
         if old is None:
             combined = HypoPhotonInfo(

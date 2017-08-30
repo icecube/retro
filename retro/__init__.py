@@ -20,9 +20,10 @@ __all__ = [
     'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME', 'DFLT_SPE_RECO_NAME',
     'IC_TABLE_FPATH_PROTO', 'DC_TABLE_FPATH_PROTO', 'DETECTOR_GEOM_FILE',
 
-    # Type definitions
+    # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
-    'RetroPhotonInfo', 'HypoPhotonInfo', 'TimeSphCoord', 'TimeCartCoord',
+    'RetroPhotonInfo', 'HypoPhotonInfo', 'Cart2DCoord', 'Cart3DCoord',
+    'PolCoord', 'SphCoord', 'TimeCart3DCoord', 'TimeSphCoord',
 
     # Type selections
     'FTYPE', 'UITYPE', 'HYPO_PARAMS_T',
@@ -124,16 +125,45 @@ where direction of vector is the direciton in which it points, NOT the
 direction from which it comes (as is the astro / IceCube convention). Intended
 to contain dictionaries with DOM depth index as keys and arrays as values."""
 
+Cart2DCoord = namedtuple( # pylint: disable=invalid-name
+    typename='Cart2DCoord',
+    field_names=('x', 'y'))
+"""Cartesian 2D coordinate: x, y."""
+
+Cart3DCoord = namedtuple( # pylint: disable=invalid-name
+    typename='Cart3DCoord',
+    field_names=('x', 'y', 'z'))
+"""Cartesian 3D coordinate: x, y, z."""
+
+PolCoord = namedtuple( # pylint: disable=invalid-name
+    typename='PolCoord',
+    field_names=('r', 'theta')
+)
+"""2D polar coordinate: r, theta."""
+
+SphCoord = namedtuple( # pylint: disable=invalid-name
+    typename='SphCoord',
+    field_names=('r', 'theta', 'phi')
+)
+"""3D spherical coordinate: r, theta, and phi."""
+
+TimeCart3DCoord = namedtuple( # pylint: disable=invalid-name
+    typename='Time3DCartCoord',
+    field_names=('t',) + Cart3DCoord._fields
+)
+"""Time and Cartesian 3D coordinate: t, x, y, z."""
+
+TimePolCoord = namedtuple( # pylint: disable=invalid-name
+    typename='TimePolCoord',
+    field_names=('t',) + PolCoord._fields
+)
+"""Time and polar coordinate: t, r, theta."""
+
 TimeSphCoord = namedtuple( # pylint: disable=invalid-name
     typename='TimeSphCoord',
-    field_names=('t', 'r', 'theta', 'phi')
+    field_names=('t',) + SphCoord._fields
 )
-"""Binning coordinates."""
-
-TimeCartCoord = namedtuple( # pylint: disable=invalid-name
-    typename='TimeCartCoord',
-    field_names=('t', 'x', 'y', 'z'))
-"""Time and space coordinates: t, x, y, z."""
+"""Time and spherical coordinate: t, r, theta, phi."""
 
 
 # -- Datatype choices for consistency throughout code -- #

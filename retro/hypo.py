@@ -15,7 +15,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import HYPO_PARAMS_T, BinningCoords, TimeCartCoord
+from retro import HYPO_PARAMS_T, TimeSphCoord, TimeCart3DCoord
 from retro import (CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS,
                    TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M, PI, TWO_PI)
 from retro import (bin_edges_to_centers, binspec_to_edges,
@@ -35,14 +35,14 @@ class Hypo(object):
     params : HYPO_PARAMS_T
     cascade_e_scale : float
     track_e_scale : float
-    origin : None or BinningCoords namedtuple
+    origin : None or TimeSphCoord namedtuple
 
     """
     def __init__(self, params, cascade_e_scale, track_e_scale, origin=None):
         # Convert types of passed values to those expected internally
 
         if origin is not None:
-            origin = convert_to_namedtuple(origin, TimeCartCoord)
+            origin = convert_to_namedtuple(origin, TimeCart3DCoord)
         params = convert_to_namedtuple(params, HYPO_PARAMS_T)
 
         # Store passed args as attrs
@@ -89,9 +89,9 @@ class Hypo(object):
 
         # Set default values for attrs computed by other methods/properties
 
-        num_coords = len(BinningCoords._fields)
-        self.bin_min, self.bin_max = [BinningCoords(*(np.nan,)*num_coords)]*2
-        self.num_bins = BinningCoords(*(0,)*num_coords)
+        num_coords = len(TimeSphCoord._fields)
+        self.bin_min, self.bin_max = [TimeSphCoord(*(np.nan,)*num_coords)]*2
+        self.num_bins = TimeSphCoord(*(0,)*num_coords)
 
         self._bin_edges = None
         self._bin_centers = None
@@ -105,20 +105,20 @@ class Hypo(object):
 
         Parameters
         ----------
-        start : BinningCoords namedtuple containing floats
+        start : TimeSphCoord namedtuple containing floats
             Lower-most bin edge in each dimension.
 
-        stop : BinningCoords namedtuple containing floats
+        stop : TimeSphCoord namedtuple containing floats
             Upper-most bin edge in each dimension.
 
-        num_bins : BinningCoords namedtuple containing ints
+        num_bins : TimeSphCoord namedtuple containing ints
             Number of bins in each dimension (note there will be
             ``num_bins + 1`` bin edges).
 
         """
-        bin_min = convert_to_namedtuple(start, BinningCoords)
-        bin_max = convert_to_namedtuple(stop, BinningCoords)
-        num_bins = convert_to_namedtuple(num_bins, BinningCoords)
+        bin_min = convert_to_namedtuple(start, TimeSphCoord)
+        bin_max = convert_to_namedtuple(stop, TimeSphCoord)
+        num_bins = convert_to_namedtuple(num_bins, TimeSphCoord)
         assert bin_min.t < bin_max.t
         assert bin_min.r == 0 < bin_max.r
         assert 0 <= bin_min.theta < bin_max.theta <= PI
@@ -141,7 +141,7 @@ class Hypo(object):
 
     @property
     def bin_edges(self):
-        """BinningCoords of floats : bin edges"""
+        """TimeSphCoord of floats : bin edges"""
         if self._bin_edges is None:
             self._bin_edges = binspec_to_edges(
                 start=self.bin_min,
@@ -152,27 +152,27 @@ class Hypo(object):
 
     @property
     def bin_centers(self):
-        """BinningCoords of floats : bin centers"""
+        """TimeSphCoord of floats : bin centers"""
         if self._bin_centers is None:
             self._bin_centers = bin_edges_to_centers(self.bin_edges)
         return self._bin_centers
 
     @property
     def bin_widths(self):
-        """BinningCoords of floats : bin widths"""
+        """TimeSphCoord of floats : bin widths"""
         if self._bin_widths is None:
             bin_edges = self.bin_edges
-            self._bin_widths = BinningCoords(
+            self._bin_widths = TimeSphCoord(
                 *(dim[1:] - dim[:-1] for dim in bin_edges)
             )
         return self._bin_widths
 
     @property
     def bin_num_factors(self):
-        """BinningCoords of floats : factors used to ID which bin number a
+        """TimeSphCoord of floats : factors used to ID which bin number a
         value falls in"""
         if self._bin_num_factors is None:
-            self._bin_num_factors = BinningCoords(
+            self._bin_num_factors = TimeSphCoord(
                 t=self.num_bins.t / (self.bin_max.t - self.bin_min.t),
                 r=self.num_bins.r / math.sqrt(self.bin_max.r - self.bin_min.r),
                 theta=self.num_bins.theta / (math.cos(self.bin_min.theta)

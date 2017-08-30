@@ -29,7 +29,7 @@ if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS
 from retro import (FTYPE, HYPO_PARAMS_T, TimeSphCoord, HypoParams10D,
-                   TimeCartCoord)
+                   TimeCart3DCoord)
 from retro import (IC_TABLE_FPATH_PROTO, DC_TABLE_FPATH_PROTO,
                    DETECTOR_GEOM_FILE)
 from retro import (bin_edges_to_binspec, event_to_hypo_params, expand,
@@ -173,7 +173,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     neg_llh = 0
     noise_counts = 0
 
-    # TODO: get 
+    # TODO: get
 
     eps_angle = EPS_STAT + EPS_CLSIM_ANGLE_BINNING
     eps_length = EPS_STAT + EPS_CLSIM_LENGTH_BINNING
@@ -233,7 +233,7 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
             )
 
         for jitter_dt in jitter_dts:
-            hit_dom_coord = TimeCartCoord(
+            hit_dom_coord = TimeCart3DCoord(
                 t=pulse_time + jitter_dt, x=x, y=y, z=z
             )
 
