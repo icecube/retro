@@ -207,6 +207,69 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
     phi_edges = np.linspace(0, 2*np.pi, nphi + 1)
     phi_centers = 0.5 * (phi_edges[:-1] + phi_edges[1:])
 
+    # TODO: function to take spherical and cartesian binnings and output the
+    # cartesian indices corresponding to each spherical bin, as well as the
+    # volume of overlap. This should have the origins of both Cartesian and
+    # spherical binnings at the same location, so that when one wants to shift
+    # the spherical binning to a particular DOM, the Cartesian bin indices
+    # merely need to be modified by the (integer) amount. Note that this means
+    # that the accuracy for a given DOM will be +/- 0.5 Caresian bin lengths
+    # (in each dimension). One _could_ upsample the rectangular binning by e.g.
+    # a factor of 2, and then the accuracy gets a little better...
+    @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+    def sphbin2cartbin(r_max, r_power, n_rbins, n_thetabins,
+                       x_bw, y_bw, z_bw,
+                       x_oversample, y_oversample, z_oversample,
+                       antialias_per_dim=1):
+        """
+        Parameters
+        ----------
+        r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray
+            Meshgrid of r, theta, and phi edges
+
+        x_bw, y_bw, z_bw : float
+            Cartesian binwidths in x, y, and z directions
+
+        x_oversample, y_oversample, z_oversample : int
+            Oversmapling factors. If oversampling is used, the returned indices
+            array will have floating point values. E.g., a bin index with
+            oversampling of 2 could have take values 0, 0.5, 1, ...
+            Note that this increases the computational cost _and_ increases the
+            memory footprint of the produced array(s).
+
+        antialias_factor : int
+            The smallest binning unit in each dimension is divided again by
+            this factor for more accruately computing the volume of overlap
+            (and then the sub-binning for antialiasing is discarded). This
+            therefore does not add to the memory footprint, but will increase
+            the computational cost.
+
+        Returns
+        -------
+        indices : list of M shape (N x 3) numpy.ndarrays
+            One array per spherical bin. Data type of the arrays is int32 if
+            all oversample factors are set to 1; otherwise, dtype is float64.
+
+        overlap_vol : list of M shape (N,) numpy.ndarrays, dtype of float64
+            One array per spherical bin
+
+        """
+        x_bw_os = x_bw / x_oversample
+        y_bw_os = y_bw / y_oversample
+        z_bw_os = z_bw / z_oversample
+
+        x_bw_os_aa = x_bw_os / antialias_factor
+        y_bw_os_aa = y_bw_os / antialias_factor
+        z_bw_os_aa = z_bw_os / antialias_factor
+
+        n_xbins_oct_os_aa = int(np.ceil(r_max / x_bw_os_aa))
+        n_ybins_oct_os_aa = int(np.ceil(r_max / y_bw_os_aa))
+        n_zbins_oct_os_aa = int(np.ceil(r_max / z_bw_os_aa))
+
+        for x in range(n_xbins):
+            x
+        pass
+
     @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
     def bin_quantities(r_edges_mg, theta_edges_mg, phi_edges_mg,
                        x_edges_mg, y_edges_mg, z_edges_mg,
@@ -219,7 +282,10 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
         Parameters
         ----------
-        x_edges_mg, y_edges_mg, z_edges : numpy.ndarray, all same shape
+        r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray, same shape
+            Relative coordinates where the data values lie
+
+        x_edges_mg, y_edges_mg, z_edges_mg : numpy.ndarray, same shape
             Relative coordinates where the data values lie
 
         x_offset, y_offset, z_offset : float

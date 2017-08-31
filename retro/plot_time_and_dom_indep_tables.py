@@ -13,6 +13,10 @@ from copy import deepcopy
 import os
 from os.path import abspath, dirname, join
 
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
+
 import numpy as np
 import pyfits
 import yt
@@ -194,6 +198,8 @@ def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
             #north_vector = (0, 0, 1)
 
         for normal in ['x', 'y', 'z']:
+            #if normal == 'x':
+            #    plt.
             slc = yt.SlicePlot(ds, normal=normal, fields='density',
                                center=center)
             slc.set_cmap('density', 'octarine')
@@ -210,7 +216,7 @@ def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
                 for depth_xyz in doms_used:
                     slc.annotate_sphere(depth_xyz, **kw)
 
-            nskip = 10
+            nskip = 20
             kw = dict(factor=nskip, scale=5e8)
             if normal == 'x':
                 slc.annotate_quiver('velocity_y', 'velocity_z', **kw)
