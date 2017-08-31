@@ -63,17 +63,17 @@ def parse_args(description=__doc__):
     parser = ArgumentParser(description=description)
     parser.add_argument(
         '--xlims', metavar='LOWER, UPPER', type=float, nargs=2,
-        default=(-700, 700),
+        default=(-900, 900),
         help='''limits on time-independent Cartesian binning in x dimension'''
     )
     parser.add_argument(
         '--ylims', metavar='LOWER, UPPER', type=float, nargs=2,
-        default=(-650, 650),
+        default=(-900, 900),
         help='''limits on time-independent Cartesian binning in y dimension'''
     )
     parser.add_argument(
         '--zlims', metavar='LOWER, UPPER', type=float, nargs=2,
-        default=(-650, 650),
+        default=(-750, 650),
         help='''limits on time-independent Cartesian binning in z dimension'''
     )
     parser.add_argument(
@@ -92,6 +92,16 @@ def parse_args(description=__doc__):
         '--nphi', type=int, required=True,
         help='''Number of phi bins to use (retro tables input to this script
         are currently independent of phi).'''
+    )
+    parser.add_argument(
+        '--t-start', type=int, default=None,
+        help='''Time slice start index (from 0 to however many time slices are
+        in the binning).'''
+    )
+    parser.add_argument(
+        '--t-stop', type=int, default=None,
+        help='''Time slice start index (from 0 to however many time slices are
+        in the binning).'''
     )
     parser.add_argument(
         '--tables-dir', metavar='DIR', type=str,
@@ -114,7 +124,8 @@ def parse_args(description=__doc__):
 
 
 def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
-                                       tables_dir, geom_file, test=False):
+                                       tables_dir, geom_file, test=False,
+                                       t_start=None, t_stop=None):
     """Generate time- and DOM-independent tables. Note that these tables are in
     Cartesian coordinates, defining nx x ny x nz voxels. One table contains the
     photon survival probability for each voxel (which can be > 1 since photons
@@ -333,8 +344,6 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
     binning_hash = None
 
     for table_kind in ['ic', 'dc']:
-        #if test and table_kind != 'dc':
-        #    continue
         det_start_time = time.time()
         if table_kind == 'ic':
             table_fpath_proto = IC_TABLE_FPATH_PROTO
@@ -393,7 +402,9 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
             # Marginalize out time for photon survival probabilities; this
             # implements, effectively, the logic
             #   ``Prob(t0 or t1 or ... or tN)``
-            t_indep_p_survival_prob = 1 - (1 - p_survival_prob).prod(axis=RETRO_T_IDX)
+            t_slice = [slice(None) for _ in orig_p_info_shape]
+            t_slice[RETRO_T_IDX] = slice(t_start, t_stop)
+            t_indep_p_survival_prob = 1 - (1 - p_survival_prob[t_slice]).prod(axis=RETRO_T_IDX)
 
             # Marginalize out time for (p_length, p_theta) by converting to
             # Cartesian coordinates and performing an average weighted by
@@ -412,8 +423,8 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
             t_indep_p_z = np.zeros_like(t_indep_p_survival_prob)
             t_indep_p_rho = np.zeros_like(t_indep_p_survival_prob)
 
-            t_indep_p_z[mask] = (p_z * p_survival_prob).sum(axis=RETRO_T_IDX)[mask] * scale
-            t_indep_p_rho[mask] = (p_rho * p_survival_prob).sum(axis=RETRO_T_IDX)[mask] * scale
+            t_indep_p_z[mask] = (p_z[t_slice] * p_survival_prob[t_slice]).sum(axis=RETRO_T_IDX)[mask] * scale
+            t_indep_p_rho[mask] = (p_rho[t_slice] * p_survival_prob[t_slice]).sum(axis=RETRO_T_IDX)[mask] * scale
 
             # Broadcast the survival probability and Cartesian components of
             # the average photon # (binned in plane-polar coordinates) to
