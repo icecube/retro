@@ -123,6 +123,262 @@ def parse_args(description=__doc__):
     return args
 
 
+# TODO: function to take spherical and cartesian binnings and output the
+# cartesian indices corresponding to each spherical bin, as well as the
+# volume of overlap. This should have the origins of both Cartesian and
+# spherical binnings at the same location, so that when one wants to shift
+# the spherical binning to a particular DOM, the Cartesian bin indices
+# merely need to be modified by the (integer) amount. Note that this means
+# that the accuracy for a given DOM will be +/- 0.5 Caresian bin lengths
+# (in each dimension). One _could_ upsample the rectangular binning by e.g.
+# a factor of 2, and then the accuracy gets a little better...
+
+def sphbin2cartbin(r_max, r_power, n_rbins, n_thetabins,
+                   x_bw, y_bw, z_bw,
+                   x_oversample, y_oversample, z_oversample,
+                   antialias_per_dim=1):
+    """
+    Parameters
+    ----------
+    r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray
+        Meshgrid of r, theta, and phi edges
+
+    x_bw, y_bw, z_bw : float
+        Cartesian binwidths in x, y, and z directions
+
+    x_oversample, y_oversample, z_oversample : int
+        Oversmapling factors. If oversampling is used, the returned indices
+        array will have floating point values. E.g., a bin index with
+        oversampling of 2 could have take values 0, 0.5, 1, ...
+        Note that this increases the computational cost _and_ increases the
+        memory footprint of the produced array(s).
+
+    antialias_factor : int
+        The smallest binning unit in each dimension is divided again by
+        this factor for more accruately computing the volume of overlap
+        (and then the sub-binning for antialiasing is discarded). This
+        therefore does not add to the memory footprint, but will increase
+        the computational cost.
+
+    Returns
+    -------
+    indices : list of M shape (N x 3) numpy.ndarrays
+        One array per spherical bin. Data type of the arrays is int32 if
+        all oversample factors are set to 1; otherwise, dtype is float64.
+
+    overlap_vol : list of M shape (N,) numpy.ndarrays, dtype of float64
+        One array per spherical bin
+
+    """
+    x_bw_os = x_bw / x_oversample
+    y_bw_os = y_bw / y_oversample
+    z_bw_os = z_bw / z_oversample
+
+    x_bw_os_aa = x_bw_os / antialias_factor
+    y_bw_os_aa = y_bw_os / antialias_factor
+    z_bw_os_aa = z_bw_os / antialias_factor
+
+    x_halfbw_os_aa = x_bw_os_aa / 2
+    y_halfbw_os_aa = y_bw_os_aa / 2
+    z_halfbw_os_aa = z_bw_os_aa / 2
+
+    n_xbins_oct_os = int(np.ceil(r_max / x_bw_os))
+    n_ybins_oct_os = int(np.ceil(r_max / y_bw_os))
+    n_zbins_oct_os = int(np.ceil(r_max / z_bw_os))
+
+    n_xbins_oct_os_aa = int(np.ceil(r_max / x_bw_os_aa))
+    n_ybins_oct_os_aa = int(np.ceil(r_max / y_bw_os_aa))
+    n_zbins_oct_os_aa = int(np.ceil(r_max / z_bw_os_aa))
+
+    r_max_sq = r_max**2
+    sqrt_r_bin_scale = n_rbins / np.sqrt(r_max)
+    costheta_bin_scale = n_thetabins / 2
+
+    bin_mapping = [[] for _ in range(n_rbins * n_thetabins)]
+
+    aa_scale = 1 / antialias_factor**3
+
+    x_centers_os_aa = np.linspace(x_halfbw_os_aa, n_xbins_oct_os_aa*x_bw_os_aa)
+    y_centers_os_aa = np.linspace(y_halfbw_os_aa, n_ybins_oct_os_aa*y_bw_os_aa)
+    z_centers_os_aa = np.linspace(z_halfbw_os_aa, n_zbins_oct_os_aa*z_bw_os_aa)
+
+    #r = np.sqrt(x_centers_os_aa**2 + y_centers_os_aa**2 + z_centers_os_aa**2)
+    #hist, _ = np.histogramdd(
+    #    [np.sqrt(r)
+    #)
+
+    r_bin_idx = (np.sqrt(r) * sqrt_r_bin_scale).astype(np.int32)
+    theta_bin_idx = (
+        (1 - z_centers_os_aa / r) * costheta_bin_scale
+    ).astype(np.int32)
+    mask = (
+        (theta_bin_idx >= 0) & (theta_bin_idx < n_thetabins)
+        &
+        (r_bin_idx >= 0) & (r_bin_idx < n_rbins)
+    )
+    flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
+    for idx in 
+
+
+#@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+#def sphbin2cartbin(r_max, r_power, n_rbins, n_thetabins,
+#                   x_bw, y_bw, z_bw,
+#                   x_oversample, y_oversample, z_oversample,
+#                   antialias_per_dim=1):
+#    """
+#    Parameters
+#    ----------
+#    r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray
+#        Meshgrid of r, theta, and phi edges
+#
+#    x_bw, y_bw, z_bw : float
+#        Cartesian binwidths in x, y, and z directions
+#
+#    x_oversample, y_oversample, z_oversample : int
+#        Oversmapling factors. If oversampling is used, the returned indices
+#        array will have floating point values. E.g., a bin index with
+#        oversampling of 2 could have take values 0, 0.5, 1, ...
+#        Note that this increases the computational cost _and_ increases the
+#        memory footprint of the produced array(s).
+#
+#    antialias_factor : int
+#        The smallest binning unit in each dimension is divided again by
+#        this factor for more accruately computing the volume of overlap
+#        (and then the sub-binning for antialiasing is discarded). This
+#        therefore does not add to the memory footprint, but will increase
+#        the computational cost.
+#
+#    Returns
+#    -------
+#    indices : list of M shape (N x 3) numpy.ndarrays
+#        One array per spherical bin. Data type of the arrays is int32 if
+#        all oversample factors are set to 1; otherwise, dtype is float64.
+#
+#    overlap_vol : list of M shape (N,) numpy.ndarrays, dtype of float64
+#        One array per spherical bin
+#
+#    """
+#    x_bw_os = x_bw / x_oversample
+#    y_bw_os = y_bw / y_oversample
+#    z_bw_os = z_bw / z_oversample
+#
+#    x_bw_os_aa = x_bw_os / antialias_factor
+#    y_bw_os_aa = y_bw_os / antialias_factor
+#    z_bw_os_aa = z_bw_os / antialias_factor
+#
+#    x_halfbw_os_aa = x_bw_os_aa / 2
+#    y_halfbw_os_aa = y_bw_os_aa / 2
+#    z_halfbw_os_aa = z_bw_os_aa / 2
+#
+#    n_xbins_oct_os = int(math.ceil(r_max / x_bw_os))
+#    n_ybins_oct_os = int(math.ceil(r_max / y_bw_os))
+#    n_zbins_oct_os = int(math.ceil(r_max / z_bw_os))
+#
+#    n_xbins_oct_os_aa = int(math.ceil(r_max / x_bw_os_aa))
+#    n_ybins_oct_os_aa = int(math.ceil(r_max / y_bw_os_aa))
+#    n_zbins_oct_os_aa = int(math.ceil(r_max / z_bw_os_aa))
+#
+#    r_max_sq = r_max**2
+#    sqrt_r_bin_scale = n_rbins / math.sqrt(r_max)
+#    costheta_bin_scale = n_thetabins / 2
+#
+#    bin_mapping = []
+#    for _ in range(n_rbins * n_thetabins):
+#        bin_mapping.append([])
+#
+#    aa_scale = 1 / antialias_factor**3
+#
+#    # Note: No phi dependence in the tables
+#    for x_os_idx in range(n_xbins_oct_os):
+#        x_idx = x_os_idx / x_oversample
+#        x0 = x_os_idx * x_bw_os + x_halfbw_os_aa
+#        x_centers = np.empty(antialias_factor)
+#        x_centers_sq = np.empty(antialias_factor)
+#        for xi in range(antialias_factor):
+#            x_center = x0 + xi * x_bw_os_aa
+#            x_center_sq = x_center * x_center
+#            x_centers[xi] = x_center
+#            x_centers_sq[xi] = x_center_sq
+#
+#        for y_os_idx in range(n_ybins_oct_os):
+#            y_idx = y_os_idx / y_oversample
+#
+#            y0 = y_os_idx * y_bw_os + y_halfbw_os_aa
+#            rho_squares = np.empty((antialias_factor, antialias_factor))
+#            for yi in range(antialias_factor):
+#                y_center = y0 + y_bw_os_aa * y_os_aa_idx
+#                y_center_sq = y_center * y_center
+#                for xi in range(antialias_factor):
+#                    rho_squares[xi, yi] = x_center_sq[xi] + y_center_sq
+#
+#            for z_os_idx in range(n_zbins_oct_os):
+#                z_idx = z_os_idx / z_oversample
+#
+#                flat_indices = []
+#                aa_counts = []
+#
+#                z0 = z_os_idx * z_bw_os + z_halfbw_os_aa
+#                for zi in range(antialias_factor):
+#                    z_center = z0 + z_bw_os_aa * z_os_aa_idx + z_halfbw_os_aa
+#                    z_center_sq = z_center * z_center
+#                    for xi in range(antialias_factor):
+#                        for yi in range(antialias_factor):
+#                            r = math.sqrt(rho_squares[xi, yi] + z_center_sq)
+#                            if r < r_max:
+#                                r_bin_idx = int(math.sqrt(r) * sqrt_r_bin_scale)
+#                                theta_bin_idx = int((1 - z_center / r) * costheta_bin_scale)
+#                                flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
+#                                if flat_bin_idx in flat_indices:
+#                                aa_count += 1
+#
+#                if aa_count == 0:
+#                    continue
+#
+#                sqrt_r = math.sqrt(r)
+#                r_bin_idx = int(sqrt_r * sqrt_r_bin_scale)
+#                theta_bin_idx = int((1 - z_center / r) * costheta_bin_scale)
+#                flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
+#
+#                bin_mapping[flat_bin_idx].append(
+#                    np.array([x_idx, y_idx, z_idx], dtype=np.float32)
+#                )
+
+    ## Phi angle is independent of z (and no phi dependence in the tables)
+    ## so start with x and y dims
+    #for x_os_aa_idx in range(n_xbins_oct_os_aa):
+    #    x_os_idx = x_os_aa_idx // antialias_factor
+    #    x_idx = x_os_idx / x_oversample
+    #    x_center = x_bw_os_aa * x_os_aa_idx + x_halfbw_os_aa
+    #    x_center_sq = x_center*x_center
+
+    #    for y_os_aa_idx in range(n_ybins_oct_os_aa):
+    #        y_os_idx = y_os_aa_idx // antialias_factor
+    #        y_idx = y_os_idx / y_oversample
+    #        y_center = y_bw_os_aa * y_os_aa_idx + y_halfbw_os_aa
+
+    #        rho_sq = x_center_sq + y_center*y_center
+    #        if rho_sq >= r_max_sq:
+    #            continue
+
+    #        for z_os_aa_idx in range(n_zbins_oct_os_aa):
+    #            z_os_idx = z_os_aa_idx / antialias_factor
+    #            z_idx = z_os_idx / z_oversample
+    #            z_center = z_bw_os_aa * z_os_aa_idx + z_halfbw_os_aa
+
+    #            r = math.sqrt(rho_sq + z_center*z_center)
+    #            if r >= r_max:
+    #                continue
+
+    #            sqrt_r = math.sqrt(r)
+    #            r_bin_idx = int(sqrt_r * sqrt_r_bin_scale)
+    #            theta_bin_idx = int((1 - z_center / r) * costheta_bin_scale)
+    #            flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
+
+    #            bin_mapping[flat_bin_idx].append(
+    #                np.array([x_idx, y_idx, z_idx], dtype=np.float32)
+    #            )
+
+
 def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
                                        tables_dir, geom_file, test=False,
                                        t_start=None, t_stop=None):
@@ -206,69 +462,6 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
     # be defined outside the loops
     phi_edges = np.linspace(0, 2*np.pi, nphi + 1)
     phi_centers = 0.5 * (phi_edges[:-1] + phi_edges[1:])
-
-    # TODO: function to take spherical and cartesian binnings and output the
-    # cartesian indices corresponding to each spherical bin, as well as the
-    # volume of overlap. This should have the origins of both Cartesian and
-    # spherical binnings at the same location, so that when one wants to shift
-    # the spherical binning to a particular DOM, the Cartesian bin indices
-    # merely need to be modified by the (integer) amount. Note that this means
-    # that the accuracy for a given DOM will be +/- 0.5 Caresian bin lengths
-    # (in each dimension). One _could_ upsample the rectangular binning by e.g.
-    # a factor of 2, and then the accuracy gets a little better...
-    @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-    def sphbin2cartbin(r_max, r_power, n_rbins, n_thetabins,
-                       x_bw, y_bw, z_bw,
-                       x_oversample, y_oversample, z_oversample,
-                       antialias_per_dim=1):
-        """
-        Parameters
-        ----------
-        r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray
-            Meshgrid of r, theta, and phi edges
-
-        x_bw, y_bw, z_bw : float
-            Cartesian binwidths in x, y, and z directions
-
-        x_oversample, y_oversample, z_oversample : int
-            Oversmapling factors. If oversampling is used, the returned indices
-            array will have floating point values. E.g., a bin index with
-            oversampling of 2 could have take values 0, 0.5, 1, ...
-            Note that this increases the computational cost _and_ increases the
-            memory footprint of the produced array(s).
-
-        antialias_factor : int
-            The smallest binning unit in each dimension is divided again by
-            this factor for more accruately computing the volume of overlap
-            (and then the sub-binning for antialiasing is discarded). This
-            therefore does not add to the memory footprint, but will increase
-            the computational cost.
-
-        Returns
-        -------
-        indices : list of M shape (N x 3) numpy.ndarrays
-            One array per spherical bin. Data type of the arrays is int32 if
-            all oversample factors are set to 1; otherwise, dtype is float64.
-
-        overlap_vol : list of M shape (N,) numpy.ndarrays, dtype of float64
-            One array per spherical bin
-
-        """
-        x_bw_os = x_bw / x_oversample
-        y_bw_os = y_bw / y_oversample
-        z_bw_os = z_bw / z_oversample
-
-        x_bw_os_aa = x_bw_os / antialias_factor
-        y_bw_os_aa = y_bw_os / antialias_factor
-        z_bw_os_aa = z_bw_os / antialias_factor
-
-        n_xbins_oct_os_aa = int(np.ceil(r_max / x_bw_os_aa))
-        n_ybins_oct_os_aa = int(np.ceil(r_max / y_bw_os_aa))
-        n_zbins_oct_os_aa = int(np.ceil(r_max / z_bw_os_aa))
-
-        for x in range(n_xbins):
-            x
-        pass
 
     @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
     def bin_quantities(r_edges_mg, theta_edges_mg, phi_edges_mg,
