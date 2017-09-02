@@ -69,6 +69,7 @@ DC_TABLE_FPATH_PROTO = (
 DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
+
 # -- namedtuples for interface simplicity and consistency -- #
 
 HypoParams8D = namedtuple( # pylint: disable=invalid-name
@@ -215,6 +216,7 @@ IC_DOM_JITTER_NS = 1.7
 # See arXiv:1612.05093v2, section 3.3
 DC_DOM_JITTER_NS = 1.7
 """Timing jitter (stddev) for DeepCore (strings 80-86) DOMs, in units of ns"""
+
 
 # -- Functions -- #
 
@@ -587,12 +589,12 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def spherical_volume(dr, dcostheta, dphi):
+def spherical_volume(rmin, rmax, dcostheta, dphi):
     """Find volume of a finite element defined in spherical coordinates.
 
     Parameters
     ----------
-    dr : float (in arbitrary distance units)
+    rmin, rmax : float (in arbitrary distance units)
         Difference between initial and final radii.
 
     dcostheta : float
@@ -611,7 +613,7 @@ def spherical_volume(dr, dcostheta, dphi):
         E.g. if those are provided in meters, ``vol`` will be in units of `m^3`.
 
     """
-    return dcostheta * dr**3 * dphi / 3
+    return -dcostheta * (rmax**3 - rmin**3) * dphi / 3
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
