@@ -12,7 +12,7 @@ cimport numpy as np
 @cython.cdivision(True)
 @cython.nonecheck(False)
 def sphbin2cartbin(double r_max, double r_power,
-                   int n_rbins, int n_thetabins, int n_phibins,
+                   int n_rbins, int n_costhetabins, int n_phibins,
                    double x_bw, double y_bw, double z_bw,
                    int x_oversample, int y_oversample,
                    int z_oversample,
@@ -22,20 +22,19 @@ def sphbin2cartbin(double r_max, double r_power,
     ----------
     r_max : double
         Maximum r bin edge (note that r binning is assumed to start at 0)
-        
+
     r_power : double
         Power used for regular power-law binning in radius
-        
-    n_rbins, n_thetabins, n_phibins : int with n_thetabins % 2 == 0 and n_phibins % 4 == 0
-        Number or r, theta, and phi bins; note that while there are no phi
-        bins expected in the retro tables, `n_phi` is used for binning
-        up any spherical cells that did not catch at least one Cartesian
-        bin. Note also that both n_thetabins and n_phibins must be even
-        and refer to the entire range of theta and phi, even though we
-        only work with the first octant. Therefore, we require each of these
-        to define cells that fit exactly within the first octant:
-        n_thetabins must be even, while n_phibins must be an integer multiple
-        of 4.
+
+    n_rbins, n_costhetabins, n_phibins : int with n_costhetabins % 2 == 0 and n_phibins % 4 == 0
+        Number or r, costheta, and phi bins; note that while there are no phi
+        bins expected in the retro tables, `n_phi` is used for binning up any
+        spherical cells that did not catch at least one Cartesian bin. Note
+        also that both n_costhetabins and n_phibins must be even and refer to
+        the entire range of costheta and phi, even though we only work with the
+        first octant. Therefore, we require each of these to define cells that
+        fit exactly within the first octant: n_costhetabins must be even, while
+        n_phibins must be an integer multiple of 4.
 
     x_bw, y_bw, z_bw : double
         Cartesian binwidths in x, y, and z directions
@@ -64,29 +63,29 @@ def sphbin2cartbin(double r_max, double r_power,
 
     """
     DEF MAX_AA_FACTOR = 50
-    
+
     DEF PI = 3.1415926535897932384626433827
     DEF TWO_PI = 6.2831853071795862319959269371
     DEF PI_BY_2 = 1.5707963267948965579989817343
-    
-    assert n_rbins >= 1 and n_thetabins >= 1 and n_phibins >= 1
-    assert n_thetabins % 2 == 0, 'A theta bin straddles XY-plane since `n_thetabins` is not even'
+
+    assert n_rbins >= 1 and n_costhetabins >= 1 and n_phibins >= 1
+    assert n_costhetabins % 2 == 0, 'A costheta bin straddles XY-plane since `n_costhetabins` is not even'
     assert n_phibins % 4 == 0, 'Phi bins straddle YZ-plane since `n_phibins` is not evenly divisible by 4'
     assert x_oversample >= 1 and y_oversample >= 1 and z_oversample >= 1
     assert 1 <= antialias_factor <= MAX_AA_FACTOR
-    
-    # Logic below about extrapolating from first octant to other octants 
+
+    # Logic below about extrapolating from first octant to other octants
     # fails if bin widths are different in different dimensions
     assert x_bw == y_bw == z_bw
     assert x_oversample == y_oversample == z_oversample
-    
+
     cdef:
-        unsigned int n_quadrant_thetabins = <unsigned int>ceil(<double>n_thetabins / 2.0)
-    
+        unsigned int n_quadrant_costhetabins = <unsigned int>ceil(<double>n_costhetabins / 2.0)
+
         double x_os_dbl = <double>x_oversample
         double y_os_dbl = <double>y_oversample
         double z_os_dbl = <double>z_oversample
-    
+
         double x_bw_os = x_bw / x_os_dbl
         double y_bw_os = y_bw / y_os_dbl
         double z_bw_os = z_bw / z_os_dbl
@@ -97,7 +96,7 @@ def sphbin2cartbin(double r_max, double r_power,
 
         double aa_vol = x_bw_os_aa * y_bw_os_aa * z_bw_os_aa
         double overlap_vol
-    
+
         double x_halfbw_os_aa = x_bw_os_aa / 2.0
         double y_halfbw_os_aa = y_bw_os_aa / 2.0
         double z_halfbw_os_aa = z_bw_os_aa / 2.0
@@ -113,54 +112,54 @@ def sphbin2cartbin(double r_max, double r_power,
         double x_idx_mirror_pt = -1.0 / x_oversample
         double y_idx_mirror_pt = -1.0 / y_oversample
         double z_idx_mirror_pt = -1.0 / z_oversample
-    
+
         double inv_r_power = 1.0 / r_power
         double power_r_bin_scale = <double>n_rbins / r_max**inv_r_power
-        double costheta_bin_scale = <double>n_thetabins / 2.0
+        double costheta_bin_scale = <double>n_costhetabins / 2.0
         double dphi = TWO_PI / <double>n_phibins
 
         unsigned int x_os_idx, y_os_idx, z_os_idx, xi, yi, zi
-        double x_idx, y_idx, z_idx
-        int r_bin_idx, theta_bin_idx, flat_bin_idx
-    
+        float x_idx, y_idx, z_idx
+        int r_bin_idx, costheta_bin_idx, flat_bin_idx
+
         double x0, y0, z0
-    
+
         double x_centers_sq[MAX_AA_FACTOR]
         double rho_squares[MAX_AA_FACTOR][MAX_AA_FACTOR]
-    
+
         double x_center, y_center, z_center, x_center_sq, y_center_sq,  z_center_sq
         double rho_sq
 
         double r
         double new_vol
-    
+
         double[:] phi_bin_centers = np.linspace(
             start=TWO_PI / <double>n_phibins / 2.0,
             stop=PI_BY_2 - TWO_PI / <double>n_phibins / 2.0,
             num=n_phibins
         )
-        
+
         dict d
         list bin_mapping = []
         tuple xyz_idx_q1
         list ind_arrays = []
         list vol_arrays = []
-    
+
         double r_bmin, r_bmax, r_bcenter
         double costheta_bmin, costheta_bmax, costheta_bcenter
         double rho_center, phi_bin_center
-    
+
         double total_tabulated_vol, sph_bin_vol
-        double dr, dcostheta
-    
+        double dcostheta
+
     # Note: there is no phi dependence in the source tables
-    
-    for theta_bin_idx in range(n_quadrant_thetabins):
+
+    for costheta_bin_idx in range(n_quadrant_costhetabins):
         for r_bin_idx in range(n_rbins):
             bin_mapping.append(dict())
 
     for x_os_idx in range(n_xbins_oct_os):
-        x_idx = <double>x_os_idx / x_os_dbl
+        x_idx = <float>(<double>x_os_idx / x_os_dbl)
         x0 = x_os_idx * x_bw_os + x_halfbw_os_aa
         for xi in range(antialias_factor):
             x_center = x0 + xi * x_bw_os_aa
@@ -168,7 +167,7 @@ def sphbin2cartbin(double r_max, double r_power,
             x_centers_sq[xi] = x_center_sq
 
         for y_os_idx in range(n_ybins_oct_os):
-            y_idx = <double>y_os_idx / y_os_dbl
+            y_idx = <float>(<double>y_os_idx / y_os_dbl)
             y0 = y_os_idx * y_bw_os + y_halfbw_os_aa
             for yi in range(antialias_factor):
                 y_center = y0 + yi * y_bw_os_aa
@@ -177,8 +176,8 @@ def sphbin2cartbin(double r_max, double r_power,
                     rho_squares[xi][yi] = x_centers_sq[xi] + y_center_sq
 
             for z_os_idx in range(n_zbins_oct_os):
-                z_idx = <double>z_os_idx / z_os_dbl
-                
+                z_idx = <float>(<double>z_os_idx / z_os_dbl)
+
                 # NOTE: populating _only_ first octant values!
                 xyz_idx_q1 = (x_idx, y_idx, z_idx)
 
@@ -191,32 +190,31 @@ def sphbin2cartbin(double r_max, double r_power,
                             r = sqrt(rho_squares[xi][yi] + z_center_sq)
                             if r < 0 or r >= r_max:
                                 continue
-                                
+
                             r_bin_idx = int(floor(r**inv_r_power * power_r_bin_scale))
-                            theta_bin_idx = int((1.0 - z_center / r) * costheta_bin_scale)
-                            if theta_bin_idx < 0 or theta_bin_idx >= n_thetabins:
+                            costheta_bin_idx = int((1.0 - z_center / r) * costheta_bin_scale)
+                            if costheta_bin_idx < 0 or costheta_bin_idx >= n_costhetabins:
                                 continue
-                                
-                            d = bin_mapping[theta_bin_idx + n_quadrant_thetabins*r_bin_idx]
+
+                            d = bin_mapping[costheta_bin_idx + n_quadrant_costhetabins*r_bin_idx]
                             new_vol = aa_vol + d.get(xyz_idx_q1, 0.0)
                             d[xyz_idx_q1] = new_vol
 
     # Account for any spherical bins that were assigned no corresponding
     # Cartesian bins; otherwise, normalize total binned volume to be no larger
-    # than that of each spherical volume element (dr and dtheta come
+    # than that of each spherical volume element (dr and dcostheta come
     # from the polar bin, while dphi is pi/2 since we only computed one
     # octant)
     for r_bin_idx in range(n_rbins):
         r_bmin = (<double>r_bin_idx / power_r_bin_scale)**r_power
         r_bmax = (<double>(r_bin_idx + 1) / power_r_bin_scale)**r_power
-        dr = r_bmax - r_bmin
 
-        for theta_bin_idx in range(n_quadrant_thetabins):
-            costheta_bmin = 1 - theta_bin_idx / costheta_bin_scale
-            costheta_bmax = 1 - (theta_bin_idx + 1) / costheta_bin_scale
+        for costheta_bin_idx in range(n_quadrant_costhetabins):
+            costheta_bmin = 1 - costheta_bin_idx / costheta_bin_scale
+            costheta_bmax = 1 - (costheta_bin_idx + 1) / costheta_bin_scale
             dcostheta = costheta_bmax - costheta_bmin
 
-            d = bin_mapping[theta_bin_idx + n_quadrant_thetabins*r_bin_idx]
+            d = bin_mapping[costheta_bin_idx + n_quadrant_costhetabins*r_bin_idx]
 
             # For spherical volume elements that don't have any assigned Cartesian bins,
             # find spherical element's center and locate it in a Cartesian bin
@@ -224,7 +222,7 @@ def sphbin2cartbin(double r_max, double r_power,
                 r_bcenter = (r_bmin + r_bmax) / 2.0
                 costheta_bcenter = (costheta_bmin + costheta_bmax) / 2.0
                 z_center = r_bcenter * costheta_bcenter
-                z_idx = floor(z_center / z_bw_os) / z_os_dbl
+                z_idx = <float>(floor(z_center / z_bw_os) / z_os_dbl)
                 rho_center = sqrt(r_bcenter**2 - z_center**2)
                 sph_bin_vol = -dcostheta * (r_bmax**3 - r_bmin**3) / 3.0 * dphi
 
@@ -232,15 +230,15 @@ def sphbin2cartbin(double r_max, double r_power,
                     phi_bin_center = phi_bin_centers[phi_idx]
                     x_center = rho_center * cos(phi_bin_center)
                     y_center = rho_center * sin(phi_bin_center)
-                    
-                    x_idx = floor(x_center / x_bw_os) / x_os_dbl
-                    y_idx = floor(y_center / y_bw_os) / y_os_dbl
+
+                    x_idx = <float>(floor(x_center / x_bw_os) / x_os_dbl)
+                    y_idx = <float>(floor(y_center / y_bw_os) / y_os_dbl)
                     xyz_idx_q1 = (x_idx, y_idx, z_idx)
-                    
+
                     # NOTE: duplicates are overwritten (i.e., should be at
                     # most one entry for xyz_idx_q1 per spherical bin)
                     d[xyz_idx_q1] = sph_bin_vol
-            
+
             # Normalize volume weight assigned from this spherical element
             # to all associated Cartesian elements to be exactly the volume of the
             # spherical volume element (i.e., the area of the polar element rotated
@@ -252,7 +250,7 @@ def sphbin2cartbin(double r_max, double r_power,
             total_tabulated_vol = np.sum(vols)
             norm_factor = sph_bin_vol / total_tabulated_vol
             vols *= norm_factor
-                    
+
             ind_arrays.append(np.atleast_2d(np.array(d.keys(), dtype=np.float32)))
             vol_arrays.append(vols.astype(np.float32))
 

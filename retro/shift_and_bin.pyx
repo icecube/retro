@@ -207,7 +207,8 @@ def shift_and_bin(list ind_arrays,
     for ix in range(num_first_octant_pol_bins):
         num_cart_bins_in_pol_bin[ix] = vol_arrays[ix].shape[0]
 
-    for (dom_x, dom_y, dom_z) in dom_coords:
+    for dom_idx in dom_coords.shape[0]:
+        (dom_x, dom_y, dom_z) = dom_coords[dom_idx]
         dom_x_float_idx = (dom_x - x0) / xbw
         dom_y_float_idx = (dom_y - y0) / ybw
         dom_z_float_idx = (dom_z - z0) / zbw
