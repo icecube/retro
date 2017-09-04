@@ -1,10 +1,7 @@
-# cython: embedsignature=True, boundscheck=False, wraparound=False, cdivision=True, nonecheck=False
-
-
 cimport cython
 
-cimport openmp
-from cython.parallel import parallel, prange
+#cimport openmp
+#from cython.parallel import parallel, prange
 
 from libc.math cimport ceil, floor, sqrt
 
@@ -17,31 +14,31 @@ cimport numpy as np
 @cython.wraparound(False)
 @cython.cdivision(True)
 @cython.nonecheck(False)
-def bin_quantities(list ind_arrays,
-                   list vol_arrays,
-                   np.ndarray dom_coords,
-                   float[:, :] survival_prob,
-                   float[:, :] prho,
-                   float[:, :] pz,
-                   unsigned int nr,
-                   unsigned int ntheta,
-                   double[:, :, :] binned_spv,
-                   double[:, :, :] binned_px_spv,
-                   double[:, :, :] binned_py_spv,
-                   double[:, :, :] binned_pz_spv,
-                   double[:, :, :] binned_one_minus_sp,
-                   unsigned int nx,
-                   unsigned int ny,
-                   unsigned int nz,
-                   float x0,
-                   float y0,
-                   float z0,
-                   float xbw,
-                   float ybw,
-                   float zbw,
-                   unsigned int x_oversample,
-                   unsigned int y_oversample,
-                   unsigned int z_oversample):
+def shift_and_bin(list ind_arrays,
+                  list vol_arrays,
+                  np.ndarray dom_coords,
+                  float[:, :] survival_prob,
+                  float[:, :] prho,
+                  float[:, :] pz,
+                  unsigned int nr,
+                  unsigned int ntheta,
+                  double[:, :, :] binned_spv,
+                  double[:, :, :] binned_px_spv,
+                  double[:, :, :] binned_py_spv,
+                  double[:, :, :] binned_pz_spv,
+                  double[:, :, :] binned_one_minus_sp,
+                  unsigned int nx,
+                  unsigned int ny,
+                  unsigned int nz,
+                  float x0,
+                  float y0,
+                  float z0,
+                  float xbw,
+                  float ybw,
+                  float zbw,
+                  unsigned int x_oversample,
+                  unsigned int y_oversample,
+                  unsigned int z_oversample):
     r"""Shift (r, theta) retro tables (i.e., (t, r, theta) tables with time
     marginalized out) to each DOM location and aggregate its quantities (with
     appropriate weighting) in (x, y, z) retro tables.
