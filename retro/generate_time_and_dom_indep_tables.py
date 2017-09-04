@@ -216,6 +216,139 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
     phi_edges = np.linspace(0, 2*np.pi, nphi + 1)
     phi_centers = 0.5 * (phi_edges[:-1] + phi_edges[1:])
 
+    @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+    def bin_quantities(r_edges_mg, theta_edges_mg, phi_edges_mg,
+                       x_edges_mg, y_edges_mg, z_edges_mg,
+                       x_offset, y_offset, z_offset,
+                       bin_vols, survival_prob, p_x, p_y, p_z,
+                       binned_p_x, binned_p_y, binned_p_z, binned_sp_by_vol,
+                       one_minus_survival_prob):
+        """Bin various quantities in one step (rather tha multiple calls to
+        `numpy.histogramdd`.
+
+        Parameters
+        ----------
+        r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray, same shape
+            Relative coordinates where the data values lie
+
+        x_edges_mg, y_edges_mg, z_edges_mg : numpy.ndarray, same shape
+            Relative coordinates where the data values lie
+
+        x_offset, y_offset, z_offset : float
+            Offset for the relative coordinates to translate to detector
+
+        survival_prob : numpy.ndarray, same shape as `x`, `y`, and `z`
+            Survival probability of a photon at this coordinate
+
+        p_x, p_y, p_z : numpy.ndarray, same shape as `x`, `y`, and `z`
+            Average photon x-, y-, and z-components at this coordinate
+
+        binned_p_x, binned_p_y, binned_p_z : numpy.ndarray of shape (nx, ny, nz)
+            Existing arrays into which average photon components are accumulated
+
+        binned_sp_by_vol : numpy.ndarray, same shape as `x`, `y`, and `z`
+            Binned photon survival probabilities * volumes, accumulated for all
+            DOMs to normalize the average surviving photon info (`binned_p_x`,
+            etc.) in the end
+
+        one_minus_survival_prob : numpy.ndarray of shape (nx, ny, nz)
+            Existing array to which ``1 - normed_survival_probability`` is
+            multiplied (where the normalization factor is not infinite)
+
+        """
+        vol_mask = np.zeros((nx, ny, nz), dtype=np.int8)
+        binned_vol = np.zeros((nx, ny, nz), dtype=CALC_FTYPE)
+        xbshift = xb0 - x_offset
+        ybshift = yb0 - y_offset
+        zbshift = zb0 - z_offset
+
+        for idx0 in range(nphi):
+            slice0 = slice(idx0, idx0 + 2)
+            for idx1 in range(n_rbins):
+                slice1 = slice(idx1, idx1 + 2)
+                for idx2 in range(n_thetabins):
+                    slice2 = slice(idx2, idx2 + 2)
+                    three_d_slice = (slice0, slice1, slice2)
+                    three_d_idx = (idx0, idx1, idx2)
+
+                    x = x_edges_mg[three_d_slice]
+                    xidx0 = int((np.min(x) - xbshift) * xbscale)
+                    xidx1 = int((np.max(x) - xbshift) * xbscale)
+                    if xidx1 < 0 or xidx0 >= nx:
+                        continue
+
+                    y = y_edges_mg[three_d_slice]
+                    yidx0 = int((np.min(y) - ybshift) * ybscale)
+                    yidx1 = int((np.max(y) - ybshift) * ybscale)
+                    if yidx1 < 0 or yidx0 >= ny:
+                        continue
+
+                    z = z_edges_mg[three_d_slice]
+                    zidx0 = int((np.min(z) - zbshift) * zbscale)
+                    zidx1 = int((np.max(z) - zbshift) * zbscale)
+                    if zidx1 < 0 or zidx0 >= nz:
+                        continue
+
+                    vol = min(cart_bin_vol, bin_vols[three_d_idx])
+                    sp = survival_prob[three_d_idx]
+
+                    sp_by_vol = sp * vol
+                    p_x_ = p_x[three_d_idx]
+                    p_y_ = p_y[three_d_idx]
+                    p_z_ = p_z[three_d_idx]
+
+                    r_edges = r_edges_mg[three_d_slice]
+                    r_lower, r_upper = np.min(r_edges), np.max(r_edges)
+                    theta_edges = theta_edges_mg[three_d_slice]
+                    theta_lower, theta_upper = np.min(theta_edges), np.max(theta_edges)
+                    phi_edges = phi_edges_mg[three_d_slice]
+                    phi_lower, phi_upper = np.min(phi_edges), np.max(phi_edges)
+
+                    # Loop through all Cartesian bins in the rectangle
+                    # enclosing the spherical volume element, and more
+                    # carefully determine which actually overlap
+                    xidx0 = max(0, xidx0)
+                    yidx0 = max(0, yidx0)
+                    zidx0 = max(0, zidx0)
+                    xidx1 = min(nx, xidx1 + 1)
+                    yidx1 = min(ny, yidx1 + 1)
+                    zidx1 = min(nz, zidx1 + 1)
+                    # TODO: why e.g. xidx + 0.0 looks good, but xidx + 0.5 looks bad?
+
+                    for xidx in range(xidx0, xidx1):
+                        x_rel_center = xbw * xidx + xbshift
+                        for yidx in range(yidx0, yidx1):
+                            y_rel_center = ybw * yidx + ybshift
+                            for zidx in range(zidx0, zidx1):
+                                z_rel_center = zbw * zidx + zbshift
+                                rho_sq = x_rel_center*x_rel_center + y_rel_center*y_rel_center
+                                r_ = np.sqrt(rho_sq + z_rel_center*z_rel_center)
+                                if r_ < r_lower or r_ > r_upper:
+                                    continue
+                                theta_ = np.arccos(z_rel_center / r_)
+                                if theta_ < theta_lower or theta_ > theta_upper:
+                                    continue
+                                phi_ = np.arctan2(y_rel_center, x_rel_center) % (2*np.pi)
+                                if phi_ < phi_lower or phi_ > phi_upper:
+                                    continue
+
+                                # TODO: more advanced intersection volume
+                                # calculation? E.g., antialiasing by subsampling?
+                                bin_idx = (xidx, yidx, zidx)
+                                vol_mask[bin_idx] = 1
+                                binned_vol[bin_idx] += vol
+                                binned_sp_by_vol[bin_idx] += sp_by_vol
+                                binned_p_x[bin_idx] += p_x_
+                                binned_p_y[bin_idx] += p_y_
+                                binned_p_z[bin_idx] += p_z_
+
+        flat_vol = binned_vol.flat
+        flat_one_minus_sp = one_minus_survival_prob.flat
+        flat_sp_by_vol = binned_sp_by_vol.flat
+        for idx, mask in enumerate(vol_mask.flat):
+            if mask == 1:
+                flat_one_minus_sp[idx] *= 1 - flat_sp_by_vol[idx] / flat_vol[idx]
+
     end_setup_time = time.time()
     print('Setup time: %.3f sec' % (end_setup_time - start_time))
 
@@ -341,7 +474,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
 
                 phi_widths_mg, r_widths_mg, costheta_widths_mg = np.meshgrid(phi_widths, r_widths, costheta_widths, indexing='ij')
 
-                bin_vols = spherical_volume(dr=r_widths_mg, dcostheta=costheta_widths_mg, dphi=phi_widths_mg)
+                bin_vols = spherical_volume(rmin=, rmax=, dcostheta=costheta_widths_mg, dphi=phi_widths_mg)
 
                 n_rbins = len(bin_edges.r) - 1
                 n_thetabins = len(bin_edges.theta) - 1

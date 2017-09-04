@@ -6,7 +6,7 @@ cimport cython
 cimport openmp
 from cython.parallel import parallel, prange
 
-from libc.math cimport floor, sqrt
+from libc.math cimport ceil, floor, sqrt
 
 import numpy as np
 cimport numpy as np
@@ -196,6 +196,7 @@ def bin_quantities(list ind_arrays,
         double sp, spv, px_spv, py_spv, pz_spv
 
         unsigned int octant
+        unsigned int ntheta_in_quad = <unsigned int>ceil(<double>ntheta / 2.0)
         Py_ssize_t flat_pol_idx, r_idx, theta_idx, theta_idx_
         int x_idx, y_idx, z_idx, ix
         unsigned int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.uint32)
@@ -215,7 +216,7 @@ def bin_quantities(list ind_arrays,
         dom_z_float_idx = (dom_z - z0) / zbw
         for r_idx in range(nr):
             for theta_idx in range(ntheta / 2):
-                flat_pol_idx = r_idx + nr * theta_idx
+                flat_pol_idx = theta_idx + r_idx*ntheta_in_quad
 
                 ind_array = ind_arrays[flat_pol_idx]
                 vol_array = vol_arrays[flat_pol_idx]
