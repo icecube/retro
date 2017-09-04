@@ -63,17 +63,20 @@ def parse_args(description=__doc__):
     parser = ArgumentParser(description=description)
     parser.add_argument(
         '--xlims', metavar='LOWER, UPPER', type=float, nargs=2,
-        default=(-900, 900),
+        #default=(-900, 900),
+        default=(-650, 800),
         help='''limits on time-independent Cartesian binning in x dimension'''
     )
     parser.add_argument(
         '--ylims', metavar='LOWER, UPPER', type=float, nargs=2,
-        default=(-900, 900),
+        #default=(-900, 900),
+        default=(-700, 800),
         help='''limits on time-independent Cartesian binning in y dimension'''
     )
     parser.add_argument(
         '--zlims', metavar='LOWER, UPPER', type=float, nargs=2,
-        default=(-750, 650),
+        #default=(-750, 650),
+        default=(-650, 600),
         help='''limits on time-independent Cartesian binning in z dimension'''
     )
     parser.add_argument(
@@ -90,24 +93,30 @@ def parse_args(description=__doc__):
     )
     parser.add_argument(
         '--nphi', type=int, required=True,
-        help='''Number of phi bins to use (retro tables input to this script
-        are currently independent of phi).'''
+        help='''Number of phi bins to use (retro tables used script are
+        currently independent of phi, so this number is used for projecting the
+        tables into the phi dimension).'''
     )
     parser.add_argument(
         '--t-start', type=int, default=None,
         help='''Time slice start index (from 0 to however many time slices are
-        in the binning).'''
+        in the binning). Omit this argument to start from the 0th (first) time
+        bin.'''
     )
     parser.add_argument(
         '--t-stop', type=int, default=None,
         help='''Time slice start index (from 0 to however many time slices are
-        in the binning).'''
+        in the binning). Note that Python slicing/iteration stops just _before_
+        the index specified. Omit this argument to end at the last time bin.'''
     )
     parser.add_argument(
         '--tables-dir', metavar='DIR', type=str,
         default='/data/icecube/retro_tables/full1000',
-        help='''Directory containing source retro tables; time-independent
-        Cartesian table will be stored in this same directory, too.''',
+        help='''Directory containing source retro tables and
+        `sphbin2cartbin_first_octant_mapping_*` files. The
+        time-/dom-independent Cartesian tables will be stored to this same
+        directory, too, so it must have enough free disk space to fit
+        these.''',
     )
     parser.add_argument(
         '--geom-file', metavar='NPY_FILE', type=str,
@@ -121,262 +130,6 @@ def parse_args(description=__doc__):
     )
     args = parser.parse_args()
     return args
-
-
-# TODO: function to take spherical and cartesian binnings and output the
-# cartesian indices corresponding to each spherical bin, as well as the
-# volume of overlap. This should have the origins of both Cartesian and
-# spherical binnings at the same location, so that when one wants to shift
-# the spherical binning to a particular DOM, the Cartesian bin indices
-# merely need to be modified by the (integer) amount. Note that this means
-# that the accuracy for a given DOM will be +/- 0.5 Caresian bin lengths
-# (in each dimension). One _could_ upsample the rectangular binning by e.g.
-# a factor of 2, and then the accuracy gets a little better...
-
-def sphbin2cartbin(r_max, r_power, n_rbins, n_thetabins,
-                   x_bw, y_bw, z_bw,
-                   x_oversample, y_oversample, z_oversample,
-                   antialias_per_dim=1):
-    """
-    Parameters
-    ----------
-    r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray
-        Meshgrid of r, theta, and phi edges
-
-    x_bw, y_bw, z_bw : float
-        Cartesian binwidths in x, y, and z directions
-
-    x_oversample, y_oversample, z_oversample : int
-        Oversmapling factors. If oversampling is used, the returned indices
-        array will have floating point values. E.g., a bin index with
-        oversampling of 2 could have take values 0, 0.5, 1, ...
-        Note that this increases the computational cost _and_ increases the
-        memory footprint of the produced array(s).
-
-    antialias_factor : int
-        The smallest binning unit in each dimension is divided again by
-        this factor for more accruately computing the volume of overlap
-        (and then the sub-binning for antialiasing is discarded). This
-        therefore does not add to the memory footprint, but will increase
-        the computational cost.
-
-    Returns
-    -------
-    indices : list of M shape (N x 3) numpy.ndarrays
-        One array per spherical bin. Data type of the arrays is int32 if
-        all oversample factors are set to 1; otherwise, dtype is float64.
-
-    overlap_vol : list of M shape (N,) numpy.ndarrays, dtype of float64
-        One array per spherical bin
-
-    """
-    x_bw_os = x_bw / x_oversample
-    y_bw_os = y_bw / y_oversample
-    z_bw_os = z_bw / z_oversample
-
-    x_bw_os_aa = x_bw_os / antialias_factor
-    y_bw_os_aa = y_bw_os / antialias_factor
-    z_bw_os_aa = z_bw_os / antialias_factor
-
-    x_halfbw_os_aa = x_bw_os_aa / 2
-    y_halfbw_os_aa = y_bw_os_aa / 2
-    z_halfbw_os_aa = z_bw_os_aa / 2
-
-    n_xbins_oct_os = int(np.ceil(r_max / x_bw_os))
-    n_ybins_oct_os = int(np.ceil(r_max / y_bw_os))
-    n_zbins_oct_os = int(np.ceil(r_max / z_bw_os))
-
-    n_xbins_oct_os_aa = int(np.ceil(r_max / x_bw_os_aa))
-    n_ybins_oct_os_aa = int(np.ceil(r_max / y_bw_os_aa))
-    n_zbins_oct_os_aa = int(np.ceil(r_max / z_bw_os_aa))
-
-    r_max_sq = r_max**2
-    sqrt_r_bin_scale = n_rbins / np.sqrt(r_max)
-    costheta_bin_scale = n_thetabins / 2
-
-    bin_mapping = [[] for _ in range(n_rbins * n_thetabins)]
-
-    aa_scale = 1 / antialias_factor**3
-
-    x_centers_os_aa = np.linspace(x_halfbw_os_aa, n_xbins_oct_os_aa*x_bw_os_aa)
-    y_centers_os_aa = np.linspace(y_halfbw_os_aa, n_ybins_oct_os_aa*y_bw_os_aa)
-    z_centers_os_aa = np.linspace(z_halfbw_os_aa, n_zbins_oct_os_aa*z_bw_os_aa)
-
-    #r = np.sqrt(x_centers_os_aa**2 + y_centers_os_aa**2 + z_centers_os_aa**2)
-    #hist, _ = np.histogramdd(
-    #    [np.sqrt(r)
-    #)
-
-    r_bin_idx = (np.sqrt(r) * sqrt_r_bin_scale).astype(np.int32)
-    theta_bin_idx = (
-        (1 - z_centers_os_aa / r) * costheta_bin_scale
-    ).astype(np.int32)
-    mask = (
-        (theta_bin_idx >= 0) & (theta_bin_idx < n_thetabins)
-        &
-        (r_bin_idx >= 0) & (r_bin_idx < n_rbins)
-    )
-    flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
-    for idx in 
-
-
-#@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-#def sphbin2cartbin(r_max, r_power, n_rbins, n_thetabins,
-#                   x_bw, y_bw, z_bw,
-#                   x_oversample, y_oversample, z_oversample,
-#                   antialias_per_dim=1):
-#    """
-#    Parameters
-#    ----------
-#    r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray
-#        Meshgrid of r, theta, and phi edges
-#
-#    x_bw, y_bw, z_bw : float
-#        Cartesian binwidths in x, y, and z directions
-#
-#    x_oversample, y_oversample, z_oversample : int
-#        Oversmapling factors. If oversampling is used, the returned indices
-#        array will have floating point values. E.g., a bin index with
-#        oversampling of 2 could have take values 0, 0.5, 1, ...
-#        Note that this increases the computational cost _and_ increases the
-#        memory footprint of the produced array(s).
-#
-#    antialias_factor : int
-#        The smallest binning unit in each dimension is divided again by
-#        this factor for more accruately computing the volume of overlap
-#        (and then the sub-binning for antialiasing is discarded). This
-#        therefore does not add to the memory footprint, but will increase
-#        the computational cost.
-#
-#    Returns
-#    -------
-#    indices : list of M shape (N x 3) numpy.ndarrays
-#        One array per spherical bin. Data type of the arrays is int32 if
-#        all oversample factors are set to 1; otherwise, dtype is float64.
-#
-#    overlap_vol : list of M shape (N,) numpy.ndarrays, dtype of float64
-#        One array per spherical bin
-#
-#    """
-#    x_bw_os = x_bw / x_oversample
-#    y_bw_os = y_bw / y_oversample
-#    z_bw_os = z_bw / z_oversample
-#
-#    x_bw_os_aa = x_bw_os / antialias_factor
-#    y_bw_os_aa = y_bw_os / antialias_factor
-#    z_bw_os_aa = z_bw_os / antialias_factor
-#
-#    x_halfbw_os_aa = x_bw_os_aa / 2
-#    y_halfbw_os_aa = y_bw_os_aa / 2
-#    z_halfbw_os_aa = z_bw_os_aa / 2
-#
-#    n_xbins_oct_os = int(math.ceil(r_max / x_bw_os))
-#    n_ybins_oct_os = int(math.ceil(r_max / y_bw_os))
-#    n_zbins_oct_os = int(math.ceil(r_max / z_bw_os))
-#
-#    n_xbins_oct_os_aa = int(math.ceil(r_max / x_bw_os_aa))
-#    n_ybins_oct_os_aa = int(math.ceil(r_max / y_bw_os_aa))
-#    n_zbins_oct_os_aa = int(math.ceil(r_max / z_bw_os_aa))
-#
-#    r_max_sq = r_max**2
-#    sqrt_r_bin_scale = n_rbins / math.sqrt(r_max)
-#    costheta_bin_scale = n_thetabins / 2
-#
-#    bin_mapping = []
-#    for _ in range(n_rbins * n_thetabins):
-#        bin_mapping.append([])
-#
-#    aa_scale = 1 / antialias_factor**3
-#
-#    # Note: No phi dependence in the tables
-#    for x_os_idx in range(n_xbins_oct_os):
-#        x_idx = x_os_idx / x_oversample
-#        x0 = x_os_idx * x_bw_os + x_halfbw_os_aa
-#        x_centers = np.empty(antialias_factor)
-#        x_centers_sq = np.empty(antialias_factor)
-#        for xi in range(antialias_factor):
-#            x_center = x0 + xi * x_bw_os_aa
-#            x_center_sq = x_center * x_center
-#            x_centers[xi] = x_center
-#            x_centers_sq[xi] = x_center_sq
-#
-#        for y_os_idx in range(n_ybins_oct_os):
-#            y_idx = y_os_idx / y_oversample
-#
-#            y0 = y_os_idx * y_bw_os + y_halfbw_os_aa
-#            rho_squares = np.empty((antialias_factor, antialias_factor))
-#            for yi in range(antialias_factor):
-#                y_center = y0 + y_bw_os_aa * y_os_aa_idx
-#                y_center_sq = y_center * y_center
-#                for xi in range(antialias_factor):
-#                    rho_squares[xi, yi] = x_center_sq[xi] + y_center_sq
-#
-#            for z_os_idx in range(n_zbins_oct_os):
-#                z_idx = z_os_idx / z_oversample
-#
-#                flat_indices = []
-#                aa_counts = []
-#
-#                z0 = z_os_idx * z_bw_os + z_halfbw_os_aa
-#                for zi in range(antialias_factor):
-#                    z_center = z0 + z_bw_os_aa * z_os_aa_idx + z_halfbw_os_aa
-#                    z_center_sq = z_center * z_center
-#                    for xi in range(antialias_factor):
-#                        for yi in range(antialias_factor):
-#                            r = math.sqrt(rho_squares[xi, yi] + z_center_sq)
-#                            if r < r_max:
-#                                r_bin_idx = int(math.sqrt(r) * sqrt_r_bin_scale)
-#                                theta_bin_idx = int((1 - z_center / r) * costheta_bin_scale)
-#                                flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
-#                                if flat_bin_idx in flat_indices:
-#                                aa_count += 1
-#
-#                if aa_count == 0:
-#                    continue
-#
-#                sqrt_r = math.sqrt(r)
-#                r_bin_idx = int(sqrt_r * sqrt_r_bin_scale)
-#                theta_bin_idx = int((1 - z_center / r) * costheta_bin_scale)
-#                flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
-#
-#                bin_mapping[flat_bin_idx].append(
-#                    np.array([x_idx, y_idx, z_idx], dtype=np.float32)
-#                )
-
-    ## Phi angle is independent of z (and no phi dependence in the tables)
-    ## so start with x and y dims
-    #for x_os_aa_idx in range(n_xbins_oct_os_aa):
-    #    x_os_idx = x_os_aa_idx // antialias_factor
-    #    x_idx = x_os_idx / x_oversample
-    #    x_center = x_bw_os_aa * x_os_aa_idx + x_halfbw_os_aa
-    #    x_center_sq = x_center*x_center
-
-    #    for y_os_aa_idx in range(n_ybins_oct_os_aa):
-    #        y_os_idx = y_os_aa_idx // antialias_factor
-    #        y_idx = y_os_idx / y_oversample
-    #        y_center = y_bw_os_aa * y_os_aa_idx + y_halfbw_os_aa
-
-    #        rho_sq = x_center_sq + y_center*y_center
-    #        if rho_sq >= r_max_sq:
-    #            continue
-
-    #        for z_os_aa_idx in range(n_zbins_oct_os_aa):
-    #            z_os_idx = z_os_aa_idx / antialias_factor
-    #            z_idx = z_os_idx / z_oversample
-    #            z_center = z_bw_os_aa * z_os_aa_idx + z_halfbw_os_aa
-
-    #            r = math.sqrt(rho_sq + z_center*z_center)
-    #            if r >= r_max:
-    #                continue
-
-    #            sqrt_r = math.sqrt(r)
-    #            r_bin_idx = int(sqrt_r * sqrt_r_bin_scale)
-    #            theta_bin_idx = int((1 - z_center / r) * costheta_bin_scale)
-    #            flat_bin_idx = r_bin_idx*n_thetabins + theta_bin_idx
-
-    #            bin_mapping[flat_bin_idx].append(
-    #                np.array([x_idx, y_idx, z_idx], dtype=np.float32)
-    #            )
 
 
 def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
@@ -446,7 +199,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
     one_minus_survival_prob = np.ones(shape=xyz_shape, dtype=CALC_FTYPE)
 
     # Overall normalizion applied after looping through all DOMs for avg.
-    # photon (i.e., p_x, p_y, p_z components)
+    # photon (p_x, p_y, p_z components)
     binned_p_survival_prob_by_vol = np.zeros(shape=xyz_shape, dtype=CALC_FTYPE)
 
     # Average photon direction & length in the bin, encoded as a single vector
@@ -462,139 +215,6 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
     # be defined outside the loops
     phi_edges = np.linspace(0, 2*np.pi, nphi + 1)
     phi_centers = 0.5 * (phi_edges[:-1] + phi_edges[1:])
-
-    @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-    def bin_quantities(r_edges_mg, theta_edges_mg, phi_edges_mg,
-                       x_edges_mg, y_edges_mg, z_edges_mg,
-                       x_offset, y_offset, z_offset,
-                       bin_vols, survival_prob, p_x, p_y, p_z,
-                       binned_p_x, binned_p_y, binned_p_z, binned_sp_by_vol,
-                       one_minus_survival_prob):
-        """Bin various quantities in one step (rather tha multiple calls to
-        `numpy.histogramdd`.
-
-        Parameters
-        ----------
-        r_edges_mg, theta_edges_mg, phi_edges_mg : numpy.ndarray, same shape
-            Relative coordinates where the data values lie
-
-        x_edges_mg, y_edges_mg, z_edges_mg : numpy.ndarray, same shape
-            Relative coordinates where the data values lie
-
-        x_offset, y_offset, z_offset : float
-            Offset for the relative coordinates to translate to detector
-
-        survival_prob : numpy.ndarray, same shape as `x`, `y`, and `z`
-            Survival probability of a photon at this coordinate
-
-        p_x, p_y, p_z : numpy.ndarray, same shape as `x`, `y`, and `z`
-            Average photon x-, y-, and z-components at this coordinate
-
-        binned_p_x, binned_p_y, binned_p_z : numpy.ndarray of shape (nx, ny, nz)
-            Existing arrays into which average photon components are accumulated
-
-        binned_sp_by_vol : numpy.ndarray, same shape as `x`, `y`, and `z`
-            Binned photon survival probabilities * volumes, accumulated for all
-            DOMs to normalize the average surviving photon info (`binned_p_x`,
-            etc.) in the end
-
-        one_minus_survival_prob : numpy.ndarray of shape (nx, ny, nz)
-            Existing array to which ``1 - normed_survival_probability`` is
-            multiplied (where the normalization factor is not infinite)
-
-        """
-        vol_mask = np.zeros((nx, ny, nz), dtype=np.int8)
-        binned_vol = np.zeros((nx, ny, nz), dtype=CALC_FTYPE)
-        xbshift = xb0 - x_offset
-        ybshift = yb0 - y_offset
-        zbshift = zb0 - z_offset
-
-        for idx0 in range(nphi):
-            slice0 = slice(idx0, idx0 + 2)
-            for idx1 in range(n_rbins):
-                slice1 = slice(idx1, idx1 + 2)
-                for idx2 in range(n_thetabins):
-                    slice2 = slice(idx2, idx2 + 2)
-                    three_d_slice = (slice0, slice1, slice2)
-                    three_d_idx = (idx0, idx1, idx2)
-
-                    x = x_edges_mg[three_d_slice]
-                    xidx0 = int((np.min(x) - xbshift) * xbscale)
-                    xidx1 = int((np.max(x) - xbshift) * xbscale)
-                    if xidx1 < 0 or xidx0 >= nx:
-                        continue
-
-                    y = y_edges_mg[three_d_slice]
-                    yidx0 = int((np.min(y) - ybshift) * ybscale)
-                    yidx1 = int((np.max(y) - ybshift) * ybscale)
-                    if yidx1 < 0 or yidx0 >= ny:
-                        continue
-
-                    z = z_edges_mg[three_d_slice]
-                    zidx0 = int((np.min(z) - zbshift) * zbscale)
-                    zidx1 = int((np.max(z) - zbshift) * zbscale)
-                    if zidx1 < 0 or zidx0 >= nz:
-                        continue
-
-                    vol = min(cart_bin_vol, bin_vols[three_d_idx])
-                    sp = survival_prob[three_d_idx]
-
-                    sp_by_vol = sp * vol
-                    p_x_ = p_x[three_d_idx]
-                    p_y_ = p_y[three_d_idx]
-                    p_z_ = p_z[three_d_idx]
-
-                    r_edges = r_edges_mg[three_d_slice]
-                    r_lower, r_upper = np.min(r_edges), np.max(r_edges)
-                    theta_edges = theta_edges_mg[three_d_slice]
-                    theta_lower, theta_upper = np.min(theta_edges), np.max(theta_edges)
-                    phi_edges = phi_edges_mg[three_d_slice]
-                    phi_lower, phi_upper = np.min(phi_edges), np.max(phi_edges)
-
-                    # Loop through all Cartesian bins in the rectangle
-                    # enclosing the spherical volume element, and more
-                    # carefully determine which actually overlap
-                    xidx0 = max(0, xidx0)
-                    yidx0 = max(0, yidx0)
-                    zidx0 = max(0, zidx0)
-                    xidx1 = min(nx, xidx1 + 1)
-                    yidx1 = min(ny, yidx1 + 1)
-                    zidx1 = min(nz, zidx1 + 1)
-                    # TODO: why e.g. xidx + 0.0 looks good, but xidx + 0.5 looks bad?
-
-                    for xidx in range(xidx0, xidx1):
-                        x_rel_center = xbw * xidx + xbshift
-                        for yidx in range(yidx0, yidx1):
-                            y_rel_center = ybw * yidx + ybshift
-                            for zidx in range(zidx0, zidx1):
-                                z_rel_center = zbw * zidx + zbshift
-                                rho_sq = x_rel_center*x_rel_center + y_rel_center*y_rel_center
-                                r_ = np.sqrt(rho_sq + z_rel_center*z_rel_center)
-                                if r_ < r_lower or r_ > r_upper:
-                                    continue
-                                theta_ = np.arccos(z_rel_center / r_)
-                                if theta_ < theta_lower or theta_ > theta_upper:
-                                    continue
-                                phi_ = np.arctan2(y_rel_center, x_rel_center) % (2*np.pi)
-                                if phi_ < phi_lower or phi_ > phi_upper:
-                                    continue
-
-                                # TODO: more advanced intersection volume
-                                # calculation? E.g., antialiasing by subsampling?
-                                bin_idx = (xidx, yidx, zidx)
-                                vol_mask[bin_idx] = 1
-                                binned_vol[bin_idx] += vol
-                                binned_sp_by_vol[bin_idx] += sp_by_vol
-                                binned_p_x[bin_idx] += p_x_
-                                binned_p_y[bin_idx] += p_y_
-                                binned_p_z[bin_idx] += p_z_
-
-        flat_vol = binned_vol.flat
-        flat_one_minus_sp = one_minus_survival_prob.flat
-        flat_sp_by_vol = binned_sp_by_vol.flat
-        for idx, mask in enumerate(vol_mask.flat):
-            if mask == 1:
-                flat_one_minus_sp[idx] *= 1 - flat_sp_by_vol[idx] / flat_vol[idx]
 
     end_setup_time = time.time()
     print('Setup time: %.3f sec' % (end_setup_time - start_time))
@@ -686,7 +306,7 @@ def generate_time_and_dom_indep_tables(xlims, ylims, zlims, nx, ny, nz, nphi,
             t_indep_p_rho[mask] = (p_rho[t_slice] * p_survival_prob[t_slice]).sum(axis=RETRO_T_IDX)[mask] * scale
 
             # Broadcast the survival probability and Cartesian components of
-            # the average photon # (binned in plane-polar coordinates) to
+            # the average photon (binned in plane-polar coordinates) to
             # spherical-polar coordinates, computing the x- and y-components
             t_indep_p_survival_prob = np.broadcast_to(t_indep_p_survival_prob, t_indep_p_info_shape)
             t_indep_p_z = np.broadcast_to(t_indep_p_z, t_indep_p_info_shape)
