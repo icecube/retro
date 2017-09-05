@@ -10,8 +10,8 @@ ext_modules = [
     Extension(
         'retro.shift_and_bin',
         ['retro/shift_and_bin.pyx'],
-        #extra_compile_args=['-fopenmp'],
-        #extra_link_args=['-fopenmp']
+        extra_compile_args=['-fopenmp'],
+        extra_link_args=['-fopenmp']
     )
 ]
 

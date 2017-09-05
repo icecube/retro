@@ -11,7 +11,8 @@ from __future__ import absolute_import, division, print_function
 from argparse import ArgumentParser
 from copy import deepcopy
 import os
-from os.path import abspath, dirname, join
+from os.path import abspath, basename, dirname, join
+import re
 
 import matplotlib as mpl
 mpl.use('Agg')
@@ -38,22 +39,22 @@ def parse_args(description=__doc__):
         help='''Path to NPY file containing DOM locations as
         (string, dom, x, y, z) entries'''
     )
+    #parser.add_argument(
+    #    '--tables-dir', metavar='DIR', type=str,
+    #    default='/data/icecube/retro_tables/full1000',
+    #    help='''Directory containing retro tables''',
+    #)
     parser.add_argument(
-        '--tables-dir', metavar='DIR', type=str,
-        default='/data/icecube/retro_tables/full1000',
-        help='''Directory containing retro tables''',
-    )
-    parser.add_argument(
-        '--tables-basename', metavar='DIR', type=str, required=True,
-        help='''Basename of the tables, e.g.
+        '--table-path', metavar='DIR', type=str, required=True,
+        help='''Path to one of the tables, e.g.
         `qdeficit_cart_table_20x20x20_os_r1_zen1_test`''',
     )
     parser.add_argument(
-        '--plot-slices', action='store_true',
+        '--slices', action='store_true',
         help='''Plot slices in each plane''',
     )
     parser.add_argument(
-        '--plot-projections', action='store_true',
+        '--projections', action='store_true',
         help='''Plot projections in each plane''',
     )
     parser.add_argument(
@@ -64,8 +65,16 @@ def parse_args(description=__doc__):
     return args
 
 
-def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
-                     plot_projections=True, plot_3d=True):
+def visualize_tables(table_path, geom_file, slices=True, projections=True,
+                     plot_3d=True):
+    tables_dir = dirname(table_path)
+    table_fname = basename(table_path)
+    tables_basename = table_fname
+    for name in ['survival_prob', 'avg_photon_x', 'avg_photon_y', 'avg_photon_z']:
+        tables_basename = tables_basename.replace('_' + name + '.fits', '')
+    if tables_basename[-1] == '_':
+        tables_basename = tables_basename[:-1]
+
     det_string_depth_xyz = np.load(geom_file)
 
     num_doms_in_detector = np.prod(det_string_depth_xyz.shape[:2])
@@ -86,6 +95,12 @@ def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
         lims = fits_file[2].data
         doms_used = fits_file[3].data
 
+        # If 3D, dims represent: (string numbers, depth indices, (x, y, z))
+        if len(doms_used.shape) == 3:
+            doms_used = np.stack((doms_used[:, :, 0].flatten(),
+                                  doms_used[:, :, 1].flatten(),
+                                  doms_used[:, :, 2].flatten())).T
+
         nx, ny, nz = xyz_shape
         xlims = lims[0, :]
         ylims = lims[1, :]
@@ -95,9 +110,11 @@ def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
         print('z lims:', zlims)
         print('(nx, ny, nz):', xyz_shape)
         num_doms_used = doms_used.shape[0]
+        print('num doms used:', num_doms_used)
+        print('doms used:', doms_used.shape)
 
-    if plot_slices:
-        mask = survival_prob > (ma / 10000000)
+    if slices:
+        mask = survival_prob > 0 #(ma / 10000000)
         avg_photon_info = {}
         for dim in ['x', 'y', 'z']:
             fname = '%s_avg_photon_%s.fits' % (tables_basename, dim)
@@ -125,7 +142,7 @@ def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
         circle_args=dict(color=(0, 0.8, 0), linewidth=1, alpha=0.3)
     )
 
-    if plot_projections:
+    if projections:
         for normal in ['x', 'y', 'z']:
             prj = yt.ProjectionPlot(ds, normal, 'density')
             prj.set_log('density', False)
@@ -185,7 +202,7 @@ def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
 
         plots.append(sc)
 
-    if plot_slices:
+    if slices:
         skw = deepcopy(sphere_kwargs)
         skw['circle_args']['color'] = (0.8, 0, 0)
         if num_doms_used != num_doms_in_detector:
@@ -216,8 +233,8 @@ def visualize_tables(tables_dir, tables_basename, geom_file, plot_slices=True,
                 for depth_xyz in doms_used:
                     slc.annotate_sphere(depth_xyz, **kw)
 
-            nskip = 20
-            kw = dict(factor=nskip, scale=5e8)
+            nskip = 5
+            kw = dict(factor=nskip, scale=1e2)
             if normal == 'x':
                 slc.annotate_quiver('velocity_y', 'velocity_z', **kw)
             elif normal == 'y':
