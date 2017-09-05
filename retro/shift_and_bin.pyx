@@ -3,7 +3,7 @@ cimport cython
 cimport openmp
 from cython.parallel import parallel, prange
 
-from libc.math cimport ceil, round, sqrt
+from libc.math cimport ceil, floor, round, sqrt
 
 import numpy as np
 cimport numpy as np
@@ -167,26 +167,35 @@ def shift_and_bin(list ind_arrays,
     # Logic below about extrapolating from first octant to other octants fails
     # if bin widths are different sizes in different dimensions
     assert xbw == ybw == zbw
+    assert xbw > 0
     assert x_oversample == y_oversample == z_oversample
+    assert x_oversample >= 1
+
+    DEF x_mirror_pt = -1
+    DEF y_mirror_pt = -1
+    DEF z_mirror_pt = -1
 
     cdef:
-        float[:, :] ind_array
+        int[:, :] ind_array
         float[:] vol_array
 
-        Py_ssize_t num_first_octant_pol_bins = len(vol_arrays)
-        Py_ssize_t num_cart_bins = nx * ny * nz
+        #int nx_os = nx * x_oversample
+        #int ny_os = ny * y_oversample
+        #int nz_os = nz * z_oversample
+
+        int num_first_octant_pol_bins = len(vol_arrays)
 
         float x_half_os_bw = xbw / (2.0 * <float>x_oversample)
         float y_half_os_bw = ybw / (2.0 * <float>y_oversample)
         float z_half_os_bw = zbw / (2.0 * <float>z_oversample)
 
-        float x_mirror_pt = -1.0 / <float>x_oversample
-        float y_mirror_pt = -1.0 / <float>y_oversample
-        float z_mirror_pt = -1.0 / <float>z_oversample
+        #float x_mirror_pt = -1.0 / <float>x_oversample
+        #float y_mirror_pt = -1.0 / <float>y_oversample
+        #float z_mirror_pt = -1.0 / <float>z_oversample
 
         float dom_x, dom_y, dom_z
-        float dom_x_float_idx, dom_y_float_idx, dom_z_float_idx
-        float x_float_idx, y_float_idx, z_float_idx
+        int dom_x_os_idx, dom_y_os_idx, dom_z_os_idx
+        int x_os_idx, y_os_idx, z_os_idx
         float bin_pos_rho_norm
 
         double vol, prho_, px_, py_, pz_
@@ -198,16 +207,25 @@ def shift_and_bin(list ind_arrays,
         int ntheta_in_quad = <int>ceil(<double>ntheta / 2.0)
         Py_ssize_t flat_pol_idx, r_idx, theta_idx, theta_idx_
         int x_idx, y_idx, z_idx, ix
-        int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.uint32)
+        int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.int32)
         int hemisphere, quadrant
 
-        int[:, :, :] vol_mask = np.zeros((nx, ny, nz), dtype=np.uint32)
+        int[:, :, :] vol_mask = np.zeros((nx, ny, nz), dtype=np.int32)
         double[:, :, :] binned_vol = np.zeros((nx, ny, nz), dtype=np.float64)
 
         int dom_idx
         int num_doms = <int>dom_coords.shape[0]
 
     assert num_first_octant_pol_bins == nr * ntheta / 2
+
+    for array, name in [(binned_spv, 'binned_spv'),
+                        (binned_px_spv, 'binned_px_spv'),
+                        (binned_py_spv, 'binned_py_spv'),
+                        (binned_pz_spv, 'binned_pz_spv'),
+                        (binned_one_minus_sp, 'binned_one_minus_sp')]:
+        assert array.shape[0] == nx
+        assert array.shape[1] == ny
+        assert array.shape[2] == nz
 
     for ix in range(num_first_octant_pol_bins):
         num_cart_bins_in_pol_bin[ix] = vol_arrays[ix].shape[0]
@@ -218,9 +236,9 @@ def shift_and_bin(list ind_arrays,
         for dom_idx in prange(num_doms, schedule='static'):
             with gil:
                 (dom_x, dom_y, dom_z) = dom_coords[dom_idx]
-            dom_x_float_idx = (dom_x - x0) / xbw
-            dom_y_float_idx = (dom_y - y0) / ybw
-            dom_z_float_idx = (dom_z - z0) / zbw
+            dom_x_os_idx = <int>round((dom_x - x0) / (xbw * x_oversample))
+            dom_y_os_idx = <int>round((dom_y - y0) / (ybw * y_oversample))
+            dom_z_os_idx = <int>round((dom_z - z0) / (zbw * z_oversample))
             for r_idx in range(nr):
                 for theta_idx in range(ntheta / 2):
                     flat_pol_idx = theta_idx + r_idx*ntheta_in_quad
@@ -231,29 +249,33 @@ def shift_and_bin(list ind_arrays,
 
                     for ix in range(num_cart_bins_in_pol_bin[flat_pol_idx]):
                         #vol = <double>vol_array[ix]
-                        #x_float_idx = ind_array[ix, 0]
-                        #y_float_idx = ind_array[ix, 1]
-                        #z_float_idx = ind_array[ix, 2]
+                        #x_os_idx = ind_array[ix, 0]
+                        #y_os_idx = ind_array[ix, 1]
+                        #z_os_idx = ind_array[ix, 2]
                         with gil:
                             vol = <double>vol_arrays[flat_pol_idx][ix]
-                            x_float_idx = ind_arrays[flat_pol_idx][ix, 0]
-                            y_float_idx = ind_arrays[flat_pol_idx][ix, 1]
-                            z_float_idx = ind_arrays[flat_pol_idx][ix, 2]
+                            x_os_idx = ind_arrays[flat_pol_idx][ix, 0]
+                            y_os_idx = ind_arrays[flat_pol_idx][ix, 1]
+                            z_os_idx = ind_arrays[flat_pol_idx][ix, 2]
+
+                        #x_idx = <int>floor(x_os_idx // x_oversample)
+                        #y_idx = <int>floor(x_os_idx // x_oversample)
+                        #z_idx = <int>floor(x_os_idx // x_oversample)
 
                         # Azimuth angle is detrmined by (x, y) bin center since
                         # we assume azimuthal symmetry
-                        px_unnormed = x_float_idx * xbw + x_half_os_bw
-                        py = y_float_idx * ybw + y_half_os_bw
+                        px_unnormed = x_os_idx * xbw * x_oversample + x_half_os_bw
+                        py_unnormed = y_os_idx * ybw * y_oversample + y_half_os_bw
                         bin_pos_rho_norm = 1 / sqrt(px_unnormed**2 + py_unnormed**2)
                         px_unnormed = px_unnormed * bin_pos_rho_norm
                         py_unnormed = py_unnormed * bin_pos_rho_norm
 
                         for hemisphere in range(2):
                             if hemisphere == 0:
-                                z_idx = <int>round(z_float_idx + dom_z_float_idx)
+                                z_idx = (z_os_idx + dom_z_os_idx) // z_oversample
                                 theta_idx_ = theta_idx
                             else:
-                                z_idx = <int>round(z_mirror_pt - z_float_idx + dom_z_float_idx)
+                                z_idx = (z_mirror_pt - z_os_idx + dom_z_os_idx) // z_oversample
                                 theta_idx_ = ntheta - 1 - theta_idx
 
                             if z_idx < 0 or z_idx >= nz:
@@ -269,29 +291,29 @@ def shift_and_bin(list ind_arrays,
 
                             for quadrant in range(4):
                                 if quadrant == 0:
-                                    x_idx = <int>round(x_float_idx + dom_x_float_idx)
-                                    y_idx = <int>round(y_float_idx + dom_y_float_idx)
+                                    x_idx = (x_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (y_os_idx + dom_y_os_idx) // y_oversample
                                     px_ = px_firstquad
                                     py_ = py_firstquad
 
                                 # x -> +y, y -> -x
                                 elif quadrant == 1:
-                                    x_idx = <int>round(y_mirror_pt - y_float_idx + dom_x_float_idx)
-                                    y_idx = <int>round(x_float_idx + dom_y_float_idx)
+                                    x_idx = (y_mirror_pt - y_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (x_os_idx + dom_y_os_idx) // y_oversample
                                     px_ = -py_firstquad
                                     py_ = px_firstquad
 
                                 # x -> -x, y -> -y
                                 elif quadrant == 2:
-                                    x_idx = <int>round(x_mirror_pt - x_float_idx + dom_x_float_idx)
-                                    y_idx = <int>round(y_mirror_pt - y_float_idx + dom_y_float_idx)
+                                    x_idx = (x_mirror_pt - x_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (y_mirror_pt - y_os_idx + dom_y_os_idx) // y_oversample
                                     px_ = -px_firstquad
                                     py_ = -py_firstquad
 
                                 # x -> -y, y -> x
                                 elif quadrant == 3:
-                                    x_idx = <int>round(y_float_idx + dom_x_float_idx)
-                                    y_idx = <int>round(x_mirror_pt - x_float_idx + dom_y_float_idx)
+                                    x_idx = (y_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (x_mirror_pt - x_os_idx + dom_y_os_idx) // y_oversample
                                     px_ = py_firstquad
                                     py_ = -px_firstquad
 

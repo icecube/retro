@@ -1,6 +1,6 @@
 cimport cython
 
-from libc.math cimport ceil, floor, sqrt, cos, sin
+from libc.math cimport ceil, floor, round, sqrt, cos, sin
 
 import numpy as np
 cimport numpy as np
@@ -58,8 +58,9 @@ def sphbin2cartbin(double r_max, double r_power,
 
     Returns
     -------
-    ind_arrays : list of M numpy.ndarrays each of shape (N, 3), dtype float32
-        One array per spherical bin in the first octant.
+    ind_arrays : list of M numpy.ndarrays each of shape (N, 3), dtype int32
+        One array per spherical bin in the first octant. Indices refer to the
+        oversampled binning.
 
     vol_arrays : list of M numpy.ndarrays each of shape (N,), dtype float32
         One array per spherical bin
@@ -83,7 +84,7 @@ def sphbin2cartbin(double r_max, double r_power,
     assert x_oversample == y_oversample == z_oversample
 
     cdef:
-        unsigned int n_quadrant_costhetabins = <unsigned int>ceil(<double>n_costhetabins / 2.0)
+        int n_quadrant_costhetabins = <int>ceil(<double>n_costhetabins / 2.0)
 
         double x_os_dbl = <double>x_oversample
         double y_os_dbl = <double>y_oversample
@@ -108,21 +109,12 @@ def sphbin2cartbin(double r_max, double r_power,
         int n_ybins_oct_os = <int>ceil(r_max / y_bw_os)
         int n_zbins_oct_os = <int>ceil(r_max / z_bw_os)
 
-        int n_xbins_oct_os_aa = <int>ceil(r_max / x_bw_os_aa)
-        int n_ybins_oct_os_aa = <int>ceil(r_max / y_bw_os_aa)
-        int n_zbins_oct_os_aa = <int>ceil(r_max / z_bw_os_aa)
-
-        double x_idx_mirror_pt = -1.0 / x_oversample
-        double y_idx_mirror_pt = -1.0 / y_oversample
-        double z_idx_mirror_pt = -1.0 / z_oversample
-
         double inv_r_power = 1.0 / r_power
         double power_r_bin_scale = <double>n_rbins / r_max**inv_r_power
         double costheta_bin_scale = <double>n_costhetabins / 2.0
         double dphi = TWO_PI / <double>n_phibins
 
-        unsigned int x_os_idx, y_os_idx, z_os_idx, xi, yi, zi
-        float x_idx, y_idx, z_idx
+        int x_os_idx, y_os_idx, z_os_idx, xi, yi, zi
         int r_bin_idx, costheta_bin_idx, flat_bin_idx
 
         double x0, y0, z0
@@ -162,7 +154,6 @@ def sphbin2cartbin(double r_max, double r_power,
             bin_mapping.append(dict())
 
     for x_os_idx in range(n_xbins_oct_os):
-        x_idx = <float>(<double>x_os_idx / x_os_dbl)
         x0 = x_os_idx * x_bw_os + x_halfbw_os_aa
         for xi in range(antialias_factor):
             x_center = x0 + xi * x_bw_os_aa
@@ -170,7 +161,6 @@ def sphbin2cartbin(double r_max, double r_power,
             x_centers_sq[xi] = x_center_sq
 
         for y_os_idx in range(n_ybins_oct_os):
-            y_idx = <float>(<double>y_os_idx / y_os_dbl)
             y0 = y_os_idx * y_bw_os + y_halfbw_os_aa
             for yi in range(antialias_factor):
                 y_center = y0 + yi * y_bw_os_aa
@@ -179,10 +169,8 @@ def sphbin2cartbin(double r_max, double r_power,
                     rho_squares[xi][yi] = x_centers_sq[xi] + y_center_sq
 
             for z_os_idx in range(n_zbins_oct_os):
-                z_idx = <float>(<double>z_os_idx / z_os_dbl)
-
                 # NOTE: populating _only_ first octant values!
-                xyz_idx_q1 = (x_idx, y_idx, z_idx)
+                xyz_idx_q1 = (x_os_idx, y_os_idx, z_os_idx)
 
                 z0 = z_os_idx * z_bw_os + z_halfbw_os_aa
                 for zi in range(antialias_factor):
@@ -194,8 +182,8 @@ def sphbin2cartbin(double r_max, double r_power,
                             if r < 0 or r >= r_max:
                                 continue
 
-                            r_bin_idx = int(floor(r**inv_r_power * power_r_bin_scale))
-                            costheta_bin_idx = int((1.0 - z_center / r) * costheta_bin_scale)
+                            r_bin_idx = <int>(floor(r**inv_r_power * power_r_bin_scale))
+                            costheta_bin_idx = <int>((1.0 - z_center / r) * costheta_bin_scale)
                             if costheta_bin_idx < 0 or costheta_bin_idx >= n_costhetabins:
                                 continue
 
@@ -225,7 +213,7 @@ def sphbin2cartbin(double r_max, double r_power,
                 r_bcenter = (r_bmin + r_bmax) / 2.0
                 costheta_bcenter = (costheta_bmin + costheta_bmax) / 2.0
                 z_center = r_bcenter * costheta_bcenter
-                z_idx = <float>(floor(z_center / z_bw_os) / z_os_dbl)
+                z_os_idx = <int>round(z_center / z_bw_os)
                 rho_center = sqrt(r_bcenter**2 - z_center**2)
                 sph_bin_vol = -dcostheta * (r_bmax**3 - r_bmin**3) / 3.0 * dphi
 
@@ -234,9 +222,9 @@ def sphbin2cartbin(double r_max, double r_power,
                     x_center = rho_center * cos(phi_bin_center)
                     y_center = rho_center * sin(phi_bin_center)
 
-                    x_idx = <float>(floor(x_center / x_bw_os) / x_os_dbl)
-                    y_idx = <float>(floor(y_center / y_bw_os) / y_os_dbl)
-                    xyz_idx_q1 = (x_idx, y_idx, z_idx)
+                    x_os_idx = <int>round(x_center / x_bw_os)
+                    y_os_idx = <int>round(y_center / y_bw_os)
+                    xyz_idx_q1 = (x_os_idx, y_os_idx, z_os_idx)
 
                     # NOTE: duplicates are overwritten (i.e., should be at
                     # most one entry for xyz_idx_q1 per spherical bin)
