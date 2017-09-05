@@ -48,7 +48,7 @@ zlims = (-750, 650)
 
 
 x_bw = y_bw = z_bw = 5
-x_oversample = y_oversample = z_oversample = 2
+x_oversample = y_oversample = z_oversample = 5
 antialias_factor = 1
 
 nx = int((xlims[1] - xlims[0]) / x_bw)
@@ -57,10 +57,13 @@ nz = int((zlims[1] - zlims[0]) / z_bw)
 xyz_shape = (nx, ny, nz)
 print('xyz_shape:', xyz_shape)
 
+#string_indices = slice(None)
+#depth_slice = slice(None)
 depth_slice = slice(48, 48+3)
 string_indices = np.array([25, 26, 34, 35, 36, 44, 45])
 #depth_slice = slice(48, 48+1)
 #string_indices = np.array([35])
+
 t_slice = slice(None)
 t_etc_slice = [t_slice, slice(None), slice(None)]
 
@@ -219,8 +222,8 @@ names = [
 recompute = False
 for name in names:
     fpath = join(tables_dir, fbasename + '_' + name + '.fits')
-    #if True:
-    if not isfile(fpath):
+    #if not isfile(fpath):
+    if True:
         print('could not find table, will (re)compute\n%s\n' % fpath)
         recompute = True
         break
