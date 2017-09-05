@@ -40,15 +40,15 @@ def sphbin2cartbin(double r_max, double r_power,
         Cartesian binwidths in x, y, and z directions
 
     x_oversample, y_oversample, z_oversample : int >= 1
-        Oversmapling factors. If oversampling is used, the returned indices
-        array will have floating point values. E.g., a bin index with
-        oversampling of 2 could have values 0, 0.5, 1, ...
-        Note that this increases the size of the computational cost _and_ increases the
-        memory footprint of the produced array(s).
+        Oversampling factors. If oversampling is used, the returned indices
+        array will have integer point values from 0 to nx*x_oversample, etc.
+        E.g., a bin index with oversampling of 3 would be represented by
+        indices 0, 1, and 2. This allows for centering the grid more accurately
+        on a DOM without upsampling the entire grid.
 
     antialias_factor : int from 1 to 50
         The smallest binning unit in each dimension is divided again (i.e.
-        after oversampling) by this factor for more accruately computing the
+        after oversampling) by this factor for more accurately computing the
         volume of overlap (and then the sub-binning for antialiasing is
         discarded). This therefore does not add to the memory footprint of the
         final binning, but there will be more partial overlaps found, and so
@@ -64,6 +64,10 @@ def sphbin2cartbin(double r_max, double r_power,
 
     vol_arrays : list of M numpy.ndarrays each of shape (N,), dtype float32
         One array per spherical bin
+
+    See Also
+    --------
+    retro.shift_and_bin.shift_and_bin
 
     """
     DEF MAX_AA_FACTOR = 50
@@ -99,15 +103,14 @@ def sphbin2cartbin(double r_max, double r_power,
         double z_bw_os_aa = z_bw_os / <double>antialias_factor
 
         double aa_vol = x_bw_os_aa * y_bw_os_aa * z_bw_os_aa
-        double overlap_vol
 
         double x_halfbw_os_aa = x_bw_os_aa / 2.0
         double y_halfbw_os_aa = y_bw_os_aa / 2.0
         double z_halfbw_os_aa = z_bw_os_aa / 2.0
 
-        int n_xbins_oct_os = <int>ceil(r_max / x_bw_os)
-        int n_ybins_oct_os = <int>ceil(r_max / y_bw_os)
-        int n_zbins_oct_os = <int>ceil(r_max / z_bw_os)
+        int n_xbins_oct_os = <int>ceil(r_max / x_bw) * x_oversample
+        int n_ybins_oct_os = <int>ceil(r_max / y_bw) * y_oversample
+        int n_zbins_oct_os = <int>ceil(r_max / z_bw) * z_oversample
 
         double inv_r_power = 1.0 / r_power
         double power_r_bin_scale = <double>n_rbins / r_max**inv_r_power
@@ -126,7 +129,6 @@ def sphbin2cartbin(double r_max, double r_power,
         double rho_sq
 
         double r
-        double new_vol
 
         double[:] phi_bin_centers = np.linspace(
             start=TWO_PI / <double>n_phibins / 2.0,
@@ -154,14 +156,14 @@ def sphbin2cartbin(double r_max, double r_power,
             bin_mapping.append(dict())
 
     for x_os_idx in range(n_xbins_oct_os):
-        x0 = x_os_idx * x_bw_os + x_halfbw_os_aa
+        x0 = <double>x_os_idx * x_bw_os + x_halfbw_os_aa
         for xi in range(antialias_factor):
             x_center = x0 + xi * x_bw_os_aa
             x_center_sq = x_center * x_center
             x_centers_sq[xi] = x_center_sq
 
         for y_os_idx in range(n_ybins_oct_os):
-            y0 = y_os_idx * y_bw_os + y_halfbw_os_aa
+            y0 = <double>y_os_idx * y_bw_os + y_halfbw_os_aa
             for yi in range(antialias_factor):
                 y_center = y0 + yi * y_bw_os_aa
                 y_center_sq = y_center * y_center
@@ -172,7 +174,7 @@ def sphbin2cartbin(double r_max, double r_power,
                 # NOTE: populating _only_ first octant values!
                 xyz_idx_q1 = (x_os_idx, y_os_idx, z_os_idx)
 
-                z0 = z_os_idx * z_bw_os + z_halfbw_os_aa
+                z0 = <double>z_os_idx * z_bw_os + z_halfbw_os_aa
                 for zi in range(antialias_factor):
                     z_center = z0 + zi * z_bw_os_aa
                     z_center_sq = z_center * z_center
@@ -182,14 +184,13 @@ def sphbin2cartbin(double r_max, double r_power,
                             if r < 0 or r >= r_max:
                                 continue
 
-                            r_bin_idx = <int>(floor(r**inv_r_power * power_r_bin_scale))
+                            r_bin_idx = <int>floor(r**inv_r_power * power_r_bin_scale)
                             costheta_bin_idx = <int>((1.0 - z_center / r) * costheta_bin_scale)
                             if costheta_bin_idx < 0 or costheta_bin_idx >= n_costhetabins:
                                 continue
 
                             d = bin_mapping[costheta_bin_idx + n_quadrant_costhetabins*r_bin_idx]
-                            new_vol = aa_vol + d.get(xyz_idx_q1, 0.0)
-                            d[xyz_idx_q1] = new_vol
+                            d[xyz_idx_q1] = d.get(xyz_idx_q1, 0.0) + aa_vol
 
     # Account for any spherical bins that were assigned no corresponding
     # Cartesian bins; otherwise, normalize total binned volume to be no larger
@@ -207,8 +208,9 @@ def sphbin2cartbin(double r_max, double r_power,
 
             d = bin_mapping[costheta_bin_idx + n_quadrant_costhetabins*r_bin_idx]
 
-            # For spherical volume elements that don't have any assigned Cartesian bins,
-            # find spherical element's center and locate it in a Cartesian bin
+            # For spherical volume elements that don't have any assigned
+            # Cartesian bins, find spherical element's center and locate it in
+            # the closest Cartesian bin
             if len(d) == 0:
                 r_bcenter = (r_bmin + r_bmax) / 2.0
                 costheta_bcenter = (costheta_bmin + costheta_bmax) / 2.0
