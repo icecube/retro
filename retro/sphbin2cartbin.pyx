@@ -42,16 +42,19 @@ def sphbin2cartbin(double r_max, double r_power,
     x_oversample, y_oversample, z_oversample : int >= 1
         Oversmapling factors. If oversampling is used, the returned indices
         array will have floating point values. E.g., a bin index with
-        oversampling of 2 could have take values 0, 0.5, 1, ...
-        Note that this increases the computational cost _and_ increases the
+        oversampling of 2 could have values 0, 0.5, 1, ...
+        Note that this increases the size of the computational cost _and_ increases the
         memory footprint of the produced array(s).
 
     antialias_factor : int from 1 to 50
-        The smallest binning unit in each dimension is divided again by
-        this factor for more accruately computing the volume of overlap
-        (and then the sub-binning for antialiasing is discarded). This
-        therefore does not add to the memory footprint, but will increase
-        the computational cost.
+        The smallest binning unit in each dimension is divided again (i.e.
+        after oversampling) by this factor for more accruately computing the
+        volume of overlap (and then the sub-binning for antialiasing is
+        discarded). This therefore does not add to the memory footprint of the
+        final binning, but there will be more partial overlaps found, and so
+        `ind_arrays` and `vol_arrays` will be larger. This does increase the
+        computational burden for this function _and_ for the `shift_and_bin`
+        function (due to the larger ind/vol arrays).
 
     Returns
     -------

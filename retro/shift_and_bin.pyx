@@ -3,7 +3,7 @@ cimport cython
 cimport openmp
 from cython.parallel import parallel, prange
 
-from libc.math cimport ceil, floor, round, sqrt
+from libc.math cimport ceil, round, sqrt
 
 import numpy as np
 cimport numpy as np
@@ -20,25 +20,25 @@ def shift_and_bin(list ind_arrays,
                   float[:, :] survival_prob,
                   float[:, :] prho,
                   float[:, :] pz,
-                  unsigned int nr,
-                  unsigned int ntheta,
+                  int nr,
+                  int ntheta,
                   double[:, :, :] binned_spv,
                   double[:, :, :] binned_px_spv,
                   double[:, :, :] binned_py_spv,
                   double[:, :, :] binned_pz_spv,
                   double[:, :, :] binned_one_minus_sp,
-                  unsigned int nx,
-                  unsigned int ny,
-                  unsigned int nz,
+                  int nx,
+                  int ny,
+                  int nz,
                   float x0,
                   float y0,
                   float z0,
                   float xbw,
                   float ybw,
                   float zbw,
-                  unsigned int x_oversample,
-                  unsigned int y_oversample,
-                  unsigned int z_oversample):
+                  int x_oversample,
+                  int y_oversample,
+                  int z_oversample):
     r"""Shift (r, theta) retro tables (i.e., (t, r, theta) tables with time
     marginalized out) to each DOM location and aggregate its quantities (with
     appropriate weighting) in (x, y, z) retro tables.
@@ -79,25 +79,26 @@ def shift_and_bin(list ind_arrays,
     survival_prob : shape (J_r, J_theta) numpy.ndarray, dtype float32
         Survival probability of a photon at this polar coordinate
 
-    px, py, pz : shape (J_r, J_theta) numpy.ndarrays, dtype float32
-        Average photon x-, y-, and z-components at this coordinate
+    prho, pz : shape (J_r, J_theta) numpy.ndarrays, dtype float32
+        Average photon rho (i.e., sqrt(x^2 + y^2)) and z-components at each
+        polar (r, theta) coordinate
 
     binned_spv : numpy.ndarray, same shape as `x`, `y`, and `z`
         Binned photon survival probabilities * volumes, accumulated for all
         DOMs to normalize the average surviving photon info (`binned_px_spv`,
         etc.) in the end
 
-    binned_one_minus_sp : numpy.ndarray of shape (nx, ny, nz)
-        Existing array to which ``1 - normed_survival_probability`` is
-        multiplied (where the normalization factor is not infinite)
-
     binned_px_spv, binned_py_spv, binned_pz_spv : shape (nx, ny, nz) numpy.ndarray, dtype float64
         Existing arrays into which average photon components are accumulated
 
-    nx, ny, nz : unsigned int
+    binned_one_minus_sp : shape (nx, ny, nz) numpy.ndarray, dtype float64
+        Existing array to which ``1 - normed_survival_probability`` is
+        multiplied (where the normalization factor is not infinite)
+
+    nx, ny, nz : int
     x0, y0, z0 : float
     xbw, ybw, zbw : float
-    x_oversample, y_oversample, z_oversample : unsigned int
+    x_oversample, y_oversample, z_oversample : int
 
 
     Notes
@@ -175,9 +176,9 @@ def shift_and_bin(list ind_arrays,
         Py_ssize_t num_first_octant_pol_bins = len(vol_arrays)
         Py_ssize_t num_cart_bins = nx * ny * nz
 
-        float x_half_os_bw = xbw / (2 * <float>x_oversample)
-        float y_half_os_bw = ybw / (2 * <float>y_oversample)
-        float z_half_os_bw = zbw / (2 * <float>z_oversample)
+        float x_half_os_bw = xbw / (2.0 * <float>x_oversample)
+        float y_half_os_bw = ybw / (2.0 * <float>y_oversample)
+        float z_half_os_bw = zbw / (2.0 * <float>z_oversample)
 
         float x_mirror_pt = -1.0 / <float>x_oversample
         float y_mirror_pt = -1.0 / <float>y_oversample
@@ -185,25 +186,26 @@ def shift_and_bin(list ind_arrays,
 
         float dom_x, dom_y, dom_z
         float dom_x_float_idx, dom_y_float_idx, dom_z_float_idx
-        float x, y, z, x_float_idx, y_float_idx, z_float_idx
+        float x_float_idx, y_float_idx, z_float_idx
         float bin_pos_rho_norm
 
         double vol, prho_, px_, py_, pz_
-        double px_nom, py_nom
+        double px_unnormed, py_unnormed, pz_unnormed
+        double px_firstquad, py_firstquad
         double sp, spv, px_spv, py_spv, pz_spv
 
-        unsigned int octant
-        unsigned int ntheta_in_quad = <unsigned int>ceil(<double>ntheta / 2.0)
+        int octant
+        int ntheta_in_quad = <int>ceil(<double>ntheta / 2.0)
         Py_ssize_t flat_pol_idx, r_idx, theta_idx, theta_idx_
         int x_idx, y_idx, z_idx, ix
-        unsigned int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.uint32)
-        unsigned int hemisphere, quadrant
+        int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.uint32)
+        int hemisphere, quadrant
 
-        unsigned int[:, :, :] vol_mask = np.zeros((nx, ny, nz), dtype=np.uint32)
+        int[:, :, :] vol_mask = np.zeros((nx, ny, nz), dtype=np.uint32)
         double[:, :, :] binned_vol = np.zeros((nx, ny, nz), dtype=np.float64)
 
-        unsigned int dom_idx
-        unsigned int num_doms = <unsigned int>dom_coords.shape[0]
+        int dom_idx
+        int num_doms = <int>dom_coords.shape[0]
 
     assert num_first_octant_pol_bins == nr * ntheta / 2
 
@@ -234,16 +236,17 @@ def shift_and_bin(list ind_arrays,
                         #z_float_idx = ind_array[ix, 2]
                         with gil:
                             vol = <double>vol_arrays[flat_pol_idx][ix]
-
                             x_float_idx = ind_arrays[flat_pol_idx][ix, 0]
                             y_float_idx = ind_arrays[flat_pol_idx][ix, 1]
                             z_float_idx = ind_arrays[flat_pol_idx][ix, 2]
 
-                        x = x_float_idx * xbw + x_half_os_bw
-                        y = y_float_idx * ybw + y_half_os_bw
-                        bin_pos_rho_norm = 1 / sqrt(x*x + y*y)
-                        x = x * bin_pos_rho_norm
-                        y = y * bin_pos_rho_norm
+                        # Azimuth angle is detrmined by (x, y) bin center since
+                        # we assume azimuthal symmetry
+                        px_unnormed = x_float_idx * xbw + x_half_os_bw
+                        py = y_float_idx * ybw + y_half_os_bw
+                        bin_pos_rho_norm = 1 / sqrt(px_unnormed**2 + py_unnormed**2)
+                        px_unnormed = px_unnormed * bin_pos_rho_norm
+                        py_unnormed = py_unnormed * bin_pos_rho_norm
 
                         for hemisphere in range(2):
                             if hemisphere == 0:
@@ -261,36 +264,36 @@ def shift_and_bin(list ind_arrays,
                             prho_ = <double>prho[r_idx, theta_idx_]
                             pz_ = <double>pz[r_idx, theta_idx_]
 
-                            px_nom = x * prho_
-                            py_nom = y * prho_
+                            px_firstquad = px_unnormed * prho_
+                            py_firstquad = py_unnormed * prho_
 
                             for quadrant in range(4):
                                 if quadrant == 0:
                                     x_idx = <int>round(x_float_idx + dom_x_float_idx)
                                     y_idx = <int>round(y_float_idx + dom_y_float_idx)
-                                    px_ = px_nom
-                                    py_ = py_nom
+                                    px_ = px_firstquad
+                                    py_ = py_firstquad
 
                                 # x -> +y, y -> -x
                                 elif quadrant == 1:
                                     x_idx = <int>round(y_mirror_pt - y_float_idx + dom_x_float_idx)
                                     y_idx = <int>round(x_float_idx + dom_y_float_idx)
-                                    px_ = -py_nom
-                                    py_ = px_nom
+                                    px_ = -py_firstquad
+                                    py_ = px_firstquad
 
                                 # x -> -x, y -> -y
                                 elif quadrant == 2:
                                     x_idx = <int>round(x_mirror_pt - x_float_idx + dom_x_float_idx)
                                     y_idx = <int>round(y_mirror_pt - y_float_idx + dom_y_float_idx)
-                                    px_ = -px_nom
-                                    py_ = -py_nom
+                                    px_ = -px_firstquad
+                                    py_ = -py_firstquad
 
                                 # x -> -y, y -> x
                                 elif quadrant == 3:
                                     x_idx = <int>round(y_float_idx + dom_x_float_idx)
                                     y_idx = <int>round(x_mirror_pt - x_float_idx + dom_y_float_idx)
-                                    px_ = py_nom
-                                    py_ = -px_nom
+                                    px_ = py_firstquad
+                                    py_ = -px_firstquad
 
                                 if x_idx < 0 or x_idx >= nx or y_idx < 0 or y_idx >= ny:
                                     continue
