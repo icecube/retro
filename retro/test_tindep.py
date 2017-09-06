@@ -40,9 +40,9 @@ n_phibins = 80
 n_tbins = 300
 
 # Whole detector
-xlims = (-900, 950)
-ylims = (-900, 800)
-zlims = (-750, 600)
+#xlims = (-900, 950)
+#ylims = (-900, 800)
+#zlims = (-750, 600)
 
 # DeepCore (below dust layer) and tighter extents in x, y as well
 #xlims = (-750, 750)
@@ -51,9 +51,9 @@ zlims = (-750, 600)
 
 # Tighter volume around DeepCore (200 m past a DOM in any dim, rounded to
 # nearest 50 m)
-#xlims = (-200, 300)
-#ylims = (-300, 250)
-#zlims = (-700, 50)
+xlims = (-200, 300)
+ylims = (-300, 250)
+zlims = (-700, 50)
 
 
 x_bw = y_bw = z_bw = 5
@@ -66,10 +66,10 @@ nz = int((zlims[1] - zlims[0]) / z_bw)
 xyz_shape = (nx, ny, nz)
 print('xyz_shape:', xyz_shape)
 
-#string_indices = slice(None)
-#depth_slice = slice(None)
-depth_slice = slice(48, 48+3)
-string_indices = np.array([25, 26, 34, 35, 36, 44, 45])
+string_indices = slice(None)
+depth_slice = slice(None)
+#depth_slice = slice(48, 48+3)
+#string_indices = np.array([25, 26, 34, 35, 36, 44, 45])
 #depth_slice = slice(48, 48+1)
 #string_indices = np.array([35])
 
@@ -310,31 +310,32 @@ for subdet, subdet_dom_coords in subdet_doms.items():
         print('time to marginalize out time dim, 1 depth:', timediffstamp(t2 - t1))
     
         retro.shift_and_bin.shift_and_bin(
-            ind_arrays,
-            vol_arrays,
-            dom_coords,
-            t_indep_sp,
-            t_indep_prho,
-            t_indep_pz,
-            n_rbins,
-            n_costhetabins,
-            binned_spv,
-            binned_px_spv,
-            binned_py_spv,
-            binned_pz_spv,
-            binned_one_minus_sp,
-            nx,
-            ny,
-            nz,
-            xlims[0],
-            ylims[0],
-            zlims[0],
-            x_bw,
-            y_bw,
-            z_bw,
-            x_oversample,
-            y_oversample,
-            z_oversample
+            ind_arrays=ind_arrays,
+            vol_arrays=vol_arrays,
+            dom_coords=dom_coords,
+            survival_prob=t_indep_sp,
+            prho=t_indep_prho,
+            pz=t_indep_pz,
+            nr=n_rbins,
+            ntheta=n_costhetabins,
+            r_max=r_max,
+            binned_spv=binned_spv,
+            binned_px_spv=binned_px_spv,
+            binned_py_spv=binned_py_spv,
+            binned_pz_spv=binned_pz_spv,
+            binned_one_minus_sp=binned_one_minus_sp,
+            nx=nx,
+            ny=ny,
+            nz=nz,
+            x_min=xlims[0],
+            y_min=ylims[0],
+            z_min=zlims[0],
+            x_bw=x_bw,
+            y_bw=y_bw,
+            z_bw=z_bw,
+            x_oversample=x_oversample,
+            y_oversample=y_oversample,
+            z_oversample=z_oversample
         )
         t3 = time.time()
         print('time to shift and bin:', timediffstamp(t3 - t2))

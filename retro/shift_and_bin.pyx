@@ -20,6 +20,7 @@ def shift_and_bin(list ind_arrays,
                   float[:, :] pz,
                   int nr,
                   int ntheta,
+                  double r_max,
                   double[:] binned_spv,
                   double[:] binned_px_spv,
                   double[:] binned_py_spv,
@@ -28,12 +29,12 @@ def shift_and_bin(list ind_arrays,
                   int nx,
                   int ny,
                   int nz,
-                  double x0,
-                  double y0,
-                  double z0,
-                  double xbw,
-                  double ybw,
-                  double zbw,
+                  double x_min,
+                  double y_min,
+                  double z_min,
+                  double x_bw,
+                  double y_bw,
+                  double z_bw,
                   int x_oversample,
                   int y_oversample,
                   int z_oversample):
@@ -81,21 +82,24 @@ def shift_and_bin(list ind_arrays,
         Average photon rho (i.e., sqrt(x^2 + y^2)) and z-components at each
         polar (r, theta) coordinate
 
-    binned_spv : numpy.ndarray, same shape as `x`, `y`, and `z`
+    r_max : float64
+        Maximum radius in the radial binning
+
+    binned_spv : shape (nx*ny*nz,) numpy.ndarray, dtype float64
         Binned photon survival probabilities * volumes, accumulated for all
         DOMs to normalize the average surviving photon info (`binned_px_spv`,
         etc.) in the end
 
-    binned_px_spv, binned_py_spv, binned_pz_spv : shape (nx, ny, nz) numpy.ndarray, dtype float64
+    binned_px_spv, binned_py_spv, binned_pz_spv : shape (nx*ny*nz,) numpy.ndarray, dtype float64
         Existing arrays into which average photon components are accumulated
 
-    binned_one_minus_sp : shape (nx, ny, nz) numpy.ndarray, dtype float64
+    binned_one_minus_sp : shape (nx*ny*nz,) numpy.ndarray, dtype float64
         Existing array to which ``1 - normed_survival_probability`` is
         multiplied (where the normalization factor is not infinite)
 
     nx, ny, nz : int
-    x0, y0, z0 : double
-    xbw, ybw, zbw : double
+    x_min, y_min, z_min : double
+    x_bw, y_bw, z_bw : double
     x_oversample, y_oversample, z_oversample : int
 
 
@@ -161,19 +165,23 @@ def shift_and_bin(list ind_arrays,
     """
     # Logic below about extrapolating from first octant to other octants fails
     # if bin widths are different sizes in different dimensions
-    assert xbw == ybw == zbw
-    assert xbw > 0
+    assert x_bw == y_bw == z_bw
+    assert x_bw > 0
     assert x_oversample == y_oversample == z_oversample
     assert x_oversample >= 1
 
     cdef:
         int num_first_octant_pol_bins = len(vol_arrays)
 
-        double x_os_bw = xbw / <double>x_oversample
-        double y_os_bw = ybw / <double>y_oversample
+        double x_os_bw = x_bw / <double>x_oversample
+        double y_os_bw = y_bw / <double>y_oversample
 
         double x_half_os_bw = x_os_bw / 2.0
         double y_half_os_bw = y_os_bw / 2.0
+
+        double xmax = x_min + x_bw * nx
+        double ymax = y_min + y_bw * ny
+        double zmax = z_min + z_bw * nz
 
         double dom_x, dom_y, dom_z
         int dom_x_os_idx, dom_y_os_idx, dom_z_os_idx
@@ -208,14 +216,12 @@ def shift_and_bin(list ind_arrays,
     try:
         assert num_first_octant_pol_bins == nr * ntheta / 2
 
-        #for array, name in [(binned_spv, 'binned_spv'),
-        #                    (binned_px_spv, 'binned_px_spv'),
-        #                    (binned_py_spv, 'binned_py_spv'),
-        #                    (binned_pz_spv, 'binned_pz_spv'),
-        #                    (binned_one_minus_sp, 'binned_one_minus_sp')]:
-        #    assert array.shape[0] == nx
-        #    assert array.shape[1] == ny
-        #    assert array.shape[2] == nz
+        for array, name in [(binned_spv, 'binned_spv'),
+                            (binned_px_spv, 'binned_px_spv'),
+                            (binned_py_spv, 'binned_py_spv'),
+                            (binned_pz_spv, 'binned_pz_spv'),
+                            (binned_one_minus_sp, 'binned_one_minus_sp')]:
+            assert array.shape[0] == nx*ny*nz
 
         for ix in range(num_first_octant_pol_bins):
             num_cart_bins_in_pol_bin[ix] = vol_arrays[ix].shape[0]
@@ -228,9 +234,21 @@ def shift_and_bin(list ind_arrays,
             dom_x = dom_coords[dom_idx, 0]
             dom_y = dom_coords[dom_idx, 1]
             dom_z = dom_coords[dom_idx, 2]
-            dom_x_os_idx = <int>round((dom_x - x0) / (xbw / <double>x_oversample))
-            dom_y_os_idx = <int>round((dom_y - y0) / (ybw / <double>y_oversample))
-            dom_z_os_idx = <int>round((dom_z - z0) / (zbw / <double>z_oversample))
+
+            # Quick-and-dirty check to see if we can circumvent this DOM
+            # altogether if the polar binning falls outside the binned volume
+            # (This is not precise: won't exclude DOMs that do overlap, but
+            # might include DOM that have no overlap)
+            if dom_x + r_max < x_min or dom_x - r_max > xmax:
+                continue
+            if dom_y + r_max < y_min or dom_y - r_max > ymax:
+                continue
+            if dom_z + r_max < z_min or dom_z - r_max > zmax:
+                continue
+
+            dom_x_os_idx = <int>round((dom_x - x_min) / (x_bw / <double>x_oversample))
+            dom_y_os_idx = <int>round((dom_y - y_min) / (y_bw / <double>y_oversample))
+            dom_z_os_idx = <int>round((dom_z - z_min) / (z_bw / <double>z_oversample))
 
             for r_idx in range(nr):
                 for theta_idx in range(ntheta_in_quad):
