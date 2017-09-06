@@ -41,14 +41,23 @@ n_tbins = 300
 
 # Whole detector
 xlims = (-900, 950)
-ylims = (-900, 950)
-zlims = (-750, 650)
+ylims = (-900, 800)
+zlims = (-750, 600)
 
-# DeepCore (below dust layer) only
+# DeepCore (below dust layer) and tighter extents in x, y as well
+#xlims = (-750, 750)
+#ylims = (-750, 600)
+#zlims = (-600, -10)
+
+# Tighter volume around DeepCore (200 m past a DOM in any dim, rounded to
+# nearest 50 m)
+#xlims = (-200, 300)
+#ylims = (-300, 250)
+#zlims = (-700, 50)
 
 
 x_bw = y_bw = z_bw = 5
-x_oversample = y_oversample = z_oversample = 5
+x_oversample = y_oversample = z_oversample = 2
 antialias_factor = 1
 
 nx = int((xlims[1] - xlims[0]) / x_bw)
@@ -246,11 +255,11 @@ if not recompute:
     sys.exit()
 
 # Instantiate accumulation arrays
-binned_spv = np.zeros((xyz_shape), dtype=np.float64)
-binned_px_spv = np.zeros((xyz_shape), dtype=np.float64)
-binned_py_spv = np.zeros((xyz_shape), dtype=np.float64)
-binned_pz_spv = np.zeros((xyz_shape), dtype=np.float64)
-binned_one_minus_sp = np.ones((xyz_shape), dtype=np.float64)
+binned_spv = np.zeros((nx*ny*nz), dtype=np.float64)
+binned_px_spv = np.zeros((nx*ny*nz), dtype=np.float64)
+binned_py_spv = np.zeros((nx*ny*nz), dtype=np.float64)
+binned_pz_spv = np.zeros((nx*ny*nz), dtype=np.float64)
+binned_one_minus_sp = np.ones((nx*ny*nz), dtype=np.float64)
 
 t00 = time.time()
 for subdet, subdet_dom_coords in subdet_doms.items():
@@ -334,7 +343,7 @@ for subdet, subdet_dom_coords in subdet_doms.items():
 print('Total time to shift and bin:', timediffstamp(t3 - t00))
 print('')
 
-binned_sp = 1 - binned_one_minus_sp
+binned_sp = (1 - binned_one_minus_sp).reshape(xyz_shape)
 del binned_one_minus_sp
 
 mask = binned_spv != 0
@@ -344,9 +353,9 @@ binned_pz_spv[mask] /= binned_spv[mask]
 del mask
 
 # Rename so as to not mislead
-binned_px = binned_px_spv
-binned_py = binned_py_spv
-binned_pz = binned_pz_spv
+binned_px = binned_px_spv.reshape(xyz_shape)
+binned_py = binned_py_spv.reshape(xyz_shape)
+binned_pz = binned_pz_spv.reshape(xyz_shape)
 del binned_px_spv, binned_py_spv, binned_pz_spv
 
 t4 = time.time()

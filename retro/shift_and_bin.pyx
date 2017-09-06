@@ -1,7 +1,7 @@
 cimport cython
 
 from libc.stdlib cimport malloc, free
-from libc.math cimport ceil, floor, round, sqrt
+from libc.math cimport ceil, round, sqrt
 
 import numpy as np
 cimport numpy as np
@@ -20,11 +20,11 @@ def shift_and_bin(list ind_arrays,
                   float[:, :] pz,
                   int nr,
                   int ntheta,
-                  double[:, :, :] binned_spv,
-                  double[:, :, :] binned_px_spv,
-                  double[:, :, :] binned_py_spv,
-                  double[:, :, :] binned_pz_spv,
-                  double[:, :, :] binned_one_minus_sp,
+                  double[:] binned_spv,
+                  double[:] binned_px_spv,
+                  double[:] binned_py_spv,
+                  double[:] binned_pz_spv,
+                  double[:] binned_one_minus_sp,
                   int nx,
                   int ny,
                   int nz,
@@ -192,8 +192,9 @@ def shift_and_bin(list ind_arrays,
         int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.int32)
         int hemisphere, quadrant
 
-        int[:, :, :] vol_mask = np.zeros((nx, ny, nz), dtype=np.int32)
-        double[:, :, :] binned_vol = np.zeros((nx, ny, nz), dtype=np.float64)
+        unsigned char[:] vol_mask = np.zeros((nx*ny*nz), dtype=np.uint8)
+        double[:] binned_vol = np.zeros((nx*ny*nz), dtype=np.float64)
+        unsigned int flat_cart_ix
 
         int dom_idx
         int num_doms = <int>dom_coords.shape[0]
@@ -207,14 +208,14 @@ def shift_and_bin(list ind_arrays,
     try:
         assert num_first_octant_pol_bins == nr * ntheta / 2
 
-        for array, name in [(binned_spv, 'binned_spv'),
-                            (binned_px_spv, 'binned_px_spv'),
-                            (binned_py_spv, 'binned_py_spv'),
-                            (binned_pz_spv, 'binned_pz_spv'),
-                            (binned_one_minus_sp, 'binned_one_minus_sp')]:
-            assert array.shape[0] == nx
-            assert array.shape[1] == ny
-            assert array.shape[2] == nz
+        #for array, name in [(binned_spv, 'binned_spv'),
+        #                    (binned_px_spv, 'binned_px_spv'),
+        #                    (binned_py_spv, 'binned_py_spv'),
+        #                    (binned_pz_spv, 'binned_pz_spv'),
+        #                    (binned_one_minus_sp, 'binned_one_minus_sp')]:
+        #    assert array.shape[0] == nx
+        #    assert array.shape[1] == ny
+        #    assert array.shape[2] == nz
 
         for ix in range(num_first_octant_pol_bins):
             num_cart_bins_in_pol_bin[ix] = vol_arrays[ix].shape[0]
@@ -239,15 +240,15 @@ def shift_and_bin(list ind_arrays,
                     for ix in range(nrows):
                         vol = <double>vol_array_ptrs[flat_pol_idx][ix]
                         ix0 = ix * 3
-                        x_os_idx = ind_array_ptrs[flat_pol_idx][ix0]
-                        y_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 1]
-                        z_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 2]
+                        x_os_idx = <unsigned int>ind_array_ptrs[flat_pol_idx][ix0]
+                        y_os_idx = <unsigned int>ind_array_ptrs[flat_pol_idx][ix0 + 1]
+                        z_os_idx = <unsigned int>ind_array_ptrs[flat_pol_idx][ix0 + 2]
 
                         # Azimuth angle is detrmined by (x, y) bin center since
                         # we assume azimuthal symmetry
                         px_unnormed = <double>x_os_idx * x_os_bw  + x_half_os_bw
                         py_unnormed = <double>y_os_idx * y_os_bw  + y_half_os_bw
-                        bin_pos_rho_norm = 1 / sqrt(px_unnormed*px_unnormed + py_unnormed*py_unnormed)
+                        bin_pos_rho_norm = 1.0 / sqrt(px_unnormed*px_unnormed + py_unnormed*py_unnormed)
                         px_unnormed = px_unnormed * bin_pos_rho_norm
                         py_unnormed = py_unnormed * bin_pos_rho_norm
 
@@ -301,12 +302,14 @@ def shift_and_bin(list ind_arrays,
                                 if x_idx < 0 or x_idx >= nx or y_idx < 0 or y_idx >= ny:
                                     continue
 
-                                vol_mask[x_idx, y_idx, z_idx] = 1
-                                binned_vol[x_idx, y_idx, z_idx] += vol
-                                binned_spv[x_idx, y_idx, z_idx] += spv
-                                binned_px_spv[x_idx, y_idx, z_idx] += px_ * spv
-                                binned_py_spv[x_idx, y_idx, z_idx] += py_ * spv
-                                binned_pz_spv[x_idx, y_idx, z_idx] += pz_ * spv
+                                # Compute base index; can use directly on typed memoryviews
+                                flat_cart_ix = (x_idx * ny*nz) + (y_idx * nz) + z_idx
+                                vol_mask[flat_cart_ix] = 1
+                                binned_vol[flat_cart_ix] += vol
+                                binned_spv[flat_cart_ix] += spv
+                                binned_px_spv[flat_cart_ix] += px_ * spv
+                                binned_py_spv[flat_cart_ix] += py_ * spv
+                                binned_pz_spv[flat_cart_ix] += pz_ * spv
 
             # Normalize the weighted sum of survival probabilities for this DOM and
             # then include it in the overall survival probability via probabilistic
@@ -315,14 +318,12 @@ def shift_and_bin(list ind_arrays,
             # though we stop at just the two factors on the right and more
             # probabilities can be easily combined before being subtracted form one
             # to yield the overall probability.
-            for x_idx in range(nx):
-                for y_idx in range(ny):
-                    for z_idx in range(nz):
-                        if vol_mask[x_idx, y_idx, z_idx] == 0:
-                            continue
-                        binned_one_minus_sp[x_idx, y_idx, z_idx] *= (
-                            1 - binned_spv[x_idx, y_idx, z_idx] / binned_vol[x_idx, y_idx, z_idx]
-                        )
+            for flat_cart_ix in range(nx*ny*nz):
+                if vol_mask[flat_cart_ix] == 0:
+                    continue
+                binned_one_minus_sp[flat_cart_ix] *= (
+                    1 - binned_spv[flat_cart_ix] / binned_vol[flat_cart_ix]
+                )
     finally:
         free(ind_array_ptrs)
         free(vol_array_ptrs)
