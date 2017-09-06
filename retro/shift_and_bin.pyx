@@ -159,14 +159,6 @@ def shift_and_bin(list ind_arrays,
         stores these to disk for use by this function.
 
     """
-    DEF PI = 3.1415926535897932384626433827
-    DEF TWO_PI = 6.2831853071795862319959269371
-    DEF PI_BY_2 = 1.5707963267948965579989817343
-
-    DEF x_mirror_pt = -1
-    DEF y_mirror_pt = -1
-    DEF z_mirror_pt = -1
-
     # Logic below about extrapolating from first octant to other octants fails
     # if bin widths are different sizes in different dimensions
     assert xbw == ybw == zbw
@@ -212,121 +204,125 @@ def shift_and_bin(list ind_arrays,
         float **vol_array_ptrs = <float**>malloc(num_first_octant_pol_bins * sizeof(float*))
         int nrows, ix0
 
-    assert num_first_octant_pol_bins == nr * ntheta / 2
+    try:
+        assert num_first_octant_pol_bins == nr * ntheta / 2
 
-    for array, name in [(binned_spv, 'binned_spv'),
-                        (binned_px_spv, 'binned_px_spv'),
-                        (binned_py_spv, 'binned_py_spv'),
-                        (binned_pz_spv, 'binned_pz_spv'),
-                        (binned_one_minus_sp, 'binned_one_minus_sp')]:
-        assert array.shape[0] == nx
-        assert array.shape[1] == ny
-        assert array.shape[2] == nz
+        for array, name in [(binned_spv, 'binned_spv'),
+                            (binned_px_spv, 'binned_px_spv'),
+                            (binned_py_spv, 'binned_py_spv'),
+                            (binned_pz_spv, 'binned_pz_spv'),
+                            (binned_one_minus_sp, 'binned_one_minus_sp')]:
+            assert array.shape[0] == nx
+            assert array.shape[1] == ny
+            assert array.shape[2] == nz
 
-    for ix in range(num_first_octant_pol_bins):
-        num_cart_bins_in_pol_bin[ix] = vol_arrays[ix].shape[0]
-        ind_array = ind_arrays[ix]
-        vol_array = vol_arrays[ix]
-        ind_array_ptrs[ix] = <unsigned int*>ind_array.data
-        vol_array_ptrs[ix] = <float*>vol_array.data
+        for ix in range(num_first_octant_pol_bins):
+            num_cart_bins_in_pol_bin[ix] = vol_arrays[ix].shape[0]
+            ind_array = ind_arrays[ix]
+            vol_array = vol_arrays[ix]
+            ind_array_ptrs[ix] = <unsigned int*>ind_array.data
+            vol_array_ptrs[ix] = <float*>vol_array.data
 
-    for dom_idx in range(num_doms):
-        dom_x = dom_coords[dom_idx, 0]
-        dom_y = dom_coords[dom_idx, 1]
-        dom_z = dom_coords[dom_idx, 2]
-        dom_x_os_idx = <int>round((dom_x - x0) / (xbw / <double>x_oversample))
-        dom_y_os_idx = <int>round((dom_y - y0) / (ybw / <double>y_oversample))
-        dom_z_os_idx = <int>round((dom_z - z0) / (zbw / <double>z_oversample))
+        for dom_idx in range(num_doms):
+            dom_x = dom_coords[dom_idx, 0]
+            dom_y = dom_coords[dom_idx, 1]
+            dom_z = dom_coords[dom_idx, 2]
+            dom_x_os_idx = <int>round((dom_x - x0) / (xbw / <double>x_oversample))
+            dom_y_os_idx = <int>round((dom_y - y0) / (ybw / <double>y_oversample))
+            dom_z_os_idx = <int>round((dom_z - z0) / (zbw / <double>z_oversample))
 
-        for r_idx in range(nr):
-            for theta_idx in range(ntheta_in_quad):
-                flat_pol_idx = <int>(theta_idx + r_idx*ntheta_in_quad)
+            for r_idx in range(nr):
+                for theta_idx in range(ntheta_in_quad):
+                    flat_pol_idx = theta_idx + r_idx*ntheta_in_quad
 
-                nrows = num_cart_bins_in_pol_bin[flat_pol_idx]
-                for ix in range(nrows):
-                    vol = <double>vol_array_ptrs[flat_pol_idx][ix]
-                    ix0 = ix * 3
-                    x_os_idx = ind_array_ptrs[flat_pol_idx][ix0]
-                    y_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 1]
-                    z_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 2]
+                    nrows = num_cart_bins_in_pol_bin[flat_pol_idx]
+                    for ix in range(nrows):
+                        vol = <double>vol_array_ptrs[flat_pol_idx][ix]
+                        ix0 = ix * 3
+                        x_os_idx = ind_array_ptrs[flat_pol_idx][ix0]
+                        y_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 1]
+                        z_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 2]
 
-                    # Azimuth angle is detrmined by (x, y) bin center since
-                    # we assume azimuthal symmetry
-                    px_unnormed = <double>x_os_idx * x_os_bw  + x_half_os_bw
-                    py_unnormed = <double>y_os_idx * y_os_bw  + y_half_os_bw
-                    bin_pos_rho_norm = 1 / sqrt(px_unnormed*px_unnormed + py_unnormed*py_unnormed)
-                    px_unnormed = px_unnormed * bin_pos_rho_norm
-                    py_unnormed = py_unnormed * bin_pos_rho_norm
+                        # Azimuth angle is detrmined by (x, y) bin center since
+                        # we assume azimuthal symmetry
+                        px_unnormed = <double>x_os_idx * x_os_bw  + x_half_os_bw
+                        py_unnormed = <double>y_os_idx * y_os_bw  + y_half_os_bw
+                        bin_pos_rho_norm = 1 / sqrt(px_unnormed*px_unnormed + py_unnormed*py_unnormed)
+                        px_unnormed = px_unnormed * bin_pos_rho_norm
+                        py_unnormed = py_unnormed * bin_pos_rho_norm
 
-                    for hemisphere in range(2):
-                        if hemisphere == 0:
-                            z_idx = <int>((z_os_idx + dom_z_os_idx) // z_oversample)
-                            theta_idx_ = theta_idx
-                        else:
-                            z_idx = <int>((z_mirror_pt - z_os_idx + dom_z_os_idx) // z_oversample)
-                            theta_idx_ = ntheta - 1 - theta_idx
+                        for hemisphere in range(2):
+                            if hemisphere == 0:
+                                z_idx = (z_os_idx + dom_z_os_idx) // z_oversample
+                                theta_idx_ = theta_idx
+                            else:
+                                z_idx = (-1 - z_os_idx + dom_z_os_idx) // z_oversample
+                                theta_idx_ = ntheta - 1 - theta_idx
 
-                        if z_idx < 0 or z_idx >= nz:
-                            continue
-
-                        sp = <double>survival_prob[r_idx, theta_idx_]
-                        spv = sp * vol
-                        prho_ = <double>prho[r_idx, theta_idx_]
-                        pz_ = <double>pz[r_idx, theta_idx_]
-
-                        px_firstquad = px_unnormed * prho_
-                        py_firstquad = py_unnormed * prho_
-
-                        for quadrant in range(4):
-                            if quadrant == 0:
-                                x_idx = <int>((x_os_idx + dom_x_os_idx) // x_oversample)
-                                y_idx = <int>((y_os_idx + dom_y_os_idx) // y_oversample)
-                                px_ = px_firstquad
-                                py_ = py_firstquad
-
-                            # x -> +y, y -> -x
-                            elif quadrant == 1:
-                                x_idx = <int>((y_mirror_pt - y_os_idx + dom_x_os_idx) // x_oversample)
-                                y_idx = <int>((x_os_idx + dom_y_os_idx) // y_oversample)
-                                px_ = -py_firstquad
-                                py_ = px_firstquad
-
-                            # x -> -x, y -> -y
-                            elif quadrant == 2:
-                                x_idx = <int>((x_mirror_pt - x_os_idx + dom_x_os_idx) // x_oversample)
-                                y_idx = <int>((y_mirror_pt - y_os_idx + dom_y_os_idx) // y_oversample)
-                                px_ = -px_firstquad
-                                py_ = -py_firstquad
-
-                            # x -> -y, y -> x
-                            elif quadrant == 3:
-                                x_idx = <int>((y_os_idx + dom_x_os_idx) // x_oversample)
-                                y_idx = <int>((x_mirror_pt - x_os_idx + dom_y_os_idx) // y_oversample)
-                                px_ = py_firstquad
-                                py_ = -px_firstquad
-
-                            if x_idx < 0 or x_idx >= nx or y_idx < 0 or y_idx >= ny:
+                            if z_idx < 0 or z_idx >= nz:
                                 continue
 
-                            vol_mask[x_idx, y_idx, z_idx] = 1
-                            binned_vol[x_idx, y_idx, z_idx] += vol
-                            binned_spv[x_idx, y_idx, z_idx] += spv
-                            binned_px_spv[x_idx, y_idx, z_idx] += px_ * spv
-                            binned_py_spv[x_idx, y_idx, z_idx] += py_ * spv
-                            binned_pz_spv[x_idx, y_idx, z_idx] += pz_ * spv
+                            sp = <double>survival_prob[r_idx, theta_idx_]
+                            spv = sp * vol
+                            prho_ = <double>prho[r_idx, theta_idx_]
+                            pz_ = <double>pz[r_idx, theta_idx_]
 
-        # Normalize the weighted sum of survival probabilities for this DOM and
-        # then include it in the overall survival probability via probabilistic
-        # "or" statement:
-        #     P(A) or P(B) = 1 - (1 - P(A)) * (1 - P(B))
-        # though we stop at just the two factors on the right and more
-        # probabilities can be easily combined before being subtracted form one
-        # to yield the overall probability.
-        for x_idx in range(nx):
-            for y_idx in range(ny):
-                for z_idx in range(nz):
-                    if vol_mask[x_idx, y_idx, z_idx] == 0:
-                        continue
-                    binned_one_minus_sp[x_idx, y_idx, z_idx] *= (
-                        1 - binned_spv[x_idx, y_idx, z_idx] / binned_vol[x_idx, y_idx, z_idx]
-                    )
+                            px_firstquad = px_unnormed * prho_
+                            py_firstquad = py_unnormed * prho_
+
+                            for quadrant in range(4):
+                                if quadrant == 0:
+                                    x_idx = (x_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (y_os_idx + dom_y_os_idx) // y_oversample
+                                    px_ = px_firstquad
+                                    py_ = py_firstquad
+
+                                # x -> +y, y -> -x
+                                elif quadrant == 1:
+                                    x_idx = (-1 - y_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (x_os_idx + dom_y_os_idx) // y_oversample
+                                    px_ = -py_firstquad
+                                    py_ = px_firstquad
+
+                                # x -> -x, y -> -y
+                                elif quadrant == 2:
+                                    x_idx = (-1 - x_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (-1 - y_os_idx + dom_y_os_idx) // y_oversample
+                                    px_ = -px_firstquad
+                                    py_ = -py_firstquad
+
+                                # x -> -y, y -> x
+                                elif quadrant == 3:
+                                    x_idx = (y_os_idx + dom_x_os_idx) // x_oversample
+                                    y_idx = (-1 - x_os_idx + dom_y_os_idx) // y_oversample
+                                    px_ = py_firstquad
+                                    py_ = -px_firstquad
+
+                                if x_idx < 0 or x_idx >= nx or y_idx < 0 or y_idx >= ny:
+                                    continue
+
+                                vol_mask[x_idx, y_idx, z_idx] = 1
+                                binned_vol[x_idx, y_idx, z_idx] += vol
+                                binned_spv[x_idx, y_idx, z_idx] += spv
+                                binned_px_spv[x_idx, y_idx, z_idx] += px_ * spv
+                                binned_py_spv[x_idx, y_idx, z_idx] += py_ * spv
+                                binned_pz_spv[x_idx, y_idx, z_idx] += pz_ * spv
+
+            # Normalize the weighted sum of survival probabilities for this DOM and
+            # then include it in the overall survival probability via probabilistic
+            # "or" statement:
+            #     P(A) or P(B) = 1 - (1 - P(A)) * (1 - P(B))
+            # though we stop at just the two factors on the right and more
+            # probabilities can be easily combined before being subtracted form one
+            # to yield the overall probability.
+            for x_idx in range(nx):
+                for y_idx in range(ny):
+                    for z_idx in range(nz):
+                        if vol_mask[x_idx, y_idx, z_idx] == 0:
+                            continue
+                        binned_one_minus_sp[x_idx, y_idx, z_idx] *= (
+                            1 - binned_spv[x_idx, y_idx, z_idx] / binned_vol[x_idx, y_idx, z_idx]
+                        )
+    finally:
+        free(ind_array_ptrs)
+        free(vol_array_ptrs)
