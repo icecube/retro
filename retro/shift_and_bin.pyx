@@ -1,8 +1,5 @@
 cimport cython
 
-#cimport openmp
-#from cython.parallel import parallel, prange
-
 from libc.stdlib cimport malloc, free
 from libc.math cimport ceil, floor, round, sqrt
 
@@ -233,10 +230,7 @@ def shift_and_bin(list ind_arrays,
         ind_array_ptrs[ix] = <unsigned int*>ind_array.data
         vol_array_ptrs[ix] = <float*>vol_array.data
 
-    #with nogil, parallel():
-    for dom_idx in range(num_doms): #, schedule='static'):
-        #with gil:
-        #(dom_x, dom_y, dom_z) = dom_coords[dom_idx]
+    for dom_idx in range(num_doms):
         dom_x = dom_coords[dom_idx, 0]
         dom_y = dom_coords[dom_idx, 1]
         dom_z = dom_coords[dom_idx, 2]
@@ -248,9 +242,6 @@ def shift_and_bin(list ind_arrays,
             for theta_idx in range(ntheta_in_quad):
                 flat_pol_idx = <int>(theta_idx + r_idx*ntheta_in_quad)
 
-                #with gil:
-                #    ind_array = ind_arrays[flat_pol_idx]
-                #    vol_array = vol_arrays[flat_pol_idx]
                 nrows = num_cart_bins_in_pol_bin[flat_pol_idx]
                 for ix in range(nrows):
                     vol = <double>vol_array_ptrs[flat_pol_idx][ix]
@@ -258,12 +249,6 @@ def shift_and_bin(list ind_arrays,
                     x_os_idx = ind_array_ptrs[flat_pol_idx][ix0]
                     y_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 1]
                     z_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 2]
-
-                    #with gil:
-                    #vol = <double>vol_arrays[flat_pol_idx][ix]
-                    #x_os_idx = ind_arrays[flat_pol_idx][ix, 0]
-                    #y_os_idx = ind_arrays[flat_pol_idx][ix, 1]
-                    #z_os_idx = ind_arrays[flat_pol_idx][ix, 2]
 
                     # Azimuth angle is detrmined by (x, y) bin center since
                     # we assume azimuthal symmetry
@@ -323,7 +308,6 @@ def shift_and_bin(list ind_arrays,
                             if x_idx < 0 or x_idx >= nx or y_idx < 0 or y_idx >= ny:
                                 continue
 
-                            #with gil:
                             vol_mask[x_idx, y_idx, z_idx] = 1
                             binned_vol[x_idx, y_idx, z_idx] += vol
                             binned_spv[x_idx, y_idx, z_idx] += spv
@@ -338,12 +322,11 @@ def shift_and_bin(list ind_arrays,
         # though we stop at just the two factors on the right and more
         # probabilities can be easily combined before being subtracted form one
         # to yield the overall probability.
-        for x_idx in range(nx): #, nogil=True, schedule='guided'):
+        for x_idx in range(nx):
             for y_idx in range(ny):
                 for z_idx in range(nz):
                     if vol_mask[x_idx, y_idx, z_idx] == 0:
                         continue
-                    #with gil:
                     binned_one_minus_sp[x_idx, y_idx, z_idx] *= (
                         1 - binned_spv[x_idx, y_idx, z_idx] / binned_vol[x_idx, y_idx, z_idx]
                     )
