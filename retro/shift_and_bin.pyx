@@ -165,6 +165,10 @@ def shift_and_bin(list ind_arrays,
     DEF TWO_PI = 6.2831853071795862319959269371
     DEF PI_BY_2 = 1.5707963267948965579989817343
 
+    DEF x_mirror_pt = -1
+    DEF y_mirror_pt = -1
+    DEF z_mirror_pt = -1
+
     # Logic below about extrapolating from first octant to other octants fails
     # if bin widths are different sizes in different dimensions
     assert xbw == ybw == zbw
@@ -172,14 +176,7 @@ def shift_and_bin(list ind_arrays,
     assert x_oversample == y_oversample == z_oversample
     assert x_oversample >= 1
 
-    DEF x_mirror_pt = -1
-    DEF y_mirror_pt = -1
-    DEF z_mirror_pt = -1
-
     cdef:
-        int[:, :] ind_array
-        float[:] vol_array
-
         int num_first_octant_pol_bins = len(vol_arrays)
 
         double x_os_bw = xbw / <double>x_oversample
@@ -190,18 +187,18 @@ def shift_and_bin(list ind_arrays,
 
         double dom_x, dom_y, dom_z
         int dom_x_os_idx, dom_y_os_idx, dom_z_os_idx
-        int x_os_idx, y_os_idx, z_os_idx
+        unsigned int x_os_idx, y_os_idx, z_os_idx
         double bin_pos_rho_norm
 
         double vol, prho_, px_, py_, pz_
         double px_unnormed, py_unnormed, pz_unnormed
         double px_firstquad, py_firstquad
-        double sp, spv, px_spv, py_spv, pz_spv
+        double sp, spv
 
-        int octant
         int ntheta_in_quad = <int>ceil(<double>ntheta / 2.0)
-        Py_ssize_t flat_pol_idx, r_idx, theta_idx, theta_idx_
-        int x_idx, y_idx, z_idx, ix
+        int flat_pol_idx, r_idx, theta_idx, theta_idx_
+        int x_idx, y_idx, z_idx
+        int ix
         int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.int32)
         int hemisphere, quadrant
 
@@ -236,7 +233,7 @@ def shift_and_bin(list ind_arrays,
         dom_z_os_idx = <int>round((dom_z - z0) / (zbw / <double>z_oversample))
 
         for r_idx in range(nr):
-            for theta_idx in range(ntheta / 2):
+            for theta_idx in range(ntheta_in_quad):
                 flat_pol_idx = theta_idx + r_idx*ntheta_in_quad
 
                 #with gil:
@@ -258,7 +255,7 @@ def shift_and_bin(list ind_arrays,
                     # we assume azimuthal symmetry
                     px_unnormed = <double>x_os_idx * x_os_bw  + x_half_os_bw
                     py_unnormed = <double>y_os_idx * y_os_bw  + y_half_os_bw
-                    bin_pos_rho_norm = 1 / sqrt(px_unnormed**2 + py_unnormed**2)
+                    bin_pos_rho_norm = 1 / sqrt(px_unnormed*px_unnormed + py_unnormed*py_unnormed)
                     px_unnormed = px_unnormed * bin_pos_rho_norm
                     py_unnormed = py_unnormed * bin_pos_rho_norm
 

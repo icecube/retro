@@ -117,7 +117,8 @@ def sphbin2cartbin(double r_max, double r_power,
         double costheta_bin_scale = <double>n_costhetabins / 2.0
         double dphi = TWO_PI / <double>n_phibins
 
-        int x_os_idx, y_os_idx, z_os_idx, xi, yi, zi
+        unsigned int x_os_idx, y_os_idx, z_os_idx
+        int xi, yi, zi
         int r_bin_idx, costheta_bin_idx, flat_bin_idx
 
         double x0, y0, z0
@@ -215,7 +216,7 @@ def sphbin2cartbin(double r_max, double r_power,
                 r_bcenter = (r_bmin + r_bmax) / 2.0
                 costheta_bcenter = (costheta_bmin + costheta_bmax) / 2.0
                 z_center = r_bcenter * costheta_bcenter
-                z_os_idx = <int>round(z_center / z_bw_os)
+                z_os_idx = <unsigned int>round(z_center / z_bw_os)
                 rho_center = sqrt(r_bcenter**2 - z_center**2)
                 sph_bin_vol = -dcostheta * (r_bmax**3 - r_bmin**3) / 3.0 * dphi
 
@@ -224,8 +225,8 @@ def sphbin2cartbin(double r_max, double r_power,
                     x_center = rho_center * cos(phi_bin_center)
                     y_center = rho_center * sin(phi_bin_center)
 
-                    x_os_idx = <int>round(x_center / x_bw_os)
-                    y_os_idx = <int>round(y_center / y_bw_os)
+                    x_os_idx = <unsigned int>round(x_center / x_bw_os)
+                    y_os_idx = <unsigned int>round(y_center / y_bw_os)
                     xyz_idx_q1 = (x_os_idx, y_os_idx, z_os_idx)
 
                     # NOTE: duplicates are overwritten (i.e., should be at
@@ -244,7 +245,7 @@ def sphbin2cartbin(double r_max, double r_power,
             norm_factor = sph_bin_vol / total_tabulated_vol
             vols *= norm_factor
 
-            ind_arrays.append(np.atleast_2d(np.array(d.keys(), dtype=np.float32)))
+            ind_arrays.append(np.atleast_2d(np.array(d.keys(), dtype=np.uint32)))
             vol_arrays.append(vols.astype(np.float32))
 
     return ind_arrays, vol_arrays
