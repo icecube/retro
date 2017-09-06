@@ -3,6 +3,7 @@ cimport cython
 #cimport openmp
 #from cython.parallel import parallel, prange
 
+from libc.stdlib cimport malloc, free
 from libc.math cimport ceil, floor, round, sqrt
 
 import numpy as np
@@ -16,7 +17,7 @@ cimport numpy as np
 @cython.nonecheck(False)
 def shift_and_bin(list ind_arrays,
                   list vol_arrays,
-                  np.ndarray dom_coords,
+                  np.ndarray[double, ndim=2] dom_coords,
                   float[:, :] survival_prob,
                   float[:, :] prho,
                   float[:, :] pz,
@@ -208,6 +209,12 @@ def shift_and_bin(list ind_arrays,
         int dom_idx
         int num_doms = <int>dom_coords.shape[0]
 
+        np.ndarray[unsigned int, ndim=2] ind_array
+        np.ndarray[float, ndim=1] vol_array
+        unsigned int **ind_array_ptrs = <unsigned int**>malloc(num_first_octant_pol_bins * sizeof(unsigned int*))
+        float **vol_array_ptrs = <float**>malloc(num_first_octant_pol_bins * sizeof(float*))
+        int nrows, ix0
+
     assert num_first_octant_pol_bins == nr * ntheta / 2
 
     for array, name in [(binned_spv, 'binned_spv'),
@@ -221,35 +228,42 @@ def shift_and_bin(list ind_arrays,
 
     for ix in range(num_first_octant_pol_bins):
         num_cart_bins_in_pol_bin[ix] = vol_arrays[ix].shape[0]
-        #vol_array_pointers[ix] = vol_arrays[ix]
-        #ind_array_pointers[ix] = ind_arrays[ix]
+        ind_array = ind_arrays[ix]
+        vol_array = vol_arrays[ix]
+        ind_array_ptrs[ix] = <unsigned int*>ind_array.data
+        vol_array_ptrs[ix] = <float*>vol_array.data
 
     #with nogil, parallel():
     for dom_idx in range(num_doms): #, schedule='static'):
         #with gil:
-        (dom_x, dom_y, dom_z) = dom_coords[dom_idx]
+        #(dom_x, dom_y, dom_z) = dom_coords[dom_idx]
+        dom_x = dom_coords[dom_idx, 0]
+        dom_y = dom_coords[dom_idx, 1]
+        dom_z = dom_coords[dom_idx, 2]
         dom_x_os_idx = <int>round((dom_x - x0) / (xbw / <double>x_oversample))
         dom_y_os_idx = <int>round((dom_y - y0) / (ybw / <double>y_oversample))
         dom_z_os_idx = <int>round((dom_z - z0) / (zbw / <double>z_oversample))
 
         for r_idx in range(nr):
             for theta_idx in range(ntheta_in_quad):
-                flat_pol_idx = theta_idx + r_idx*ntheta_in_quad
+                flat_pol_idx = <int>(theta_idx + r_idx*ntheta_in_quad)
 
                 #with gil:
                 #    ind_array = ind_arrays[flat_pol_idx]
                 #    vol_array = vol_arrays[flat_pol_idx]
+                nrows = num_cart_bins_in_pol_bin[flat_pol_idx]
+                for ix in range(nrows):
+                    vol = <double>vol_array_ptrs[flat_pol_idx][ix]
+                    ix0 = ix * 3
+                    x_os_idx = ind_array_ptrs[flat_pol_idx][ix0]
+                    y_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 1]
+                    z_os_idx = ind_array_ptrs[flat_pol_idx][ix0 + 2]
 
-                for ix in range(num_cart_bins_in_pol_bin[flat_pol_idx]):
-                    #vol = <double>vol_array[ix]
-                    #x_os_idx = ind_array[ix, 0]
-                    #y_os_idx = ind_array[ix, 1]
-                    #z_os_idx = ind_array[ix, 2]
                     #with gil:
-                    vol = <double>vol_arrays[flat_pol_idx][ix]
-                    x_os_idx = ind_arrays[flat_pol_idx][ix, 0]
-                    y_os_idx = ind_arrays[flat_pol_idx][ix, 1]
-                    z_os_idx = ind_arrays[flat_pol_idx][ix, 2]
+                    #vol = <double>vol_arrays[flat_pol_idx][ix]
+                    #x_os_idx = ind_arrays[flat_pol_idx][ix, 0]
+                    #y_os_idx = ind_arrays[flat_pol_idx][ix, 1]
+                    #z_os_idx = ind_arrays[flat_pol_idx][ix, 2]
 
                     # Azimuth angle is detrmined by (x, y) bin center since
                     # we assume azimuthal symmetry
