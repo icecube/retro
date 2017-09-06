@@ -233,8 +233,8 @@ def visualize_tables(table_path, geom_file, slices=True, projections=True,
                 for depth_xyz in doms_used:
                     slc.annotate_sphere(depth_xyz, **kw)
 
-            nskip = 5
-            kw = dict(factor=nskip, scale=1e2)
+            nskip = 10
+            kw = dict(factor=nskip, scale=1e3)
             if normal == 'x':
                 slc.annotate_quiver('velocity_y', 'velocity_z', **kw)
             elif normal == 'y':

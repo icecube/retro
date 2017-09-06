@@ -51,12 +51,17 @@ n_tbins = 300
 
 # Tighter volume around DeepCore (200 m past a DOM in any dim, rounded to
 # nearest 50 m)
-xlims = (-200, 300)
-ylims = (-300, 250)
-zlims = (-700, 50)
+#xlims = (-200, 300)
+#ylims = (-300, 250)
+#zlims = (-700, 50)
+
+# 50x50x50 m tiles...
+xlims = (-200, -150)
+ylims = (-300, -250)
+zlims = (-700, -650)
 
 
-x_bw = y_bw = z_bw = 5
+x_bw = y_bw = z_bw = 1
 x_oversample = y_oversample = z_oversample = 2
 antialias_factor = 1
 
@@ -231,8 +236,8 @@ names = [
 recompute = False
 for name in names:
     fpath = join(tables_dir, fbasename + '_' + name + '.fits')
-    #if not isfile(fpath):
-    if True:
+    #if True:
+    if not isfile(fpath):
         print('could not find table, will (re)compute\n%s\n' % fpath)
         recompute = True
         break
