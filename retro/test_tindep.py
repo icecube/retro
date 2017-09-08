@@ -437,8 +437,9 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
 
     geom = np.load(geom_fpath)
 
-    depth_indices = np.atleast_1d(list(range(60))[depths])
-    string_indices = np.atleast_1d(np.arange(86)[strings])
+    depth_indices = np.atleast_1d(np.arange(60)[depths])
+    string_indices = np.atleast_1d(np.arange(87)[strings]) - 1
+    string_indices = string_indices[string_indices >= 0]
 
     subdet_doms = {'ic': [], 'dc': []}
     dc_strings = list(range(79, 86))
@@ -448,13 +449,13 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             subdet_doms['dc'].append(dom_coords)
         else:
             subdet_doms['ic'].append(dom_coords)
-    for subdet in subdet_doms:
+    for subdet in subdet_doms.keys():
         dom_string_list = subdet_doms[subdet]
         if not dom_string_list:
             subdet_doms.pop(subdet)
         else:
             subdet_doms[subdet] = np.concatenate(dom_string_list, axis=0)
-    geom = np.atleast_3d(geom[strings, depths, :])
+    geom = geom[string_indices, :, :][:, depth_indices, :]
     geom_meta = get_geom_meta(geom)
     print('Geom uses strings %s, depth indices %s for a total of %d DOMs'
           % (list2hrlist([i+1 for i in string_indices]),
@@ -548,7 +549,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     binned_px_spv = np.zeros((nx*ny*nz), dtype=np.float64)
     binned_py_spv = np.zeros((nx*ny*nz), dtype=np.float64)
     binned_pz_spv = np.zeros((nx*ny*nz), dtype=np.float64)
-    binned_one_minus_sp = np.ones((nx*ny*nz), dtype=np.float64)
+    binned_log_one_minus_sp = np.zeros((nx*ny*nz), dtype=np.float64)
 
     t00 = time.time()
     for subdet, subdet_dom_coords in subdet_doms.items():
@@ -577,16 +578,16 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             print('    Time to load the retro table:',
                   timediffstamp(t1 - t0))
 
-            sp = photon_info.survival_prob[depth_idx]
-            plength = photon_info.length[depth_idx]
-            ptheta = photon_info.theta[depth_idx]
-            pdeltaphi = photon_info.deltaphi[depth_idx]
+            sp = photon_info.survival_prob[depth_idx].astype(np.float64)
+            plength = photon_info.length[depth_idx].astype(np.float64)
+            ptheta = photon_info.theta[depth_idx].astype(np.float64)
+            pdeltaphi = photon_info.deltaphi[depth_idx].astype(np.float64)
 
             plength *= np.cos(pdeltaphi)
             pz = plength * np.cos(ptheta)
             prho = plength * np.sin(ptheta)
 
-            t_indep_sp = 1 - np.prod(1 - sp[times], axis=0)
+            t_indep_sp = 1 - np.exp(np.sum(np.log(1 - sp[times]), axis=0))
 
             mask = t_indep_sp != 0
             scale = 1 / sp.sum(axis=0)[mask]
@@ -615,7 +616,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                 binned_px_spv=binned_px_spv,
                 binned_py_spv=binned_py_spv,
                 binned_pz_spv=binned_pz_spv,
-                binned_one_minus_sp=binned_one_minus_sp,
+                binned_log_one_minus_sp=binned_log_one_minus_sp,
                 x_min=x_lims[0],
                 y_min=y_lims[0],
                 z_min=z_lims[0],
@@ -633,8 +634,12 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     print('Total time to shift and bin:', timediffstamp(t3 - t00))
     print('')
 
-    binned_sp = (1 - binned_one_minus_sp).reshape(xyz_shape)
-    del binned_one_minus_sp
+    binned_sp = (
+        (1 - np.exp(binned_log_one_minus_sp))
+        .astype(np.float32)
+        .reshape(xyz_shape)
+    )
+    del binned_log_one_minus_sp
 
     mask = binned_spv != 0
     binned_px_spv[mask] /= binned_spv[mask]
@@ -643,9 +648,9 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     del mask
 
     # Rename so as to not mislead
-    binned_px = binned_px_spv.reshape(xyz_shape)
-    binned_py = binned_py_spv.reshape(xyz_shape)
-    binned_pz = binned_pz_spv.reshape(xyz_shape)
+    binned_px = binned_px_spv.astype(np.float32).reshape(xyz_shape)
+    binned_py = binned_py_spv.astype(np.float32).reshape(xyz_shape)
+    binned_pz = binned_pz_spv.astype(np.float32).reshape(xyz_shape)
     del binned_px_spv, binned_py_spv, binned_pz_spv
 
     t4 = time.time()
@@ -814,7 +819,7 @@ def parse_args(description=__doc__):
         if val is None:
             kwargs[key] = slice(None)
         else:
-            kwargs[key] = hrlist2list(val)
+            kwargs[key] = hrlist2list(','.join(val))
 
     return kwargs
 

@@ -1,7 +1,7 @@
 cimport cython
 
 from libc.stdlib cimport free, malloc
-from libc.math cimport abs, ceil, round, sqrt
+from libc.math cimport abs, ceil, log, round, sqrt
 
 import numpy as np
 cimport numpy as np
@@ -15,9 +15,9 @@ cimport numpy as np
 def shift_and_bin(list ind_arrays,
                   list vol_arrays,
                   np.ndarray[double, ndim=2] dom_coords,
-                  float[:, :] survival_prob,
-                  float[:, :] prho,
-                  float[:, :] pz,
+                  double[:, :] survival_prob,
+                  double[:, :] prho,
+                  double[:, :] pz,
                   int nr,
                   int ntheta,
                   double r_max,
@@ -25,7 +25,7 @@ def shift_and_bin(list ind_arrays,
                   double[:] binned_px_spv,
                   double[:] binned_py_spv,
                   double[:] binned_pz_spv,
-                  double[:] binned_one_minus_sp,
+                  double[:] binned_log_one_minus_sp,
                   double x_min,
                   double x_max,
                   double y_min,
@@ -68,14 +68,14 @@ def shift_and_bin(list ind_arrays,
         Volume from the polar bin to be applied to each of the N Cartesian
         bins. There is one vol_array per polar bin in the first octant.
 
-    dom_coords : shape (I, 3) numpy.ndarray, dtype float32
+    dom_coords : shape (I, 3) numpy.ndarray, dtype float64
         Each 3-element row represents a DOM x-, y, and z-coordinate at which to
         apply the photon info.
 
-    survival_prob : shape (J_r, J_theta) numpy.ndarray, dtype float32
+    survival_prob : shape (J_r, J_theta) numpy.ndarray, dtype float64
         Survival probability of a photon at this polar coordinate
 
-    prho, pz : shape (J_r, J_theta) numpy.ndarrays, dtype float32
+    prho, pz : shape (J_r, J_theta) numpy.ndarrays, dtype float64
         Average photon rho (i.e., sqrt(x^2 + y^2)) and z-components at each
         polar (r, theta) coordinate
 
@@ -90,7 +90,7 @@ def shift_and_bin(list ind_arrays,
     binned_px_spv, binned_py_spv, binned_pz_spv : shape (nx*ny*nz,) numpy.ndarray, dtype float64
         Existing arrays into which average photon components are accumulated
 
-    binned_one_minus_sp : shape (nx*ny*nz,) numpy.ndarray, dtype float64
+    binned_log_one_minus_sp : shape (nx*ny*nz,) numpy.ndarray, dtype float64
         Existing array to which ``1 - normed_survival_probability`` is
         multiplied (where the normalization factor is not infinite)
 
@@ -227,7 +227,7 @@ def shift_and_bin(list ind_arrays,
                             (binned_px_spv, 'binned_px_spv'),
                             (binned_py_spv, 'binned_py_spv'),
                             (binned_pz_spv, 'binned_pz_spv'),
-                            (binned_one_minus_sp, 'binned_one_minus_sp')]:
+                            (binned_log_one_minus_sp, 'binned_log_one_minus_sp')]:
             assert array.shape[0] == nx*ny*nz
 
         for ix in range(num_first_octant_pol_bins):
@@ -288,10 +288,10 @@ def shift_and_bin(list ind_arrays,
                             if z_idx < 0 or z_idx >= nz:
                                 continue
 
-                            sp = <double>survival_prob[r_idx, theta_idx_]
+                            sp = survival_prob[r_idx, theta_idx_]
                             spv = sp * vol
-                            prho_ = <double>prho[r_idx, theta_idx_]
-                            pz_ = <double>pz[r_idx, theta_idx_]
+                            prho_ = prho[r_idx, theta_idx_]
+                            pz_ = pz[r_idx, theta_idx_]
 
                             px_firstquad = px_unnormed * prho_
                             py_firstquad = py_unnormed * prho_
@@ -346,7 +346,7 @@ def shift_and_bin(list ind_arrays,
             for flat_cart_ix in range(nx*ny*nz):
                 if vol_mask[flat_cart_ix] == 0:
                     continue
-                binned_one_minus_sp[flat_cart_ix] *= (
+                binned_log_one_minus_sp[flat_cart_ix] += log(
                     1 - binned_spv[flat_cart_ix] / binned_vol[flat_cart_ix]
                 )
     finally:
