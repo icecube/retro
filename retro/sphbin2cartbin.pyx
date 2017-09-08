@@ -13,7 +13,7 @@ cimport numpy as np
 @cython.nonecheck(False)
 def sphbin2cartbin(double r_max, double r_power,
                    int n_rbins, int n_costhetabins, int n_phibins,
-                   double binwidth, int oversample, int antialias):
+                   double cart_binwidth, int oversample, int antialias):
     """
     Parameters
     ----------
@@ -33,7 +33,7 @@ def sphbin2cartbin(double r_max, double r_power,
         fit exactly within the first octant: n_costhetabins must be even, while
         n_phibins must be an integer multiple of 4.
 
-    binwidth : double
+    cart_binwidth : double
         Cartesian binwidths in x, y, and z directions
 
     oversample : int >= 1
@@ -82,15 +82,15 @@ def sphbin2cartbin(double r_max, double r_power,
         unsigned int n_quadrant_costhetabins = <unsigned int>ceil(<double>n_costhetabins / 2.0)
 
         double os_dbl = <double>oversample
-        double bw_os = binwidth / os_dbl
+        double bw_os = cart_binwidth / os_dbl
         double inv_bw_os = 1.0 / bw_os
         double bw_os_aa = bw_os / <double>antialias
         double aa_vol = bw_os_aa**3
         double halfbw_os_aa = bw_os_aa / 2.0
 
-        unsigned int n_xbins_oct_os = <unsigned int>ceil(r_max / binwidth) * oversample
-        unsigned int n_ybins_oct_os = <unsigned int>ceil(r_max / binwidth) * oversample
-        unsigned int n_zbins_oct_os = <unsigned int>ceil(r_max / binwidth) * oversample
+        unsigned int n_xbins_oct_os = <unsigned int>ceil(r_max / cart_binwidth) * oversample
+        unsigned int n_ybins_oct_os = <unsigned int>ceil(r_max / cart_binwidth) * oversample
+        unsigned int n_zbins_oct_os = <unsigned int>ceil(r_max / cart_binwidth) * oversample
 
         double inv_r_power = 1.0 / r_power
         double power_r_binwidth = r_max**inv_r_power / <double>n_rbins
