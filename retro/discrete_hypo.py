@@ -16,7 +16,7 @@ import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (SPEED_OF_LIGHT_M_PER_S, CASCADE_PHOTONS_PER_GEV,
+from retro import (SPEED_OF_LIGHT_M_PER_NS, CASCADE_PHOTONS_PER_GEV,
                    TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M)
 
 
@@ -28,21 +28,26 @@ ALL_REALS = (-np.inf, np.inf)
 
 
 # TODO: use / check limits...?
-def const_energy_loss_muon(hypo_params, limits=None, dt=1e-9):
+def const_energy_loss_muon(hypo_params, limits=None, dt=1):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
 
     Parameters
     ----------
-    hypo_params : HypoParams8D
+    hypo_params : HypoParams*
+        Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
+        `.track_azimuth`, and `.track_zenith` attributes.
+
     limits
+        NOT IMPLEMENTED
+
     dt : float
-        Time step
+        Time step in nanoseconds
 
     Returns
     -------
-    pinfo_array : shape (N, 8) numpy.ndarray, dtype float32
+    pinfo_gen : shape (N, 8) numpy.ndarray, dtype float32
 
     """
     #if limits is None:
@@ -50,7 +55,7 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1e-9):
     #                             z=ALL_REALS)
 
     length = hypo_params.track_energy * TRACK_M_PER_GEV
-    duration = length / SPEED_OF_LIGHT_M_PER_S
+    duration = length / SPEED_OF_LIGHT_M_PER_NS
     first_sample_t = hypo_params.t + dt/2
     final_sample_t = hypo_params.t + duration - dt/2
     n_samples = int((final_sample_t - first_sample_t) / dt)
@@ -62,18 +67,18 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1e-9):
     dir_y = sin_zen * math.sin(hypo_params.track_azimuth)
     dir_z = math.cos(hypo_params.track_zenith)
 
-    pinfo_array = np.empty((n_samples, 8), dtype=np.float32)
-    t = pinfo_array[:, 0] = np.linspace(first_sample_t, final_sample_t,
+    pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
+    t = pinfo_gen[:, 0] = np.linspace(first_sample_t, final_sample_t,
                                         n_samples)
-    pinfo_array[:, 1] = hypo_params.x + t * (dir_x * SPEED_OF_LIGHT_M_PER_S)
-    pinfo_array[:, 2] = hypo_params.y + t * (dir_y * SPEED_OF_LIGHT_M_PER_S)
-    pinfo_array[:, 3] = hypo_params.z + t * (dir_z * SPEED_OF_LIGHT_M_PER_S)
-    pinfo_array[:, 4] = photons_per_segment
-    pinfo_array[:, 5] = dir_x * 0.562
-    pinfo_array[:, 6] = dir_y * 0.562
-    pinfo_array[:, 7] = dir_z * 0.562
+    pinfo_gen[:, 1] = hypo_params.x + t * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 2] = hypo_params.y + t * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 3] = hypo_params.z + t * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 4] = photons_per_segment
+    pinfo_gen[:, 5] = dir_x * 0.562
+    pinfo_gen[:, 6] = dir_y * 0.562
+    pinfo_gen[:, 7] = dir_z * 0.562
 
-    return pinfo_array
+    return pinfo_gen
 
 
 def point_cascade(hypo_params, limits=None):
@@ -88,19 +93,19 @@ def point_cascade(hypo_params, limits=None):
 
     Returns
     -------
-    pinfo_array
+    pinfo_gen
 
     """
-    pinfo_array = np.empty((1, 8), dtype=np.float32)
-    pinfo_array[0, 0] = hypo_params.t
-    pinfo_array[0, 1] = hypo_params.x
-    pinfo_array[0, 2] = hypo_params.y
-    pinfo_array[0, 3] = hypo_params.z
-    pinfo_array[0, 4] = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy
-    pinfo_array[0, 5] = 0
-    pinfo_array[0, 6] = 0
-    pinfo_array[0, 7] = 0
-    return pinfo_array
+    pinfo_gen = np.empty((1, 8), dtype=np.float32)
+    pinfo_gen[0, 0] = hypo_params.t
+    pinfo_gen[0, 1] = hypo_params.x
+    pinfo_gen[0, 2] = hypo_params.y
+    pinfo_gen[0, 3] = hypo_params.z
+    pinfo_gen[0, 4] = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy
+    pinfo_gen[0, 5] = 0
+    pinfo_gen[0, 6] = 0
+    pinfo_gen[0, 7] = 0
+    return pinfo_gen
 
 
 class DiscreteHypo(object):
@@ -138,8 +143,9 @@ class DiscreteHypo(object):
         self.kernel_kwargs = kernel_kwargs
         self.limits = limits
 
-    def get_photon_info(self, hypo_params):
-        """Evaluate the discrete hypothesis given specific parameters.
+    def get_photon_gen_info(self, hypo_params):
+        """Evaluate the discrete hypothesis (all hypo kernels) given particular
+        parameters to yield the hypothesis's expected generated photons.
 
         Parameters
         ----------
@@ -147,12 +153,12 @@ class DiscreteHypo(object):
 
         Returns
         -------
-        pinfo_array : shape (N, 8) numpy.ndarray, dtype float32
+        pinfo_gen : shape (N, 8) numpy.ndarray, dtype float32
             Each row contains (t, x, y, z, p_count, p_x, p_y, p_z)
 
         """
-        pinfo_arrays = []
+        pinfo_gen_arrays = []
         for kernel, kwargs in zip(self.hypo_kernels, self.kernel_kwargs):
-            pinfo_arrays.append(kernel(hypo_params, **kwargs))
-        pinfo_array = np.concatenate(pinfo_arrays, axis=0)
-        return pinfo_array
+            pinfo_gen_arrays.append(kernel(hypo_params, **kwargs))
+        pinfo_gen = np.concatenate(pinfo_gen_arrays, axis=0)
+        return pinfo_gen

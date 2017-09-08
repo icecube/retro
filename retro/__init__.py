@@ -18,7 +18,7 @@ from scipy.special import gammaln
 __all__ = [
     # Defaults
     'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME', 'DFLT_SPE_RECO_NAME',
-    'IC_TABLE_FPATH_PROTO', 'DC_TABLE_FPATH_PROTO', 'DETECTOR_GEOM_FILE',
+    'IC_TABLE_FNAME_PROTO', 'DC_TABLE_FNAME_PROTO', 'DETECTOR_GEOM_FILE',
 
     # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -33,7 +33,7 @@ __all__ = [
 
     # Pre-calculated values
     'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'CASCADE_PHOTONS_PER_GEV',
-    'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS',
+    'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'MAX_POL_TABLE_SPACETIME_SEP',
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
@@ -56,14 +56,10 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
-IC_TABLE_FPATH_PROTO = (
-    '{tables_dir:s}/retro_nevts1000_IC_DOM{dom:d}_r_cz_t_angles.fits'
-)
+IC_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}_r_cz_t_angles.fits'
 """String template for IceCube single-DOM final-level retro tables"""
 
-DC_TABLE_FPATH_PROTO = (
-    '{tables_dir:s}/retro_nevts1000_DC_DOM{dom:d}_r_cz_t_angles.fits'
-)
+DC_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}_r_cz_t_angles.fits'
 """String template for DeepCore single-DOM final-level retro tables"""
 
 DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
@@ -190,7 +186,7 @@ TWO_PI = FTYPE(2*np.pi)
 PI_BY_TWO = FTYPE(np.pi / 2)
 """pi / 2"""
 
-SPEED_OF_LIGHT_M_PER_NS = FTYPE(0.299792458)
+SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 """Speed of light in units of m/ns"""
 
 
@@ -216,6 +212,14 @@ IC_DOM_JITTER_NS = 1.7
 # See arXiv:1612.05093v2, section 3.3
 DC_DOM_JITTER_NS = 1.7
 """Timing jitter (stddev) for DeepCore (strings 80-86) DOMs, in units of ns"""
+
+MAX_POL_TABLE_SPACETIME_SEP = 400 * SPEED_OF_LIGHT_M_PER_NS
+"""DOM Retro tables binned in (t, r, theta) contain up to this spacetime sep"""
+
+POL_TABLE_DT = 10e-9
+POL_TABLE_RPWR = 2
+POL_TABLE_DRPWR = 0.1
+POL_TABLE_DCOSTHETA = -0.05
 
 
 # -- Functions -- #
@@ -487,8 +491,12 @@ def poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
+    # TODO: why is there a +1 here? Avoid zero observations? How does this
+    # affect the result, besides avoiding inf? Removed for now until we work
+    # this out...
+
     #llh = observed * np.log(expected) - expected - gammaln(observed + 1)
-    llh = observed * np.log(expected) - gammaln(observed)
+    llh = observed * np.log(expected) - expected - gammaln(observed)
     return llh
 
 
@@ -499,7 +507,8 @@ def spacetime_separation(dt, dx, dy, dz):
     Parameters
     ----------
     dt, dx, dy, dz : numeric
-        Separation between events in ns (dt) and meters (dx, dy, and dz).
+        Separation between events in nanoseconds (dt) and meters (dx, dy, and
+        dz).
 
     """
     return SPEED_OF_LIGHT_M_PER_NS*dt - np.sqrt(dx**2 + dy**2 + dz**2)
@@ -525,16 +534,16 @@ def generate_unique_ids(events):
     return uids
 
 
-def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
+def extract_photon_info(fpath, depth_idx, scale=1, photon_info=None):
     """Extract photon info from a FITS file containing a (t, r, theta)-binned
     table.
 
     Parameters
     ----------
     fpath : string
-        Path to FITS file corresponding to the passed ``dom_depth_index``.
+        Path to FITS file corresponding to the passed ``depth_idx``.
 
-    dom_depth_index : int
+    depth_idx : int
         Depth index (e.g. from 0 to 59)
 
     scale : float
@@ -550,7 +559,7 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
     -------
     photon_info : RetroPhotonInfo namedtuple of dicts
         Tuple fields are 'survival_prob', 'theta', 'phi', and 'length'. Each
-        dict is keyed by `dom_depth_index` and values are the arrays loaded
+        dict is keyed by `depth_idx` and values are the arrays loaded
         from the FITS file.
 
     bin_edges : TimeSphCoord namedtuple
@@ -568,13 +577,13 @@ def extract_photon_info(fpath, dom_depth_index, scale=1, photon_info=None):
 
     with pyfits.open(expand(fpath)) as table:
         if scale == 1:
-            photon_info.survival_prob[dom_depth_index] = table[0].data
+            photon_info.survival_prob[depth_idx] = table[0].data
         else:
-            photon_info.survival_prob[dom_depth_index] = table[0].data * scale
+            photon_info.survival_prob[depth_idx] = table[0].data * scale
 
-        photon_info.theta[dom_depth_index] = table[1].data
-        photon_info.deltaphi[dom_depth_index] = table[2].data
-        photon_info.length[dom_depth_index] = table[3].data
+        photon_info.theta[depth_idx] = table[1].data
+        photon_info.deltaphi[depth_idx] = table[2].data
+        photon_info.length[depth_idx] = table[3].data
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.

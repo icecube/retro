@@ -30,7 +30,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS
 from retro import (FTYPE, HYPO_PARAMS_T, TimeSphCoord, HypoParams10D,
                    TimeCart3DCoord)
-from retro import (IC_TABLE_FPATH_PROTO, DC_TABLE_FPATH_PROTO,
+from retro import (IC_TABLE_FNAME_PROTO, DC_TABLE_FNAME_PROTO,
                    DETECTOR_GEOM_FILE)
 from retro import (bin_edges_to_binspec, event_to_hypo_params, expand,
                    extract_photon_info, poisson_llh,
@@ -80,9 +80,12 @@ if not isdir(RESULTS_DIR):
 
 ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
-    x=(-700, 700),
-    y=(-650, 650),
-    z=(-650, 650),
+    #x=(-700, 700),
+    #y=(-650, 650),
+    #z=(-650, 650),
+    x=(-200, 300),
+    y=(-350, 250),
+    z=(-700, 50),
     track_azimuth=(0, 2*np.pi),
     track_zenith=(-np.pi, np.pi),
     track_energy=(0, 100),
@@ -107,10 +110,10 @@ REL_BOUNDS = HypoParams10D(
 )
 """Relative bounds defined about "truth" values for scanning / minimization"""
 
-MIN_USE_RELATIVE_BOUNDS = True
+MIN_USE_RELATIVE_BOUNDS = False
 """Whether minimizer is to use relative bounds (where defined)"""
 
-SCAN_USE_RELATIVE_BOUNDS = True
+SCAN_USE_RELATIVE_BOUNDS = False
 """Whether scanning is to use relative bounds (where defined)"""
 
 MIN_DIMS = [] #('t x y z track_zenith track_azimuth track_energy'.split())
@@ -144,10 +147,15 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     Parameters
     ----------
     hypo : HypoClass
+
     event : retro.Event namedtuple or convertible thereto
+
     detector_geometry : numpy.ndarray
+
     ic_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
+
     dc_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
+
     t_dom_indep_tables : dict of numpy.ndarray
         Time- and DOM-independent tables in Cartesian coordinates. Dict has
         format
@@ -155,8 +163,9 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
            'avg_photon_x': numpy.ndarray,
            'avg_photon_y': numpy.ndarray,
            'avg_photon_z': numpy.ndarray
-           'binning': }
+           'binning': ?}
          For now, it is assumed that the values are in the range...
+
     detailed_info_list : None or appendable sequence
         If a list is provided, it is appended with a dict containing detailed
         info from the calculation useful, e.g., for debugging. If ``None`` is
@@ -183,6 +192,13 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     #no_hit_doms = [sd for sd in product(range(n_strings), range(n_doms))]
     #print(no_hit_doms[:10])
     #print(len(no_hit_doms))
+
+    total_expected_q = get_total_exp_charge(
+        hypo=hypo,
+        t_dom_indep_tables=t_dom_indep_tables
+    )
+
+    expected_q_accounted_for = 0
 
     # Loop over pulses (aka hits)
     for string, om, pulse_time, pulse_charge in izip(*event.pulses):
@@ -223,6 +239,9 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
         # TODO: Jitter via e.g. smearing photons that go into retro tables
 
         best_pulse_neg_llh = np.inf
+        best_nonoise_q = 0
+        best_jitter_dts = []
+
         if NUM_JITTER_SAMPLES == 1:
             jitter_dts = [0]
         else:
@@ -326,28 +345,54 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
                 # retro simulation
                 expected_charge += hypo_cell_expected_charge
 
+            expected_charge_excluding_noise = expected_charge
+
             if expected_charge < NOISE_CHARGE:
                 noise_counts += 1
                 # "Add" in noise (i.e.: expected charge must be at least as
                 # large as noise level)
                 expected_charge = NOISE_CHARGE
 
-            # Poisson log likelihood (negative for minimizers)
+            # Poisson log likelihood (take negative to interface w/ minimizers)
             pulse_neg_llh = -poisson_llh(expected=expected_charge,
                                          observed=pulse_charge)
             #print('pulse_neg_llh:', pulse_neg_llh)
             if pulse_neg_llh < best_pulse_neg_llh:
                 #print('llh %f better than %f'
                 #      % (pulse_neg_llh, best_pulse_neg_llh))
+                best_nonoise_q = expected_charge_excluding_noise
                 best_pulse_neg_llh = pulse_neg_llh
+                best_jitter_dt = jitter_dt
             #else:
             #    print('llh %f worse than  %f'
             #          % (pulse_neg_llh, best_pulse_neg_llh))
 
         neg_llh += best_pulse_neg_llh
+        expected_q_accounted_for += best_nonoise_q
+        best_jitter_dts.append(best_jitter_dt)
 
+    # Penalize the likelihood (_add_ to neg_llh) by expected charge that
+    # would be seen by DOMs other than those hit (by the physics even itself,
+    # i.e. non-noise hits). This is the unaccounted for excess predicted by the
+    # hypothesis.
+    unaccounted_excess_expected_q = total_expected_q - expected_q_accounted_for
+    if unaccounted_excess_expected_q > 0:
+        neg_llh += unaccounted_excess_expected_q
+    else:
+        print('WARNING!!!! DOM tables account for %e expected charge, which'
+              ' exceeds total expected from TDI tables of %e'
+              % (expected_q_accounted_for, total_expected_q))
+        #raise ValueError()
+
+    # Record details if user passed a list for storing them
     if detailed_info_list is not None:
-        detailed_info_list.append(dict(noise_counts=noise_counts))
+        detailed_info = dict(
+            noise_counts=noise_counts,
+            total_expected_q=total_expected_q,
+            expected_q_accounted_for=expected_q_accounted_for,
+            best_jitter_dts=best_jitter_dts
+        )
+        detailed_info_list.append(detailed_info)
 
     #print('time to compute likelihood: %.5f ms' % ((time.time() - t0) * 1000))
     return neg_llh
@@ -501,15 +546,15 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
 
     # Read in the actual tables
     ref_bin_edges = None
-    for dom_depth_index in range(60):
+    for depth_idx in range(60):
         # IceCube (non-DeepCore) DOM retro tables
-        fpath = IC_TABLE_FPATH_PROTO.format(
-            tables_dir=tables_dir, dom=dom_depth_index
+        fpath = join(
+            tables_dir, IC_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
         )
         if isfile(fpath):
             ic_photon_info, bin_edges = extract_photon_info(
                 fpath=expand(fpath),
-                dom_depth_index=dom_depth_index,
+                depth_idx=depth_idx,
                 scale=norm * dom_eff_ic,
                 photon_info=ic_photon_info
             )
@@ -520,15 +565,16 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     assert np.array_equal(test, ref)
         else:
             print('No table for IC DOM depth index %i found at path "%s"'
-                  % (dom_depth_index, fpath))
+                  % (depth_idx, fpath))
 
         # DeepCore DOM retro tables
-        fpath = DC_TABLE_FPATH_PROTO.format(tables_dir=tables_dir,
-                                            dom=dom_depth_index)
+        fpath = join(
+            tables_dir, DC_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
+        )
         if isfile(fpath):
             dc_photon_info, bin_edges = extract_photon_info(
                 fpath=expand(fpath),
-                dom_depth_index=dom_depth_index,
+                depth_idx=depth_idx,
                 scale=norm * dom_eff_dc,
                 photon_info=dc_photon_info
             )
@@ -539,7 +585,7 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     assert np.array_equal(test, ref)
         else:
             print('No table for IC DOM depth index %i found at path "%s"'
-                  % (dom_depth_index, fpath))
+                  % (depth_idx, fpath))
 
     # Take bin edges from those stored in retro tables but also add phi bins
     # manually since no phi dependence in retro tables

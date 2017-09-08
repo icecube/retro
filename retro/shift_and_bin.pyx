@@ -1,7 +1,7 @@
 cimport cython
 
-from libc.stdlib cimport malloc, free
-from libc.math cimport ceil, round, sqrt
+from libc.stdlib cimport free, malloc
+from libc.math cimport abs, ceil, round, sqrt
 
 import numpy as np
 cimport numpy as np
@@ -26,18 +26,15 @@ def shift_and_bin(list ind_arrays,
                   double[:] binned_py_spv,
                   double[:] binned_pz_spv,
                   double[:] binned_one_minus_sp,
-                  int nx,
-                  int ny,
-                  int nz,
                   double x_min,
+                  double x_max,
                   double y_min,
+                  double y_max,
                   double z_min,
-                  double x_bw,
-                  double y_bw,
-                  double z_bw,
-                  int x_oversample,
-                  int y_oversample,
-                  int z_oversample):
+                  double z_max,
+                  double binwidth,
+                  int oversample,
+                  anisotropy):
     r"""Shift (r, theta) retro tables (i.e., (t, r, theta) tables with time
     marginalized out) to each DOM location and aggregate its quantities (with
     appropriate weighting) in (x, y, z) retro tables.
@@ -53,7 +50,7 @@ def shift_and_bin(list ind_arrays,
     azimuthal directions, respectively). Each polar bin `j` maps to `K_j`
     Cartesian bins (n.b. this number can be different for each polar bin).
 
-    There are a total of `N_x`, `N_y`, and `N_z` Cartesian bins in x-, y-, and
+    There are a total of `nx`, `ny`, and `nz` Cartesian bins in x-, y-, and
     z-directions, respectively.
 
     See Notes for more detailed description of the process carried out by this
@@ -97,11 +94,20 @@ def shift_and_bin(list ind_arrays,
         Existing array to which ``1 - normed_survival_probability`` is
         multiplied (where the normalization factor is not infinite)
 
-    nx, ny, nz : int
-    x_min, y_min, z_min : double
-    x_bw, y_bw, z_bw : double
-    x_oversample, y_oversample, z_oversample : int
+    x_min, x_max, y_min, y_max, z_min, z_max : double
+        Binning limits (lower- and upper-most edges in each dimension)
 
+    binwidth : double
+        Bin width (all dimensions share bin width). Note that `binwidth` must
+        be such that there are an integral number of bins in each dimension.
+
+    oversample : int
+        Oversampling factor, which allows for finer sub-bin shifting before the
+        final binning is performed, e.g. to more accurately account for
+        off-grid DOM positions while maintaining a reasonable final grid size.
+
+    anisotropy : None or tuple
+        Anisotropy parameter(s). Not yet implemented.
 
     Notes
     -----
@@ -163,29 +169,25 @@ def shift_and_bin(list ind_arrays,
         stores these to disk for use by this function.
 
     """
-    # Logic below about extrapolating from first octant to other octants fails
-    # if bin widths are different sizes in different dimensions
-    assert x_bw == y_bw == z_bw
-    assert x_bw > 0
-    assert x_oversample == y_oversample == z_oversample
-    assert x_oversample >= 1
+    assert binwidth > 0
+    assert oversample >= 1
+    assert anisotropy is None
 
     cdef:
-        int num_first_octant_pol_bins = len(vol_arrays)
+        unsigned int num_first_octant_pol_bins = len(vol_arrays)
 
-        double x_os_bw = x_bw / <double>x_oversample
-        double y_os_bw = y_bw / <double>y_oversample
+        double os_bw = binwidth / <double>oversample
+        double inv_os_bw = 1.0 / os_bw
 
-        double x_half_os_bw = x_os_bw / 2.0
-        double y_half_os_bw = y_os_bw / 2.0
+        double half_os_bw = os_bw / 2.0
 
-        double xmax = x_min + x_bw * nx
-        double ymax = y_min + y_bw * ny
-        double zmax = z_min + z_bw * nz
+        unsigned int nx = <unsigned int>round((x_max - x_min) / binwidth)
+        unsigned int ny = <unsigned int>round((y_max - y_min) / binwidth)
+        unsigned int nz = <unsigned int>round((z_max - z_min) / binwidth)
 
         double dom_x, dom_y, dom_z
         int dom_x_os_idx, dom_y_os_idx, dom_z_os_idx
-        unsigned int x_os_idx, y_os_idx, z_os_idx
+        int x_os_idx, y_os_idx, z_os_idx
         double bin_pos_rho_norm
 
         double vol, prho_, px_, py_, pz_
@@ -193,8 +195,8 @@ def shift_and_bin(list ind_arrays,
         double px_firstquad, py_firstquad
         double sp, spv
 
-        int ntheta_in_quad = <int>ceil(<double>ntheta / 2.0)
-        int flat_pol_idx, r_idx, theta_idx, theta_idx_
+        unsigned int ntheta_in_quad = <unsigned int>ceil(<double>ntheta / 2.0)
+        unsigned int flat_pol_idx, r_idx, theta_idx, theta_idx_
         int x_idx, y_idx, z_idx
         int ix
         int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.int32)
@@ -206,14 +208,19 @@ def shift_and_bin(list ind_arrays,
 
         int dom_idx
         int num_doms = <int>dom_coords.shape[0]
+        int nrows, ix0
 
         np.ndarray[unsigned int, ndim=2] ind_array
         np.ndarray[float, ndim=1] vol_array
         unsigned int **ind_array_ptrs = <unsigned int**>malloc(num_first_octant_pol_bins * sizeof(unsigned int*))
         float **vol_array_ptrs = <float**>malloc(num_first_octant_pol_bins * sizeof(float*))
-        int nrows, ix0
 
     try:
+        # Enforce < 1 micrometer accumulated error for binning
+        assert abs(x_min + nx * binwidth - x_max) < 1e-6
+        assert abs(y_min + ny * binwidth - y_max) < 1e-6
+        assert abs(z_min + nz * binwidth - z_max) < 1e-6
+
         assert num_first_octant_pol_bins == nr * ntheta / 2
 
         for array, name in [(binned_spv, 'binned_spv'),
@@ -239,16 +246,16 @@ def shift_and_bin(list ind_arrays,
             # altogether if the polar binning falls outside the binned volume
             # (This is not precise: won't exclude DOMs that do overlap, but
             # might include DOM that have no overlap)
-            if dom_x + r_max < x_min or dom_x - r_max > xmax:
+            if dom_x + r_max <= x_min or dom_x - r_max >= x_max:
                 continue
-            if dom_y + r_max < y_min or dom_y - r_max > ymax:
+            if dom_y + r_max <= y_min or dom_y - r_max >= y_max:
                 continue
-            if dom_z + r_max < z_min or dom_z - r_max > zmax:
+            if dom_z + r_max <= z_min or dom_z - r_max >= z_max:
                 continue
 
-            dom_x_os_idx = <int>round((dom_x - x_min) / (x_bw / <double>x_oversample))
-            dom_y_os_idx = <int>round((dom_y - y_min) / (y_bw / <double>y_oversample))
-            dom_z_os_idx = <int>round((dom_z - z_min) / (z_bw / <double>z_oversample))
+            dom_x_os_idx = <int>round((dom_x - x_min) * inv_os_bw)
+            dom_y_os_idx = <int>round((dom_y - y_min) * inv_os_bw)
+            dom_z_os_idx = <int>round((dom_z - z_min) * inv_os_bw)
 
             for r_idx in range(nr):
                 for theta_idx in range(ntheta_in_quad):
@@ -258,24 +265,24 @@ def shift_and_bin(list ind_arrays,
                     for ix in range(nrows):
                         vol = <double>vol_array_ptrs[flat_pol_idx][ix]
                         ix0 = ix * 3
-                        x_os_idx = <unsigned int>ind_array_ptrs[flat_pol_idx][ix0]
-                        y_os_idx = <unsigned int>ind_array_ptrs[flat_pol_idx][ix0 + 1]
-                        z_os_idx = <unsigned int>ind_array_ptrs[flat_pol_idx][ix0 + 2]
+                        x_os_idx = <int>ind_array_ptrs[flat_pol_idx][ix0]
+                        y_os_idx = <int>ind_array_ptrs[flat_pol_idx][ix0 + 1]
+                        z_os_idx = <int>ind_array_ptrs[flat_pol_idx][ix0 + 2]
 
                         # Azimuth angle is detrmined by (x, y) bin center since
                         # we assume azimuthal symmetry
-                        px_unnormed = <double>x_os_idx * x_os_bw  + x_half_os_bw
-                        py_unnormed = <double>y_os_idx * y_os_bw  + y_half_os_bw
+                        px_unnormed = <double>x_os_idx * os_bw  + half_os_bw
+                        py_unnormed = <double>y_os_idx * os_bw  + half_os_bw
                         bin_pos_rho_norm = 1.0 / sqrt(px_unnormed*px_unnormed + py_unnormed*py_unnormed)
                         px_unnormed = px_unnormed * bin_pos_rho_norm
                         py_unnormed = py_unnormed * bin_pos_rho_norm
 
                         for hemisphere in range(2):
                             if hemisphere == 0:
-                                z_idx = (z_os_idx + dom_z_os_idx) // z_oversample
+                                z_idx = (z_os_idx + dom_z_os_idx) // oversample
                                 theta_idx_ = theta_idx
                             else:
-                                z_idx = (-1 - z_os_idx + dom_z_os_idx) // z_oversample
+                                z_idx = (-1 - z_os_idx + dom_z_os_idx) // oversample
                                 theta_idx_ = ntheta - 1 - theta_idx
 
                             if z_idx < 0 or z_idx >= nz:
@@ -291,29 +298,29 @@ def shift_and_bin(list ind_arrays,
 
                             for quadrant in range(4):
                                 if quadrant == 0:
-                                    x_idx = (x_os_idx + dom_x_os_idx) // x_oversample
-                                    y_idx = (y_os_idx + dom_y_os_idx) // y_oversample
+                                    x_idx = (x_os_idx + dom_x_os_idx) // oversample
+                                    y_idx = (y_os_idx + dom_y_os_idx) // oversample
                                     px_ = px_firstquad
                                     py_ = py_firstquad
 
                                 # x -> +y, y -> -x
                                 elif quadrant == 1:
-                                    x_idx = (-1 - y_os_idx + dom_x_os_idx) // x_oversample
-                                    y_idx = (x_os_idx + dom_y_os_idx) // y_oversample
+                                    x_idx = (-1 - y_os_idx + dom_x_os_idx) // oversample
+                                    y_idx = (x_os_idx + dom_y_os_idx) // oversample
                                     px_ = -py_firstquad
                                     py_ = px_firstquad
 
                                 # x -> -x, y -> -y
                                 elif quadrant == 2:
-                                    x_idx = (-1 - x_os_idx + dom_x_os_idx) // x_oversample
-                                    y_idx = (-1 - y_os_idx + dom_y_os_idx) // y_oversample
+                                    x_idx = (-1 - x_os_idx + dom_x_os_idx) // oversample
+                                    y_idx = (-1 - y_os_idx + dom_y_os_idx) // oversample
                                     px_ = -px_firstquad
                                     py_ = -py_firstquad
 
                                 # x -> -y, y -> x
                                 elif quadrant == 3:
-                                    x_idx = (y_os_idx + dom_x_os_idx) // x_oversample
-                                    y_idx = (-1 - x_os_idx + dom_y_os_idx) // y_oversample
+                                    x_idx = (y_os_idx + dom_x_os_idx) // oversample
+                                    y_idx = (-1 - x_os_idx + dom_y_os_idx) // oversample
                                     px_ = py_firstquad
                                     py_ = -px_firstquad
 
