@@ -39,6 +39,7 @@ from copy import deepcopy
 import cPickle as pickle
 import os
 from os.path import abspath, dirname, isdir, isfile, join
+import re
 import sys
 import time
 
@@ -72,22 +73,20 @@ TDI_TABLE_FNAME_PROTO = (
 )
 
 TDI_TABLE_FNAME_RE = re.compile(
-    ''''
-    ^retro_tdi_table
-    _(?P<tdi_hash>[^_]+)
-    _binmap_(?P<binmap_hash>[^_]+)
-    _geom_(?P<geom_hash>[^_]+)
-    _domtbl_(?P<dom_table_hash>[^_]+)
-    _times_(?P<times_str>[^_]+)
-    _x(?P<x_min>[^_]+)_(?P<x_max>[^_]+)
-    _y(?P<y_min>[^_]+)_(?P<y_max>[^_]+)
-    _z(?P<z_min>[^_]+)_(?P<z_max>[^_]+)
-    _bw(?P<bandwidth>[^_]+)
-    _anisot_(?P<anisotropy>.+?)
-    _(?P<table_name>(avg_photon_x|avg_photon_y|avg_photon_z|survival_prob))
-    \.fits$
-    '''
-    , re.IGNORECASE | re.MULTILINE
+    r'^retro_tdi_table'
+    r'_(?P<tdi_hash>[^_]+)'
+    r'_binmap_(?P<binmap_hash>[^_]+)'
+    r'_geom_(?P<geom_hash>[^_]+)'
+    r'_domtbl_(?P<dom_tables_hash>[^_]+)'
+    r'_times_(?P<times_str>[^_]+)'
+    r'_x(?P<x_min>[^_]+)_(?P<x_max>[^_]+)'
+    r'_y(?P<y_min>[^_]+)_(?P<y_max>[^_]+)'
+    r'_z(?P<z_min>[^_]+)_(?P<z_max>[^_]+)'
+    r'_bw(?P<binwidth>[^_]+)'
+    r'_anisot_(?P<anisotropy>.+?)'
+    r'_(?P<table_name>(avg_photon_x|avg_photon_y|avg_photon_z|survival_prob))'
+    r'\.fits$'
+    , re.IGNORECASE
 )
 
 

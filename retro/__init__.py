@@ -567,7 +567,7 @@ def extract_photon_info(fpath, depth_idx, scale=1, photon_info=None):
 
     """
     # pylint: disable=no-member
-    assert 0 < scale <= 1
+    assert scale > 0
 
     if photon_info is None:
         empty_dicts = []
@@ -579,7 +579,7 @@ def extract_photon_info(fpath, depth_idx, scale=1, photon_info=None):
         if scale == 1:
             photon_info.survival_prob[depth_idx] = table[0].data
         else:
-            photon_info.survival_prob[depth_idx] = table[0].data * scale
+            photon_info.survival_prob[depth_idx] = 1 - (1 - table[0].data)**scale
 
         photon_info.theta[depth_idx] = table[1].data
         photon_info.deltaphi[depth_idx] = table[2].data

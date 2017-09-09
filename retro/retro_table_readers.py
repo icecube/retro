@@ -25,7 +25,8 @@ from retro import (DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
                    POL_TABLE_DCOSTHETA)
 from retro import RetroPhotonInfo
 from retro import expand, extract_photon_info
-from retro.test_tindep import TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE
+from retro.test_tindep import (TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
+                               get_anisotropy_str)
 
 from pisa.utils.format import hrlist2list
 
@@ -255,16 +256,19 @@ class RetroTDICartTables(object):
     scale : float
 
     """
-    def __init__(self, tables_dir, use_directionality, proto_tile_hash):
+    def __init__(self, tables_dir, use_directionality, proto_tile_hash,
+                 scale=1):
         # Translation and validation of args
         tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
         assert isinstance(use_directionality, bool)
         assert isinstance(proto_tile_hash, basestring)
+        assert scale > 0
 
         self.tables_dir = tables_dir
         self.use_directionality = use_directionality
         self.proto_tile_hash = proto_tile_hash
+        self.scale = scale
 
         self.survival_prob = None
         self.avg_photon_x = None
@@ -279,25 +283,29 @@ class RetroTDICartTables(object):
 
         self.tables_meta = None
 
-        self.proto_table_fpath = glob(join(
+        proto_table_fpath = glob(join(
             self.tables_dir,
             'retro_tdi_table_%s_*survival_prob.fits' % self.proto_tile_hash
         ))
-        if not self.proto_table_fpath:
+        if not proto_table_fpath:
             raise ValueError('Could not find the prototypical table.')
-        self.proto_meta = self.get_table_metadata(self.proto_table_fpath[0])
+        proto_table_fpath = proto_table_fpath[0]
+        proto_meta = self.get_table_metadata(proto_table_fpath)
+        if not proto_meta:
+            raise ValueError('Could not figure out metadata from\n' + self.proto_table_fpath)
+        self.proto_meta = proto_meta
 
         # Some "universal" metadata can be gotten from the proto table
-        self.binmap_hash = self.proto_meta['binmap_hash']
-        self.geom_hash = self.proto_meta['geom_hash']
-        self.dom_table_hash = self.proto_meta['dom_table_hash']
-        self.times = self.proto_meta['times']
-        self.times_str = self.proto_meta['times_str']
-        self.x_tile_width = self.proto_meta['x_width']
-        self.y_tile_width = self.proto_meta['y_width']
-        self.z_tile_width = self.proto_meta['z_width']
-        self.binwidth = self.proto_meta['binwidth']
-        self.anisotropy = self.proto_meta['anisotropy']
+        self.binmap_hash = proto_meta['binmap_hash']
+        self.geom_hash = proto_meta['geom_hash']
+        self.dom_tables_hash = proto_meta['dom_tables_hash']
+        self.time_indices = proto_meta['time_indices']
+        self.times_str = proto_meta['times_str']
+        self.x_tile_width = proto_meta['x_width']
+        self.y_tile_width = proto_meta['y_width']
+        self.z_tile_width = proto_meta['z_width']
+        self.binwidth = proto_meta['binwidth']
+        self.anisotropy = proto_meta['anisotropy']
 
         self.tables_loaded = False
         self.load_tables()
@@ -355,8 +363,8 @@ class RetroTDICartTables(object):
         z_ref = self.proto_meta['z_min']
 
         must_match = [
-            'binmap_hash', 'geom_hash', 'dom_tables_hash', 'times', 'binwidth',
-            'anisotropy',
+            'binmap_hash', 'geom_hash', 'dom_tables_hash', 'time_indices',
+            'binwidth', 'anisotropy',
             # For simplicity, assume all tiles have equal widths. If there's a
             # compelling reason to use something more complicated, we could
             # implement it... but I see no reason to do so now
@@ -435,8 +443,10 @@ class RetroTDICartTables(object):
         else:
             avg_photon_x, avg_photon_y, avg_photon_z = None, None, None
 
+        anisotropy_str = get_anisotropy_str(self.anisotropy)
+
         tables_meta = {} #[[[None]*nz_tiles]*ny_tiles]*nx_tiles
-        for meta in to_load_meta:
+        for meta in to_load_meta.values():
             tile_x_idx = int(np.round((meta['x_min'] - x_min) / self.x_tile_width))
             tile_y_idx = int(np.round((meta['y_min'] - y_min) / self.y_tile_width))
             tile_z_idx = int(np.round((meta['z_min'] - z_min) / self.z_tile_width))
@@ -464,11 +474,18 @@ class RetroTDICartTables(object):
                 fpath = join(
                     self.tables_dir,
                     TDI_TABLE_FNAME_PROTO.format(
-                        table_name=table_name, **kwargs
-                    )
+                        table_name=table_name, anisotropy_str=anisotropy_str,
+                        **kwargs
+                    ).lower()
                 )
+
                 with pyfits.open(fpath) as fits_table:
-                    table[bin_idx_range] = fits_table[0].data
+                    data = fits_table[0].data
+
+                if self.scale != 1 and table_name == 'survival_prob':
+                    data = 1 - (1 - data)**self.scale
+
+                table[bin_idx_range] = data
 
             tables_meta[(tile_x_idx, tile_y_idx, tile_z_idx)] = meta
 
