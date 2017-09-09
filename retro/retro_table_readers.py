@@ -83,6 +83,32 @@ def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
     return expected_photon_count
 
 
+@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def pexp_xyz(pinfo_array, x_min, y_min, z_min=, nx, ny, nz, binwidth,
+             survival_prob, avg_photon_x, avg_photon_y, avg_photon_z,
+             use_directionality):
+    expected_photon_count = 0.0
+    for (_, x, y, z, p_count, p_x, p_y, p_z) in pinfo_array:
+        x_idx = int(round((x - x_min) / binwidth))
+        if x_idx < 0 or x_idx >= nx:
+            continue
+        y_idx = int(round((y - y_min) / binwidth))
+        if y_idx < 0 or y_idx >= ny:
+            continue
+        z_idx = int(round((z - z_min) / binwidth))
+        if z_idx < 0 or z_idx >= nz:
+            continue
+        surviving_count = p_count * survival_prob[x_idx, y_idx, z_idx]
+
+        # TODO: directionality!
+        if use_directionality:
+            pass
+
+        expected_photon_count += surviving_count
+
+    return expected_photon_count
+
+
 class RetroDOMTimePolarTables(object):
     """Load and use information from individual-dom (time, r, theta)-binned
     Retro tables.
@@ -476,6 +502,8 @@ class RetroTDICartTables(object):
         kwargs = dict(
             pinfo_array=pinfo_array,
             x_min=self.x_min, y_min=self.y_min, z_min=self.z_min,
+            nx=self.nx, ny=self.ny, nz=self.nz,
+            binwidth=self.binwidth,
             survival_prob=self.survival_prob,
             avg_photon_x=self.avg_photon_x,
             avg_photon_y=self.avg_photon_y,
