@@ -7,14 +7,15 @@ Classes for reading and getting info from Retro tables.
 
 from __future__ import absolute_import, division, print_function
 
+from copy import deepcopy
 from glob import glob
 import math
 import os
-from os.path import abspath, dirname, isdir, join
-import re
+from os.path import abspath, basename, dirname, isdir, join
 
 import numba
 import numpy as np
+import pyfits
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
@@ -25,6 +26,8 @@ from retro import (DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
 from retro import RetroPhotonInfo
 from retro import expand, extract_photon_info
 from retro.test_tindep import TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE
+
+from pisa.utils.format import hrlist2list
 
 
 __all__ = ['pexp_t_r_theta', 'RetroDOMTimePolarTables', 'RetroTDICartTables']
@@ -84,23 +87,23 @@ def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
 
 
 @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def pexp_xyz(pinfo_array, x_min, y_min, z_min=, nx, ny, nz, binwidth,
+def pexp_xyz(pinfo_array, x_min, y_min, z_min, nx, ny, nz, binwidth,
              survival_prob, avg_photon_x, avg_photon_y, avg_photon_z,
              use_directionality):
     expected_photon_count = 0.0
     for (_, x, y, z, p_count, p_x, p_y, p_z) in pinfo_array:
-        x_idx = int(round((x - x_min) / binwidth))
+        x_idx = int(np.round((x - x_min) / binwidth))
         if x_idx < 0 or x_idx >= nx:
             continue
-        y_idx = int(round((y - y_min) / binwidth))
+        y_idx = int(np.round((y - y_min) / binwidth))
         if y_idx < 0 or y_idx >= ny:
             continue
-        z_idx = int(round((z - z_min) / binwidth))
+        z_idx = int(np.round((z - z_min) / binwidth))
         if z_idx < 0 or z_idx >= nz:
             continue
         surviving_count = p_count * survival_prob[x_idx, y_idx, z_idx]
 
-        # TODO: directionality!
+        # TODO: Incorporate photon direction info
         if use_directionality:
             pass
 
@@ -139,6 +142,7 @@ class RetroDOMTimePolarTables(object):
         assert 0 < scale < np.inf
 
         self.tables_dir = tables_dir
+        self.hash_val = hash_val
         self.geom = geom
         self.use_directionality = use_directionality
         self.scale = scale
@@ -281,7 +285,7 @@ class RetroTDICartTables(object):
         ))
         if not self.proto_table_fpath:
             raise ValueError('Could not find the prototypical table.')
-        self.proto_meta = self.get_table_metadata(proto_tables[0])
+        self.proto_meta = self.get_table_metadata(self.proto_table_fpath[0])
 
         # Some "universal" metadata can be gotten from the proto table
         self.binmap_hash = self.proto_meta['binmap_hash']
@@ -315,7 +319,7 @@ class RetroTDICartTables(object):
             for a TDI table.
 
         """
-        fname = basneame(fpath)
+        fname = basename(fpath)
         match = TDI_TABLE_FNAME_RE.match(fname)
         if match is None:
             return None
@@ -379,12 +383,12 @@ class RetroTDICartTables(object):
 
             # Make sure that the corner falls on the reference grid (within
             # micrometer precision)
-            x_float_idx = (meta['x_min'] - x_ref) / x_tile_width
-            y_float_idx = (meta['y_min'] - y_ref) / y_tile_width
-            z_float_idx = (meta['z_min'] - z_ref) / x_tile_width
+            x_float_idx = (meta['x_min'] - x_ref) / self.x_tile_width
+            y_float_idx = (meta['y_min'] - y_ref) / self.y_tile_width
+            z_float_idx = (meta['z_min'] - z_ref) / self.x_tile_width
             for float_idx, tile_width in zip([x_float_idx, y_float_idx, z_float_idx],
-                                             [x_tile_width, y_tile_width, z_tile_width]):
-                if abs(round(float_idx) - float_idx) * tile_width >= 1e-6:
+                                             [self.x_tile_width, self.y_tile_width, self.z_tile_width]):
+                if abs(np.round(float_idx) - float_idx) * tile_width >= 1e-6:
                     continue
 
             # Extend the limits of the tiled volume to include this tile
@@ -394,16 +398,16 @@ class RetroTDICartTables(object):
             uppermost_corner = np.max([uppermost_corner, upper_corner], axis=0)
 
             # Store the metadata by relative tile index
-            rel_idx = tuple(int(round(i)) for i in [x_float_idx, y_float_idx, z_float_idx])
+            rel_idx = tuple(int(np.round(i)) for i in [x_float_idx, y_float_idx, z_float_idx])
             to_load_meta[rel_idx] = meta
 
         x_min, y_min, z_min = lowermost_corner
         x_max, y_max, z_max = uppermost_corner
 
         # Figure out how many tiles we _should_ have
-        nx_tiles = int(round((x_max - x_min) / self.x_tile_width))
-        ny_tiles = int(round((y_max - y_min) / self.y_tile_width))
-        nz_tiles = int(round((z_max - z_min) / self.z_tile_width))
+        nx_tiles = int(np.round((x_max - x_min) / self.x_tile_width))
+        ny_tiles = int(np.round((y_max - y_min) / self.y_tile_width))
+        nz_tiles = int(np.round((z_max - z_min) / self.z_tile_width))
         n_tiles = nx_tiles * ny_tiles * nz_tiles
         if len(to_load_meta) < n_tiles:
             raise ValueError('Not enough tiles found! Cannot fill the extents'
@@ -413,14 +417,14 @@ class RetroTDICartTables(object):
             raise ValueError('WTF? How did we get here?')
 
         # Figure out how many bins in each dimension fill the volume
-        nx = int(round(nx_tiles * self.x_tile_width / self.binwidth))
-        ny = int(round(ny_tiles * self.y_tile_width / self.binwidth))
-        nz = int(round(nz_tiles * self.z_tile_width / self.binwidth))
+        nx = int(np.round(nx_tiles * self.x_tile_width / self.binwidth))
+        ny = int(np.round(ny_tiles * self.y_tile_width / self.binwidth))
+        nz = int(np.round(nz_tiles * self.z_tile_width / self.binwidth))
 
         # Number of bins per dimension in the tile
-        nx_per_tile = int(round(self.x_tile_width / self.binwidth))
-        ny_per_tile = int(round(self.y_tile_width / self.binwidth))
-        nz_per_tile = int(round(self.z_tile_width / self.binwidth))
+        nx_per_tile = int(np.round(self.x_tile_width / self.binwidth))
+        ny_per_tile = int(np.round(self.y_tile_width / self.binwidth))
+        nz_per_tile = int(np.round(self.z_tile_width / self.binwidth))
 
         # Create empty arrays to fill
         survival_prob = np.empty((nx, ny, nz), dtype=np.float32)
@@ -433,13 +437,13 @@ class RetroTDICartTables(object):
 
         tables_meta = {} #[[[None]*nz_tiles]*ny_tiles]*nx_tiles
         for meta in to_load_meta:
-            tile_x_idx = int(round((meta['x_min'] - x_min) / self.x_tile_width))
-            tile_y_idx = int(round((meta['y_min'] - y_min) / self.y_tile_width))
-            tile_z_idx = int(round((meta['z_min'] - z_min) / self.z_tile_width))
+            tile_x_idx = int(np.round((meta['x_min'] - x_min) / self.x_tile_width))
+            tile_y_idx = int(np.round((meta['y_min'] - y_min) / self.y_tile_width))
+            tile_z_idx = int(np.round((meta['z_min'] - z_min) / self.z_tile_width))
 
-            x0_idx = int(round((meta['x_min'] - x_min) / self.binwidth))
-            y0_idx = int(round((meta['y_min'] - y_min) / self.binwidth))
-            z0_idx = int(round((meta['z_min'] - z_min) / self.binwidth))
+            x0_idx = int(np.round((meta['x_min'] - x_min) / self.binwidth))
+            y0_idx = int(np.round((meta['y_min'] - y_min) / self.binwidth))
+            z0_idx = int(np.round((meta['z_min'] - z_min) / self.binwidth))
 
             bin_idx_range = (slice(x0_idx, x0_idx + nx_per_tile),
                              slice(y0_idx, y0_idx + ny_per_tile),
@@ -464,14 +468,14 @@ class RetroTDICartTables(object):
                     )
                 )
                 with pyfits.open(fpath) as fits_table:
-                    table[idx] = fits_table[0].data
+                    table[bin_idx_range] = fits_table[0].data
 
             tables_meta[(tile_x_idx, tile_y_idx, tile_z_idx)] = meta
 
         # Since we have made it to the end successfully, it is now safe to
         # store the above-computed info to the object for later use
         self.nx, self.ny, self.nz = nx, ny, nz
-        self.nx_tiles, self.ny_tiles, zelf.nz_tiles = nx_tiles, ny_tiles, nz_tiles
+        self.nx_tiles, self.ny_tiles, self.nz_tiles = nx_tiles, ny_tiles, nz_tiles
         self.x_min, self.y_min, self.z_min = x_min, y_min, z_min
         self.x_max, self.y_max, self.z_max = x_max, y_max, z_max
 
