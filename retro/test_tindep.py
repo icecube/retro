@@ -251,21 +251,8 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
     tdi_hash = hash_obj(hash_params, hash_to='hex', full_hash=True)
 
     anisotropy_str = get_anisotropy_str(anisotropy)
-    fbasename = (
-        'retro_tdi_table'
-        '_%s'
-        '_binmap_{binmap_hash:s}'
-        '_geom_{geom_hash:s}'
-        '_domtbl_{dom_tables_hash:s}'
-        '_times_{times_str:s}'
-        '_x{x_min:.3f}_{x_max:.3f}'
-        '_y{y_min:.3f}_{y_max:.3f}'
-        '_z{z_min:.3f}_{z_max:.3f}'
-        '_bw{binwidth:.9f}'
-        '_anisot_%s'
-        .format(**kwargs)
-    ) % (tdi_hash, anisotropy_str)
     fname = TDI_TABLE_FNAME_PROTO.format(
+        tdi_hash=tdi_hash,
         anisotropy_str=anisotropy_str,
         table_name='',
         **kwargs
