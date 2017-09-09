@@ -31,7 +31,6 @@ any of the voxel(s) of this table.
 """
 
 
-
 from __future__ import absolute_import, division, print_function
 
 from argparse import ArgumentParser
@@ -39,7 +38,7 @@ from collections import OrderedDict
 from copy import deepcopy
 import cPickle as pickle
 import os
-from os.path import abspath, dirname, isfile, join
+from os.path import abspath, dirname, isdir, isfile, join
 import sys
 import time
 
@@ -56,6 +55,42 @@ from pisa.utils.format import hrlist2list, list2hrlist
 from pisa.utils.timing import timediffstamp
 
 
+TDI_TABLE_FNAME_PROTO = (
+    'retro_tdi_table'
+    '_{tdi_hash:s}'
+    '_binmap_{binmap_hash:s}'
+    '_geom_{geom_hash:s}'
+    '_domtbl_{dom_tables_hash:s}'
+    '_times_{times_str:s}'
+    '_x{x_min:.3f}_{x_max:.3f}'
+    '_y{y_min:.3f}_{y_max:.3f}'
+    '_z{z_min:.3f}_{z_max:.3f}'
+    '_bw{binwidth:.9f}'
+    '_anisot_{anisotropy_str:s}'
+    '_{table_name:s}'
+    '.fits'
+)
+
+TDI_TABLE_FNAME_RE = re.compile(
+    ''''
+    ^retro_tdi_table
+    _(?P<tdi_hash>[^_]+)
+    _binmap_(?P<binmap_hash>[^_]+)
+    _geom_(?P<geom_hash>[^_]+)
+    _domtbl_(?P<dom_table_hash>[^_]+)
+    _times_(?P<times_str>[^_]+)
+    _x(?P<x_min>[^_]+)_(?P<x_max>[^_]+)
+    _y(?P<y_min>[^_]+)_(?P<y_max>[^_]+)
+    _z(?P<z_min>[^_]+)_(?P<z_max>[^_]+)
+    _bw(?P<bandwidth>[^_]+)
+    _anisot_(?P<anisotropy>.+?)
+    _(?P<table_name>(avg_photon_x|avg_photon_y|avg_photon_z|survival_prob))
+    \.fits$
+    '''
+    , re.IGNORECASE | re.MULTILINE
+)
+
+
 def get_anisotropy_str(anisotropy):
     if anisotropy is None:
         anisotropy_str = 'none'
@@ -64,6 +99,7 @@ def get_anisotropy_str(anisotropy):
     return anisotropy_str
 
 
+# TODO: does anisotropy need to be considered here?
 def get_binmap_meta(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
                     cart_binwidth, oversample, antialias):
     """Get metadata for spherical to Cartesian bin mapping, including the file
@@ -166,7 +202,7 @@ def get_geom_meta(geom):
 
 def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
                        x_min, x_max, y_min, y_max, z_min, z_max, binwidth,
-                       n_phibins, anisotropy):
+                       anisotropy):
     """Get metadata for a time- and DOM-independent Cartesian (x, y, z)-binned
     table.
 
@@ -178,7 +214,6 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
     times_str : string
     x_lims, y_lims, z_lims : 2-tuples of floats
     binwidth : float
-    n_phibins : int
     anisotropy : None or tuple
 
     Returns
@@ -205,7 +240,6 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         ('z_min', z_min),
         ('z_max', z_max),
         ('binwidth', binwidth),
-        ('n_phibins', n_phibins),
         ('anisotropy', anisotropy)
     ])
 
@@ -229,10 +263,15 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         '_y{y_min:.3f}_{y_max:.3f}'
         '_z{z_min:.3f}_{z_max:.3f}'
         '_bw{binwidth:.9f}'
-        '_nphi{n_phibins:d}'
         '_anisot_%s'
         .format(**kwargs)
     ) % (tdi_hash, anisotropy_str)
+    fname = TDI_TABLE_FNAME_PROTO.format(
+        anisotropy_str=anisotropy_str,
+        table_name='',
+        **kwargs
+    )
+    fbasename = fname.rsplit('_.fits')[0]
 
     metadata = OrderedDict([
         ('fbasename', fbasename),
@@ -243,6 +282,7 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
     return metadata
 
 
+# TODO: does anisotropy need to be considered here?
 def generate_binmap(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
                     cart_binwidth, oversample, antialias, tables_dir,
                     recompute):
@@ -272,6 +312,7 @@ def generate_binmap(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
         Output of `get_binmap_meta`
 
     """
+    assert isdir(tables_dir)
     r_edges = powerspace(0, r_max, n_rbins + 1, r_power)
     theta_edges = np.arccos(np.linspace(1, -1, n_costhetabins + 1))
 
@@ -414,6 +455,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                 Return value from `get_binmap_meta`
 
     """
+    assert isdir(tables_dir)
     if dom_tables_hash is None:
         dom_tables_hash = 'none'
         r_max = 400
@@ -493,7 +535,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         x_min=x_lims[0], x_max=x_lims[1],
         y_min=y_lims[0], y_max=y_lims[1],
         z_min=z_lims[0], z_max=z_lims[1],
-        binwidth=binwidth, n_phibins=n_phibins, anisotropy=anisotropy
+        binwidth=binwidth, anisotropy=anisotropy
     )
 
     print('Generating Cartesian time- and DOM-independent (TDI) Retro table')
@@ -554,7 +596,9 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     t00 = time.time()
     for subdet, subdet_dom_coords in subdet_doms.items():
         print('  Subdetector:', subdet)
-        print('  subdet_dom_coords.shape:', subdet_dom_coords.shape)
+        print('  -> %d strings with DOM(s) at %d depths'
+              % (subdet_dom_coords.shape[0], subdet_dom_coords.shape[1]))
+        print('')
         for rel_ix, depth_idx in enumerate(depth_indices):
             print('    Subdetector: %s, depth_idx: %d' % (subdet, depth_idx))
             dom_coords = subdet_dom_coords[:, rel_ix, :]
