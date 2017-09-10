@@ -577,7 +577,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     binned_px_spv = np.zeros((nx*ny*nz), dtype=np.float64)
     binned_py_spv = np.zeros((nx*ny*nz), dtype=np.float64)
     binned_pz_spv = np.zeros((nx*ny*nz), dtype=np.float64)
-    binned_log_one_minus_sp = np.zeros((nx*ny*nz), dtype=np.float64)
+    binned_one_minus_sp = np.ones((nx*ny*nz), dtype=np.float64)
 
     t00 = time.time()
     for subdet, subdet_dom_coords in subdet_doms.items():
@@ -646,7 +646,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                 binned_px_spv=binned_px_spv,
                 binned_py_spv=binned_py_spv,
                 binned_pz_spv=binned_pz_spv,
-                binned_log_one_minus_sp=binned_log_one_minus_sp,
+                binned_one_minus_sp=binned_one_minus_sp,
                 x_min=x_lims[0],
                 y_min=y_lims[0],
                 z_min=z_lims[0],
@@ -665,11 +665,11 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     print('')
 
     binned_sp = (
-        (1 - np.exp(binned_log_one_minus_sp))
+        (1 - binned_one_minus_sp)
         .astype(np.float32)
         .reshape(xyz_shape)
     )
-    del binned_log_one_minus_sp
+    del binned_one_minus_sp
 
     mask = binned_spv != 0
     binned_px_spv[mask] /= binned_spv[mask]

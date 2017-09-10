@@ -1,7 +1,7 @@
 cimport cython
 
 from libc.stdlib cimport free, malloc
-from libc.math cimport abs, ceil, log, round, sqrt
+from libc.math cimport abs, ceil, round, sqrt
 
 import numpy as np
 cimport numpy as np
@@ -25,7 +25,7 @@ def shift_and_bin(list ind_arrays,
                   double[:] binned_px_spv,
                   double[:] binned_py_spv,
                   double[:] binned_pz_spv,
-                  double[:] binned_log_one_minus_sp,
+                  double[:] binned_one_minus_sp,
                   double x_min,
                   double x_max,
                   double y_min,
@@ -90,7 +90,7 @@ def shift_and_bin(list ind_arrays,
     binned_px_spv, binned_py_spv, binned_pz_spv : shape (nx*ny*nz,) numpy.ndarray, dtype float64
         Existing arrays into which average photon components are accumulated
 
-    binned_log_one_minus_sp : shape (nx*ny*nz,) numpy.ndarray, dtype float64
+    binned_one_minus_sp : shape (nx*ny*nz,) numpy.ndarray, dtype float64
         Existing array to which ``1 - normed_survival_probability`` is
         multiplied (where the normalization factor is not infinite)
 
@@ -227,7 +227,7 @@ def shift_and_bin(list ind_arrays,
                             (binned_px_spv, 'binned_px_spv'),
                             (binned_py_spv, 'binned_py_spv'),
                             (binned_pz_spv, 'binned_pz_spv'),
-                            (binned_log_one_minus_sp, 'binned_log_one_minus_sp')]:
+                            (binned_one_minus_sp, 'binned_one_minus_sp')]:
             assert array.shape[0] == nx*ny*nz
 
         for ix in range(num_first_octant_pol_bins):
@@ -346,7 +346,7 @@ def shift_and_bin(list ind_arrays,
             for flat_cart_ix in range(nx*ny*nz):
                 if vol_mask[flat_cart_ix] == 0:
                     continue
-                binned_log_one_minus_sp[flat_cart_ix] += log(
+                binned_one_minus_sp[flat_cart_ix] *= (
                     1 - binned_spv[flat_cart_ix] / binned_vol[flat_cart_ix]
                 )
     finally:
