@@ -35,6 +35,7 @@ __all__ = [
     'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'CASCADE_PHOTONS_PER_GEV',
     'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'POL_TABLE_DCOSTHETA',
     'POL_TABLE_DRPWR', 'POL_TABLE_DT', 'POL_TABLE_RPWR', 'POL_TABLE_RMAX',
+    'POL_TABLE_NTBINS', 'POL_TABLE_NRBINS', 'POL_TABLE_NTHETABINS',
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
@@ -215,11 +216,14 @@ DC_DOM_JITTER_NS = 1.7
 """Timing jitter (stddev) for DeepCore (strings 80-86) DOMs, in units of ns"""
 
 # TODO: figure these out from the tables rather than defining as constants
-POL_TABLE_RMAX = 400
-POL_TABLE_DT = 10e-9
+POL_TABLE_RMAX = 400 # m
+POL_TABLE_DT = 10 # ns
 POL_TABLE_RPWR = 2
 POL_TABLE_DRPWR = 0.1
 POL_TABLE_DCOSTHETA = -0.05
+POL_TABLE_NTBINS = 300
+POL_TABLE_NRBINS = 200
+POL_TABLE_NTHETABINS = 40
 
 
 # -- Functions -- #

@@ -25,7 +25,8 @@ if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
                    SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT, POL_TABLE_RMAX,
-                   POL_TABLE_RPWR, POL_TABLE_DRPWR, POL_TABLE_DCOSTHETA)
+                   POL_TABLE_RPWR, POL_TABLE_DRPWR, POL_TABLE_DCOSTHETA,
+                   POL_TABLE_NTBINS, POL_TABLE_NRBINS, POL_TABLE_NTHETABINS)
 from retro import RetroPhotonInfo
 from retro import expand, extract_photon_info
 from retro.test_tindep import (TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
@@ -37,14 +38,15 @@ from pisa.utils.format import hrlist2list
 __all__ = ['pexp_t_r_theta', 'pexp_xyz', 'DOMTimePolarTables', 'TDICartTables']
 
 
-@numba.jit(nopython=False, nogil=True, cache=True, fastmath=True)
-def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
+#@numba.jit('f8(f4[:,:], f8[:,:,:], f4[:,:,:], f4[:,:,:], f4[:,:,:], b1)', nopython=True, nogil=True, cache=True)
+def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta,
+                   avg_photon_length, use_directionality=False):
     """Compute total expected photons in a DOM based on the (t,r,theta)-binned
     Retro DOM tables applied to a the generated photon info `pinfo_gen`.
 
     Parameters
     ----------
-    pinfo_array : shape (N, 8) numpy ndarray, dtype float32
+    pinfo_gen : shape (N, 8) numpy ndarray, dtype float32
     dom_coord : shape (3,) numpy ndarray, dtype float64
     table :
     use_directionality : bool
@@ -55,7 +57,9 @@ def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
 
     """
     expected_photon_count = 0.0
-    for (t, x, y, z, p_count, p_x, p_y, p_z) in pinfo_array:
+    for pgen_idx in range(pinfo_gen.shape[0]):
+        t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :]
+        #print(t, x, y, z, p_count, p_x, p_y, p_z)
         # An photon that starts in the past (before the DOM was hit) will show
         # up in the Retro DOM tables as a positive time relative to the DOM.
         # Therefore, invert the sign of the t coordinate.
@@ -67,17 +71,23 @@ def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
         rho2 = dx**2 + dy**2
         r = math.sqrt(rho2 + dz**2)
 
-        spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
-        if spacetime_sep < 0 or spacetime_sep >= POL_TABLE_DCOSTHETA:
-            print('spacetime_sep:', spacetime_sep)
-            print('MAX_POL_TABLE_SPACETIME_SEP:', POL_TABLE_RMAX)
-            continue
+        #spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
+        #if spacetime_sep < 0 or spacetime_sep >= POL_TABLE_RMAX:
+        #    print('spacetime_sep:', spacetime_sep)
+        #    print('MAX_POL_TABLE_SPACETIME_SEP:', POL_TABLE_RMAX)
+        #    continue
 
-        tbin_idx = int(math.floor(dt / POL_TABLE_DT))
-        rbin_idx = int(math.floor(r**(1/POL_TABLE_RPWR) / POL_TABLE_DRPWR))
-        thetabin_idx = int(dz / (r * POL_TABLE_DCOSTHETA))
-        photon_info = table[tbin_idx, rbin_idx, thetabin_idx]
-        surviving_count = p_count * photon_info.survival_prob
+        tbin_idx = np.int(math.floor(dt / POL_TABLE_DT))
+        if tbin_idx < 0 or tbin_idx >= POL_TABLE_NTBINS:
+            continue
+        rbin_idx = np.int(math.floor(r**(1/POL_TABLE_RPWR) / POL_TABLE_DRPWR))
+        if rbin_idx < 0 or rbin_idx >= POL_TABLE_NRBINS:
+            continue
+        thetabin_idx = np.int(dz / (r * POL_TABLE_DCOSTHETA))
+        if thetabin_idx < 0 or thetabin_idx >= POL_TABLE_NTHETABINS:
+            continue
+        #print('survival_prob[0,0,0]:', survival_prob[0,0,0])
+        surviving_count = p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
 
         # TODO: Include simple ice photon prop asymmetry here? Might need to
         # use both phi angle relative to DOM _and_ photon directionality
@@ -93,11 +103,13 @@ def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
 
 
 #@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def pexp_xyz(pinfo_array, x_min, y_min, z_min, nx, ny, nz, binwidth,
+def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
              survival_prob, avg_photon_x, avg_photon_y, avg_photon_z,
              use_directionality):
     expected_photon_count = 0.0
-    for (_, x, y, z, p_count, p_x, p_y, p_z) in pinfo_array:
+    for pgen_idx in range(pinfo_gen.shape[0]):
+        _, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :]
+        #print(x, y, z, p_count, p_x, p_y, p_z)
         x_idx = int(np.round((x - x_min) / binwidth))
         if x_idx < 0 or x_idx >= nx:
             continue
@@ -107,7 +119,9 @@ def pexp_xyz(pinfo_array, x_min, y_min, z_min, nx, ny, nz, binwidth,
         z_idx = int(np.round((z - z_min) / binwidth))
         if z_idx < 0 or z_idx >= nz:
             continue
-        surviving_count = p_count * survival_prob[x_idx, y_idx, z_idx]
+        sp = survival_prob[x_idx, y_idx, z_idx]
+        #print('survival_prob:', sp)
+        surviving_count = p_count * sp
 
         # TODO: Incorporate photon direction info
         if use_directionality:
@@ -190,7 +204,7 @@ class DOMTimePolarTables(object):
             theta=photon_info.theta[depth_idx],
             deltaphi=photon_info.deltaphi[depth_idx],
             length=(photon_info.length[depth_idx]
-                    * np.cos(photon_info.deltaphi[depth_idx]))
+                    * np.cos(photon_info.deltaphi[depth_idx])).astype('>f4')
         )
 
     def load_tables(self):
@@ -200,13 +214,13 @@ class DOMTimePolarTables(object):
                 self.load_table(string=string, depth_idx=depth_idx,
                                 force_reload=False)
 
-    def get_photon_expectation(self, pinfo_array, string, depth_idx,
+    def get_photon_expectation(self, pinfo_gen, string, depth_idx,
                                use_directionality=None):
         """Get the expectation for photon survival.
 
         Parameters
         ----------
-        pinfo_array : shape (N, 8) numpy ndarray, dtype float32
+        pinfo_gen : shape (N, 8) numpy ndarray, dtype float32
 
         use_directionality : None or bool
             Whether to use photon directionality informatino in hypo / table to
@@ -226,15 +240,23 @@ class DOMTimePolarTables(object):
         string_idx = string - 1
 
         dom_coord = self.geom[string_idx, depth_idx]
-        print('dom_coord:', dom_coord)
+        #print('dom_coord:', dom_coord)
         if string_idx < 79:
             subdet = 'ic'
         else:
             subdet = 'dc'
         table = self.tables[subdet][depth_idx]
-        return pexp_t_r_theta(pinfo_array=pinfo_array,
+        survival_prob = table.survival_prob
+        avg_photon_theta = table.theta
+        avg_photon_length = table.length
+        #print(type(survival_prob), survival_prob.shape, survival_prob.dtype)
+        #print(type(avg_photon_theta), avg_photon_theta.shape, avg_photon_theta.dtype)
+        #print(type(avg_photon_length), avg_photon_length.shape, avg_photon_length.dtype)
+        return pexp_t_r_theta(pinfo_gen=pinfo_gen,
                               dom_coord=dom_coord,
-                              table=table,
+                              survival_prob=survival_prob,
+                              avg_photon_theta=avg_photon_theta,
+                              avg_photon_length=avg_photon_length,
                               use_directionality=use_directionality)
 
 
@@ -567,14 +589,14 @@ class TDICartTables(object):
               ' bins are (%.3f m)³'
               % (self.n_tiles, tstr, self.x_min, self.x_max, self.y_min,
                  self.y_max, self.z_min, self.z_max, self.binwidth))
-        print('Time to load tiles:', timediffstamp(time.time() - t0))
+        print('Time to load: %s' % timediffstamp(time.time() - t0))
 
-    def get_photon_expectation(self, pinfo_array):
+    def get_photon_expectation(self, pinfo_gen):
         """Get the expectation for photon survival.
 
         Parameters
         ----------
-        pinfo_array : shape (N, 8) numpy ndarray, dtype float32
+        pinfo_gen : shape (N, 8) numpy ndarray, dtype float32
 
         Returns
         -------
@@ -586,7 +608,7 @@ class TDICartTables(object):
             raise Exception("Tables haven't been loaded")
 
         kwargs = dict(
-            pinfo_array=pinfo_array,
+            pinfo_gen=pinfo_gen,
             x_min=self.x_min, y_min=self.y_min, z_min=self.z_min,
             nx=self.nx, ny=self.ny, nz=self.nz,
             binwidth=self.binwidth,
@@ -599,3 +621,77 @@ class TDICartTables(object):
         photon_expectation = pexp_xyz(**kwargs)
 
         return photon_expectation
+
+    def plot_slices(self, x_slice=slice(None), y_slice=slice(None),
+                    z_slice=slice(None)):
+        # Formulate a slice through the table to look at
+        slx = slice(dom_x_idx - ncells,
+                    dom_x_idx + ncells,
+                    1)
+        sly = slice(dom_y_idx - ncells,
+                    dom_y_idx + ncells,
+                    1)
+        slz = dom_z_idx
+        sl = (x_slice, y_slice, slz)
+
+        # Slice the x and y directions
+        pxsl = binned_px[sl]
+        pysl = binned_py[sl]
+
+        xmid = (xlims[0] + x_bw/2.0 + x_bw * np.arange(nx))[x_slice]
+        ymid = (ylims[0] + y_bw/2.0 + y_bw * np.arange(ny))[y_slice]
+        zmid = zlims[0] + z_bw/2.0 + z_bw * dom_z_idx
+
+        x_inner_lim = (xmid.min() - x_bw/2.0, xmid.max() + x_bw/2.0)
+        y_inner_lim = (ymid.min() - y_bw/2.0, ymid.max() + y_bw/2.0)
+        X, Y = np.meshgrid(xmid, ymid, indexing='ij')
+
+        fig = plt.figure(1, figsize=(10, 10), dpi=72)
+        fig.clf()
+        ax = fig.add_subplot(111)
+
+        ax.plot(
+            dom_x, dom_y,
+            'ro', ms=8, lw=0.5,
+            label='Actual DOM location'
+        )
+        ax.plot(
+            xlims[0] + x_os_bw*dom_x_os_idx,
+            ylims[0] + y_os_bw*dom_y_os_idx,
+            'go', ms=8, lw=0.5,
+            label='DOM location used for binning'
+        )
+        ax.quiver(
+            X, Y, pxsl, pysl,
+            label='Binned average photon direction'
+        )
+
+        ax.axis('image')
+        ax.set_xlabel('x (m)')
+        ax.set_ylabel('y (m)')
+
+        ax.set_xticks(np.arange(xlims[0], xlims[1]+x_bw, x_bw), minor=False)
+        ax.grid(which='major', b=True)
+        if x_oversample > 1:
+            ax.set_xticks(
+                np.arange(x_inner_lim[0]+x_os_bw, x_inner_lim[1], x_os_bw),
+                minor=True
+            )
+            ax.grid(which='minor', b=True, ls=':', alpha=0.6)
+
+        if y_oversample > 1:
+            ax.set_yticks(
+                np.arange(y_inner_lim[0]+y_os_bw, y_inner_lim[1], y_os_bw),
+                minor=True
+            )
+            ax.grid(which='minor', b=True, ls=':', alpha=0.6)
+
+        ax.set_xlim(x_inner_lim)
+        ax.set_ylim(y_inner_lim)
+        ax.legend(loc='upper left', fancybox=True, framealpha=0.9)
+        ax.set_title('Detail of table, XY-slice through center of DOM')
+        fig.savefig('xyslice_detail.png', dpi=300)
+        fig.savefig('xyslice_detail.pdf')
+
+    def plot_projections(self):
+        pass
