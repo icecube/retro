@@ -59,7 +59,7 @@ def sphbin2cartbin(double r_max, double r_power,
         One array per spherical bin in the first octant. Indices refer to the
         oversampled binning.
 
-    vol_arrays : list of M numpy.ndarrays each of shape (N,), dtype float32
+    vol_arrays : list of M numpy.ndarrays each of shape (N,), dtype float64
         One array per spherical bin
 
     See Also
@@ -227,6 +227,6 @@ def sphbin2cartbin(double r_max, double r_power,
             vols *= norm_factor
 
             ind_arrays.append(np.atleast_2d(np.array(d.keys(), dtype=np.uint32)))
-            vol_arrays.append(vols.astype(np.float32))
+            vol_arrays.append(vols)
 
     return ind_arrays, vol_arrays
