@@ -59,12 +59,12 @@ def shift_and_bin(list ind_arrays,
 
     Parameters
     ----------
-    ind_arrays : length-J list of shape (K_j, 3) numpy.ndarrays, dtype float32
+    ind_arrays : length-J list of shape (K_j, 3) numpy.ndarrays, dtype uint32
         Each 3-element row contains the x-, y-, and z-coordinates of a
         Cartesian bin onto which the polar bin maps. There is one ind_array per
         polar bin in the first octant.
 
-    vol_arrays : length-J list of shape (K_j,) numpy.ndarrays, dtype float32
+    vol_arrays : length-J list of shape (K_j,) numpy.ndarrays, dtype float64
         Volume from the polar bin to be applied to each of the N Cartesian
         bins. There is one vol_array per polar bin in the first octant.
 
@@ -202,18 +202,19 @@ def shift_and_bin(list ind_arrays,
         int[:] num_cart_bins_in_pol_bin = np.empty(num_first_octant_pol_bins, dtype=np.int32)
         int hemisphere, quadrant
 
-        unsigned char[:] vol_mask = np.zeros((nx*ny*nz), dtype=np.uint8)
-        double[:] binned_vol = np.zeros((nx*ny*nz), dtype=np.float64)
+        double[:] dom_binned_vol = np.empty((nx*ny*nz), dtype=np.float64)
+        double[:] dom_binned_spv = np.empty((nx*ny*nz), dtype=np.float64)
+        double bv
         unsigned int flat_cart_ix
 
         int dom_idx
         int num_doms = <int>dom_coords.shape[0]
-        int nrows, ix0
+        int ix0
 
         np.ndarray[unsigned int, ndim=2] ind_array
-        np.ndarray[float, ndim=1] vol_array
+        np.ndarray[double, ndim=1] vol_array
         unsigned int **ind_array_ptrs = <unsigned int**>malloc(num_first_octant_pol_bins * sizeof(unsigned int*))
-        float **vol_array_ptrs = <float**>malloc(num_first_octant_pol_bins * sizeof(float*))
+        double **vol_array_ptrs = <double**>malloc(num_first_octant_pol_bins * sizeof(double*))
 
     try:
         # Enforce < 1 micrometer accumulated error for binning
@@ -235,7 +236,7 @@ def shift_and_bin(list ind_arrays,
             ind_array = ind_arrays[ix]
             vol_array = vol_arrays[ix]
             ind_array_ptrs[ix] = <unsigned int*>ind_array.data
-            vol_array_ptrs[ix] = <float*>vol_array.data
+            vol_array_ptrs[ix] = <double*>vol_array.data
 
         for dom_idx in range(num_doms):
             dom_x = dom_coords[dom_idx, 0]
@@ -257,13 +258,16 @@ def shift_and_bin(list ind_arrays,
             dom_y_os_idx = <int>round((dom_y - y_min) * inv_os_bw)
             dom_z_os_idx = <int>round((dom_z - z_min) * inv_os_bw)
 
+            dom_binned_vol[:] = 0.0
+            dom_binned_spv[:] = 0.0
+
             for r_idx in range(nr):
                 for theta_idx in range(ntheta_in_quad):
                     flat_pol_idx = theta_idx + r_idx*ntheta_in_quad
 
-                    nrows = num_cart_bins_in_pol_bin[flat_pol_idx]
-                    for ix in range(nrows):
+                    for ix in range(num_cart_bins_in_pol_bin[flat_pol_idx]):
                         vol = <double>vol_array_ptrs[flat_pol_idx][ix]
+                        #assert 0 <= vol <= 1e5
                         ix0 = ix * 3
                         x_os_idx = <int>ind_array_ptrs[flat_pol_idx][ix0]
                         y_os_idx = <int>ind_array_ptrs[flat_pol_idx][ix0 + 1]
@@ -271,8 +275,8 @@ def shift_and_bin(list ind_arrays,
 
                         # Azimuth angle is detrmined by (x, y) bin center since
                         # we assume azimuthal symmetry
-                        px_unnormed = <double>x_os_idx * os_bw  + half_os_bw
-                        py_unnormed = <double>y_os_idx * os_bw  + half_os_bw
+                        px_unnormed = <double>x_os_idx * os_bw + half_os_bw
+                        py_unnormed = <double>y_os_idx * os_bw + half_os_bw
                         bin_pos_rho_norm = 1.0 / sqrt(px_unnormed*px_unnormed + py_unnormed*py_unnormed)
                         px_unnormed = px_unnormed * bin_pos_rho_norm
                         py_unnormed = py_unnormed * bin_pos_rho_norm
@@ -289,6 +293,7 @@ def shift_and_bin(list ind_arrays,
                                 continue
 
                             sp = survival_prob[r_idx, theta_idx_]
+                            #assert 0 <= sp <= 1
                             spv = sp * vol
                             prho_ = prho[r_idx, theta_idx_]
                             pz_ = pz[r_idx, theta_idx_]
@@ -329,8 +334,8 @@ def shift_and_bin(list ind_arrays,
 
                                 # Compute base index; can use directly on typed memoryviews
                                 flat_cart_ix = (x_idx * ny*nz) + (y_idx * nz) + z_idx
-                                vol_mask[flat_cart_ix] = 1
-                                binned_vol[flat_cart_ix] += vol
+                                dom_binned_vol[flat_cart_ix] += vol
+                                dom_binned_spv[flat_cart_ix] += spv
                                 binned_spv[flat_cart_ix] += spv
                                 binned_px_spv[flat_cart_ix] += px_ * spv
                                 binned_py_spv[flat_cart_ix] += py_ * spv
@@ -344,11 +349,10 @@ def shift_and_bin(list ind_arrays,
             # probabilities can be easily combined before being subtracted form one
             # to yield the overall probability.
             for flat_cart_ix in range(nx*ny*nz):
-                if vol_mask[flat_cart_ix] == 0:
+                bv = dom_binned_vol[flat_cart_ix]
+                if bv == 0:
                     continue
-                binned_one_minus_sp[flat_cart_ix] *= (
-                    1 - binned_spv[flat_cart_ix] / binned_vol[flat_cart_ix]
-                )
+                binned_one_minus_sp[flat_cart_ix] *= 1.0 - dom_binned_spv[flat_cart_ix] / bv
     finally:
         free(ind_array_ptrs)
         free(vol_array_ptrs)
