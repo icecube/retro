@@ -33,7 +33,8 @@ __all__ = [
 
     # Pre-calculated values
     'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'CASCADE_PHOTONS_PER_GEV',
-    'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'MAX_POL_TABLE_SPACETIME_SEP',
+    'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'POL_TABLE_DCOSTHETA',
+    'POL_TABLE_DRPWR', 'POL_TABLE_DT', 'POL_TABLE_RPWR', 'POL_TABLE_RMAX',
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
@@ -213,9 +214,8 @@ IC_DOM_JITTER_NS = 1.7
 DC_DOM_JITTER_NS = 1.7
 """Timing jitter (stddev) for DeepCore (strings 80-86) DOMs, in units of ns"""
 
-MAX_POL_TABLE_SPACETIME_SEP = 400 * SPEED_OF_LIGHT_M_PER_NS
-"""DOM Retro tables binned in (t, r, theta) contain up to this spacetime sep"""
-
+# TODO: figure these out from the tables rather than defining as constants
+POL_TABLE_RMAX = 400
 POL_TABLE_DT = 10e-9
 POL_TABLE_RPWR = 2
 POL_TABLE_DRPWR = 0.1

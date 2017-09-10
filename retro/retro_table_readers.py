@@ -1,4 +1,5 @@
 # pylint: disable=wrong-import-position
+# -*- coding: utf-8 -*-
 
 """
 Classes for reading and getting info from Retro tables.
@@ -12,17 +13,19 @@ from glob import glob
 import math
 import os
 from os.path import abspath, basename, dirname, isdir, join
+import time
 
 import numba
 import numpy as np
 import pyfits
 
+from pisa.utils.timing import timediffstamp
+
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
 from retro import (DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
-                   SPEED_OF_LIGHT_M_PER_NS, MAX_POL_TABLE_SPACETIME_SEP,
-                   POL_TABLE_DT, POL_TABLE_RPWR, POL_TABLE_DRPWR,
-                   POL_TABLE_DCOSTHETA)
+                   SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT, POL_TABLE_RMAX,
+                   POL_TABLE_RPWR, POL_TABLE_DRPWR, POL_TABLE_DCOSTHETA)
 from retro import RetroPhotonInfo
 from retro import expand, extract_photon_info
 from retro.test_tindep import (TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
@@ -31,10 +34,10 @@ from retro.test_tindep import (TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
 from pisa.utils.format import hrlist2list
 
 
-__all__ = ['pexp_t_r_theta', 'RetroDOMTimePolarTables', 'RetroTDICartTables']
+__all__ = ['pexp_t_r_theta', 'pexp_xyz', 'DOMTimePolarTables', 'TDICartTables']
 
 
-@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+@numba.jit(nopython=False, nogil=True, cache=True, fastmath=True)
 def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
     """Compute total expected photons in a DOM based on the (t,r,theta)-binned
     Retro DOM tables applied to a the generated photon info `pinfo_gen`.
@@ -57,15 +60,17 @@ def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
         # up in the Retro DOM tables as a positive time relative to the DOM.
         # Therefore, invert the sign of the t coordinate.
         dt = -t
-        dx = x - dom_coord[1]
-        dy = y - dom_coord[2]
-        dz = z - dom_coord[3]
+        dx = x - dom_coord[0]
+        dy = y - dom_coord[1]
+        dz = z - dom_coord[2]
 
         rho2 = dx**2 + dy**2
         r = math.sqrt(rho2 + dz**2)
 
         spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
-        if spacetime_sep < 0 or spacetime_sep >= MAX_POL_TABLE_SPACETIME_SEP:
+        if spacetime_sep < 0 or spacetime_sep >= POL_TABLE_DCOSTHETA:
+            print('spacetime_sep:', spacetime_sep)
+            print('MAX_POL_TABLE_SPACETIME_SEP:', POL_TABLE_RMAX)
             continue
 
         tbin_idx = int(math.floor(dt / POL_TABLE_DT))
@@ -87,7 +92,7 @@ def pexp_t_r_theta(pinfo_array, dom_coord, table, use_directionality=False):
     return expected_photon_count
 
 
-@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+#@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
 def pexp_xyz(pinfo_array, x_min, y_min, z_min, nx, ny, nz, binwidth,
              survival_prob, avg_photon_x, avg_photon_y, avg_photon_z,
              use_directionality):
@@ -113,7 +118,7 @@ def pexp_xyz(pinfo_array, x_min, y_min, z_min, nx, ny, nz, binwidth,
     return expected_photon_count
 
 
-class RetroDOMTimePolarTables(object):
+class DOMTimePolarTables(object):
     """Load and use information from individual-dom (time, r, theta)-binned
     Retro tables.
 
@@ -155,11 +160,14 @@ class RetroDOMTimePolarTables(object):
         Parameters
         ----------
         string : int
+            Indexed from 1
+
         depth_idx : int
         force_reload : bool
 
         """
-        if string < 79:
+        string_idx = string - 1
+        if string_idx < 79:
             subdet = 'ic'
             fname_proto = IC_TABLE_FNAME_PROTO
         else:
@@ -187,7 +195,7 @@ class RetroDOMTimePolarTables(object):
 
     def load_tables(self):
         """Load all tables"""
-        for string in range(86):
+        for string in range(1, 86+1):
             for depth_idx in range(60):
                 self.load_table(string=string, depth_idx=depth_idx,
                                 force_reload=False)
@@ -215,8 +223,11 @@ class RetroDOMTimePolarTables(object):
         if use_directionality is None:
             use_directionality = self.use_directionality
 
-        dom_coord = self.geom[string, depth_idx]
-        if string < 79:
+        string_idx = string - 1
+
+        dom_coord = self.geom[string_idx, depth_idx]
+        print('dom_coord:', dom_coord)
+        if string_idx < 79:
             subdet = 'ic'
         else:
             subdet = 'dc'
@@ -227,7 +238,7 @@ class RetroDOMTimePolarTables(object):
                               use_directionality=use_directionality)
 
 
-class RetroTDICartTables(object):
+class TDICartTables(object):
     """Load and use information from time- and DOM-independent Cartesian
     (x, y, z)-binned Retro tables.
 
@@ -257,7 +268,7 @@ class RetroTDICartTables(object):
 
     """
     def __init__(self, tables_dir, use_directionality, proto_tile_hash,
-                 scale=1):
+                 scale=1, subvol=None):
         # Translation and validation of args
         tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
@@ -306,6 +317,28 @@ class RetroTDICartTables(object):
         self.z_tile_width = proto_meta['z_width']
         self.binwidth = proto_meta['binwidth']
         self.anisotropy = proto_meta['anisotropy']
+
+        if subvol is not None:
+            raise NotImplementedError
+            sv_x0, sv_x1 = subvol[0][0], subvol[0][1]
+            sv_y0, sv_y1 = subvol[1][0], subvol[1][1]
+            sv_z0, sv_z1 = subvol[2][0], subvol[2][1]
+            assert sv_x1 - sv_x0 >= self.binwidth
+            assert sv_y1 - sv_y0 >= self.binwidth
+            assert sv_z1 - sv_z0 >= self.binwidth
+            sv_x0_idx = (sv_x0 - proto_meta['x_min']) / self.binwidth
+            sv_y0_idx = (sv_y0 - proto_meta['y_min']) / self.binwidth
+            sv_z0_idx = (sv_z0 - proto_meta['z_min']) / self.binwidth
+            assert abs(np.round(sv_x0_idx) - sv_x0_idx) * self.binwidth < 1e-6
+            assert abs(np.round(sv_y0_idx) - sv_y0_idx) * self.binwidth < 1e-6
+            assert abs(np.round(sv_z0_idx) - sv_z0_idx) * self.binwidth < 1e-6
+            sv_x1_idx = (sv_x1 - proto_meta['x_min']) / self.binwidth
+            sv_y1_idx = (sv_y1 - proto_meta['y_min']) / self.binwidth
+            sv_z1_idx = (sv_z1 - proto_meta['z_min']) / self.binwidth
+            assert abs(np.round(sv_x1_idx) - sv_x1_idx) * self.binwidth < 1e-6
+            assert abs(np.round(sv_y1_idx) - sv_y1_idx) * self.binwidth < 1e-6
+            assert abs(np.round(sv_z1_idx) - sv_z1_idx) * self.binwidth < 1e-6
+        self.subvol = subvol
 
         self.tables_loaded = False
         self.load_tables()
@@ -358,6 +391,8 @@ class RetroTDICartTables(object):
         if self.tables_loaded and not force_reload:
             return
 
+        t0 = time.time()
+
         x_ref = self.proto_meta['x_min']
         y_ref = self.proto_meta['y_min']
         z_ref = self.proto_meta['z_min']
@@ -385,9 +420,13 @@ class RetroTDICartTables(object):
             if meta is None:
                 continue
 
+            is_match = True
             for key in must_match:
                 if meta[key] != self.proto_meta[key]:
-                    continue
+                    is_match = False
+
+            if not is_match:
+                continue
 
             # Make sure that the corner falls on the reference grid (within
             # micrometer precision)
@@ -422,7 +461,18 @@ class RetroTDICartTables(object):
                              ' of the outermost extents of the volume defined'
                              ' by the tiles found.')
         elif len(to_load_meta) > n_tiles:
-            raise ValueError('WTF? How did we get here?')
+            print(self.proto_meta['tdi_hash'])
+            print('x:', self.proto_meta['x_min'], self.proto_meta['x_max'], self.proto_meta['x_width'])
+            print('y:', self.proto_meta['y_min'], self.proto_meta['y_max'], self.proto_meta['y_width'])
+            print('z:', self.proto_meta['z_min'], self.proto_meta['z_max'], self.proto_meta['z_width'])
+            print('')
+            for v in to_load_meta.values():
+                print(v['tdi_hash'])
+                print('x:', v['x_min'], v['x_max'], v['x_width'])
+                print('y:', v['y_min'], v['y_max'], v['y_width'])
+                print('z:', v['z_min'], v['z_max'], v['z_width'])
+                print('')
+            raise ValueError('WTF? How did we get here? to_load_meta = %d, n_tiles = %d' % (len(to_load_meta), n_tiles))
 
         # Figure out how many bins in each dimension fill the volume
         nx = int(np.round(nx_tiles * self.x_tile_width / self.binwidth))
@@ -493,6 +543,8 @@ class RetroTDICartTables(object):
         # store the above-computed info to the object for later use
         self.nx, self.ny, self.nz = nx, ny, nz
         self.nx_tiles, self.ny_tiles, self.nz_tiles = nx_tiles, ny_tiles, nz_tiles
+        self.n_bins = self.nx * self.ny * self.nz
+        self.n_tiles = self.nx_tiles * self.ny_tiles * self.nz_tiles
         self.x_min, self.y_min, self.z_min = x_min, y_min, z_min
         self.x_max, self.y_max, self.z_max = x_max, y_max, z_max
 
@@ -503,6 +555,19 @@ class RetroTDICartTables(object):
 
         self.tables_meta = tables_meta
         self.tables_loaded = True
+
+        if self.n_tiles == 1:
+            tstr = 'tile'
+        else:
+            tstr = 'tiles'
+        print('Loaded %d %s spanning'
+              ' x ∈ [%.2f, %.2f) m,'
+              ' y ∈ [%.2f, %.2f) m,'
+              ' z ∈ [%.2f, %.2f) m;'
+              ' bins are (%.3f m)³'
+              % (self.n_tiles, tstr, self.x_min, self.x_max, self.y_min,
+                 self.y_max, self.z_min, self.z_max, self.binwidth))
+        print('Time to load tiles:', timediffstamp(time.time() - t0))
 
     def get_photon_expectation(self, pinfo_array):
         """Get the expectation for photon survival.
