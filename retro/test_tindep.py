@@ -617,7 +617,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             pz = plength * np.cos(ptheta)
             prho = plength * np.sin(ptheta)
 
-            t_indep_sp = 1 - np.exp(np.sum(np.log(1 - sp[times]), axis=0))
+            t_indep_sp = 1 - np.prod(1 - sp[times], axis=0)
 
             mask = t_indep_sp != 0
             scale = 1 / sp.sum(axis=0)[mask]
@@ -657,6 +657,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                 oversample=oversample,
                 anisotropy=None
             )
+            print('    %d surv probs are exactly 1' % np.sum(binned_one_minus_sp == 0))
             t3 = time.time()
             print('    Time to shift and bin:', timediffstamp(t3 - t2))
             print('')
@@ -664,11 +665,8 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     print('Total time to shift and bin:', timediffstamp(t3 - t00))
     print('')
 
-    binned_sp = (
-        (1 - binned_one_minus_sp)
-        .astype(np.float32)
-        .reshape(xyz_shape)
-    )
+    binned_sp = 1.0 - binned_one_minus_sp
+    binned_sp = binned_sp.astype(np.float32).reshape(xyz_shape)
     del binned_one_minus_sp
 
     mask = binned_spv != 0
