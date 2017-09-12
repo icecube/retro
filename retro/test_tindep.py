@@ -617,6 +617,8 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             pz = plength * np.cos(ptheta)
             prho = plength * np.sin(ptheta)
 
+            # Marginalize out time, computing the probability of a photon
+            # starting at any one time being detected at any other time
             t_indep_sp = 1 - np.prod(1 - sp[times], axis=0)
 
             mask = t_indep_sp != 0
