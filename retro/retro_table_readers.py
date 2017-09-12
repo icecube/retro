@@ -38,9 +38,8 @@ from pisa.utils.format import hrlist2list
 __all__ = ['pexp_t_r_theta', 'pexp_xyz', 'DOMTimePolarTables', 'TDICartTables']
 
 
-#@numba.jit('f8(f4[:,:], f8[:,:,:], f4[:,:,:], f4[:,:,:], f4[:,:,:], b1)', nopython=True, nogil=True, cache=True)
-def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta,
-                   avg_photon_length, use_directionality=False):
+@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta, avg_photon_length, use_directionality):
     """Compute total expected photons in a DOM based on the (t,r,theta)-binned
     Retro DOM tables applied to a the generated photon info `pinfo_gen`.
 
@@ -48,7 +47,9 @@ def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta,
     ----------
     pinfo_gen : shape (N, 8) numpy ndarray, dtype float32
     dom_coord : shape (3,) numpy ndarray, dtype float64
-    table :
+    survival_prob
+    avg_photon_theta
+    avg_photon_length
     use_directionality : bool
 
     Returns
@@ -59,8 +60,8 @@ def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta,
     expected_photon_count = 0.0
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :]
-        #print(t, x, y, z, p_count, p_x, p_y, p_z)
-        # An photon that starts in the past (before the DOM was hit) will show
+
+        # A photon that starts in the past (before the DOM was hit) will show
         # up in the Retro DOM tables as a positive time relative to the DOM.
         # Therefore, invert the sign of the t coordinate.
         dt = -t
@@ -69,7 +70,7 @@ def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta,
         dz = z - dom_coord[2]
 
         rho2 = dx**2 + dy**2
-        r = math.sqrt(rho2 + dz**2)
+        r = np.sqrt(rho2 + dz**2)
 
         #spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
         #if spacetime_sep < 0 or spacetime_sep >= POL_TABLE_RMAX:
@@ -77,16 +78,15 @@ def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta,
         #    print('MAX_POL_TABLE_SPACETIME_SEP:', POL_TABLE_RMAX)
         #    continue
 
-        tbin_idx = np.int(math.floor(dt / POL_TABLE_DT))
+        tbin_idx = int(np.floor(dt / POL_TABLE_DT))
         if tbin_idx < 0 or tbin_idx >= POL_TABLE_NTBINS:
             continue
-        rbin_idx = np.int(math.floor(r**(1/POL_TABLE_RPWR) / POL_TABLE_DRPWR))
+        rbin_idx = int(np.floor(r**(1/POL_TABLE_RPWR) / POL_TABLE_DRPWR))
         if rbin_idx < 0 or rbin_idx >= POL_TABLE_NRBINS:
             continue
-        thetabin_idx = np.int(dz / (r * POL_TABLE_DCOSTHETA))
+        thetabin_idx = int(dz / (r * POL_TABLE_DCOSTHETA))
         if thetabin_idx < 0 or thetabin_idx >= POL_TABLE_NTHETABINS:
             continue
-        #print('survival_prob[0,0,0]:', survival_prob[0,0,0])
         surviving_count = p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
 
         # TODO: Include simple ice photon prop asymmetry here? Might need to
@@ -102,14 +102,11 @@ def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta,
     return expected_photon_count
 
 
-#@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
-             survival_prob, avg_photon_x, avg_photon_y, avg_photon_z,
-             use_directionality):
+@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth, survival_prob, avg_photon_x, avg_photon_y, avg_photon_z, use_directionality):
     expected_photon_count = 0.0
     for pgen_idx in range(pinfo_gen.shape[0]):
         _, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :]
-        #print(x, y, z, p_count, p_x, p_y, p_z)
         x_idx = int(np.round((x - x_min) / binwidth))
         if x_idx < 0 or x_idx >= nx:
             continue
@@ -120,7 +117,6 @@ def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
         if z_idx < 0 or z_idx >= nz:
             continue
         sp = survival_prob[x_idx, y_idx, z_idx]
-        #print('survival_prob:', sp)
         surviving_count = p_count * sp
 
         # TODO: Incorporate photon direction info
@@ -199,12 +195,14 @@ class DOMTimePolarTables(object):
             scale=self.scale
         )
 
+        length = photon_info.length[depth_idx]
+        deltaphi = photon_info.deltaphi[depth_idx]
         self.tables[subdet][depth_idx] = RetroPhotonInfo(
             survival_prob=photon_info.survival_prob[depth_idx],
             theta=photon_info.theta[depth_idx],
             deltaphi=photon_info.deltaphi[depth_idx],
             length=(photon_info.length[depth_idx]
-                    * np.cos(photon_info.deltaphi[depth_idx])).astype('>f4')
+                    * np.cos(photon_info.deltaphi[depth_idx]))
         )
 
     def load_tables(self):
@@ -240,7 +238,6 @@ class DOMTimePolarTables(object):
         string_idx = string - 1
 
         dom_coord = self.geom[string_idx, depth_idx]
-        #print('dom_coord:', dom_coord)
         if string_idx < 79:
             subdet = 'ic'
         else:
@@ -249,9 +246,6 @@ class DOMTimePolarTables(object):
         survival_prob = table.survival_prob
         avg_photon_theta = table.theta
         avg_photon_length = table.length
-        #print(type(survival_prob), survival_prob.shape, survival_prob.dtype)
-        #print(type(avg_photon_theta), avg_photon_theta.shape, avg_photon_theta.dtype)
-        #print(type(avg_photon_length), avg_photon_length.shape, avg_photon_length.dtype)
         return pexp_t_r_theta(pinfo_gen=pinfo_gen,
                               dom_coord=dom_coord,
                               survival_prob=survival_prob,
@@ -553,6 +547,8 @@ class TDICartTables(object):
 
                 with pyfits.open(fpath) as fits_table:
                     data = fits_table[0].data
+                if data.dtype.byteorder == '>':
+                    data = data.byteswap().newbyteorder()
 
                 if self.scale != 1 and table_name == 'survival_prob':
                     data = 1 - (1 - data)**self.scale

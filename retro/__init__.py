@@ -580,23 +580,48 @@ def extract_photon_info(fpath, depth_idx, scale=1, photon_info=None):
         photon_info = RetroPhotonInfo(*empty_dicts)
 
     with pyfits.open(expand(fpath)) as table:
+        data = table[0].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
         if scale == 1:
-            photon_info.survival_prob[depth_idx] = table[0].data
+            photon_info.survival_prob[depth_idx] = data
         else:
-            photon_info.survival_prob[depth_idx] = 1 - (1 - table[0].data)**scale
+            photon_info.survival_prob[depth_idx] = 1 - (1 - data)**scale
 
-        photon_info.theta[depth_idx] = table[1].data
-        photon_info.deltaphi[depth_idx] = table[2].data
-        photon_info.length[depth_idx] = table[3].data
+        data = table[1].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        photon_info.theta[depth_idx] = data
+
+        data = table[2].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        photon_info.deltaphi[depth_idx] = data
+
+        data = table[3].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        photon_info.length[depth_idx] = data
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.
-        bin_edges = TimeSphCoord(
-            t=-table[4].data[::-1],
-            r=table[5].data,
-            theta=table[6].data,
-            phi=np.array([])
-        )
+        data = table[4].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        t = - data[::-1]
+
+        data = table[5].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        r = data
+
+        data = table[6].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        theta = data
+
+        bin_edges = TimeSphCoord(t=t, r=r, theta=theta,
+                                 phi=np.array([], dtype=t.dtype))
 
     return photon_info, bin_edges
 
