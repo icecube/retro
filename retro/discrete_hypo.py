@@ -28,7 +28,7 @@ ALL_REALS = (-np.inf, np.inf)
 
 
 # TODO: use / check limits...?
-def const_energy_loss_muon(hypo_params, limits=None, dt=1):
+def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -54,25 +54,34 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1):
 	#    limits = TimeCart3DCoord(t=ALL_REALS, x=ALL_REALS, y=ALL_REALS,
     #                             z=ALL_REALS)
 
-    length = hypo_params.track_energy * TRACK_M_PER_GEV
+    track_energy = hypo_params.track_energy
+
+    if track_energy == 0:
+        pinfo_gen = np.array(
+            [[hypo_params.t, hypo_params.x, hypo_params.y, hypo_params.z, 0, 0, 0, 0]],
+            dtype=np.float64
+        )
+        return pinfo_gen
+
+    length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
-    first_sample_t = hypo_params.t + dt/2
-    final_sample_t = hypo_params.t + duration - dt/2
-    n_samples = int((final_sample_t - first_sample_t) / dt)
+    n_samples = int(np.floor(duration / dt))
+    first_sample_t = dt/2
+    final_sample_t = first_sample_t + (n_samples - 1) * dt
     segment_length = length / n_samples
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
     sin_zen = math.sin(hypo_params.track_zenith)
-    dir_x = sin_zen * math.cos(hypo_params.track_azimuth)
-    dir_y = sin_zen * math.sin(hypo_params.track_azimuth)
-    dir_z = math.cos(hypo_params.track_zenith)
+    dir_x = -sin_zen * math.cos(hypo_params.track_azimuth)
+    dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
+    dir_z = -math.cos(hypo_params.track_zenith)
 
-    pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
-    t = pinfo_gen[:, 0] = np.linspace(first_sample_t, final_sample_t,
-                                        n_samples)
-    pinfo_gen[:, 1] = hypo_params.x + t * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
-    pinfo_gen[:, 2] = hypo_params.y + t * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
-    pinfo_gen[:, 3] = hypo_params.z + t * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen = np.empty((n_samples, 8), dtype=np.float64)
+    sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
+    pinfo_gen[:, 0] = hypo_params.t + dt
+    pinfo_gen[:, 1] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 2] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 3] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     pinfo_gen[:, 4] = photons_per_segment
     pinfo_gen[:, 5] = dir_x * 0.562
     pinfo_gen[:, 6] = dir_y * 0.562
@@ -96,7 +105,7 @@ def point_cascade(hypo_params, limits=None):
     pinfo_gen
 
     """
-    pinfo_gen = np.empty((1, 8), dtype=np.float32)
+    pinfo_gen = np.empty((1, 8), dtype=np.float64)
     pinfo_gen[0, 0] = hypo_params.t
     pinfo_gen[0, 1] = hypo_params.x
     pinfo_gen[0, 2] = hypo_params.y
@@ -134,7 +143,7 @@ class DiscreteHypo(object):
             assert callable(kernel)
         self.hypo_kernels = hypo_kernels
         if kernel_kwargs is None:
-            kernel_kwargs = [{} for _ in range(hypo_kernels)]
+            kernel_kwargs = [{} for _ in hypo_kernels]
         assert isinstance(kernel_kwargs, Iterable)
         if limits is not None:
             for kwargs in kernel_kwargs:
@@ -143,9 +152,9 @@ class DiscreteHypo(object):
         self.kernel_kwargs = kernel_kwargs
         self.limits = limits
 
-    def get_photon_gen_info(self, hypo_params):
+    def get_pinfo_gen(self, hypo_params):
         """Evaluate the discrete hypothesis (all hypo kernels) given particular
-        parameters to yield the hypothesis's expected generated photons.
+        parameters and return the hypothesis's expected generated photons.
 
         Parameters
         ----------
@@ -153,7 +162,7 @@ class DiscreteHypo(object):
 
         Returns
         -------
-        pinfo_gen : shape (N, 8) numpy.ndarray, dtype float32
+        pinfo_gen : shape (N, 8) numpy.ndarray, dtype float64
             Each row contains (t, x, y, z, p_count, p_x, p_y, p_z)
 
         """

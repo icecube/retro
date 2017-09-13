@@ -47,6 +47,9 @@ import numpy as np
 import pyfits
 
 os.sys.path.append(dirname(dirname(abspath('__file__'))))
+from retro import (IC_QUANT_EFF, DC_QUANT_EFF, POL_TABLE_NRBINS,
+                   POL_TABLE_NTBINS, POL_TABLE_NTHETABINS, POL_TABLE_RMAX,
+                   POL_TABLE_RPWR)
 from retro import powerspace, spherical_volume, extract_photon_info
 from retro.shift_and_bin import shift_and_bin
 from retro.sphbin2cartbin import sphbin2cartbin
@@ -68,6 +71,8 @@ TDI_TABLE_FNAME_PROTO = (
     '_z{z_min:.3f}_{z_max:.3f}'
     '_bw{binwidth:.9f}'
     '_anisot_{anisotropy_str:s}'
+    '_ics{ic_scale:.5f}'
+    '_dcs{dc_scale:.5f}'
     '_{table_name:s}'
     '.fits'
 )
@@ -84,6 +89,8 @@ TDI_TABLE_FNAME_RE = re.compile(
     r'_z(?P<z_min>[^_]+)_(?P<z_max>[^_]+)'
     r'_bw(?P<binwidth>[^_]+)'
     r'_anisot_(?P<anisotropy>.+?)'
+    r'_ics(?P<ic_scale>.+?)'
+    r'_dcs(?P<dc_scale>.+?)'
     r'_(?P<table_name>(avg_photon_x|avg_photon_y|avg_photon_z|survival_prob))'
     r'\.fits$'
     , re.IGNORECASE
@@ -201,7 +208,7 @@ def get_geom_meta(geom):
 
 def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
                        x_min, x_max, y_min, y_max, z_min, z_max, binwidth,
-                       anisotropy):
+                       anisotropy, ic_scale, dc_scale):
     """Get metadata for a time- and DOM-independent Cartesian (x, y, z)-binned
     table.
 
@@ -214,6 +221,8 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
     x_lims, y_lims, z_lims : 2-tuples of floats
     binwidth : float
     anisotropy : None or tuple
+    ic_scale : float
+    dc_scale : float
 
     Returns
     -------
@@ -239,7 +248,9 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         ('z_min', z_min),
         ('z_max', z_max),
         ('binwidth', binwidth),
-        ('anisotropy', anisotropy)
+        ('anisotropy', anisotropy),
+        ('ic_scale', ic_scale),
+        ('dc_scale', dc_scale)
     ])
 
     hash_params = deepcopy(kwargs)
@@ -247,6 +258,10 @@ def get_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         rounded_int = int(np.round(hash_params[param]*100))
         hash_params[param] = rounded_int
         kwargs[param] = float(rounded_int) / 100
+    for param in ['ic_scale', 'dc_scale']:
+        rounded_int = int(np.round(hash_params[param]*10000))
+        hash_params[param] = rounded_int
+        kwargs[param] = float(rounded_int) / 10000
     hash_params['binwidth'] = int(np.round(hash_params['binwidth'] * 1e10))
     tdi_hash = hash_obj(hash_params, hash_to='hex', full_hash=True)
 
@@ -379,6 +394,7 @@ def generate_binmap(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
 def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                        x_lims, y_lims, z_lims,
                        binwidth, oversample, antialias, anisotropy,
+                       ic_scale, dc_scale,
                        strings=slice(None),
                        depths=slice(None),
                        times=slice(None),
@@ -404,6 +420,9 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     binwidth : float
     oversample : int
     antialias : int
+    anisotropy : int
+    ic_scale : float
+    dc_scale : float
     strings : int, sequence, slice
         Select only these strings by indexing into the geom array
 
@@ -444,11 +463,11 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     assert isdir(tables_dir)
     if dom_tables_hash is None:
         dom_tables_hash = 'none'
-        r_max = 400
-        r_power = 2
-        n_rbins = 200
-        n_costhetabins = 40
-        n_tbins = 300
+        r_max = POL_TABLE_RMAX
+        r_power = POL_TABLE_RPWR
+        n_rbins = POL_TABLE_NRBINS
+        n_costhetabins = POL_TABLE_NTHETABINS
+        n_tbins = POL_TABLE_NTBINS
     else:
         raise ValueError('Cannot handle non-None `dom_tables_hash`')
 
@@ -521,7 +540,8 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         x_min=x_lims[0], x_max=x_lims[1],
         y_min=y_lims[0], y_max=y_lims[1],
         z_min=z_lims[0], z_max=z_lims[1],
-        binwidth=binwidth, anisotropy=anisotropy
+        binwidth=binwidth, anisotropy=anisotropy,
+        ic_scale=ic_scale, dc_scale=dc_scale
     )
 
     print('Generating Cartesian time- and DOM-independent (TDI) Retro table')
@@ -585,6 +605,14 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         print('  -> %d strings with DOM(s) at %d depths'
               % (subdet_dom_coords.shape[0], subdet_dom_coords.shape[1]))
         print('')
+
+        if subdet == 'ic':
+            qe_scale = ic_scale
+        elif subdet == 'dc':
+            qe_scale = dc_scale
+        else:
+            raise ValueError(str(subdet))
+
         for rel_ix, depth_idx in enumerate(depth_indices):
             print('    Subdetector: %s, depth_idx: %d' % (subdet, depth_idx))
             dom_coords = subdet_dom_coords[:, rel_ix, :]
@@ -602,11 +630,10 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             # TODO: validate that bin edges match spec we're using
             photon_info, _ = extract_photon_info(
                 fpath=join(tables_dir, table_fname),
-                depth_idx=depth_idx
+                depth_idx=depth_idx, scale=qe_scale
             )
             t1 = time.time()
-            print('    Time to load the retro table:',
-                  timediffstamp(t1 - t0))
+            print('    Time to load DOM retro table:', timediffstamp(t1 - t0))
 
             sp = photon_info.survival_prob[depth_idx].astype(np.float64)
             plength = photon_info.length[depth_idx].astype(np.float64)
@@ -807,6 +834,15 @@ def parse_args(description=__doc__):
         for azimuthal direction of low-scattering axis (radians) and MAG for
         magnitude of anisotropy (unitless). If not specified, no anisotropy is
         modeled.'''
+    )
+    parser.add_argument(
+        '--ic-scale', type=float, default=IC_QUANT_EFF,
+        help='''IceCube (non-DeepCore) DOM scaling factor (e.g. for quantum
+        efficiency)'''
+    )
+    parser.add_argument(
+        '--dc-scale', type=float, default=DC_QUANT_EFF,
+        help='''DeepCore DOM scaling factor (e.g. for quantum efficiency)'''
     )
     parser.add_argument(
         '--strings', type=str, nargs='+', required=False, default=None,

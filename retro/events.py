@@ -60,9 +60,10 @@ class Events(object):
             strings = pulses['string']
             oms = pulses['om']
 
-            # Note that string and om indices are one less than their numbers
+            # Note that we will use the convention that strings go from 1 to 86 while depth (om) indices go
+            # from 0 to 59
             self.pulses = Pulses(
-                strings=strings - 1,
+                strings=strings,
                 oms=oms - 1,
                 times=pulses['time'],
                 charges=pulses['charge'],

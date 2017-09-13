@@ -24,6 +24,7 @@ import time
 import numba # pylint: disable=unused-import
 import numpy as np
 from pyswarm import pso
+from pisa.utils.timing import timediffstamp
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
@@ -36,9 +37,12 @@ from retro import (bin_edges_to_binspec, event_to_hypo_params, expand,
                    extract_photon_info, poisson_llh,
                    get_primary_interaction_str)
 from retro.events import Events
+from retro.discrete_hypo import (DiscreteHypo, const_energy_loss_muon,
+                                 point_cascade)
 from retro.analytic_hypo import AnalyticHypo # pylint: disable=unused-import
 from retro.plot_1d_scan import plot_1d_scan
 from retro.segmented_hypo import SegmentedHypo # pylint: disable=unused-import
+from retro.table_readers import DOMTimePolarTables, TDICartTables
 
 
 DFLT_EVENTS_FPATH = (
@@ -52,12 +56,11 @@ EPS_STAT = EPS
 EPS_CLSIM_LENGTH_BINNING = EPS
 EPS_CLSIM_ANGLE_BINNING = EPS
 NOISE_CHARGE = 0.00000025 * 100
-CASCADE_E_SCALE = 100
+CASCADE_E_SCALE = 1
 TRACK_E_SCALE = 1
 NUM_JITTER_SAMPLES = 1
 JITTER_SIGMA = 5
 
-N_PHI_BINS = 40
 NUM_SCAN_POINTS = 100
 HypoClass = SegmentedHypo
 HYPOCLASS_KWARGS = dict(time_increment=1)
@@ -80,12 +83,9 @@ if not isdir(RESULTS_DIR):
 
 ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
-    #x=(-700, 700),
-    #y=(-650, 650),
-    #z=(-650, 650),
-    x=(-200, 300),
-    y=(-350, 250),
-    z=(-700, 50),
+    x=(-700, 700),
+    y=(-700, 700),
+    z=(-800, 600),
     track_azimuth=(0, 2*np.pi),
     track_zenith=(-np.pi, np.pi),
     track_energy=(0, 100),
@@ -113,7 +113,7 @@ REL_BOUNDS = HypoParams10D(
 MIN_USE_RELATIVE_BOUNDS = False
 """Whether minimizer is to use relative bounds (where defined)"""
 
-SCAN_USE_RELATIVE_BOUNDS = False
+SCAN_USE_RELATIVE_BOUNDS = True
 """Whether scanning is to use relative bounds (where defined)"""
 
 MIN_DIMS = [] #('t x y z track_zenith track_azimuth track_energy'.split())
@@ -140,31 +140,18 @@ SCAN_DIM_SETS = (
 
 
 #@profile
-def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
-                t_dom_indep_table=None, detailed_info_list=None):
+def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None, detailed_info_list=None):
     """Get log likelihood.
 
     Parameters
     ----------
-    hypo : HypoClass
+    pinfo_gen
 
     event : retro.Event namedtuple or convertible thereto
 
-    detector_geometry : numpy.ndarray
+    dom_tables
 
-    ic_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
-
-    dc_photon_info : retro.RetroPhotonInfo namedtuple or convertible thereto
-
-    t_dom_indep_tables : dict of numpy.ndarray
-        Time- and DOM-independent tables in Cartesian coordinates. Dict has
-        format
-          {'survival_prob': numpy.ndarray,
-           'avg_photon_x': numpy.ndarray,
-           'avg_photon_y': numpy.ndarray,
-           'avg_photon_z': numpy.ndarray
-           'binning': ?}
-         For now, it is assumed that the values are in the range...
+    tdi_table
 
     detailed_info_list : None or appendable sequence
         If a list is provided, it is appended with a dict containing detailed
@@ -182,207 +169,55 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     neg_llh = 0
     noise_counts = 0
 
-    # TODO: get
-
     eps_angle = EPS_STAT + EPS_CLSIM_ANGLE_BINNING
     eps_length = EPS_STAT + EPS_CLSIM_LENGTH_BINNING
 
-    ## Initialize with _all_ DOMs: tuples of (string, depth)
-    #n_strings, n_doms = detector_geometry.shape[:2]
-    #no_hit_doms = [sd for sd in product(range(n_strings), range(n_doms))]
-    #print(no_hit_doms[:10])
-    #print(len(no_hit_doms))
-
-    total_expected_q = get_total_exp_charge(
-        hypo=hypo,
-        t_dom_indep_tables=t_dom_indep_tables
-    )
+    if tdi_table is not None:
+        total_expected_q = tdi_table.get_photon_expectation(pinfo_gen=pinfo_gen)
+    else:
+        total_expected_q = 0
 
     expected_q_accounted_for = 0
 
-    # Loop over pulses (aka hits)
-    for string, om, pulse_time, pulse_charge in izip(*event.pulses):
-        string_om = (string, om)
-        #try:
-        #    no_hit_doms.remove(string_om)
-        #except ValueError:
-        #    pass
-        x, y, z = detector_geometry[string_om]
+    # Loop over pulses (aka hits) to get likelihood of those hits coming from
+    # the hypo
+    for string, depth_idx, pulse_time, pulse_charge in izip(*event.pulses):
+        expected_charge = dom_tables.get_photon_expectation(
+            pinfo_gen=pinfo_gen, hit_time=pulse_time,
+            string=string, depth_idx=depth_idx
+        )
 
-        # String indices 0-78 (numbers 1-79) are ordinary IceCube strings
-        if 0 <= string < 79:
-            timing_jitter = IC_DOM_JITTER_NS
-            # Get the retro table corresponding to the hit DOM
-            retro_photon_survival_prob = ic_photon_info.survival_prob[om]
-            retro_photon_avg_theta = ic_photon_info.theta[om]
-            retro_photon_avg_deltaphi = ic_photon_info.deltaphi[om]
-            retro_photon_avg_len = ic_photon_info.length[om]
-        # String indices 79-85 (numbers 80-86) are DeepCore strings
-        elif 79 <= string < 86:
-            timing_jitter = DC_DOM_JITTER_NS
-            # Get the retro table corresponding to the hit DOM
-            retro_photon_survival_prob = dc_photon_info.survival_prob[om]
-            retro_photon_avg_theta = dc_photon_info.theta[om]
-            retro_photon_avg_deltaphi = dc_photon_info.deltaphi[om]
-            retro_photon_avg_len = dc_photon_info.length[om]
-        else:
-            raise ValueError('Unhandled string index %d (number %d)'
-                             % (string, string + 1))
+        expected_charge_excluding_noise = expected_charge
 
-        # TODO: store each LLH computed for jitter times to info, so we can see
-        # if this has any meaningful effect, if jitter times should be
-        # modified, or if more points should be sampled from
-        # [-timing_jitter to +timing_jitter].
+        if expected_charge < NOISE_CHARGE:
+            noise_counts += 1
+            # "Add" in noise (i.e.: expected charge must be at least as
+            # large as noise level)
+            expected_charge = NOISE_CHARGE
 
-        # TODO: Set jitter on DOM-by-DOM basis, not just DeepCore vs. IceCube
-        #       (if it is apprciably different for different DOMs)
-        # TODO: Jitter via e.g. smearing photons that go into retro tables
+        # Poisson log likelihood (take negative to interface w/ minimizers)
+        pulse_neg_llh = -poisson_llh(expected=expected_charge, observed=pulse_charge)
 
-        best_pulse_neg_llh = np.inf
-        best_nonoise_q = 0
-        best_jitter_dts = []
-
-        if NUM_JITTER_SAMPLES == 1:
-            jitter_dts = [0]
-        else:
-            jitter_dts = np.linspace(
-                start=-JITTER_SIGMA*timing_jitter,
-                stop=+JITTER_SIGMA*timing_jitter,
-                num=NUM_JITTER_SAMPLES
-            )
-
-        for jitter_dt in jitter_dts:
-            hit_dom_coord = TimeCart3DCoord(
-                t=pulse_time + jitter_dt, x=x, y=y, z=z
-            )
-
-            # Get the photon expectations of the hypothesis in coordinates
-            # relative to the hit DOM
-            try:
-                hypo.compute_matrices(hit_dom_coord=hit_dom_coord)
-            except (IndexError, ValueError):
-                pulse_neg_llh = -poisson_llh(expected=NOISE_CHARGE,
-                                             observed=pulse_charge)
-                if pulse_neg_llh < best_pulse_neg_llh:
-                    best_pulse_neg_llh = pulse_neg_llh
-                continue
-
-            expected_charge = 0
-            for bin_idx, hypo_photon_info in hypo.photon_info.iteritems():
-                if bin_idx.t < 0:
-                    continue
-
-                hypo_count = hypo_photon_info.count
-
-                # Get retro simulation table
-                retro_idx = (bin_idx.t, bin_idx.r, bin_idx.theta)
-                try:
-                    retro_survival_prob = (
-                        retro_photon_survival_prob[retro_idx]
-                    )
-                except IndexError:
-                    continue
-                hypo_cell_expected_charge = hypo_count * retro_survival_prob
-
-                if LLH_USE_AVGPHOT:
-                    #print('hypo_cell_expected_charge 0:',
-                    #      hypo_cell_expected_charge)
-                    hypo_length = hypo_photon_info.length
-                    retro_length = retro_photon_avg_len[retro_idx]
-                    #print('retro_length:', retro_length, 'hypo_length:',
-                    #      hypo_length)
-                    length_weight = (
-                        (1 - abs(hypo_length - retro_length) + eps_length)
-                        / (1 + eps_length)
-                    )
-                    hypo_cell_expected_charge *= length_weight
-
-                    ## These two agles need to be inverted because we're
-                    ## backpropagating but want to match to forward-propagating
-                    ## photons
-                    #hypo_theta = np.pi - hypo_photon_info.theta
-                    #hypo_phi = np.pi - hypo_photon_info.phi
-
-                    retro_theta = retro_photon_avg_theta[retro_idx]
-                    retro_phi = (
-                        bin_idx.phi + retro_photon_avg_deltaphi[retro_idx]
-                    )
-
-                    # alpha is smallest angle between retro avg photon angle
-                    # and hypo avg photon angle. Note that we invert the retro
-                    # direction vector to account for it being a _reverse_
-                    # simulation from DOM to cell, whereas hypo has photons
-                    # start from cell and go outwards.
-                    neg_sin_retro_theta = math.sin(retro_theta)
-                    retro_x = neg_sin_retro_theta * math.cos(retro_phi)
-                    retro_y = neg_sin_retro_theta * math.sin(retro_phi)
-                    retro_z = math.cos(retro_theta)
-                    cos_alpha = (retro_x*hypo.track_dir_x
-                                 + retro_y*hypo.track_dir_y
-                                 + retro_z*hypo.track_dir_z)
-
-                    #print('retro_x:', retro_x, 'retro_y:', retro_y,
-                    #      'retro_z:', retro_z)
-                    #print('hypo_x :', hypo.track_dir_x, 'hypo_y :',
-                    #      hypo.track_dir_y, 'hypo_z :', hypo.track_dir_z)
-                    #print('cos_alpha:', cos_alpha)
-
-                    angle_weight = (
-                        (0.5 + 0.5*cos_alpha + eps_angle + (1 - retro_length))
-                        / (1 + eps_angle + (1 - retro_length))
-                    )
-                    #print('length_weight:', length_weight)
-                    #print('angle_weight: ', angle_weight)
-                    hypo_cell_expected_charge *= angle_weight
-                    #print('hypo_cell_expected_charge 1:',
-                    #      hypo_cell_expected_charge)
-                else:
-                    angle_weight = 1
-
-                # Charge at the DOM weighted by matching avg. photon direction
-                # & length, multiplied by the probability of light getting from
-                # the DOM to the hypo cell (and therefore vice versa) from
-                # retro simulation
-                expected_charge += hypo_cell_expected_charge
-
-            expected_charge_excluding_noise = expected_charge
-
-            if expected_charge < NOISE_CHARGE:
-                noise_counts += 1
-                # "Add" in noise (i.e.: expected charge must be at least as
-                # large as noise level)
-                expected_charge = NOISE_CHARGE
-
-            # Poisson log likelihood (take negative to interface w/ minimizers)
-            pulse_neg_llh = -poisson_llh(expected=expected_charge,
-                                         observed=pulse_charge)
-            #print('pulse_neg_llh:', pulse_neg_llh)
-            if pulse_neg_llh < best_pulse_neg_llh:
-                #print('llh %f better than %f'
-                #      % (pulse_neg_llh, best_pulse_neg_llh))
-                best_nonoise_q = expected_charge_excluding_noise
-                best_pulse_neg_llh = pulse_neg_llh
-                best_jitter_dt = jitter_dt
-            #else:
-            #    print('llh %f worse than  %f'
-            #          % (pulse_neg_llh, best_pulse_neg_llh))
-
-        neg_llh += best_pulse_neg_llh
-        expected_q_accounted_for += best_nonoise_q
-        best_jitter_dts.append(best_jitter_dt)
+        neg_llh += pulse_neg_llh
+        expected_q_accounted_for += expected_charge
 
     # Penalize the likelihood (_add_ to neg_llh) by expected charge that
     # would be seen by DOMs other than those hit (by the physics even itself,
     # i.e. non-noise hits). This is the unaccounted for excess predicted by the
     # hypothesis.
     unaccounted_excess_expected_q = total_expected_q - expected_q_accounted_for
-    if unaccounted_excess_expected_q > 0:
-        neg_llh += unaccounted_excess_expected_q
-    else:
-        print('WARNING!!!! DOM tables account for %e expected charge, which'
-              ' exceeds total expected from TDI tables of %e'
-              % (expected_q_accounted_for, total_expected_q))
-        #raise ValueError()
+    if tdi_table is not None:
+        if unaccounted_excess_expected_q > 0:
+            print('neg_llh before correction    :', neg_llh)
+            print('unaccounted_excess_expected_q:', unaccounted_excess_expected_q)
+            neg_llh += unaccounted_excess_expected_q
+            print('neg_llh aftee correction     :', neg_llh)
+            print('')
+        else:
+            print('WARNING!!!! DOM tables account for %e expected charge, which'
+                  ' exceeds total expected from TDI tables of %e'
+                  % (expected_q_accounted_for, total_expected_q))
+            #raise ValueError()
 
     # Record details if user passed a list for storing them
     if detailed_info_list is not None:
@@ -390,7 +225,6 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
             noise_counts=noise_counts,
             total_expected_q=total_expected_q,
             expected_q_accounted_for=expected_q_accounted_for,
-            best_jitter_dts=best_jitter_dts
         )
         detailed_info_list.append(detailed_info)
 
@@ -398,20 +232,22 @@ def get_neg_llh(hypo, event, detector_geometry, ic_photon_info, dc_photon_info,
     return neg_llh
 
 
-def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
-         llh_func_kwargs=None):
+def scan(hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
+         neg_llh_func_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
 
     Parameters
     ----------
-    llh_func : callable
-        Function used to compute a likelihood. Must take ``hypo`` and ``event``
-        as first two arguments, where ``hypo`` is a HypoClass object and
-        ``event`` is the argument passed here. Function must return just one
-        value (the ``llh``)
+    hypo_obj
 
     event : Event
         Event for which to get likelihoods
+
+    neg_llh_func : callable
+        Function used to compute a likelihood. Must take ``pinfo_gen`` and
+        ``event`` as first two arguments, where ``pinfo_gen`` is (...) and
+        ``event`` is the argument passed here. Function must return just one
+        value (the ``llh``)
 
     dims : string or iterable thereof
         One of 't', 'x', 'y', 'z', 'azimuth', 'zenith', 'cascade_energy',
@@ -420,15 +256,13 @@ def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
     scan_values : iterable of floats, or iterable thereof
         Values to set for the dimension being scanned.
 
-    bin_spec
-
     nominal_params : None or HYPO_PARAMS_T namedtuple
         Nominal values for all param values. The value for the params being
         scanned are irrelevant, as this is replaced with each value from
         `scan_values`. Therefore this is optional if _all_ parameters are
         subject to the scan.
 
-    llh_func_kwargs : mapping or None
+    neg_llh_func_kwargs : mapping or None
         Keyword arguments to pass to `get_neg_llh` function
 
     Returns
@@ -437,8 +271,8 @@ def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
         Likelihoods corresponding to each value in product(*scan_values).
 
     """
-    if llh_func_kwargs is None:
-        llh_func_kwargs = {}
+    if neg_llh_func_kwargs is None:
+        neg_llh_func_kwargs = {}
 
     all_params = HYPO_PARAMS_T._fields
 
@@ -474,28 +308,24 @@ def scan(llh_func, event, dims, scan_values, bin_spec, nominal_params=None,
     for dim in dims:
         param_indices.append(all_params.index(dim))
 
-    all_llh = []
+    all_neg_llh = []
     for param_values in product(*scan_sequences):
         for pidx, pval in izip(param_indices, param_values):
             params[pidx] = pval
 
-        hypo = HypoClass(
-            params=params,
-            cascade_e_scale=CASCADE_E_SCALE,
-            track_e_scale=TRACK_E_SCALE,
-            **HYPOCLASS_KWARGS
-        )
-        hypo.set_binning(*bin_spec)
-        neg_llh = llh_func(hypo, event, **llh_func_kwargs)
-        all_llh.append(neg_llh)
+        hypo_params = HYPO_PARAMS_T(*params)
 
-    all_llh = np.array(all_llh, dtype=FTYPE)
-    all_llh.reshape(shape)
+        pinfo_gen = hypo_obj.get_pinfo_gen(hypo_params=hypo_params)
+        neg_llh = neg_llh_func(pinfo_gen, event, **neg_llh_func_kwargs)
+        all_neg_llh.append(neg_llh)
 
-    return all_llh
+    all_neg_llh = np.array(all_neg_llh, dtype=FTYPE)
+    all_neg_llh.reshape(shape)
+
+    return all_neg_llh
 
 
-def main(events_fpath, tables_dir, geom_file, start_index=None,
+def main(events_fpath, tables_dir, geom_file=None, start_index=None,
          stop_index=None):
     """Perform scans and minimization for events.
 
@@ -522,83 +352,42 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
     """
     # pylint: disable=no-member
 
-    events = Events(events_fpath)
-    print('%d events found' % len(events))
-
-    # Load tables
-
-    # Tables are not binned in phi, but we will do so for the hypo, therefore
-    # need to apply norm
-    norm = 1 / N_PHI_BINS
-
-    # Correct for DOM wavelength acceptance, given cherenkov spectrum (source
-    # photons); see tables/wavelegth.py
-    #norm *= 0.0544243061857
-
-    # Compensate for costheta bins (40) and wavelength accepet.
-    #norm = 0.0544243061857 * 40.
-
-    # Add in quantum efficiencies (?)
-    dom_eff_ic = 0.25
-    dom_eff_dc = 0.35
-
-    ic_photon_info, dc_photon_info = None, None
-
-    # Read in the actual tables
-    ref_bin_edges = None
-    for depth_idx in range(60):
-        # IceCube (non-DeepCore) DOM retro tables
-        fpath = join(
-            tables_dir, IC_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
-        )
-        if isfile(fpath):
-            ic_photon_info, bin_edges = extract_photon_info(
-                fpath=expand(fpath),
-                depth_idx=depth_idx,
-                scale=norm * dom_eff_ic,
-                photon_info=ic_photon_info
-            )
-            if ref_bin_edges is None:
-                ref_bin_edges = bin_edges
-            else:
-                for test, ref in zip(bin_edges, ref_bin_edges):
-                    assert np.array_equal(test, ref)
-        else:
-            print('No table for IC DOM depth index %i found at path "%s"'
-                  % (depth_idx, fpath))
-
-        # DeepCore DOM retro tables
-        fpath = join(
-            tables_dir, DC_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
-        )
-        if isfile(fpath):
-            dc_photon_info, bin_edges = extract_photon_info(
-                fpath=expand(fpath),
-                depth_idx=depth_idx,
-                scale=norm * dom_eff_dc,
-                photon_info=dc_photon_info
-            )
-            if ref_bin_edges is None:
-                ref_bin_edges = bin_edges
-            else:
-                for test, ref in zip(bin_edges, ref_bin_edges):
-                    assert np.array_equal(test, ref)
-        else:
-            print('No table for IC DOM depth index %i found at path "%s"'
-                  % (depth_idx, fpath))
-
-    # Take bin edges from those stored in retro tables but also add phi bins
-    # manually since no phi dependence in retro tables
-    bin_edges = TimeSphCoord(
-        t=bin_edges.t,
-        r=bin_edges.r,
-        theta=bin_edges.theta,
-        phi=np.linspace(0, 2*np.pi, N_PHI_BINS + 1)
+    print('Instantiate a hypoo class...')
+    discrete_hypo = DiscreteHypo(
+        hypo_kernels=[const_energy_loss_muon, point_cascade]
     )
-    bin_spec = bin_edges_to_binspec(bin_edges)
+
+    # Load events
+    print('Loading events...')
+    events = Events(events_fpath)
+    print('  %d events found' % len(events))
 
     # Load detector geometry array
-    detector_geometry = np.load(geom_file)
+    print('Loading detector geometry from "%s"...' % expand(geom_file))
+    detector_geometry = np.load(expand(geom_file))
+
+    # Load tables
+    print('Loading DOM tables...')
+    dom_tables = DOMTimePolarTables(
+            tables_dir=tables_dir,
+            hash_val=None,
+            geom=detector_geometry,
+            use_directionality=False
+    )
+    dom_tables.load_tables()
+
+    tdi_table = None
+    #print('Loading TDI table...')
+    #tdi_table = TDICartTables(
+    #        tables_dir=tables_dir,
+    #        use_directionality=False,
+    #        #proto_tile_hash='0e28683a74ebea92', # 14^3 tiles, 1 m gridsize, +/- 700 m in x and y, -800 to +600 in z
+    #        #proto_tile_hash='8c4770c8371a4025', # single tile, 10 m gridsize +/- 700 m in x and y, -800 to +600 in z
+    #        proto_tile_hash='fd29bc306d29bc83', # single tile, QE used; 10 m gridsize +/- 700 m in x and y, -800 to +600 in z
+    #        scale=1,
+    #)
+
+    neg_llh_func_kwargs = dict(dom_tables=dom_tables, tdi_table=tdi_table)
 
     # Iterate through events
     for idx, event in enumerate(events[start_index:stop_index]):
@@ -610,21 +399,11 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
         print('    track   :', event.track)
         print('    cascade :', event.cascade)
 
-        llh_func_kwargs = dict(detector_geometry=detector_geometry,
-                               ic_photon_info=ic_photon_info,
-                               dc_photon_info=dc_photon_info)
-
         truth_params = event_to_hypo_params(event)
-        truth_hypo = HypoClass(
-            params=truth_params,
-            cascade_e_scale=CASCADE_E_SCALE,
-            track_e_scale=TRACK_E_SCALE,
-            **HYPOCLASS_KWARGS
-        )
-        truth_hypo.set_binning(*bin_spec)
-        llh_truth = get_neg_llh(hypo=truth_hypo, event=event,
-                                **llh_func_kwargs)
-        print('llh at truth = %.2f' % llh_truth)
+        pinfo_gen_truth = discrete_hypo.get_pinfo_gen(truth_params)
+        neg_llh_truth = get_neg_llh(pinfo_gen=pinfo_gen_truth, event=event,
+                                    **neg_llh_func_kwargs)
+        print('llh at truth = %.2f' % neg_llh_truth)
 
         if MIN_DIMS:
             print('Will minimize following dimension(s): %s' % MIN_DIMS)
@@ -657,7 +436,7 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                 pass
 
             xopt1, fopt1 = pso(get_neg_llh_partial, lower_bounds, upper_bounds,
-                               kwargs=llh_func_kwargs,
+                               kwargs=neg_llh_func_kwargs,
                                minstep=1e-5,
                                minfunc=1e-1,
                                debug=True)
@@ -665,8 +444,12 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
         if SCAN_DIM_SETS:
             print('Will scan following sets of dimensions: %s'
                   % str(SCAN_DIM_SETS))
+            time_to_scan = 0
+            num_likelihoods = 0
+            t0 = time.time()
             for dims in SCAN_DIM_SETS:
                 print('Scanning dimension(s): %s...' % str(dims))
+
                 if isinstance(dims, basestring):
                     dims = [dims]
 
@@ -684,12 +467,20 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                         np.linspace(lower, upper, NUM_SCAN_POINTS)
                     )
 
+                ts0 = time.time()
                 neg_llh = scan(
-                    llh_func=get_neg_llh, event=event, dims=dims,
-                    scan_values=scan_values, bin_spec=bin_spec,
+                    hypo_obj=discrete_hypo,
+                    event=event,
+                    neg_llh_func=get_neg_llh,
+                    dims=dims,
+                    scan_values=scan_values,
                     nominal_params=nominal_params,
-                    llh_func_kwargs=llh_func_kwargs
+                    neg_llh_func_kwargs=neg_llh_func_kwargs
                 )
+                ts1 = time.time()
+                time_to_scan += ts1 - ts0
+
+                num_likelihoods += len(neg_llh)
 
                 datadump = OrderedDict([
                     ('filename', event.filename),
@@ -707,7 +498,6 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                     ('NUM_JITTER_SAMPLES', NUM_JITTER_SAMPLES),
                     ('CASCADE_E_SCALE', CASCADE_E_SCALE),
                     ('TRACK_E_SCALE', TRACK_E_SCALE),
-                    ('N_PHI_BINS', N_PHI_BINS),
                     ('EPS_ANGLE', EPS_STAT + EPS_CLSIM_ANGLE_BINNING),
                     ('EPS_LENGTH', EPS_STAT + EPS_CLSIM_LENGTH_BINNING),
                     ('NOISE_CHARGE', NOISE_CHARGE),
@@ -723,6 +513,9 @@ def main(events_fpath, tables_dir, geom_file, start_index=None,
                 print('saved scan to "%s"' % fpath)
 
             plot_1d_scan(dir=RESULTS_DIR, event=event.event, uid=event.uid)
+            print('')
+            print('Time to scan (%d likelihoods): %s' % (num_likelihoods, timediffstamp(time_to_scan)))
+            print('Time to scan, dump, and plot:', timediffstamp(time.time() - t0))
             print('')
 
 
@@ -744,7 +537,7 @@ def parse_args(description=__doc__):
     )
     parser.add_argument(
         '--tables-dir', metavar='DIR', type=str,
-        default='/data/icecube/retro_tables/full1000',
+        default='/fastio/icecube/retro_tables/full1000',
         help='''Directory containing retro tables''',
     )
     parser.add_argument(

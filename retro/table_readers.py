@@ -4,7 +4,7 @@
 """
 Classes for reading and getting info from Retro tables.
 """
-
+# TODO: should the QE numbers be simple multipliers?
 
 from __future__ import absolute_import, division, print_function
 
@@ -23,10 +23,11 @@ from pisa.utils.timing import timediffstamp
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
-                   SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT, POL_TABLE_RMAX,
-                   POL_TABLE_RPWR, POL_TABLE_DRPWR, POL_TABLE_DCOSTHETA,
-                   POL_TABLE_NTBINS, POL_TABLE_NRBINS, POL_TABLE_NTHETABINS)
+from retro import (IC_QUANT_EFF, DC_QUANT_EFF, DC_TABLE_FNAME_PROTO,
+                   IC_TABLE_FNAME_PROTO, SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT,
+                   POL_TABLE_RMAX, POL_TABLE_RPWR, POL_TABLE_DRPWR,
+                   POL_TABLE_DCOSTHETA, POL_TABLE_NTBINS, POL_TABLE_NRBINS,
+                   POL_TABLE_NTHETABINS)
 from retro import RetroPhotonInfo
 from retro import expand, extract_photon_info
 from retro.test_tindep import (TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
@@ -39,13 +40,15 @@ __all__ = ['pexp_t_r_theta', 'pexp_xyz', 'DOMTimePolarTables', 'TDICartTables']
 
 
 @numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta, avg_photon_length, use_directionality):
+def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
+                   avg_photon_theta, avg_photon_length, use_directionality):
     """Compute total expected photons in a DOM based on the (t,r,theta)-binned
     Retro DOM tables applied to a the generated photon info `pinfo_gen`.
 
     Parameters
     ----------
-    pinfo_gen : shape (N, 8) numpy ndarray, dtype float32
+    pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
+    hit_time : float
     dom_coord : shape (3,) numpy ndarray, dtype float64
     survival_prob
     avg_photon_theta
@@ -61,10 +64,10 @@ def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta, avg_ph
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :]
 
-        # A photon that starts in the past (before the DOM was hit) will show
-        # up in the Retro DOM tables as a positive time relative to the DOM.
-        # Therefore, invert the sign of the t coordinate.
-        dt = -t
+        # A photon that starts immediately in the past (before the DOM was hit)
+        # will show up in the Retro DOM tables in the _last_ bin.
+        # Therefore, invert the sign of the t coordinate and index -1, -2, ....
+        dt = hit_time - t
         dx = x - dom_coord[0]
         dy = y - dom_coord[1]
         dz = z - dom_coord[2]
@@ -79,14 +82,20 @@ def pexp_t_r_theta(pinfo_gen, dom_coord, survival_prob, avg_photon_theta, avg_ph
         #    continue
 
         tbin_idx = int(np.floor(dt / POL_TABLE_DT))
-        if tbin_idx < 0 or tbin_idx >= POL_TABLE_NTBINS:
+        #if tbin_idx < 0 or tbin_idx >= -POL_TABLE_DT:
+        if tbin_idx < -POL_TABLE_NTBINS or tbin_idx >= 0:
+            #print('t')
             continue
         rbin_idx = int(np.floor(r**(1/POL_TABLE_RPWR) / POL_TABLE_DRPWR))
         if rbin_idx < 0 or rbin_idx >= POL_TABLE_NRBINS:
+            #print('r')
             continue
         thetabin_idx = int(dz / (r * POL_TABLE_DCOSTHETA))
         if thetabin_idx < 0 or thetabin_idx >= POL_TABLE_NTHETABINS:
+            #print('theta')
             continue
+        #print(tbin_idx, rbin_idx, thetabin_idx)
+        #raise Exception()
         surviving_count = p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
 
         # TODO: Include simple ice photon prop asymmetry here? Might need to
@@ -145,23 +154,20 @@ class DOMTimePolarTables(object):
         Whether to use photon directionality information from the hypothesis
         and table to modify the expected surviving photon counts.
 
-    scale : float
-
     """
-    def __init__(self, tables_dir, hash_val, geom, use_directionality,
-                 scale=1):
+    def __init__(self, tables_dir, hash_val, geom, use_directionality):
         # Translation and validation of args
         tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
         assert len(geom.shape) == 3
         assert isinstance(use_directionality, bool)
-        assert 0 < scale < np.inf
+        #assert 0 < scale < np.inf
 
         self.tables_dir = tables_dir
         self.hash_val = hash_val
         self.geom = geom
         self.use_directionality = use_directionality
-        self.scale = scale
+        #self.scale = scale
         self.tables = {'ic': {}, 'dc': {}}
 
     def load_table(self, string, depth_idx, force_reload=False):
@@ -180,9 +186,11 @@ class DOMTimePolarTables(object):
         if string_idx < 79:
             subdet = 'ic'
             fname_proto = IC_TABLE_FNAME_PROTO
+            quantum_efficiency = IC_QUANT_EFF
         else:
             subdet = 'dc'
             fname_proto = DC_TABLE_FNAME_PROTO
+            quantum_efficiency = DC_QUANT_EFF
 
         if not force_reload and depth_idx in self.tables[subdet]:
             return
@@ -192,7 +200,7 @@ class DOMTimePolarTables(object):
         photon_info, _ = extract_photon_info(
             fpath=fpath,
             depth_idx=depth_idx,
-            scale=self.scale
+            scale=quantum_efficiency #* scale
         )
 
         length = photon_info.length[depth_idx]
@@ -212,13 +220,13 @@ class DOMTimePolarTables(object):
                 self.load_table(string=string, depth_idx=depth_idx,
                                 force_reload=False)
 
-    def get_photon_expectation(self, pinfo_gen, string, depth_idx,
+    def get_photon_expectation(self, pinfo_gen, hit_time, string, depth_idx,
                                use_directionality=None):
         """Get the expectation for photon survival.
 
         Parameters
         ----------
-        pinfo_gen : shape (N, 8) numpy ndarray, dtype float32
+        pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
 
         use_directionality : None or bool
             Whether to use photon directionality informatino in hypo / table to
@@ -247,6 +255,7 @@ class DOMTimePolarTables(object):
         avg_photon_theta = table.theta
         avg_photon_length = table.length
         return pexp_t_r_theta(pinfo_gen=pinfo_gen,
+                              hit_time=hit_time,
                               dom_coord=dom_coord,
                               survival_prob=survival_prob,
                               avg_photon_theta=avg_photon_theta,
@@ -386,6 +395,8 @@ class TDICartTables(object):
                 meta[key] = float(meta[key])
             elif key == 'n_phibins':
                 meta[key] = int(meta[key])
+            elif key.endswith('scale'):
+                meta[key] = float(meta[key])
             elif key.endswith('hash'):
                 if value.lower() == 'none':
                     meta[key] = None
@@ -592,7 +603,7 @@ class TDICartTables(object):
 
         Parameters
         ----------
-        pinfo_gen : shape (N, 8) numpy ndarray, dtype float32
+        pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
 
         Returns
         -------

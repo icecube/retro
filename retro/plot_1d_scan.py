@@ -72,6 +72,7 @@ def plot_1d_scan(dir, event, uid):
             units = 'deg'
             scan_values *= 180 / np.pi
             err_at_max_llh *= 180/np.pi
+            err_at_max_llh = ((err_at_max_llh + 180) % 360) - 180
             truth *= 180/np.pi
         elif param in ['track_energy', 'cascade_energ']:
             units = 'GeV'
@@ -133,8 +134,13 @@ def plot_1d_scan(dir, event, uid):
 
     plt.tight_layout(rect=(0, 0, 1, 0.92))
     fbasename = 'scan_results_event_%d_uid_%d_1d' % (event, uid)
-    fig.savefig(join(dir, fbasename + '.png'), dpi=300)
-    fig.savefig(join(dir, fbasename + '.pdf'))
+    fbasepath = join(dir, fbasename)
+    fpath = fbasepath + '.png'
+    fig.savefig(fpath, dpi=120)
+    print('saved plot to "%s"' % fpath)
+    #fpath = fbasepath + '.pdf'
+    #fig.savefig(fpath)
+    #print('saved plot to "%s"' % fpath)
     #plt.draw()
     #plt.show()
 

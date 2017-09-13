@@ -36,6 +36,7 @@ __all__ = [
     'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'POL_TABLE_DCOSTHETA',
     'POL_TABLE_DRPWR', 'POL_TABLE_DT', 'POL_TABLE_RPWR', 'POL_TABLE_RMAX',
     'POL_TABLE_NTBINS', 'POL_TABLE_NRBINS', 'POL_TABLE_NTHETABINS',
+    'IC_QUANT_EFF', 'DC_QUANT_EFF',
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
@@ -197,10 +198,10 @@ SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 TRACK_M_PER_GEV = FTYPE(15 / 3.3)
 """Track length per energy, in units of m/GeV"""
 
-TRACK_PHOTONS_PER_M = FTYPE(2451.4544553 * 10)
+TRACK_PHOTONS_PER_M = FTYPE(2451.4544553)
 """Track photons per length, in units of 1/m (see ``nphotons.py``)"""
 
-CASCADE_PHOTONS_PER_GEV = FTYPE(12805.3383311 * 10 * 0.6)
+CASCADE_PHOTONS_PER_GEV = FTYPE(12805.3383311)
 """Cascade photons per energy, in units of 1/GeV (see ``nphotons.py``)"""
 
 # TODO: Is jitter same (or close enough to the same) for all DOMs? Is it
@@ -224,6 +225,9 @@ POL_TABLE_DCOSTHETA = -0.05
 POL_TABLE_NTBINS = 300
 POL_TABLE_NRBINS = 200
 POL_TABLE_NTHETABINS = 40
+
+IC_QUANT_EFF = 0.25
+DC_QUANT_EFF = 0.35
 
 
 # -- Functions -- #
@@ -586,7 +590,8 @@ def extract_photon_info(fpath, depth_idx, scale=1, photon_info=None):
         if scale == 1:
             photon_info.survival_prob[depth_idx] = data
         else:
-            photon_info.survival_prob[depth_idx] = 1 - (1 - data)**scale
+            #photon_info.survival_prob[depth_idx] = 1 - (1 - data)**scale
+            photon_info.survival_prob[depth_idx] = data*scale
 
         data = table[1].data
         if data.dtype.byteorder == '>':
