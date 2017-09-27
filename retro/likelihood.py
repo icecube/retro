@@ -16,9 +16,8 @@ from collections import OrderedDict, Sequence
 from copy import deepcopy
 import cPickle as pickle
 from itertools import izip, product
-import math
 import os
-from os.path import abspath, dirname, isdir, isfile, join
+from os.path import abspath, dirname, isdir, join
 import time
 
 import numba # pylint: disable=unused-import
@@ -28,21 +27,19 @@ from pisa.utils.timing import timediffstamp
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS
-from retro import (FTYPE, HYPO_PARAMS_T, TimeSphCoord, HypoParams10D,
-                   TimeCart3DCoord)
-from retro import (IC_TABLE_FNAME_PROTO, DC_TABLE_FNAME_PROTO,
-                   DETECTOR_GEOM_FILE)
-from retro import (bin_edges_to_binspec, event_to_hypo_params, expand,
-                   extract_photon_info, poisson_llh,
+from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS # pylint: disable=unused-import
+from retro import FTYPE, HYPO_PARAMS_T, HypoParams10D
+from retro import DETECTOR_GEOM_FILE
+from retro import (event_to_hypo_params, expand, poisson_llh,
                    get_primary_interaction_str)
 from retro.events import Events
-from retro.discrete_hypo import (DiscreteHypo, const_energy_loss_muon,
-                                 point_cascade)
+from retro.discrete_hypo import DiscreteHypo
+from retro.discrete_muon_models import const_energy_loss_muon
+from retro.discrete_cascade_models import point_cascade
 from retro.analytic_hypo import AnalyticHypo # pylint: disable=unused-import
 from retro.plot_1d_scan import plot_1d_scan
 from retro.segmented_hypo import SegmentedHypo # pylint: disable=unused-import
-from retro.table_readers import DOMTimePolarTables, TDICartTables
+from retro.table_readers import DOMTimePolarTables, TDICartTables # pylint: disable=unused-import
 
 
 DFLT_EVENTS_FPATH = (
@@ -369,22 +366,22 @@ def main(events_fpath, tables_dir, geom_file=None, start_index=None,
     # Load tables
     print('Loading DOM tables...')
     dom_tables = DOMTimePolarTables(
-            tables_dir=tables_dir,
-            hash_val=None,
-            geom=detector_geometry,
-            use_directionality=False
+        tables_dir=tables_dir,
+        hash_val=None,
+        geom=detector_geometry,
+        use_directionality=False
     )
     dom_tables.load_tables()
 
     tdi_table = None
     #print('Loading TDI table...')
     #tdi_table = TDICartTables(
-    #        tables_dir=tables_dir,
-    #        use_directionality=False,
-    #        #proto_tile_hash='0e28683a74ebea92', # 14^3 tiles, 1 m gridsize, +/- 700 m in x and y, -800 to +600 in z
-    #        #proto_tile_hash='8c4770c8371a4025', # single tile, 10 m gridsize +/- 700 m in x and y, -800 to +600 in z
-    #        proto_tile_hash='fd29bc306d29bc83', # single tile, QE used; 10 m gridsize +/- 700 m in x and y, -800 to +600 in z
-    #        scale=1,
+    #    tables_dir=tables_dir,
+    #    use_directionality=False,
+    #    #proto_tile_hash='0e28683a74ebea92', # 14^3 tiles, 1 m gridsize, +/- 700 m in x and y, -800 to +600 in z
+    #    #proto_tile_hash='8c4770c8371a4025', # single tile, 10 m gridsize +/- 700 m in x and y, -800 to +600 in z
+    #    proto_tile_hash='fd29bc306d29bc83', # single tile, QE used; 10 m gridsize +/- 700 m in x and y, -800 to +600 in z
+    #    scale=1,
     #)
 
     neg_llh_func_kwargs = dict(dom_tables=dom_tables, tdi_table=tdi_table)
