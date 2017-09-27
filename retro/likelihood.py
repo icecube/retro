@@ -34,8 +34,8 @@ from retro import (event_to_hypo_params, expand, poisson_llh,
                    get_primary_interaction_str)
 from retro.events import Events
 from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_models import const_energy_loss_muon
-from retro.discrete_cascade_models import point_cascade
+from retro.discrete_muon_kernels import const_energy_loss_muon # pylint: disable=unused-import
+from retro.discrete_cascade_kernels import point_cascade # pylint: disable=unused-import
 from retro.analytic_hypo import AnalyticHypo # pylint: disable=unused-import
 from retro.plot_1d_scan import plot_1d_scan
 from retro.segmented_hypo import SegmentedHypo # pylint: disable=unused-import
@@ -180,8 +180,10 @@ def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None, detailed_info_list
     # the hypo
     for string, depth_idx, pulse_time, pulse_charge in izip(*event.pulses):
         expected_charge = dom_tables.get_photon_expectation(
-            pinfo_gen=pinfo_gen, hit_time=pulse_time,
-            string=string, depth_idx=depth_idx
+            pinfo_gen=pinfo_gen,
+            hit_time=pulse_time,
+            string=string,
+            depth_idx=depth_idx
         )
 
         expected_charge_excluding_noise = expected_charge
@@ -199,8 +201,8 @@ def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None, detailed_info_list
         expected_q_accounted_for += expected_charge
 
     # Penalize the likelihood (_add_ to neg_llh) by expected charge that
-    # would be seen by DOMs other than those hit (by the physics even itself,
-    # i.e. non-noise hits). This is the unaccounted for excess predicted by the
+    # would be seen by DOMs other than those hit (by the physics event itself,
+    # i.e. non-noise hits). This is the unaccounted-for excess predicted by the
     # hypothesis.
     unaccounted_excess_expected_q = total_expected_q - expected_q_accounted_for
     if tdi_table is not None:
@@ -208,7 +210,7 @@ def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None, detailed_info_list
             print('neg_llh before correction    :', neg_llh)
             print('unaccounted_excess_expected_q:', unaccounted_excess_expected_q)
             neg_llh += unaccounted_excess_expected_q
-            print('neg_llh aftee correction     :', neg_llh)
+            print('neg_llh after correction     :', neg_llh)
             print('')
         else:
             print('WARNING!!!! DOM tables account for %e expected charge, which'

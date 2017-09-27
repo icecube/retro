@@ -1,3 +1,9 @@
+"""
+Fast `shift_and_bin` function: Shift (r, theta) retro tables (i.e., (t, r,
+theta) tables with time marginalized out) to each DOM location and aggregate
+their quantities (with appropriate weighting) in (x, y, z) retro tables.
+"""
+
 cimport cython
 
 from libc.stdlib cimport free, malloc
@@ -36,7 +42,7 @@ def shift_and_bin(list ind_arrays,
                   int oversample,
                   anisotropy):
     r"""Shift (r, theta) retro tables (i.e., (t, r, theta) tables with time
-    marginalized out) to each DOM location and aggregate its quantities (with
+    marginalized out) to each DOM location and aggregate their quantities (with
     appropriate weighting) in (x, y, z) retro tables.
 
     Note that the results are aggregated in the input arrays (which are assumed

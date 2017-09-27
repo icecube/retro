@@ -2,7 +2,6 @@ import numpy as np
 import math
 from sparse import sparse
 from numba import jit, int32, float32
-from power_axis import PowerAxis
 
 @jit((float32, float32, float32, float32, float32, float32, float32, float32, float32), nopython=True, nogil=True, fastmath=True)
 def numba_bin_indices(t, x, y, z, radius, t_scaling_factor, r_scaling_factor, theta_scaling_factor, phi_scaling_factor):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Tabulate the retro lught flux
+Tabulate the retro light flux
 """
 
 from optparse import OptionParser

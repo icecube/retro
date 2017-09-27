@@ -1,7 +1,7 @@
 # pylint: disable=wrong-import-position
 
 """
-Discrete-time models for muons generating photons, to be used as hypo_kernels
+Discrete-time kernels for muons generating photons, to be used as hypo_kernels
 in discrete_hypo/DiscreteHypo class.
 """
 

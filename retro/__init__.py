@@ -351,7 +351,7 @@ def hypo_to_track_params(hypo_params):
     )
     return track_params
 
-
+# TODO: add `endpoint`, `retstep`, and `dtype` kwargs
 def powerspace(start, stop, num, power):
     """Create bin edges evenly spaced w.r.t. ``x**power``.
 
@@ -379,9 +379,9 @@ def powerspace(start, stop, num, power):
 
     """
     inv_power = 1 / power
-    liner_edges = np.linspace(np.power(start, inv_power),
-                              np.power(stop, inv_power),
-                              num)
+    liner_edges = np.linspace(start=np.power(start, inv_power),
+                              stop=np.power(stop, inv_power),
+                              num=num)
     bin_edges = np.power(liner_edges, power)
     return bin_edges
 

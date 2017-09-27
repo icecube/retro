@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+
+"""
+Make plots from the 3-d retro tables. The output will be 2-d maps plus the time
+dimension as the video time.
+"""
+
+
 import pyfits
 import numpy as np
 import matplotlib as mpl
@@ -8,12 +16,6 @@ import sys
 
 import matplotlib.animation as animation
 
-
-'''
-make plots from the 3-d retro tables
-The output will be 2-d maps plus the time dimension as the video time
-
-'''
 
 Writer = animation.writers['ffmpeg']
 writer = Writer(fps=15, bitrate=20000)

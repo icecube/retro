@@ -2,7 +2,7 @@
 # pylint: disable=wrong-import-position, no-member
 
 """
-3D visualization of a time- and DOM-independent table
+2D and 3D visualizations of a time- and DOM-independent (TDI) table
 """
 
 
