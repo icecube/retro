@@ -8,3 +8,12 @@
 *.i3.gz
 *.csv
 *.out
+.ipynb_checkpoints
+__pycache__
+*.bak
+build
+*.so
+*.html
+*old
+*new
+*.c
