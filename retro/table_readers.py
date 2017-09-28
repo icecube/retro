@@ -66,7 +66,8 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
         # A photon that starts immediately in the past (before the DOM was hit)
         # will show up in the Retro DOM tables in the _last_ bin.
-        # Therefore, invert the sign of the t coordinate and index -1, -2, ....
+        # Therefore, invert the sign of the t coordinate and index sequentially
+        # via e.g. -1, -2, ....
         dt = hit_time - t
         dx = x - dom_coord[0]
         dy = y - dom_coord[1]

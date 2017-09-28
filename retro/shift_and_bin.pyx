@@ -49,12 +49,13 @@ def shift_and_bin(list ind_arrays,
     to be appropriately instantiated), so there are no return values.
 
     The convention used is that DOMs are indexed by `i`, polar bins are indexed
-    by `j` (flattened from 2D to 1D), and Cartesian bins are indexed by `k`
-    (flattened from 3D to 1D). There are a total of `I` DOMs and each is
-    assumed to have the same number of polar bins `J = J_r \times J_\theta`
-    (where `J_r` and `J_\theta` are the numbers of bins in the radial and
-    azimuthal directions, respectively). Each polar bin `j` maps to `K_j`
-    Cartesian bins (n.b. this number can be different for each polar bin).
+    by `j` (flattened from 2D to 1D, so there's a single index), and Cartesian
+    bins are indexed by `k` (flattened from 3D to 1D; also a single index).
+    There are a total of `I` DOMs and each is assumed to have the same number
+    of polar bins `J = J_r \times J_\theta` (where `J_r` and `J_\theta` are the
+    numbers of bins in the radial and azimuthal directions, respectively). Each
+    polar bin `j` maps to `K_j` Cartesian bins (n.b. this number can be
+    different for each polar bin).
 
     There are a total of `nx`, `ny`, and `nz` Cartesian bins in x-, y-, and
     z-directions, respectively.
