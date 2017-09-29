@@ -30,8 +30,9 @@ from retro import (IC_QUANT_EFF, DC_QUANT_EFF, DC_TABLE_FNAME_PROTO,
                    POL_TABLE_NTHETABINS)
 from retro import RetroPhotonInfo
 from retro import expand, extract_photon_info
-from retro.test_tindep import (TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
-                               get_anisotropy_str)
+from retro.generate_time_and_dom_indep_tables import (TDI_TABLE_FNAME_PROTO,
+                                                      TDI_TABLE_FNAME_RE,
+                                                      get_anisotropy_str)
 
 from pisa.utils.format import hrlist2list
 
@@ -329,7 +330,7 @@ class TDICartTables(object):
         proto_table_fpath = proto_table_fpath[0]
         proto_meta = self.get_table_metadata(proto_table_fpath)
         if not proto_meta:
-            raise ValueError('Could not figure out metadata from\n' + self.proto_table_fpath)
+            raise ValueError('Could not figure out metadata from\n' + proto_table_fpath)
         self.proto_meta = proto_meta
 
         # Some "universal" metadata can be gotten from the proto table
