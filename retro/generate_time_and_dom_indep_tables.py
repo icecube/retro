@@ -613,9 +613,9 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         else:
             raise ValueError(str(subdet))
 
-        for rel_ix, depth_idx in enumerate(depth_indices):
+        for rel_idx, depth_idx in enumerate(depth_indices):
             print('    Subdetector: %s, depth_idx: %d' % (subdet, depth_idx))
-            dom_coords = subdet_dom_coords[:, rel_ix, :]
+            dom_coords = subdet_dom_coords[:, rel_idx, :]
 
             t0 = time.time()
             table_fname = (
@@ -633,7 +633,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                 depth_idx=depth_idx, scale=qe_scale
             )
             t1 = time.time()
-            print('    Time to load DOM retro table:', timediffstamp(t1 - t0))
+            print('    Time to load Retro DOM table:', timediffstamp(t1 - t0))
 
             sp = photon_info.survival_prob[depth_idx].astype(np.float64)
             plength = photon_info.length[depth_idx].astype(np.float64)
@@ -658,7 +658,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             t_indep_prho[mask] = (prho[times] * sp[times]).sum(axis=0)[mask] * scale
 
             t2 = time.time()
-            print("    Time to reduce DOM table's time dimension:",
+            print("    Time to reduce Retro DOM table's time dimension:",
                   timediffstamp(t2 - t1))
 
             shift_and_bin(
