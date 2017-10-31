@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
 """
-Make plots from the 3-d retro tables. The output will be 2-d maps plus the time
-dimension as the video time.
+Make plots from the (t,r,theta)-binnned Retro tables. The output are 2D maps
+and the time dimension is represented as frames in the video.
 """
+
+
+# TODO: use class from table_readers.py instead of copy-pasted code here
 
 
 import pyfits

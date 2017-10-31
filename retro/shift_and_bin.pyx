@@ -116,21 +116,24 @@ def shift_and_bin(list ind_arrays,
     anisotropy : None or tuple
         Anisotropy parameter(s). Not yet implemented.
 
+
     Notes
     -----
-    For DOMs labeled `i`, each of which is characterized in polar bins `j`, we
-    wish to find the "aggregated" survival probability `sp` and photon average
-    behavior (`px`, `py`, and `pz`) in the Cartesian bins `k`.
+    For a DOM labeled `i`, characterized with polar binning--one bin if which
+    is labeled `j`, we wish to find the "aggregated" survival probability `sp`
+    and photon average behavior (`px`, `py`, and `pz`) in a Cartesian bin
+    labeled `k`.
 
-    Weight survival probability by volume of overlap
+    Weight survival probability `sp_{ij}` by volume of overlap `v_{ijk}`
         spv_{ijk} = sp_{ij} * v_{ijk}
 
-    Weight average photon by volume of overlap times survival probability
+    Weight average photon vector components by volume of overlap times survival
+    probability
         px_spv_{ijk} = px_{ij} * spv_{ijk}
         py_spv_{ijk} = py_{ij} * spv_{ijk}
         pz_spv_{ijk} = pz_{ij} * spv_{ijk}
 
-    Total weighted survival probability for DOM `i`, Cartesian bin `k`
+    Total weighted survival probability for DOM `i`, Cartesian bin `k` is
         spv_{ik} = \sum_j spv_{ijk}
 
     Normalization factor used for weighted survival probability contribution of
@@ -253,7 +256,9 @@ def shift_and_bin(list ind_arrays,
             # Quick-and-dirty check to see if we can circumvent this DOM
             # altogether if the polar binning falls outside the binned volume
             # (This is not precise: won't exclude DOMs that do overlap, but
-            # might include DOM that have no overlap)
+            # this _might_ include DOMs that have no overlap--in which case the
+            # result will not be wrong, it'll just take more time to compute
+            # the fact that there's no overlap.)
             if dom_x + r_max <= x_min or dom_x - r_max >= x_max:
                 continue
             if dom_y + r_max <= y_min or dom_y - r_max >= y_max:

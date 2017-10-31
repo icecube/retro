@@ -1,4 +1,4 @@
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, too-many-instance-attributes, too-many-locals
 # -*- coding: utf-8 -*-
 
 """
@@ -10,7 +10,6 @@ from __future__ import absolute_import, division, print_function
 
 from copy import deepcopy
 from glob import glob
-import math
 import os
 from os.path import abspath, basename, dirname, isdir, join
 import time
@@ -19,28 +18,140 @@ import numba
 import numpy as np
 import pyfits
 
+from pisa.utils.format import hrlist2list
 from pisa.utils.timing import timediffstamp
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (IC_QUANT_EFF, DC_QUANT_EFF, DC_TABLE_FNAME_PROTO,
-                   IC_TABLE_FNAME_PROTO, SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT,
+from retro import (DFLT_NUMBA_JIT_KWARGS, IC_QUANT_EFF, DC_QUANT_EFF,
+                   DC_RAW_TABLE_FNAME_PROTO, IC_RAW_TABLE_FNAME_PROTO,
+                   DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
+                   TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
+                   SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT,
                    POL_TABLE_RMAX, POL_TABLE_RPWR, POL_TABLE_DRPWR,
                    POL_TABLE_DCOSTHETA, POL_TABLE_NTBINS, POL_TABLE_NRBINS,
                    POL_TABLE_NTHETABINS)
-from retro import RetroPhotonInfo
-from retro import expand, extract_photon_info
-from retro.generate_time_and_dom_indep_tables import (TDI_TABLE_FNAME_PROTO,
-                                                      TDI_TABLE_FNAME_RE,
-                                                      get_anisotropy_str)
-
-from pisa.utils.format import hrlist2list
+from retro import RetroPhotonInfo, TimeSphCoord
+from retro import expand, generate_anisotropy_str
+from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
-__all__ = ['pexp_t_r_theta', 'pexp_xyz', 'DOMTimePolarTables', 'TDICartTables']
+__all__ = ['load_t_r_theta_table', 'pexp_t_r_theta', 'pexp_xyz',
+           'DOMTimePolarTables', 'TDICartTable']
 
 
-@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
+def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
+                         photon_info=None):
+    """Extract info from a file containing a (t, r, theta)-binned Retro table.
+
+    Parameters
+    ----------
+    fpath : string
+        Path to FITS file corresponding to the passed ``depth_idx``.
+
+    depth_idx : int
+        Depth index (e.g. from 0 to 59)
+
+    scale : float
+        Scaling factor to apply to the photon survival probability from the
+        table, e.g. for quantum efficiency. This is applied _before_
+        `exponent`. See `Notes` for more info.
+
+    exponent : float >= 0, optional
+        Modify probabilties in the table by ``prob = 1 - (1 - prob)**exponent``
+        to allow for up- and down-scaling the efficiency of the DOMs. This is
+        applied to each DOM's table _after_ `scale`. See `Notes` for more
+        info.
+
+    photon_info : None or RetroPhotonInfo namedtuple of dicts
+        If None, creates a new RetroPhotonInfo namedtuple with empty dicts to
+        fill. If one is provided, the existing component dictionaries are
+        updated.
+
+    Returns
+    -------
+    photon_info : RetroPhotonInfo namedtuple of dicts
+        Tuple fields are 'survival_prob', 'theta', 'phi', and 'length'. Each
+        dict is keyed by `depth_idx` and values are the arrays loaded
+        from the FITS file.
+
+    bin_edges : TimeSphCoord namedtuple
+        Each element of the tuple is an array of bin edges.
+
+    Notes
+    -----
+    The parameters `scale` and `exponent` modify a table's probability `P` by::
+
+        P = 1 - (1 - P*scale)**exponent
+
+    This allows for `scale` (which must be from 0 to 1) to be used for e.g.
+    quantum efficiency--which always reduces the detection probability--and
+    `exponent` (which must be 0 or greater) to be used as a systematic that
+    modifies the post-`scale` probabilities up and down while keeping them
+    valid (i.e., from 0 to 1).
+
+    """
+    # pylint: disable=no-member
+    assert 0 <= scale <= 1
+    assert exponent >= 0
+
+    if photon_info is None:
+        empty_dicts = []
+        for _ in RetroPhotonInfo._fields:
+            empty_dicts.append({})
+        photon_info = RetroPhotonInfo(*empty_dicts)
+
+    with pyfits.open(expand(fpath)) as table:
+        data = table[0].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+
+        if scale == exponent == 1:
+            photon_info.survival_prob[depth_idx] = data
+        else:
+            photon_info.survival_prob[depth_idx] = (
+                1 - (1 - data * scale)**exponent
+            )
+
+        data = table[1].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        photon_info.theta[depth_idx] = data
+
+        data = table[2].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        photon_info.deltaphi[depth_idx] = data
+
+        data = table[3].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        photon_info.length[depth_idx] = data
+
+        # Note that we invert (reverse and multiply by -1) time edges; also,
+        # no phi edges are defined in these tables.
+        data = table[4].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        t = - data[::-1]
+
+        data = table[5].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        r = data
+
+        data = table[6].data
+        if data.dtype.byteorder == '>':
+            data = data.byteswap().newbyteorder()
+        theta = data
+
+        bin_edges = TimeSphCoord(t=t, r=r, theta=theta,
+                                 phi=np.array([], dtype=t.dtype))
+
+    return photon_info, bin_edges
+
+
+@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
 def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
                    avg_photon_theta, avg_photon_length, use_directionality):
     """Compute total expected photons in a DOM based on the (t,r,theta)-binned
@@ -63,7 +174,7 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     """
     expected_photon_count = 0.0
     for pgen_idx in range(pinfo_gen.shape[0]):
-        t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :]
+        t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
 
         # A photon that starts immediately in the past (before the DOM was hit)
         # will show up in the Retro DOM tables in the _last_ bin.
@@ -98,7 +209,9 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
             continue
         #print(tbin_idx, rbin_idx, thetabin_idx)
         #raise Exception()
-        surviving_count = p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
+        surviving_count = (
+            p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
+        )
 
         # TODO: Include simple ice photon prop asymmetry here? Might need to
         # use both phi angle relative to DOM _and_ photon directionality
@@ -113,11 +226,27 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     return expected_photon_count
 
 
-@numba.jit(nopython=True, nogil=True, cache=True, fastmath=True)
-def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth, survival_prob, avg_photon_x, avg_photon_y, avg_photon_z, use_directionality):
+@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
+def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
+             survival_prob, avg_photon_x, avg_photon_y, avg_photon_z,
+             use_directionality):
+    """Compute the expected number of detected photons in _all_ DOMs at _all_
+    times.
+
+    Parameters
+    ----------
+    pinfo_gen :
+    x_min, y_min, z_min :
+    nx, ny, nz :
+    binwidth :
+    survival_prob :
+    avg_photon_x, avg_photon_y, avg_photon_z :
+    use_directionality : bool
+
+    """
     expected_photon_count = 0.0
     for pgen_idx in range(pinfo_gen.shape[0]):
-        _, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :]
+        t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
         x_idx = int(np.round((x - x_min) / binwidth))
         if x_idx < 0 or x_idx >= nx:
             continue
@@ -132,7 +261,7 @@ def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth, survival_prob
 
         # TODO: Incorporate photon direction info
         if use_directionality:
-            pass
+            raise NotImplementedError('Directionality cannot be used yet')
 
         expected_photon_count += surviving_count
 
@@ -140,8 +269,8 @@ def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth, survival_prob
 
 
 class DOMTimePolarTables(object):
-    """Load and use information from individual-dom (time, r, theta)-binned
-    Retro tables.
+    """Load and use information from individual-dom (t,r,theta)-binned Retro
+    tables.
 
     Parameters
     ----------
@@ -156,20 +285,33 @@ class DOMTimePolarTables(object):
         Whether to use photon directionality information from the hypothesis
         and table to modify the expected surviving photon counts.
 
+    ic_exponent, dc_exponent : float >= 0, optional
+        Modify probabilties in the table by ``prob = 1 - (1 - prob)**exponent``
+        to allow for up- and down-scaling the efficiency of the DOMs.
+        `ic_exponent` is applied to IceCube (non-DeepCore) DOMs and
+        `dc_exponent` is applied to DeepCore DOMs. Note that this is applied to
+        each DOM's table after the appropriate quantum efficiency scale factor
+        has already been applied (quantum efficiency is applied as a simple
+        multiplier; see :attr:`retro.IC_QUANT_EFF` and
+        :attr:`retro.DC_QUANT_EFF`).
+
     """
-    def __init__(self, tables_dir, hash_val, geom, use_directionality):
+    def __init__(self, tables_dir, hash_val, geom, use_directionality,
+                 ic_exponent=1, dc_exponent=1):
         # Translation and validation of args
         tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
         assert len(geom.shape) == 3
         assert isinstance(use_directionality, bool)
-        #assert 0 < scale < np.inf
+        assert ic_exponent >= 0
+        assert dc_exponent >= 0
 
         self.tables_dir = tables_dir
         self.hash_val = hash_val
         self.geom = geom
         self.use_directionality = use_directionality
-        #self.scale = scale
+        self.ic_exponent = ic_exponent
+        self.dc_exponent = dc_exponent
         self.tables = {'ic': {}, 'dc': {}}
 
     def load_table(self, string, depth_idx, force_reload=False):
@@ -188,25 +330,28 @@ class DOMTimePolarTables(object):
         if string_idx < 79:
             subdet = 'ic'
             fname_proto = IC_TABLE_FNAME_PROTO
-            quantum_efficiency = IC_QUANT_EFF
+            quant_eff = IC_QUANT_EFF
+            exponent = self.ic_exponent
         else:
             subdet = 'dc'
             fname_proto = DC_TABLE_FNAME_PROTO
-            quantum_efficiency = DC_QUANT_EFF
+            quant_eff = DC_QUANT_EFF
+            exponent = self.dc_exponent
 
         if not force_reload and depth_idx in self.tables[subdet]:
             return
 
         fpath = join(self.tables_dir, fname_proto.format(depth_idx=depth_idx))
 
-        photon_info, _ = extract_photon_info(
+        photon_info, _ = load_t_r_theta_table(
             fpath=fpath,
             depth_idx=depth_idx,
-            scale=quantum_efficiency #* scale
+            scale=quant_eff,
+            exponent=exponent
         )
 
-        length = photon_info.length[depth_idx]
-        deltaphi = photon_info.deltaphi[depth_idx]
+        #length = photon_info.length[depth_idx]
+        #deltaphi = photon_info.deltaphi[depth_idx]
         self.tables[subdet][depth_idx] = RetroPhotonInfo(
             survival_prob=photon_info.survival_prob[depth_idx],
             theta=photon_info.theta[depth_idx],
@@ -217,6 +362,9 @@ class DOMTimePolarTables(object):
 
     def load_tables(self):
         """Load all tables"""
+        # TODO: parallelize the loading of each table to reduce CPU overhead
+        # time (though most time I expect to be disk-read times, this could
+        # still help speed the process up)
         for string in range(1, 86+1):
             for depth_idx in range(60):
                 self.load_table(string=string, depth_idx=depth_idx,
@@ -265,16 +413,30 @@ class DOMTimePolarTables(object):
                               use_directionality=use_directionality)
 
 
-class TDICartTables(object):
-    """Load and use information from time- and DOM-independent Cartesian
-    (x, y, z)-binned Retro tables.
+class TDICartTable(object):
+    """Load and use information from a time- and DOM-independent Cartesian
+    (x, y, z)-binned Retro table.
 
     The parameters used to generate the table are passed at instantiation of
-    this class to determine which table(s) to load when a table is requested.
+    this class to determine which table(s) to load when a table is requested
+    (multiple "tables" are loaded if a single table is generated from multiple
+    smaller tiles meant to be stitched together).
 
     Parameters
     ----------
     tables_dir : string
+
+    proto_tile_hash : string
+        Hash value used to locate files in the `tables_dir` which contain tiles
+        relevant to the table being loaded.
+
+    scale : float from 0 to 1, optional
+        Scale factor by which to multiply the detection probabilities in the
+        table.
+
+    subvol : None or sequence of 3 2-element sequences, optional
+        Specify (min, max) values for the x-, y-, and z-dimensions to load only
+        this portion of the large table. If None, load the entire table
 
     use_directionality : bool
         Whether to use photon directionality information from the hypothesis
@@ -282,20 +444,9 @@ class TDICartTables(object):
         directionality is not to be used, the corresponding tables will not be
         loaded, resulting in ~1/4 the memory footprint.
 
-    x_bw, y_bw, z_bw
-        Tables x-, y-, and z-bin widths
-
-    x_oversample, y_oversample, z_oversample
-        Tables x, y, and z oversampling
-
-    antialias_factor
-        Tables antialiasing factor
-
-    scale : float
-
     """
-    def __init__(self, tables_dir, use_directionality, proto_tile_hash,
-                 scale=1, subvol=None):
+    def __init__(self, tables_dir, proto_tile_hash, subvol=None, scale=1,
+                 use_directionality=True):
         # Translation and validation of args
         tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
@@ -315,7 +466,7 @@ class TDICartTables(object):
 
         self.x_min, self.y_min, self.z_min = None, None, None
         self.x_max, self.y_max, self.z_max = None, None, None
-        self.nx, self.ny, self.nz = None, None, None
+        self.nx, self.ny, self.nz = None, None, None # pylint: disable=invalid-name
         self.nx_tiles, self.ny_tiles, self.nz_tiles = None, None, None
         self.nx_per_tile, self.ny_per_tile, self.nz_per_tile = None, None, None
 
@@ -330,7 +481,8 @@ class TDICartTables(object):
         proto_table_fpath = proto_table_fpath[0]
         proto_meta = self.get_table_metadata(proto_table_fpath)
         if not proto_meta:
-            raise ValueError('Could not figure out metadata from\n' + proto_table_fpath)
+            raise ValueError('Could not figure out metadata from\n%s'
+                             % proto_table_fpath)
         self.proto_meta = proto_meta
 
         # Some "universal" metadata can be gotten from the proto table
@@ -417,6 +569,8 @@ class TDICartTables(object):
         return meta
 
     def load_tables(self, force_reload=False):
+        """Load all tables that match the `proto_tile_hash`; if multiple tables
+        match, then stitch these together into one large TDI table."""
         if self.tables_loaded and not force_reload:
             return
 
@@ -474,7 +628,8 @@ class TDICartTables(object):
             uppermost_corner = np.max([uppermost_corner, upper_corner], axis=0)
 
             # Store the metadata by relative tile index
-            rel_idx = tuple(int(np.round(i)) for i in [x_float_idx, y_float_idx, z_float_idx])
+            rel_idx = tuple(int(np.round(i))
+                            for i in [x_float_idx, y_float_idx, z_float_idx])
             to_load_meta[rel_idx] = meta
 
         x_min, y_min, z_min = lowermost_corner
@@ -491,9 +646,12 @@ class TDICartTables(object):
                              ' by the tiles found.')
         elif len(to_load_meta) > n_tiles:
             print(self.proto_meta['tdi_hash'])
-            print('x:', self.proto_meta['x_min'], self.proto_meta['x_max'], self.proto_meta['x_width'])
-            print('y:', self.proto_meta['y_min'], self.proto_meta['y_max'], self.proto_meta['y_width'])
-            print('z:', self.proto_meta['z_min'], self.proto_meta['z_max'], self.proto_meta['z_width'])
+            print('x:', self.proto_meta['x_min'], self.proto_meta['x_max'],
+                  self.proto_meta['x_width'])
+            print('y:', self.proto_meta['y_min'], self.proto_meta['y_max'],
+                  self.proto_meta['y_width'])
+            print('z:', self.proto_meta['z_min'], self.proto_meta['z_max'],
+                  self.proto_meta['z_width'])
             print('')
             for v in to_load_meta.values():
                 print(v['tdi_hash'])
@@ -501,7 +659,10 @@ class TDICartTables(object):
                 print('y:', v['y_min'], v['y_max'], v['y_width'])
                 print('z:', v['z_min'], v['z_max'], v['z_width'])
                 print('')
-            raise ValueError('WTF? How did we get here? to_load_meta = %d, n_tiles = %d' % (len(to_load_meta), n_tiles))
+            raise ValueError(
+                'WTF? How did we get here? to_load_meta = %d, n_tiles = %d'
+                % (len(to_load_meta), n_tiles)
+            )
 
         # Figure out how many bins in each dimension fill the volume
         nx = int(np.round(nx_tiles * self.x_tile_width / self.binwidth))
@@ -522,13 +683,19 @@ class TDICartTables(object):
         else:
             avg_photon_x, avg_photon_y, avg_photon_z = None, None, None
 
-        anisotropy_str = get_anisotropy_str(self.anisotropy)
+        anisotropy_str = generate_anisotropy_str(self.anisotropy)
 
         tables_meta = {} #[[[None]*nz_tiles]*ny_tiles]*nx_tiles
         for meta in to_load_meta.values():
-            tile_x_idx = int(np.round((meta['x_min'] - x_min) / self.x_tile_width))
-            tile_y_idx = int(np.round((meta['y_min'] - y_min) / self.y_tile_width))
-            tile_z_idx = int(np.round((meta['z_min'] - z_min) / self.z_tile_width))
+            tile_x_idx = int(np.round(
+                (meta['x_min'] - x_min) / self.x_tile_width
+            ))
+            tile_y_idx = int(np.round(
+                (meta['y_min'] - y_min) / self.y_tile_width
+            ))
+            tile_z_idx = int(np.round(
+                (meta['z_min'] - z_min) / self.z_tile_width
+            ))
 
             x0_idx = int(np.round((meta['x_min'] - x_min) / self.binwidth))
             y0_idx = int(np.round((meta['y_min'] - y_min) / self.binwidth))
@@ -573,7 +740,9 @@ class TDICartTables(object):
         # Since we have made it to the end successfully, it is now safe to
         # store the above-computed info to the object for later use
         self.nx, self.ny, self.nz = nx, ny, nz
-        self.nx_tiles, self.ny_tiles, self.nz_tiles = nx_tiles, ny_tiles, nz_tiles
+        self.nx_tiles = nx_tiles
+        self.ny_tiles = ny_tiles
+        self.nz_tiles = nz_tiles
         self.n_bins = self.nx * self.ny * self.nz
         self.n_tiles = self.nx_tiles * self.ny_tiles * self.nz_tiles
         self.x_min, self.y_min, self.z_min = x_min, y_min, z_min
@@ -631,76 +800,212 @@ class TDICartTables(object):
 
         return photon_expectation
 
-    def plot_slices(self, x_slice=slice(None), y_slice=slice(None),
-                    z_slice=slice(None)):
-        # Formulate a slice through the table to look at
-        slx = slice(dom_x_idx - ncells,
-                    dom_x_idx + ncells,
-                    1)
-        sly = slice(dom_y_idx - ncells,
-                    dom_y_idx + ncells,
-                    1)
-        slz = dom_z_idx
-        sl = (x_slice, y_slice, slz)
+    #def plot_slices(self, x_slice=slice(None), y_slice=slice(None),
+    #                z_slice=slice(None)):
+    #    # Formulate a slice through the table to look at
+    #    slx = slice(dom_x_idx - ncells,
+    #                dom_x_idx + ncells,
+    #                1)
+    #    sly = slice(dom_y_idx - ncells,
+    #                dom_y_idx + ncells,
+    #                1)
+    #    slz = dom_z_idx
+    #    sl = (x_slice, y_slice, slz)
 
-        # Slice the x and y directions
-        pxsl = binned_px[sl]
-        pysl = binned_py[sl]
+    #    # Slice the x and y directions
+    #    pxsl = binned_px[sl]
+    #    pysl = binned_py[sl]
 
-        xmid = (xlims[0] + x_bw/2.0 + x_bw * np.arange(nx))[x_slice]
-        ymid = (ylims[0] + y_bw/2.0 + y_bw * np.arange(ny))[y_slice]
-        zmid = zlims[0] + z_bw/2.0 + z_bw * dom_z_idx
+    #    xmid = (xlims[0] + x_bw/2.0 + x_bw * np.arange(nx))[x_slice]
+    #    ymid = (ylims[0] + y_bw/2.0 + y_bw * np.arange(ny))[y_slice]
+    #    zmid = zlims[0] + z_bw/2.0 + z_bw * dom_z_idx
 
-        x_inner_lim = (xmid.min() - x_bw/2.0, xmid.max() + x_bw/2.0)
-        y_inner_lim = (ymid.min() - y_bw/2.0, ymid.max() + y_bw/2.0)
-        X, Y = np.meshgrid(xmid, ymid, indexing='ij')
+    #    x_inner_lim = (xmid.min() - x_bw/2.0, xmid.max() + x_bw/2.0)
+    #    y_inner_lim = (ymid.min() - y_bw/2.0, ymid.max() + y_bw/2.0)
+    #    X, Y = np.meshgrid(xmid, ymid, indexing='ij')
 
-        fig = plt.figure(1, figsize=(10, 10), dpi=72)
-        fig.clf()
-        ax = fig.add_subplot(111)
+    #    fig = plt.figure(1, figsize=(10, 10), dpi=72)
+    #    fig.clf()
+    #    ax = fig.add_subplot(111)
 
-        ax.plot(
-            dom_x, dom_y,
-            'ro', ms=8, lw=0.5,
-            label='Actual DOM location'
+    #    ax.plot(
+    #        dom_x, dom_y,
+    #        'ro', ms=8, lw=0.5,
+    #        label='Actual DOM location'
+    #    )
+    #    ax.plot(
+    #        xlims[0] + x_os_bw*dom_x_os_idx,
+    #        ylims[0] + y_os_bw*dom_y_os_idx,
+    #        'go', ms=8, lw=0.5,
+    #        label='DOM location used for binning'
+    #    )
+    #    ax.quiver(
+    #        X, Y, pxsl, pysl,
+    #        label='Binned average photon direction'
+    #    )
+
+    #    ax.axis('image')
+    #    ax.set_xlabel('x (m)')
+    #    ax.set_ylabel('y (m)')
+
+    #    ax.set_xticks(np.arange(xlims[0], xlims[1]+x_bw, x_bw), minor=False)
+    #    ax.grid(which='major', b=True)
+    #    if x_oversample > 1:
+    #        ax.set_xticks(
+    #            np.arange(x_inner_lim[0]+x_os_bw, x_inner_lim[1], x_os_bw),
+    #            minor=True
+    #        )
+    #        ax.grid(which='minor', b=True, ls=':', alpha=0.6)
+
+    #    if y_oversample > 1:
+    #        ax.set_yticks(
+    #            np.arange(y_inner_lim[0]+y_os_bw, y_inner_lim[1], y_os_bw),
+    #            minor=True
+    #        )
+    #        ax.grid(which='minor', b=True, ls=':', alpha=0.6)
+
+    #    ax.set_xlim(x_inner_lim)
+    #    ax.set_ylim(y_inner_lim)
+    #    ax.legend(loc='upper left', fancybox=True, framealpha=0.9)
+    #    ax.set_title('Detail of table, XY-slice through center of DOM')
+    #    fig.savefig('xyslice_detail.png', dpi=300)
+    #    fig.savefig('xyslice_detail.pdf')
+
+    #def plot_projections(self):
+    #    pass
+
+
+class DOMRawTable(object):
+    """Load and use information from a single "raw" individual-DOM
+    (time, r, theta, p_theta, p_phi)-binned Retro table.
+
+    Note that this is the table generated by CLSim, prior to any manipulations
+    performed for using the table with Retro, and is in the FITS file format.
+
+    Parameters
+    ----------
+    tables_dir : string
+
+    hash_val : None or string
+        Hash string identifying the source Retro tables to use.
+
+    string : int
+        Indexed from 1
+
+    depth_idx : int
+
+    angular_acceptance : float
+
+    """
+    def __init__(self, tables_dir, hash_val, string, depth_idx,
+                 angular_acceptance=0.338019664877):
+        # Translation and validation of args
+        tables_dir = expand(tables_dir)
+        assert isdir(tables_dir)
+        assert 0 < angular_acceptance <= 1
+
+        self.tables_dir = tables_dir
+        self.hash_val = hash_val
+        self.string = string
+        self.depth_idx = depth_idx
+        self.angular_acceptance = angular_acceptance
+
+        self.string_idx = string - 1
+        if self.string_idx < 79:
+            self.subdet = 'ic'
+            self.fname_proto = IC_RAW_TABLE_FNAME_PROTO
+            self.dtp_fname_proto = IC_TABLE_FNAME_PROTO
+        else:
+            self.subdet = 'dc'
+            self.fname_proto = DC_RAW_TABLE_FNAME_PROTO
+            self.dtp_fname_proto = DC_TABLE_FNAME_PROTO
+
+        self.fpath = join(
+            self.tables_dir,
+            self.fname_proto.format(depth_idx=depth_idx)
         )
-        ax.plot(
-            xlims[0] + x_os_bw*dom_x_os_idx,
-            ylims[0] + y_os_bw*dom_y_os_idx,
-            'go', ms=8, lw=0.5,
-            label='DOM location used for binning'
+
+        table = pyfits.open(self.fpath)
+
+        # Cut off underflow and overflow bins
+        self.data = table[0].data[1:-1, 1:-1, 1:-1, 1:-1, 1:-1]
+
+        self.n_photons = table[0].header['_i3_n_photons']
+        self.phase_refractive_index = table[0].header['_i3_n_phase']
+
+        self.r_bin_edges = table[1].data # meters
+        self.costheta_bin_edges = table[2].data
+        self.theta_bin_edges = np.arccos(self.costheta_bin_edges) # radians
+        self.t_bin_edges = table[3].data # nanoseconds
+
+        t_bin_widths = np.diff(self.t_bin_edges)
+        assert np.allclose(t_bin_widths, t_bin_widths[0])
+        self.t_bin_width = np.mean(t_bin_widths)
+
+        self.norm = (self.n_photons * SPEED_OF_LIGHT_M_PER_NS
+                     * self.t_bin_width
+                     / self.phase_refractive_index
+                     / self.angular_acceptance)
+
+        self.n_photons = self.data.sum(axis=(3, 4)) / self.norm
+
+        # Photon arrival directions
+        self.p_theta_bin_edges = table[4].data
+        self.p_delta_phi_bin_edges = table[5].data
+        self.p_costheta_centers = (
+            0.5 * (self.p_theta_bin_edges[:-1] + self.p_theta_bin_edges[1:])
         )
-        ax.quiver(
-            X, Y, pxsl, pysl,
-            label='Binned average photon direction'
+        self.p_theta_centers = np.arccos(self.p_costheta_centers)
+        self.p_delta_phi_centers = (
+            0.5 * (self.p_delta_phi_bin_edges[:-1]
+                   + self.p_delta_phi_bin_edges[1:])
         )
 
-        ax.axis('image')
-        ax.set_xlabel('x (m)')
-        ax.set_ylabel('y (m)')
+    def export_dom_time_polar_table(self, dest_dir=None):
+        """Distill binned photon directionality information into a single
+        vector per bin and force azimuthal symmetry to reduce the table from a
+        5D histogram of photon counts binned in
+        (t, r, theta, phi, p_theta, p_deltaphi) to a 3D histogram binned in
+        (t, r, theta) where each bin contains a probability and an average
+        direction vector.
 
-        ax.set_xticks(np.arange(xlims[0], xlims[1]+x_bw, x_bw), minor=False)
-        ax.grid(which='major', b=True)
-        if x_oversample > 1:
-            ax.set_xticks(
-                np.arange(x_inner_lim[0]+x_os_bw, x_inner_lim[1], x_os_bw),
-                minor=True
-            )
-            ax.grid(which='minor', b=True, ls=':', alpha=0.6)
+        The resulting file will be placed in the same directory as the source
+        table and the file name will be the source filename suffixed by
+        "_r_cz_t_angles" (prior to the ".hdf5" extension).
 
-        if y_oversample > 1:
-            ax.set_yticks(
-                np.arange(y_inner_lim[0]+y_os_bw, y_inner_lim[1], y_os_bw),
-                minor=True
-            )
-            ax.grid(which='minor', b=True, ls=':', alpha=0.6)
+        Parameters
+        ----------
+        dest_dir : string, optional
+            If specified, store the DOM-time-polar table into this directory.
+            Otherwise, if not specified, the table is stored in the same
+            directory as the source table.
 
-        ax.set_xlim(x_inner_lim)
-        ax.set_ylim(y_inner_lim)
-        ax.legend(loc='upper left', fancybox=True, framealpha=0.9)
-        ax.set_title('Detail of table, XY-slice through center of DOM')
-        fig.savefig('xyslice_detail.png', dpi=300)
-        fig.savefig('xyslice_detail.pdf')
+        """
+        if dest_dir is None:
+            dest_dir = self.tables_dir
 
-    def plot_projections(self):
-        pass
+        new_fname = self.dtp_fname_proto.format(depth_idx=self.depth_idx)
+        new_fpath = join(dest_dir, new_fname)
+
+        if not isdir(dest_dir):
+            os.makedirs(dest_dir)
+
+        (n_photons, average_thetas, average_phis, lengths) = (
+            generate_t_r_theta_table(self.data,
+                                     self.n_photons,
+                                     self.p_theta_centers,
+                                     self.p_delta_phi_centers,
+                                     self.theta_bin_edges)
+        )
+        objects = [
+            pyfits.PrimaryHDU(n_photons),
+            pyfits.ImageHDU(average_thetas),
+            pyfits.ImageHDU(average_phis),
+            pyfits.ImageHDU(lengths),
+            pyfits.ImageHDU(self.t_bin_edges),
+            pyfits.ImageHDU(self.r_bin_edges),
+            pyfits.ImageHDU(self.theta_bin_edges[::-1])
+        ]
+
+        hdulist = pyfits.HDUList(objects)
+        hdulist.writeto(new_fpath)

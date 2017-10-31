@@ -36,10 +36,8 @@ from retro.events import Events
 from retro.discrete_hypo import DiscreteHypo
 from retro.discrete_muon_kernels import const_energy_loss_muon # pylint: disable=unused-import
 from retro.discrete_cascade_kernels import point_cascade # pylint: disable=unused-import
-from retro.analytic_hypo import AnalyticHypo # pylint: disable=unused-import
 from retro.plot_1d_scan import plot_1d_scan
-from retro.segmented_hypo import SegmentedHypo # pylint: disable=unused-import
-from retro.table_readers import DOMTimePolarTables, TDICartTables # pylint: disable=unused-import
+from retro.table_readers import DOMTimePolarTables, TDICartTable # pylint: disable=unused-import
 
 
 DFLT_EVENTS_FPATH = (
@@ -59,7 +57,7 @@ NUM_JITTER_SAMPLES = 1
 JITTER_SIGMA = 5
 
 NUM_SCAN_POINTS = 100
-HypoClass = SegmentedHypo
+HypoClass = DiscreteHypo
 HYPOCLASS_KWARGS = dict(time_increment=1)
 LLH_USE_AVGPHOT = False
 LLH_USE_NOHIT = False
@@ -137,7 +135,8 @@ SCAN_DIM_SETS = (
 
 
 #@profile
-def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None, detailed_info_list=None):
+def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None,
+                detailed_info_list=None):
     """Get log likelihood.
 
     Parameters
@@ -195,7 +194,8 @@ def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None, detailed_info_list
             expected_charge = NOISE_CHARGE
 
         # Poisson log likelihood (take negative to interface w/ minimizers)
-        pulse_neg_llh = -poisson_llh(expected=expected_charge, observed=pulse_charge)
+        pulse_neg_llh = -poisson_llh(expected=expected_charge,
+                                     observed=pulse_charge)
 
         neg_llh += pulse_neg_llh
         expected_q_accounted_for += expected_charge
@@ -208,7 +208,8 @@ def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None, detailed_info_list
     if tdi_table is not None:
         if unaccounted_excess_expected_q > 0:
             print('neg_llh before correction    :', neg_llh)
-            print('unaccounted_excess_expected_q:', unaccounted_excess_expected_q)
+            print('unaccounted_excess_expected_q:',
+                  unaccounted_excess_expected_q)
             neg_llh += unaccounted_excess_expected_q
             print('neg_llh after correction     :', neg_llh)
             print('')
@@ -377,7 +378,7 @@ def main(events_fpath, tables_dir, geom_file=None, start_index=None,
 
     tdi_table = None
     #print('Loading TDI table...')
-    #tdi_table = TDICartTables(
+    #tdi_table = TDICartTable(
     #    tables_dir=tables_dir,
     #    use_directionality=False,
     #    #proto_tile_hash='0e28683a74ebea92', # 14^3 tiles, 1 m gridsize, +/- 700 m in x and y, -800 to +600 in z
@@ -513,8 +514,10 @@ def main(events_fpath, tables_dir, geom_file=None, start_index=None,
 
             plot_1d_scan(dir=RESULTS_DIR, event=event.event, uid=event.uid)
             print('')
-            print('Time to scan (%d likelihoods): %s' % (num_likelihoods, timediffstamp(time_to_scan)))
-            print('Time to scan, dump, and plot:', timediffstamp(time.time() - t0))
+            print('Time to scan (%d likelihoods): %s'
+                  % (num_likelihoods, timediffstamp(time_to_scan)))
+            print('Time to scan, dump, and plot:',
+                  timediffstamp(time.time() - t0))
             print('')
 
 

@@ -5,20 +5,25 @@ Basic module-wide definitions and simple types (namedtuples).
 
 from __future__ import absolute_import, division, print_function
 
-from collections import namedtuple, Iterable, Mapping, Sequence
+from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
 import math
 from os.path import abspath, dirname, expanduser, expandvars, join
+import re
 
 import numba
 import numpy as np
 import pyfits
 from scipy.special import gammaln
 
+from pisa.utils.hash import hash_obj
+
 
 __all__ = [
     # Defaults
-    'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME', 'DFLT_SPE_RECO_NAME',
-    'IC_TABLE_FNAME_PROTO', 'DC_TABLE_FNAME_PROTO', 'DETECTOR_GEOM_FILE',
+    'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
+    'DFLT_SPE_RECO_NAME', 'IC_RAW_TABLE_FNAME_PROTO',
+    'DC_RAW_TABLE_FNAME_PROTO', 'IC_TABLE_FNAME_PROTO', 'DC_TABLE_FNAME_PROTO',
+    'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO', 'TDI_TABLE_FNAME_RE',
 
     # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -40,15 +45,18 @@ __all__ = [
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
-    'hypo_to_track_params', 'powerspace', 'binspec_to_edges',
-    'bin_edges_to_binspec', 'bin_edges_to_centers', 'poisson_llh',
-    'spacetime_separation', 'generate_unique_ids', 'extract_photon_info',
-    'spherical_volume', 'sph2cart', 'get_primary_interaction_str',
-    'get_primary_interaction_tex'
+    'hypo_to_track_params', 'powerspace', 'bin_edges_to_binspec',
+    'linear_bin_centers', 'poisson_llh', 'spacetime_separation',
+    'generate_anisotropy_str', 'generate_geom_meta',
+    'generate_unique_ids', 'spherical_volume', 'sph2cart',
+    'get_primary_interaction_str', 'get_primary_interaction_tex',
 ]
 
 
 # -- Default choices we've made -- #
+
+DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, cache=True)
+"""kwargs to pass to numba.jit"""
 
 DFLT_PULSE_SERIES = 'SRTInIcePulses'
 """Default pulse series to extract from events"""
@@ -59,6 +67,12 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
+IC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}.fits'
+"""String template for IceCube single-DOM raw retro tables"""
+
+DC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}.fits'
+"""String template for DeepCore single-DOM raw retro tables"""
+
 IC_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}_r_cz_t_angles.fits'
 """String template for IceCube single-DOM final-level retro tables"""
 
@@ -67,6 +81,46 @@ DC_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}_r_cz_t_angles.fits'
 
 DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
+
+TDI_TABLE_FNAME_PROTO = (
+    'retro_tdi_table'
+    '_{tdi_hash:s}'
+    '_binmap_{binmap_hash:s}'
+    '_geom_{geom_hash:s}'
+    '_domtbl_{dom_tables_hash:s}'
+    '_times_{times_str:s}'
+    '_x{x_min:.3f}_{x_max:.3f}'
+    '_y{y_min:.3f}_{y_max:.3f}'
+    '_z{z_min:.3f}_{z_max:.3f}'
+    '_bw{binwidth:.9f}'
+    '_anisot_{anisotropy_str:s}'
+    '_ics{ic_scale:.5f}'
+    '_dcs{dc_scale:.5f}'
+    '_{table_name:s}'
+    '.fits'
+)
+"""Time- and DOM-independent (TDI) table file names follow this template"""
+
+TDI_TABLE_FNAME_RE = re.compile(
+    r'^retro_tdi_table'
+    r'_(?P<tdi_hash>[^_]+)'
+    r'_binmap_(?P<binmap_hash>[^_]+)'
+    r'_geom_(?P<geom_hash>[^_]+)'
+    r'_domtbl_(?P<dom_tables_hash>[^_]+)'
+    r'_times_(?P<times_str>[^_]+)'
+    r'_x(?P<x_min>[^_]+)_(?P<x_max>[^_]+)'
+    r'_y(?P<y_min>[^_]+)_(?P<y_max>[^_]+)'
+    r'_z(?P<z_min>[^_]+)_(?P<z_max>[^_]+)'
+    r'_bw(?P<binwidth>[^_]+)'
+    r'_anisot_(?P<anisotropy>.+?)'
+    r'_ics(?P<ic_scale>.+?)'
+    r'_dcs(?P<dc_scale>.+?)'
+    r'_(?P<table_name>(avg_photon_x|avg_photon_y|avg_photon_z|survival_prob))'
+    r'\.fits$'
+    , re.IGNORECASE
+)
+"""Time- and DOM-independent (TDI) table file names can be found / interpreted
+using this regex"""
 
 
 # -- namedtuples for interface simplicity and consistency -- #
@@ -227,7 +281,13 @@ POL_TABLE_NRBINS = 200
 POL_TABLE_NTHETABINS = 40
 
 IC_QUANT_EFF = 0.25
+"""scalar in [0, 1] : (Very rough approximation!) IceCube (i.e. non-DeepCore)
+DOM quantum efficiency. Multiplies the tabulated detection probabilities to
+yield the actual probabilitiy that a photon is detected."""
 DC_QUANT_EFF = 0.35
+"""scalar in [0, 1] : (Very rough approximation!) DeepCore DOM quantum
+efficiency. Multiplies the tabulated detection probabilities to yield the
+actual probabilitiy that a photon is detected."""
 
 
 # -- Functions -- #
@@ -386,45 +446,6 @@ def powerspace(start, stop, num, power):
     return bin_edges
 
 
-def binspec_to_edges(start, stop, num_bins):
-    """Convert binning specification (start, stop, and num_bins) to bin edges.
-
-    Note:
-    * t-bins are linearly spaced in ``t``
-    * r-bins are evenly spaced w.r.t. ``r**2``
-    * theta-bins are evenly spaced w.r.t. ``cos(theta)``
-    * phi bins are linearly spaced in ``phi``
-
-    Parameters
-    ----------
-    start : TimeSphCoord containing floats
-    stop : TimeSphCoord containing floats
-    num_bins : TimeSphCoord containing ints
-
-    Returns
-    -------
-    edges : TimeSphCoord containing arrays of floats
-
-    """
-    if not isinstance(start, TimeSphCoord):
-        start = TimeSphCoord(*start)
-    if not isinstance(stop, TimeSphCoord):
-        stop = TimeSphCoord(*stop)
-    if not isinstance(num_bins, TimeSphCoord):
-        num_bins = TimeSphCoord(*num_bins)
-
-    edges = TimeSphCoord(
-        t=np.linspace(start.t, stop.t, num_bins.t + 1),
-        r=powerspace(start=start.r, stop=stop.r, num=num_bins.r + 1, power=2),
-        theta=np.arccos(np.linspace(np.cos(start.theta),
-                                    np.cos(stop.theta),
-                                    num_bins.theta + 1)),
-        phi=np.linspace(start.phi, stop.phi, num_bins.phi + 1)
-    )
-
-    return edges
-
-
 def bin_edges_to_binspec(edges):
     """Convert bin edges to a binning specification (start, stop, and num_bins).
 
@@ -453,37 +474,38 @@ def bin_edges_to_binspec(edges):
     return start, stop, num_bins
 
 
-def bin_edges_to_centers(bin_edges):
-    """Return bin centers, where center is defined in whatever space the
-    dimension is "regular."
-
-    E.g., r is binned regularly in r**2-space, so centers are computed as
-    averages in r**2-space but returned in r-space.
+@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
+def linear_bin_centers(bin_edges):
+    """Return bin centers for bins defined in a linear space.
 
     Parameters
     ----------
-    bin_edges : TimeSphCoord namedtuple or convertible thereto
+    bin_edges : sequence of numeric
+        Note that all numbers contained must be of the same dtype (this is a
+        limitation due to numba, at least as of version 0.35).
 
     Returns
     -------
-    bin_centers : TimeSphCoord
+    bin_centers : numpy.ndarray
+        Length is one less than that of `bin_edges`, and datatype is inferred
+        from the first element of `bin_edges`.
 
     """
-    t = bin_edges.t
-    rsqaured = np.square(bin_edges.r)
-    costheta = np.cos(bin_edges.theta)
-    phi = bin_edges.phi
-    bin_centers = TimeSphCoord(
-        t=0.5 * (t[:-1] + t[1:]),
-        r=np.sqrt(0.5 * (rsqaured[:-1] + rsqaured[1:])),
-        theta=np.arccos(0.5 * (costheta[:-1] + costheta[1:])),
-        phi=0.5 * (phi[:-1] + phi[1:]),
-    )
+    num_edges = len(bin_edges)
+    bin_centers = np.empty(num_edges - 1, dtype=np.dtype(bin_edges[0]))
+    edge0 = bin_edges[0]
+    for n in range(num_edges - 1):
+        edge1 = bin_edges[n + 1]
+        bin_centers[n] = 0.5 * (edge0 + edge1)
+        edge0 = edge1
     return bin_centers
 
 
 def poisson_llh(expected, observed):
-    """Compute Poisson log-likelihood and center around zero.
+    r"""Compute the log Poisson likelihood.
+
+    .. math::
+        {\rm observed} \cdot \log {\rm expected} - {\rm expected} \log \Gamma({\rm observed})
 
     Parameters
     ----------
@@ -508,6 +530,36 @@ def poisson_llh(expected, observed):
     return llh
 
 
+def partial_poisson_llh(expected, observed):
+    r"""Compute the log Poisson likelihood _excluding_ subtracting off
+    expected. This part, which constitutes an expected-but-not-observed
+    penalty, is intended to be taken care of outside this function.
+
+    .. math::
+        {\rm observed} \cdot \log {\rm expected} - \log \Gamma({\rm observed})
+
+    Parameters
+    ----------
+    expected
+        Expected value(s)
+
+    observed
+        Observed value(s)
+
+    Returns
+    -------
+    llh
+        Log likelihood(s)
+
+    """
+    # TODO: why is there a +1 here? Avoid zero observations? How does this
+    # affect the result, besides avoiding inf? Removed for now until we work
+    # this out...
+
+    llh = observed * np.log(expected) - expected - gammaln(observed)
+    return llh
+
+
 def spacetime_separation(dt, dx, dy, dz):
     """Compute the separation between two events in spacetime. Negative values
     are non-causal.
@@ -520,6 +572,52 @@ def spacetime_separation(dt, dx, dy, dz):
 
     """
     return SPEED_OF_LIGHT_M_PER_NS*dt - np.sqrt(dx**2 + dy**2 + dz**2)
+
+
+def generate_anisotropy_str(anisotropy):
+    """Generate a string from anisotropy specification parameters.
+
+    Parameters
+    ----------
+    anisotropy : None or tuple of values
+
+    Returns
+    -------
+    anisotropy_str : string
+
+    """
+    if anisotropy is None:
+        anisotropy_str = 'none'
+    else:
+        anisotropy_str = '_'.join(str(param) for param in anisotropy)
+    return anisotropy_str
+
+
+def generate_geom_meta(geom):
+    """Generate geometry metadata dict. Currently, this sinmply hashes on the
+    geometry coordinates. Note that the values are rounded to the nearest
+    centimeter for hashing purposes. (Also, the values are converted to
+    integers at this precision to eliminate any possible float32 / float64
+    issues that could cause discrepancies in hash values for what we consider
+    to be equal geometries.)
+
+    Parameters
+    ----------
+    geom : shape (n_strings, n_depths, 3) numpy ndarray, dtype float{32,64}
+
+    Returns
+    -------
+    metadata : OrderedDict
+        Contains the item:
+            'hash' : length-8 str
+                Hex characters convert to a string of length 8
+
+    """
+    assert len(geom.shape) == 3
+    assert geom.shape[2] == 3
+    rounded_ints = np.round(geom * 100).astype(np.int)
+    geom_hash = hash_obj(rounded_ints, hash_to='hex', full_hash=True)
+    return OrderedDict([('hash', geom_hash)])
 
 
 def generate_unique_ids(events):
@@ -542,96 +640,7 @@ def generate_unique_ids(events):
     return uids
 
 
-def extract_photon_info(fpath, depth_idx, scale=1, photon_info=None):
-    """Extract photon info from a FITS file containing a (t, r, theta)-binned
-    table.
-
-    Parameters
-    ----------
-    fpath : string
-        Path to FITS file corresponding to the passed ``depth_idx``.
-
-    depth_idx : int
-        Depth index (e.g. from 0 to 59)
-
-    scale : float
-        Scaling factor to apply to the photon survival probability from the
-        table, e.g. for DOM efficiency.
-
-    photon_info : None or RetroPhotonInfo namedtuple of dicts
-        If None, creates a new RetroPhotonInfo namedtuple with empty dicts to
-        fill. If one is provided, the existing component dictionaries are
-        updated.
-
-    Returns
-    -------
-    photon_info : RetroPhotonInfo namedtuple of dicts
-        Tuple fields are 'survival_prob', 'theta', 'phi', and 'length'. Each
-        dict is keyed by `depth_idx` and values are the arrays loaded
-        from the FITS file.
-
-    bin_edges : TimeSphCoord namedtuple
-        Each element of the tuple is an array of bin edges.
-
-    """
-    # pylint: disable=no-member
-    assert scale > 0
-
-    if photon_info is None:
-        empty_dicts = []
-        for _ in RetroPhotonInfo._fields:
-            empty_dicts.append({})
-        photon_info = RetroPhotonInfo(*empty_dicts)
-
-    with pyfits.open(expand(fpath)) as table:
-        data = table[0].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
-        if scale == 1:
-            photon_info.survival_prob[depth_idx] = data
-        else:
-            #photon_info.survival_prob[depth_idx] = 1 - (1 - data)**scale
-            photon_info.survival_prob[depth_idx] = data*scale
-
-        data = table[1].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
-        photon_info.theta[depth_idx] = data
-
-        data = table[2].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
-        photon_info.deltaphi[depth_idx] = data
-
-        data = table[3].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
-        photon_info.length[depth_idx] = data
-
-        # Note that we invert (reverse and multiply by -1) time edges; also,
-        # no phi edges are defined in these tables.
-        data = table[4].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
-        t = - data[::-1]
-
-        data = table[5].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
-        r = data
-
-        data = table[6].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
-        theta = data
-
-        bin_edges = TimeSphCoord(t=t, r=r, theta=theta,
-                                 phi=np.array([], dtype=t.dtype))
-
-    return photon_info, bin_edges
-
-
-@numba.jit(nopython=True, nogil=True, cache=True)
+@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
 def spherical_volume(rmin, rmax, dcostheta, dphi):
     """Find volume of a finite element defined in spherical coordinates.
 
@@ -659,7 +668,7 @@ def spherical_volume(rmin, rmax, dcostheta, dphi):
     return -dcostheta * (rmax**3 - rmin**3) * dphi / 3
 
 
-@numba.jit(nopython=True, nogil=True, cache=True)
+@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
 def sph2cart(r, theta, phi, x, y, z):
     """Convert spherical coordinates to Cartesian.
 
@@ -689,7 +698,7 @@ def sph2cart(r, theta, phi, x, y, z):
         z_flat[idx] = rf * math.cos(thetaf)
 
 
-@numba.jit(nopython=True, nogil=True, cache=True)
+@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
 def pol2cart(r, theta, x, y):
     """Convert plane polar (r, theta) to Cartesian (x, y) Coordinates.
 
@@ -714,7 +723,7 @@ def pol2cart(r, theta, x, y):
         y_flat[idx] = rf * math.sin(tf)
 
 
-@numba.jit(nopython=True, nogil=True, cache=True)
+@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
 def cart2pol(x, y, r, theta):
     """Convert plane Cartesian (x, y) to plane polar (r, theta) Coordinates.
 
