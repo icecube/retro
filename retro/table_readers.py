@@ -11,7 +11,7 @@ from __future__ import absolute_import, division, print_function
 from copy import deepcopy
 from glob import glob
 import os
-from os.path import abspath, basename, dirname, isdir, join
+from os.path import abspath, basename, dirname, isdir, isfile, join
 import time
 
 import numba
@@ -32,7 +32,8 @@ from retro import (DFLT_NUMBA_JIT_KWARGS, IC_QUANT_EFF, DC_QUANT_EFF,
                    POL_TABLE_DCOSTHETA, POL_TABLE_NTBINS, POL_TABLE_NRBINS,
                    POL_TABLE_NTHETABINS)
 from retro import RetroPhotonInfo, TimeSphCoord
-from retro import expand, generate_anisotropy_str
+from retro import (expand, force_little_endian, generate_anisotropy_str,
+                   linear_bin_centers)
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
@@ -102,9 +103,7 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
         photon_info = RetroPhotonInfo(*empty_dicts)
 
     with pyfits.open(expand(fpath)) as table:
-        data = table[0].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
+        data = force_little_endian(table[0].data)
 
         if scale == exponent == 1:
             photon_info.survival_prob[depth_idx] = data
@@ -113,36 +112,24 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
                 1 - (1 - data * scale)**exponent
             )
 
-        data = table[1].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
+        data = force_little_endian(table[1].data)
         photon_info.theta[depth_idx] = data
 
-        data = table[2].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
+        data = force_little_endian(table[2].data)
         photon_info.deltaphi[depth_idx] = data
 
-        data = table[3].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
+        data = force_little_endian(table[3].data)
         photon_info.length[depth_idx] = data
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.
-        data = table[4].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
+        data = force_little_endian(table[4].data)
         t = - data[::-1]
 
-        data = table[5].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
+        data = force_little_endian(table[5].data)
         r = data
 
-        data = table[6].data
-        if data.dtype.byteorder == '>':
-            data = data.byteswap().newbyteorder()
+        data = force_little_endian(table[6].data)
         theta = data
 
         bin_edges = TimeSphCoord(t=t, r=r, theta=theta,
@@ -413,6 +400,10 @@ class DOMTimePolarTables(object):
                               use_directionality=use_directionality)
 
 
+# TODO: convert to using exponent rather than scale (scale will be applied via
+# quant_eff when generating the TDI table in the first place; at this stage, we
+# want to go either up or down with probabilities, so a single exponent should
+# be appropriate, while a scale factor can exceed 1 for probabilities).
 class TDICartTable(object):
     """Load and use information from a time- and DOM-independent Cartesian
     (x, y, z)-binned Retro table.
@@ -726,9 +717,7 @@ class TDICartTable(object):
                 )
 
                 with pyfits.open(fpath) as fits_table:
-                    data = fits_table[0].data
-                if data.dtype.byteorder == '>':
-                    data = data.byteswap().newbyteorder()
+                    data = force_little_endian(fits_table[0].data)
 
                 if self.scale != 1 and table_name == 'survival_prob':
                     data = 1 - (1 - data)**self.scale
@@ -925,43 +914,38 @@ class DOMRawTable(object):
             self.fname_proto.format(depth_idx=depth_idx)
         )
 
-        table = pyfits.open(self.fpath)
+        with pyfits.open(self.fpath) as table:
+            # Cut off first and last bin in each dimension (underflow and
+            # overflow bins)
+            self.data = force_little_endian(table[0].data[1:-1, 1:-1, 1:-1, 1:-1, 1:-1])
 
-        # Cut off underflow and overflow bins
-        self.data = table[0].data[1:-1, 1:-1, 1:-1, 1:-1, 1:-1]
+            self.n_photons = force_little_endian(table[0].header['_i3_n_photons'])
+            self.phase_refractive_index = force_little_endian(table[0].header['_i3_n_phase'])
 
-        self.n_photons = table[0].header['_i3_n_photons']
-        self.phase_refractive_index = table[0].header['_i3_n_phase']
+            self.r_bin_edges = force_little_endian(table[1].data) # meters
+            self.costheta_bin_edges = force_little_endian(table[2].data)
+            self.theta_bin_edges = np.arccos(self.costheta_bin_edges) # radians
+            self.t_bin_edges = force_little_endian(table[3].data) # nanoseconds
 
-        self.r_bin_edges = table[1].data # meters
-        self.costheta_bin_edges = table[2].data
-        self.theta_bin_edges = np.arccos(self.costheta_bin_edges) # radians
-        self.t_bin_edges = table[3].data # nanoseconds
+            t_bin_widths = np.diff(self.t_bin_edges)
+            assert np.allclose(t_bin_widths, t_bin_widths[0])
+            self.t_bin_width = np.mean(t_bin_widths)
 
-        t_bin_widths = np.diff(self.t_bin_edges)
-        assert np.allclose(t_bin_widths, t_bin_widths[0])
-        self.t_bin_width = np.mean(t_bin_widths)
+            self.norm = (self.n_photons * SPEED_OF_LIGHT_M_PER_NS
+                         * self.t_bin_width
+                         / self.phase_refractive_index
+                         / self.angular_acceptance)
 
-        self.norm = (self.n_photons * SPEED_OF_LIGHT_M_PER_NS
-                     * self.t_bin_width
-                     / self.phase_refractive_index
-                     / self.angular_acceptance)
+            self.n_photons = self.data.sum(axis=(3, 4)) / self.norm
 
-        self.n_photons = self.data.sum(axis=(3, 4)) / self.norm
+            # Photon arrival directions
+            self.p_theta_bin_edges = force_little_endian(table[4].data)
+            self.p_delta_phi_bin_edges = force_little_endian(table[5].data)
+            self.p_costheta_centers = linear_bin_centers(self.p_theta_bin_edges)
+            self.p_theta_centers = np.arccos(self.p_costheta_centers)
+            self.p_delta_phi_centers = linear_bin_centers(self.p_delta_phi_bin_edges)
 
-        # Photon arrival directions
-        self.p_theta_bin_edges = table[4].data
-        self.p_delta_phi_bin_edges = table[5].data
-        self.p_costheta_centers = (
-            0.5 * (self.p_theta_bin_edges[:-1] + self.p_theta_bin_edges[1:])
-        )
-        self.p_theta_centers = np.arccos(self.p_costheta_centers)
-        self.p_delta_phi_centers = (
-            0.5 * (self.p_delta_phi_bin_edges[:-1]
-                   + self.p_delta_phi_bin_edges[1:])
-        )
-
-    def export_dom_time_polar_table(self, dest_dir=None):
+    def export_dom_time_polar_table(self, dest_dir=None, overwrite=True):
         """Distill binned photon directionality information into a single
         vector per bin and force azimuthal symmetry to reduce the table from a
         5D histogram of photon counts binned in
@@ -983,12 +967,21 @@ class DOMRawTable(object):
         """
         if dest_dir is None:
             dest_dir = self.tables_dir
+        dest_dir = expand(dest_dir)
 
         new_fname = self.dtp_fname_proto.format(depth_idx=self.depth_idx)
         new_fpath = join(dest_dir, new_fname)
 
         if not isdir(dest_dir):
             os.makedirs(dest_dir)
+
+        if isfile(new_fpath):
+            if overwrite:
+                print('WARNING: overwriting existing file at "%s"' % new_fpath)
+                os.remove(new_fpath)
+            else:
+                print('There is an existing file at "%s"; not proceeding.' % new_fpath)
+                return
 
         (n_photons, average_thetas, average_phis, lengths) = (
             generate_t_r_theta_table(self.data,
@@ -999,12 +992,12 @@ class DOMRawTable(object):
         )
         objects = [
             pyfits.PrimaryHDU(n_photons),
-            pyfits.ImageHDU(average_thetas),
-            pyfits.ImageHDU(average_phis),
-            pyfits.ImageHDU(lengths),
-            pyfits.ImageHDU(self.t_bin_edges),
-            pyfits.ImageHDU(self.r_bin_edges),
-            pyfits.ImageHDU(self.theta_bin_edges[::-1])
+            pyfits.ImageHDU(average_thetas.astype(np.float32)),
+            pyfits.ImageHDU(average_phis.astype(np.float32)),
+            pyfits.ImageHDU(lengths.astype(np.float32)),
+            pyfits.ImageHDU(self.t_bin_edges.astype(np.float32)),
+            pyfits.ImageHDU(self.r_bin_edges.astype(np.float32)),
+            pyfits.ImageHDU(self.theta_bin_edges[::-1].astype(np.float32))
         ]
 
         hdulist = pyfits.HDUList(objects)

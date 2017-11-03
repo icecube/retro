@@ -50,6 +50,7 @@ __all__ = [
     'generate_anisotropy_str', 'generate_geom_meta',
     'generate_unique_ids', 'spherical_volume', 'sph2cart',
     'get_primary_interaction_str', 'get_primary_interaction_tex',
+    'force_little_endian',
 ]
 
 
@@ -94,8 +95,10 @@ TDI_TABLE_FNAME_PROTO = (
     '_z{z_min:.3f}_{z_max:.3f}'
     '_bw{binwidth:.9f}'
     '_anisot_{anisotropy_str:s}'
-    '_ics{ic_scale:.5f}'
-    '_dcs{dc_scale:.5f}'
+    '_icqe{ic_quant_eff:.5f}'
+    '_dcqe{dc_quant_eff:.5f}'
+    '_icexp{ic_exponent:.5f}'
+    '_dcexp{dc_exponent:.5f}'
     '_{table_name:s}'
     '.fits'
 )
@@ -113,8 +116,10 @@ TDI_TABLE_FNAME_RE = re.compile(
     r'_z(?P<z_min>[^_]+)_(?P<z_max>[^_]+)'
     r'_bw(?P<binwidth>[^_]+)'
     r'_anisot_(?P<anisotropy>.+?)'
-    r'_ics(?P<ic_scale>.+?)'
-    r'_dcs(?P<dc_scale>.+?)'
+    r'_icqe(?P<ic_quant_eff>.+?)'
+    r'_dcqe(?P<dc_quant_eff>.+?)'
+    r'_icexp(?P<ic_exponent>.+?)'
+    r'_dcexp(?P<dc_exponent>.+?)'
     r'_(?P<table_name>(avg_photon_x|avg_photon_y|avg_photon_z|survival_prob))'
     r'\.fits$'
     , re.IGNORECASE
@@ -492,7 +497,7 @@ def linear_bin_centers(bin_edges):
 
     """
     num_edges = len(bin_edges)
-    bin_centers = np.empty(num_edges - 1, dtype=np.dtype(bin_edges[0]))
+    bin_centers = np.empty(num_edges - 1, bin_edges.dtype)
     edge0 = bin_edges[0]
     for n in range(num_edges - 1):
         edge1 = bin_edges[n + 1]
@@ -828,3 +833,26 @@ def get_primary_interaction_tex(event):
         tex += r'\,NC'
 
     return tex
+
+
+def force_little_endian(x):
+    """Convert a numpy ndarray to little endian if it isn't already.
+
+    E.g., use when loading from FITS files since that spec is big endian, while
+    most CPUs (e.g. Intel) are little endian.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+
+    Returns
+    -------
+    x : numpy.ndarray
+        Same as input `x` with byte order swapped if necessary.
+
+    """
+    if np.isscalar(x):
+        return x
+    if x.dtype.byteorder == '>':
+        x = x.byteswap().newbyteorder()
+    return x
