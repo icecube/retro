@@ -18,12 +18,11 @@ import numba
 import numpy as np
 import pyfits
 
-from pisa.utils.format import hrlist2list
-from pisa.utils.timing import timediffstamp
+from pisa.utils.format import hrlist2list, timediff
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (DFLT_NUMBA_JIT_KWARGS, IC_QUANT_EFF, DC_QUANT_EFF,
+from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
                    DC_RAW_TABLE_FNAME_PROTO, IC_RAW_TABLE_FNAME_PROTO,
                    DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
                    TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
@@ -89,7 +88,10 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
     quantum efficiency--which always reduces the detection probability--and
     `exponent` (which must be 0 or greater) to be used as a systematic that
     modifies the post-`scale` probabilities up and down while keeping them
-    valid (i.e., from 0 to 1).
+    valid (i.e., between 0 and 1). Larger values of `scale` (i.e., closer to 1)
+    indicate a more efficient DOM. Likewise, values of `exponent` greater than
+    one scale up the DOM efficiency, while values of `exponent` between 0 and 1
+    scale the efficiency down.
 
     """
     # pylint: disable=no-member
@@ -279,8 +281,8 @@ class DOMTimePolarTables(object):
         `dc_exponent` is applied to DeepCore DOMs. Note that this is applied to
         each DOM's table after the appropriate quantum efficiency scale factor
         has already been applied (quantum efficiency is applied as a simple
-        multiplier; see :attr:`retro.IC_QUANT_EFF` and
-        :attr:`retro.DC_QUANT_EFF`).
+        multiplier; see :attr:`retro.IC_DOM_QUANT_EFF` and
+        :attr:`retro.DC_DOM_QUANT_EFF`).
 
     """
     def __init__(self, tables_dir, hash_val, geom, use_directionality,
@@ -317,12 +319,12 @@ class DOMTimePolarTables(object):
         if string_idx < 79:
             subdet = 'ic'
             fname_proto = IC_TABLE_FNAME_PROTO
-            quant_eff = IC_QUANT_EFF
+            dom_quant_eff = IC_DOM_QUANT_EFF
             exponent = self.ic_exponent
         else:
             subdet = 'dc'
             fname_proto = DC_TABLE_FNAME_PROTO
-            quant_eff = DC_QUANT_EFF
+            dom_quant_eff = DC_DOM_QUANT_EFF
             exponent = self.dc_exponent
 
         if not force_reload and depth_idx in self.tables[subdet]:
@@ -333,7 +335,7 @@ class DOMTimePolarTables(object):
         photon_info, _ = load_t_r_theta_table(
             fpath=fpath,
             depth_idx=depth_idx,
-            scale=quant_eff,
+            scale=dom_quant_eff,
             exponent=exponent
         )
 
@@ -401,9 +403,10 @@ class DOMTimePolarTables(object):
 
 
 # TODO: convert to using exponent rather than scale (scale will be applied via
-# quant_eff when generating the TDI table in the first place; at this stage, we
-# want to go either up or down with probabilities, so a single exponent should
-# be appropriate, while a scale factor can exceed 1 for probabilities).
+# dom_quant_eff when generating the TDI table in the first place; at this
+# stage, we want to go either up or down with probabilities, so a single
+# exponent should be appropriate, while a scale factor can exceed 1 for
+# probabilities).
 class TDICartTable(object):
     """Load and use information from a time- and DOM-independent Cartesian
     (x, y, z)-binned Retro table.
@@ -756,7 +759,7 @@ class TDICartTable(object):
               ' bins are (%.3f m)³'
               % (self.n_tiles, tstr, self.x_min, self.x_max, self.y_min,
                  self.y_max, self.z_min, self.z_max, self.binwidth))
-        print('Time to load: %s' % timediffstamp(time.time() - t0))
+        print('Time to load: %s' % timediff(time.time() - t0))
 
     def get_photon_expectation(self, pinfo_gen):
         """Get the expectation for photon survival.
@@ -931,19 +934,37 @@ class DOMRawTable(object):
             assert np.allclose(t_bin_widths, t_bin_widths[0])
             self.t_bin_width = np.mean(t_bin_widths)
 
-            self.norm = (self.n_photons * SPEED_OF_LIGHT_M_PER_NS
-                         * self.t_bin_width
-                         / self.phase_refractive_index
-                         / self.angular_acceptance)
+            # Multiply the tabulated photon counts by a normalization factor to
+            # arrive at a (reasonable, but still imperfect) suvival
+            # probability. Normalization is performed by:
+            # * Dividing by total photons thrown
+            # * Dividing by the speed of light in ice, c / n, in m/ns
+            # * Dividing by time bin width in ns
+            # * Multiplying by a correction for angular acceptance, in [0,1]
+            # * Multiplying by the number of costheta bins (>= 1)
+            # The result of applying this norm is in units of 1/meter, where
+            # this unit accounts for the fact that CLSim tabulates the same
+            # photon every meter it travels, hence the same photon results in
+            # multiple counts (as many as there are meters in its path).
+            self.norm = (
+                1
+                / self.n_photons
+                / (SPEED_OF_LIGHT_M_PER_NS / self.phase_refractive_index)
+                / self.t_bin_width
+                * (len(self.costheta_bin_edges) - 1)
+                * self.phase_refractive_index
+                * self.angular_acceptance
+            )
 
-            self.n_photons = self.data.sum(axis=(3, 4)) / self.norm
+            # The photon direction is tabulated in dimensions 3 and 4
+            self.survival_prob = self.data.sum(axis=(3, 4)) * self.norm
 
             # Photon arrival directions
             self.p_theta_bin_edges = force_little_endian(table[4].data)
-            self.p_delta_phi_bin_edges = force_little_endian(table[5].data)
+            self.p_deltaphi_bin_edges = force_little_endian(table[5].data)
             self.p_costheta_centers = linear_bin_centers(self.p_theta_bin_edges)
             self.p_theta_centers = np.arccos(self.p_costheta_centers)
-            self.p_delta_phi_centers = linear_bin_centers(self.p_delta_phi_bin_edges)
+            self.p_deltaphi_centers = linear_bin_centers(self.p_deltaphi_bin_edges)
 
     def export_dom_time_polar_table(self, dest_dir=None, overwrite=True):
         """Distill binned photon directionality information into a single
@@ -980,18 +1001,19 @@ class DOMRawTable(object):
                 print('WARNING: overwriting existing file at "%s"' % new_fpath)
                 os.remove(new_fpath)
             else:
-                print('There is an existing file at "%s"; not proceeding.' % new_fpath)
+                print('There is an existing file at "%s"; not proceeding.'
+                      % new_fpath)
                 return
 
-        (n_photons, average_thetas, average_phis, lengths) = (
-            generate_t_r_theta_table(self.data,
-                                     self.n_photons,
-                                     self.p_theta_centers,
-                                     self.p_delta_phi_centers,
-                                     self.theta_bin_edges)
+        (survival_prob, average_thetas, average_phis, lengths) = (
+            generate_t_r_theta_table(data=self.data,
+                                     survival_prob=self.survival_prob,
+                                     p_theta_centers=self.p_theta_centers,
+                                     p_deltaphi_centers=self.p_deltaphi_centers,
+                                     theta_bin_edges=self.theta_bin_edges)
         )
         objects = [
-            pyfits.PrimaryHDU(n_photons),
+            pyfits.PrimaryHDU(survival_prob),
             pyfits.ImageHDU(average_thetas.astype(np.float32)),
             pyfits.ImageHDU(average_phis.astype(np.float32)),
             pyfits.ImageHDU(lengths.astype(np.float32)),

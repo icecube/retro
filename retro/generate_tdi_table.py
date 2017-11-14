@@ -49,8 +49,8 @@ from pisa.utils.format import hrlist2list, list2hrlist
 from pisa.utils.timing import timediffstamp
 
 os.sys.path.append(dirname(dirname(abspath('__file__'))))
-from retro import (TDI_TABLE_FNAME_PROTO, IC_QUANT_EFF,
-                   DC_QUANT_EFF, POL_TABLE_NRBINS, POL_TABLE_NTBINS,
+from retro import (TDI_TABLE_FNAME_PROTO, IC_DOM_QUANT_EFF,
+                   DC_DOM_QUANT_EFF, POL_TABLE_NRBINS, POL_TABLE_NTBINS,
                    POL_TABLE_NTHETABINS, POL_TABLE_RMAX, POL_TABLE_RPWR)
 from retro import generate_anisotropy_str, generate_geom_meta
 from retro.generate_binmap import generate_binmap
@@ -63,7 +63,7 @@ __all__ = ['generate_tdi_table_meta', 'generate_tdi_table', 'parse_args']
 
 def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
                             x_min, x_max, y_min, y_max, z_min, z_max, binwidth,
-                            anisotropy, ic_quant_eff, dc_quant_eff,
+                            anisotropy, ic_dom_quant_eff, dc_dom_quant_eff,
                             ic_exponent, dc_exponent):
     """Generate a metadata dict for a time- and DOM-independent Cartesian
     (x,y,z)-binned table.
@@ -77,8 +77,8 @@ def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
     x_lims, y_lims, z_lims : 2-tuples of floats
     binwidth : float
     anisotropy : None or tuple
-    ic_quant_eff : float in [0, 1]
-    dc_quant_eff : float in [0, 1]
+    ic_dom_quant_eff : float in [0, 1]
+    dc_dom_quant_eff : float in [0, 1]
     ic_exponent : float >= 0
     dc_exponent : float >= 0
 
@@ -107,8 +107,8 @@ def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         ('z_max', z_max),
         ('binwidth', binwidth),
         ('anisotropy', anisotropy),
-        ('ic_quant_eff', ic_quant_eff),
-        ('dc_quant_eff', dc_quant_eff),
+        ('ic_dom_quant_eff', ic_dom_quant_eff),
+        ('dc_dom_quant_eff', dc_dom_quant_eff),
         ('ic_exponent', ic_exponent),
         ('dc_exponent', dc_exponent)
     ])
@@ -118,7 +118,7 @@ def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         rounded_int = int(np.round(hash_params[param]*100))
         hash_params[param] = rounded_int
         kwargs[param] = float(rounded_int) / 100
-    for param in ['ic_quant_eff', 'dc_quant_eff',
+    for param in ['ic_dom_quant_eff', 'dc_dom_quant_eff',
                   'ic_exponent', 'dc_exponent']:
         rounded_int = int(np.round(hash_params[param]*10000))
         hash_params[param] = rounded_int
@@ -147,7 +147,7 @@ def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
 def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                        x_lims, y_lims, z_lims,
                        binwidth, oversample, antialias, anisotropy,
-                       ic_quant_eff, dc_quant_eff,
+                       ic_dom_quant_eff, dc_dom_quant_eff,
                        ic_exponent, dc_exponent,
                        strings=slice(None),
                        depths=slice(None),
@@ -174,8 +174,8 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     oversample : int
     antialias : int
     anisotropy : None or tuple
-    ic_quant_eff : float in [0, 1]
-    dc_quant_eff : float in [0, 1]
+    ic_dom_quant_eff : float in [0, 1]
+    dc_dom_quant_eff : float in [0, 1]
     ic_exponent : float >= 0
     dc_exponent : float >= 0
     strings : int, sequence, slice
@@ -295,7 +295,8 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         y_min=y_lims[0], y_max=y_lims[1],
         z_min=z_lims[0], z_max=z_lims[1],
         binwidth=binwidth, anisotropy=anisotropy,
-        ic_quant_eff=ic_quant_eff, dc_quant_eff=dc_quant_eff,
+        ic_dom_quant_eff=ic_dom_quant_eff,
+        dc_dom_quant_eff=dc_dom_quant_eff,
         ic_exponent=ic_exponent, dc_exponent=dc_exponent
     )
 
@@ -362,10 +363,10 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         print('')
 
         if subdet == 'ic':
-            quant_eff = ic_quant_eff
+            dom_quant_eff = ic_dom_quant_eff
             exponent = ic_exponent
         elif subdet == 'dc':
-            quant_eff = dc_quant_eff
+            dom_quant_eff = dc_dom_quant_eff
             exponent = dc_exponent
         else:
             raise ValueError(str(subdet))
@@ -388,7 +389,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             photon_info, _ = load_t_r_theta_table(
                 fpath=join(tables_dir, table_fname),
                 depth_idx=depth_idx,
-                scale=quant_eff,
+                scale=dom_quant_eff,
                 exponent=exponent
             )
             t1 = time.time()
@@ -604,11 +605,11 @@ def parse_args(description=__doc__):
         modeled.'''
     )
     parser.add_argument(
-        '--ic-quant-eff', type=float, default=IC_QUANT_EFF,
+        '--ic-quant-eff', type=float, default=IC_DOM_QUANT_EFF,
         help='''IceCube (non-DeepCore) DOM quantum efficiency'''
     )
     parser.add_argument(
-        '--dc-quant-eff', type=float, default=DC_QUANT_EFF,
+        '--dc-quant-eff', type=float, default=DC_DOM_QUANT_EFF,
         help='''DeepCore DOM quantum efficiency'''
     )
     parser.add_argument(

@@ -41,7 +41,7 @@ __all__ = [
     'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'POL_TABLE_DCOSTHETA',
     'POL_TABLE_DRPWR', 'POL_TABLE_DT', 'POL_TABLE_RPWR', 'POL_TABLE_RMAX',
     'POL_TABLE_NTBINS', 'POL_TABLE_NRBINS', 'POL_TABLE_NTHETABINS',
-    'IC_QUANT_EFF', 'DC_QUANT_EFF',
+    'IC_DOM_QUANT_EFF', 'DC_DOM_QUANT_EFF',
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
@@ -95,8 +95,8 @@ TDI_TABLE_FNAME_PROTO = (
     '_z{z_min:.3f}_{z_max:.3f}'
     '_bw{binwidth:.9f}'
     '_anisot_{anisotropy_str:s}'
-    '_icqe{ic_quant_eff:.5f}'
-    '_dcqe{dc_quant_eff:.5f}'
+    '_icqe{ic_dom_quant_eff:.5f}'
+    '_dcqe{dc_dom_quant_eff:.5f}'
     '_icexp{ic_exponent:.5f}'
     '_dcexp{dc_exponent:.5f}'
     '_{table_name:s}'
@@ -116,8 +116,8 @@ TDI_TABLE_FNAME_RE = re.compile(
     r'_z(?P<z_min>[^_]+)_(?P<z_max>[^_]+)'
     r'_bw(?P<binwidth>[^_]+)'
     r'_anisot_(?P<anisotropy>.+?)'
-    r'_icqe(?P<ic_quant_eff>.+?)'
-    r'_dcqe(?P<dc_quant_eff>.+?)'
+    r'_icqe(?P<ic_dom_quant_eff>.+?)'
+    r'_dcqe(?P<dc_dom_quant_eff>.+?)'
     r'_icexp(?P<ic_exponent>.+?)'
     r'_dcexp(?P<dc_exponent>.+?)'
     r'_(?P<table_name>(avg_photon_x|avg_photon_y|avg_photon_z|survival_prob))'
@@ -285,11 +285,11 @@ POL_TABLE_NTBINS = 300
 POL_TABLE_NRBINS = 200
 POL_TABLE_NTHETABINS = 40
 
-IC_QUANT_EFF = 0.25
+IC_DOM_QUANT_EFF = 0.25
 """scalar in [0, 1] : (Very rough approximation!) IceCube (i.e. non-DeepCore)
 DOM quantum efficiency. Multiplies the tabulated detection probabilities to
 yield the actual probabilitiy that a photon is detected."""
-DC_QUANT_EFF = 0.35
+DC_DOM_QUANT_EFF = 0.35
 """scalar in [0, 1] : (Very rough approximation!) DeepCore DOM quantum
 efficiency. Multiplies the tabulated detection probabilities to yield the
 actual probabilitiy that a photon is detected."""
