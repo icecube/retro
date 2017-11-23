@@ -48,8 +48,8 @@ def weighted_average(x, w):
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def generate_t_r_theta_table(data, survival_prob, p_theta_centers,
-                             p_deltaphi_centers, theta_bin_edges):
+def generate_t_r_theta_table(data, survival_prob, thetadir_centers,
+                             deltaphidir_centers, theta_bin_edges):
     """Transform information from a raw single-DOM table (as output from CLSim)
     that is binned in (r, theta, t, theta_dir, deltaphi_dir) into a more
     compact representation, with a probability and an average direction vector
@@ -59,8 +59,8 @@ def generate_t_r_theta_table(data, survival_prob, p_theta_centers,
     ----------
     data
     n_photons
-    p_theta_centers
-    p_deltaphi_centers
+    thetadir_centers
+    deltaphidir_centers
     theta_bin_edges
 
     Returns
@@ -103,23 +103,23 @@ def generate_t_r_theta_table(data, survival_prob, p_theta_centers,
                 else:
                     # Average theta
                     weights_theta = weights.sum(axis=1)
-                    average_theta = weighted_average(p_theta_centers,
+                    average_theta = weighted_average(thetadir_centers,
                                                      weights_theta)
 
                     # Average delta phi
                     projected_survival_prob = (
-                        (weights.T * np.sin(p_theta_centers)).T
+                        (weights.T * np.sin(thetadir_centers)).T
                     )
                     weights_phi = projected_survival_prob.sum(axis=0)
-                    average_phi = weighted_average(p_deltaphi_centers,
+                    average_phi = weighted_average(deltaphidir_centers,
                                                    weights_phi)
 
                     # Length of vector (using projections from all vectors
                     # onto average vector cos(angle) between average vector
                     # and all angles)
-                    coscos = np.cos(p_theta_centers)*np.cos(average_theta)
-                    sinsin = np.sin(p_theta_centers)*np.sin(average_theta)
-                    cosphi = np.cos(p_deltaphi_centers - average_phi)
+                    coscos = np.cos(thetadir_centers)*np.cos(average_theta)
+                    sinsin = np.sin(thetadir_centers)*np.sin(average_theta)
+                    cosphi = np.cos(deltaphidir_centers - average_phi)
                     # Other half of sphere
                     cospsi = (coscos + np.outer(sinsin, cosphi).T).T
                     cospsi_avg = (cospsi * weights).sum() / weights_tot

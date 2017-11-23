@@ -5,17 +5,39 @@ Basic module-wide definitions and simple types (namedtuples).
 
 from __future__ import absolute_import, division, print_function
 
+import base64
 from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
+import cPickle as pickle
+import hashlib
 import math
+from numbers import Number
 from os.path import abspath, dirname, expanduser, expandvars, join
 import re
+import struct
+from time import time
 
-import numba
+
+NUMBA_AVAIL = False
+def dummy_func(x):
+    """Decorate to to see if Numba actually works"""
+    x += 1
+try:
+    from numba import jit as numba_jit
+    numba_jit(dummy_func)
+except Exception:
+    #logging.debug('Failed to import or use numba', exc_info=True)
+    def numba_jit(*args, **kwargs): # pylint: disable=unused-argument
+        """Dummy decorator to replace `numba.jit` when Numba is not present"""
+        def decorator(func):
+            """Decorator that smply returns the function being decorated"""
+            return func
+        return decorator
+else:
+    NUMBA_AVAIL = True
 import numpy as np
 import pyfits
+from scipy.optimize import brentq
 from scipy.special import gammaln
-
-from pisa.utils.hash import hash_obj
 
 
 __all__ = [
@@ -24,6 +46,7 @@ __all__ = [
     'DFLT_SPE_RECO_NAME', 'IC_RAW_TABLE_FNAME_PROTO',
     'DC_RAW_TABLE_FNAME_PROTO', 'IC_TABLE_FNAME_PROTO', 'DC_TABLE_FNAME_PROTO',
     'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO', 'TDI_TABLE_FNAME_RE',
+    'NUMBA_AVAIL',
 
     # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -45,12 +68,12 @@ __all__ = [
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
-    'hypo_to_track_params', 'powerspace', 'bin_edges_to_binspec',
+    'hypo_to_track_params', 'powerspace', 'infer_power', 'test_infer_power', 'bin_edges_to_binspec',
     'linear_bin_centers', 'poisson_llh', 'spacetime_separation',
     'generate_anisotropy_str', 'generate_geom_meta',
     'generate_unique_ids', 'spherical_volume', 'sph2cart',
     'get_primary_interaction_str', 'get_primary_interaction_tex',
-    'force_little_endian',
+    'force_little_endian', 'hash_obj'
 ]
 
 
@@ -451,6 +474,53 @@ def powerspace(start, stop, num, power):
     return bin_edges
 
 
+_inv_power_2nd_diff = lambda power, edges: np.diff(edges**(1/power), n=2)
+
+
+def infer_power(edges):
+    """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
+    first_three_edges = edges[:3]
+    atol = 1e-15
+    rtol = 4*np.finfo(np.float).eps
+    power = None
+    try:
+        power = brentq(
+            f=_inv_power_2nd_diff,
+            a=1, b=100,
+            maxiter=1000, xtol=atol, rtol=rtol,
+            args=(first_three_edges,)
+        )
+    except RuntimeError:
+        raise ValueError('Edges do not appear to be power-spaced'
+                         ' (optimizer did not converge)')
+    diff = _inv_power_2nd_diff(power, edges)
+    if not np.allclose(diff, diff[0], atol=1000*atol, rtol=10*rtol):
+        raise ValueError('Edges do not appear to be power-spaced'
+                         ' (power found does not hold for all edges)\n%s'
+                         % str(diff))
+    return power
+
+
+def test_infer_power():
+    """Unit test for function `infer_power`"""
+    ref_powers = np.arange(1, 10, 0.001)
+    total_time = 0.0
+    for ref_power in ref_powers:
+        edges = powerspace(start=0, stop=400, num=201, power=ref_power)
+        try:
+            t0 = time()
+            inferred_power = infer_power(edges)
+            t1 = time()
+        except ValueError:
+            print(ref_power, edges)
+            raise
+        assert np.isclose(inferred_power, ref_power,
+                          atol=1e-14, rtol=4*np.finfo(np.float).eps), ref_power
+        total_time += t1 - t0
+    print('Average time to infer power: {} s'.format(total_time/len(ref_powers)))
+    print('<< PASS : test_infer_power >>')
+
+
 def bin_edges_to_binspec(edges):
     """Convert bin edges to a binning specification (start, stop, and num_bins).
 
@@ -479,7 +549,7 @@ def bin_edges_to_binspec(edges):
     return start, stop, num_bins
 
 
-@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def linear_bin_centers(bin_edges):
     """Return bin centers for bins defined in a linear space.
 
@@ -645,7 +715,7 @@ def generate_unique_ids(events):
     return uids
 
 
-@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def spherical_volume(rmin, rmax, dcostheta, dphi):
     """Find volume of a finite element defined in spherical coordinates.
 
@@ -673,7 +743,7 @@ def spherical_volume(rmin, rmax, dcostheta, dphi):
     return -dcostheta * (rmax**3 - rmin**3) * dphi / 3
 
 
-@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def sph2cart(r, theta, phi, x, y, z):
     """Convert spherical coordinates to Cartesian.
 
@@ -703,7 +773,7 @@ def sph2cart(r, theta, phi, x, y, z):
         z_flat[idx] = rf * math.cos(thetaf)
 
 
-@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def pol2cart(r, theta, x, y):
     """Convert plane polar (r, theta) to Cartesian (x, y) Coordinates.
 
@@ -728,7 +798,7 @@ def pol2cart(r, theta, x, y):
         y_flat[idx] = rf * math.sin(tf)
 
 
-@numba.jit(**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def cart2pol(x, y, r, theta):
     """Convert plane Cartesian (x, y) to plane polar (r, theta) Coordinates.
 
@@ -753,7 +823,7 @@ def cart2pol(x, y, r, theta):
         theta_flat[idx] = math.atan2(yfi, xfi)
 
 
-#@numba.jit(nopython=True, nogil=True, cache=True, parallel=True)
+#@numba_jit(nopython=True, nogil=True, cache=True, parallel=True)
 #def sph2cart(r, theta, phi):
 #    """Convert spherical coordinates to Cartesian.
 #
@@ -856,3 +926,90 @@ def force_little_endian(x):
     if x.dtype.byteorder == '>':
         x = x.byteswap().newbyteorder()
     return x
+
+
+def hash_obj(obj, prec=None, fmt='hex'):
+    """Hash an object (recursively), sorting dict keys first and (optionally)
+    rounding floating point values to ensure consistency between invocations on
+    effectively-equivalent objects.
+
+    Parameters
+    ----------
+    obj
+        Object to hash
+
+    prec : None, np.float32, or np.float64
+        Precision to enforce on numeric values
+
+    fmt : string, one of {'int', 'hex', 'base64'}
+        Format to use for hash
+
+    Returns
+    -------
+    hash_val : int or string
+        Hash value, where type is determined by `fmt`
+
+    """
+    if isinstance(obj, Mapping):
+        hashable = []
+        for key in sorted(obj.keys()):
+            hashable.append((key, hash_obj(obj[key], prec=prec)))
+        hashable = pickle.dumps(hashable)
+    elif isinstance(obj, np.ndarray):
+        if prec is not None:
+            obj = obj.astype(prec)
+        hashable = obj.tobytes()
+    elif isinstance(obj, Number):
+        if prec is not None:
+            obj = prec(obj)
+        hashable = obj
+    elif isinstance(obj, basestring):
+        hashable = obj
+    elif isinstance(obj, Iterable):
+        hashable = tuple(hash_obj(x, prec=prec) for x in obj)
+    else:
+        raise ValueError('key "{}" has value "{}" of unhandled type {}'
+                         .format(key, value, type(value)))
+
+    if not isinstance(hashable, basestring):
+        hashable = pickle.dumps(hashable, pickle.HIGHEST_PROTOCOL)
+
+    md5hash = hashlib.md5(hashable)
+    if fmt == 'hex':
+        hash_val = md5hash.hexdigest()#[:16]
+    elif fmt == 'int':
+        hash_val, = struct.unpack('<q', md5hash.digest()[:8])
+    elif fmt == 'base64':
+        hash_val = base64.b64encode(md5hash.digest()[:8], '+-')
+    else:
+        raise ValueError('Unrecognized `fmt`: "%s"' % fmt)
+
+    return hash_val
+
+
+def test_hash_obj():
+    obj = {'x': {'one': {1:[1, 2, {1:1, 2:2}], 2:2}, 'two': 2}, 'y': {1:1, 2:2}}
+    print('base64:', hash_obj(obj, fmt='base64'))
+    print('int   :', hash_obj(obj, fmt='int'))
+    print('hex   :', hash_obj(obj, fmt='hex'))
+    obj = {
+        'r_binning_kw': {'n_bins': 200, 'max': 400, 'power': 2, 'min': 0},
+        't_binning_kw': {'n_bins': 300, 'max': 3000, 'min': 0},
+        'costhetadir_binning_kw': {'n_bins': 40, 'max': 1, 'min': -1},
+        'costheta_binning_kw': {'n_bins': 40, 'max': 1, 'min': -1},
+        'deltaphidir_binning_kw': {'n_bins': 80, 'max': 3.141592653589793,
+                                   'min': -3.141592653589793},
+        'tray_kw_to_hash': {'DisableTilt': True, 'PhotonPrescale': 1,
+                            'IceModel': 'spice_mie',
+                            'Zenith': 3.141592653589793, 'NEvents': 1,
+                            'Azimuth': 0.0, 'Sensor': 'none',
+                            'PhotonSource': 'retro'}
+    }
+    print('hex   :', hash_obj(obj, fmt='hex'))
+    obj['r_binning_kw']['n_bins'] = 201
+    print('hex   :', hash_obj(obj, fmt='hex'))
+
+
+if __name__ == '__main__':
+    test_infer_power()
+    test_hash_obj()
