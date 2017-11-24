@@ -4,12 +4,14 @@
 Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
 """
 
-#===============================================================================
-# TODO: put all options and config data together into a single hash that can
-# uniquely identify a _set_ of tables (i.e. leave off DOM depth idx in the hash
-# but include the entire set of geometry that is referenced).
-#===============================================================================
+
 # TODO: add angular sensitivity model to the values used to produce a hash
+# TODO: command-line option to simply return the metadata for a config to e.g.
+#       extract a hash value one would expect from the given params
+# TODO: include detector geometry (probably original full detector geom...) in
+#       hash value
+# TODO: does x and y coordinate make a difference if we turn ice tilt on? if
+#       so, we should be able to specify (str,om) coordinate for simulation
 
 
 from __future__ import absolute_import, division, print_function
@@ -30,7 +32,11 @@ from I3Tray import I3Tray # pylint: disable=import-error
 
 if __name__ == '__main__' and __package__ is None:
     os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from retro import hash_obj
+from retro import CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_METANAME_PROTO
+from retro import generate_geom_meta, hash_obj
+
+
+__all__ = ['generate_clsim_table_meta', 'generate_clsim_table', 'parse_args']
 
 
 IC_AVG_Z = [
@@ -78,6 +84,46 @@ DC_AVG_Z = [
     -467.58000401088168, -474.58857509068082, -481.59286063058033,
     -488.5999973842076, -495.57714407784596, -502.65428379603793
 ]
+
+
+def generate_clsim_table_meta(r_binning_kw, t_binning_kw, costheta_binning_kw,
+                              costhetadir_binning_kw, deltaphidir_binning_kw,
+                              tray_kw_to_hash):
+    """
+    Returns
+    -------
+    hashval : string
+        8 hex characters indicating hash value for the table
+
+    metaname : string
+        Filename for file that will contain the complete metadata used to
+        define this set of tables
+
+    """
+    linear_binning_keys = sorted(['min', 'max', 'n_bins'])
+    power_binning_keys = sorted(['min', 'max', 'power', 'n_bins'])
+    for binning_kw in [t_binning_kw, costheta_binning_kw,
+                       costhetadir_binning_kw, deltaphidir_binning_kw]:
+        assert sorted(binning_kw.keys()) == linear_binning_keys
+    assert sorted(r_binning_kw.keys()) == power_binning_keys
+
+    tray_keys = sorted(['PhotonSource', 'Zenith', 'Azimuth', 'NEvents',
+                        'IceModel', 'DisableTilt', 'PhotonPrescale', 'Sensor'])
+    assert sorted(tray_kw_to_hash.keys()) == tray_keys
+
+    hashable_params = dict(
+        r_binning_kw=r_binning_kw,
+        t_binning_kw=t_binning_kw,
+        costheta_binning_kw=costheta_binning_kw,
+        costhetadir_binning_kw=costhetadir_binning_kw,
+        deltaphidir_binning_kw=deltaphidir_binning_kw,
+        tray_kw_to_hash=tray_kw_to_hash
+    )
+
+    hashval = hash_obj(hashable_params, fmt='hex')[:8]
+    metaname = CLSIM_TABLE_METANAME_PROTO.format(hashval)
+
+    return hashval, metaname
 
 
 def parse_args(description=__doc__):
@@ -145,6 +191,10 @@ def parse_args(description=__doc__):
         '--n-deltaphidir-bins', type=int, default=40,
         help='Number of deltaphidir bins (default: 20)'
     )
+    parser.add_argument(
+        '--overwrite', action='store_true',
+        help='Overwrite if the table already exists'
+    )
 
     return parser.parse_args()
 
@@ -154,7 +204,8 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
                          n_costheta_bins,
                          t_min, t_max, n_t_bins,
                          n_costhetadir_bins,
-                         n_deltaphidir_bins):
+                         n_deltaphidir_bins,
+                         overwrite=False):
     outdir = os.path.expanduser(os.path.expandvars(outdir))
     if not os.path.isdir(outdir):
         os.makedirs(outdir)
@@ -223,6 +274,13 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
         PhotonSource='retro',
         Zenith=180 * I3Units.degree, # orientation of source
         Azimuth=0 * I3Units.degree, # orientation of source
+        # Number of events will affect the tables, but n=999 and n=1000 will be
+        # very similar (and not statistically independent if the seed is the
+        # same). But a user is likely to want to test out same settings but
+        # different statistics, so thesesets need different hashes (unless we
+        # want the user to also specify the nevts when identifying a set...)
+        # Therefore, this is included in the hash to indicate a common set of
+        # tables
         NEvents=nevts,
         IceModel='spice_mie',
         DisableTilt=True,
@@ -239,32 +297,38 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
         tray_kw_to_hash=tray_kw_to_hash
     )
 
-    hash_val = hash_obj(hashable_params, fmt='hex')[:8]
-    filename = ('clsim_table__set_{}__{}__depth_{}__seed_{}.fits'
-                .format(hash_val, subdet, depth_idx, seed))
+    hashval, metaname = generate_clsim_table_meta(**hashable_params)
+    metapath = os.path.join(outdir, metaname)
+
+    filename = CLSIM_TABLE_FNAME_PROTO.format(hashval=hashval, string=subdet,
+                                              depth_idx=depth_idx, seed=seed)
     filepath = os.path.join(outdir, filename)
 
-    metaname = 'clsim_table__set_{}__params.json'.format(hash_val)
-    metapath = os.path.join(outdir, metaname)
-    if os.path.isfile(filepath):
-        if overwrite:
-            print('WARNING! Overwriting table metadata file at "{}"'
-                  .format(metapath))
-        else:
-            raise ValueError(
-                'Table metadata file already exists at "{}",'
-                ' assuming table already generated or in process; not'
-                ' overwriting.'.format(metapath)
-            )
+    #if os.path.isfile(metapath):
+    #    if overwrite:
+    #        print('WARNING! Overwriting table metadata file at "{}"'
+    #              .format(metapath))
+    #    else:
+    #        raise ValueError(
+    #            'Table metadata file already exists at "{}",'
+    #            ' assuming table already generated or in process; not'
+    #            ' overwriting.'.format(metapath)
+    #        )
     json.dump(hashable_params, file(metapath, 'w'), sort_keys=True, indent=4)
+
+    print('='*80)
+    print('Metadata for the table set was written to\n  "{}"'.format(metapath))
+    print('Table will be written to\n  "{}"'.format(filepath))
+    print('='*80)
 
     if os.path.isfile(filepath):
         if overwrite:
-            print('WARNING! Overwriting table at "{}"'.format(filepath))
+            print('WARNING! Deleting existing table at "{}"'.format(filepath))
             os.remove(filepath)
         else:
-            raise ValueError('Table already exists at "{}"! Not overwriting.'
+            raise ValueError('Table already exists at "{}"; not overwriting.'
                              .format(filepath))
+    print('')
 
     tray_kw_other = dict(
         # Note that hash includes the parameters used to construct the axes

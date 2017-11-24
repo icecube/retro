@@ -43,10 +43,11 @@ from scipy.special import gammaln
 __all__ = [
     # Defaults
     'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
-    'DFLT_SPE_RECO_NAME', 'IC_RAW_TABLE_FNAME_PROTO',
-    'DC_RAW_TABLE_FNAME_PROTO', 'IC_TABLE_FNAME_PROTO', 'DC_TABLE_FNAME_PROTO',
-    'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO', 'TDI_TABLE_FNAME_RE',
-    'NUMBA_AVAIL',
+    'DFLT_SPE_RECO_NAME', 'CLSIM_TABLE_FNAME_PROTO',
+    'IC_RAW_TABLE_FNAME_PROTO', 'DC_RAW_TABLE_FNAME_PROTO',
+    'IC_TABLE_FNAME_PROTO', 'DC_TABLE_FNAME_PROTO', 'GEOM_FILE_PROTO',
+    'GEOM_META_PROTO', 'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO',
+    'TDI_TABLE_FNAME_RE', 'NUMBA_AVAIL',
 
     # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -73,7 +74,7 @@ __all__ = [
     'generate_anisotropy_str', 'generate_geom_meta',
     'generate_unique_ids', 'spherical_volume', 'sph2cart',
     'get_primary_interaction_str', 'get_primary_interaction_tex',
-    'force_little_endian', 'hash_obj'
+    'force_little_endian', 'hash_obj', 'get_file_md5'
 ]
 
 
@@ -91,6 +92,15 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
+CLSIM_TABLE_FNAME_PROTO = 'clsim_table_set_{hashval:s}_string_{string}_depth_{depth_idx:d}_seed_{seed}.fits'
+"""String template for CLSim ("raw") retro tables. Note that `string` can
+either be a specific string number OR either "ic" or "dc" indicating a generic
+DOM of one of these two types located at the center of the detector, where z location is averaged over all DOMs. `seed` can
+either be an integer or a human-readable range (e.g. "0-9" for a table that
+combines toegether seeds, 0, 1, ..., 9)"""
+
+CLSIM_TABLE_METANAME_PROTO = 'clsim_table_set_{}_meta.json'
+
 IC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}.fits'
 """String template for IceCube single-DOM raw retro tables"""
 
@@ -102,6 +112,13 @@ IC_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}_r_cz_t_angles.fits'
 
 DC_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}_r_cz_t_angles.fits'
 """String template for DeepCore single-DOM final-level retro tables"""
+
+GEOM_FILE_PROTO = 'geom_{hash:s}.npy'
+"""File containing detector geometry as a Numpy 5D array with coordinates
+(string, om, x, y, z)"""
+
+GEOM_META_PROTO = 'geom_{hash:s}_meta.json'
+"""File containing metadata about source of detector geometry"""
 
 DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
@@ -691,7 +708,7 @@ def generate_geom_meta(geom):
     assert len(geom.shape) == 3
     assert geom.shape[2] == 3
     rounded_ints = np.round(geom * 100).astype(np.int)
-    geom_hash = hash_obj(rounded_ints, hash_to='hex', full_hash=True)
+    geom_hash = hash_obj(rounded_ints, fmt='hex')[:8]
     return OrderedDict([('hash', geom_hash)])
 
 
@@ -1008,6 +1025,35 @@ def test_hash_obj():
     print('hex   :', hash_obj(obj, fmt='hex'))
     obj['r_binning_kw']['n_bins'] = 201
     print('hex   :', hash_obj(obj, fmt='hex'))
+
+
+def get_file_md5(fpath, blocksize=2**20):
+    """Get a file's MD5 checksum.
+
+    Code from stackoverflow.com/a/1131255
+
+    Parameters
+    ----------
+    fpath : string
+        Path to file
+
+    blocksize : int
+        Read file in chunks of this many bytes
+
+    Returns
+    -------
+    md5sum : string
+        32-characters representing hex MD5 checksum
+
+    """
+    md5 = hashlib.md5()
+    with open(fpath, 'rb') as f:
+        while True:
+            buf = f.read(blocksize)
+            if not buf:
+                break
+            md5.update(buf)
+    return md5.hexdigest()
 
 
 if __name__ == '__main__':
