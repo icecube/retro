@@ -16,6 +16,10 @@ import re
 import struct
 from time import time
 
+import numpy as np
+import pyfits
+from scipy.optimize import brentq
+from scipy.special import gammaln
 
 NUMBA_AVAIL = False
 def dummy_func(x):
@@ -34,10 +38,6 @@ except Exception:
         return decorator
 else:
     NUMBA_AVAIL = True
-import numpy as np
-import pyfits
-from scipy.optimize import brentq
-from scipy.special import gammaln
 
 
 __all__ = [
@@ -69,13 +69,28 @@ __all__ = [
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
-    'hypo_to_track_params', 'powerspace', 'infer_power', 'test_infer_power', 'bin_edges_to_binspec',
-    'linear_bin_centers', 'poisson_llh', 'spacetime_separation',
-    'generate_anisotropy_str', 'generate_geom_meta',
-    'generate_unique_ids', 'spherical_volume', 'sph2cart',
-    'get_primary_interaction_str', 'get_primary_interaction_tex',
+    'hypo_to_track_params', 'powerspace', 'inv_power_2nd_diff', 'infer_power',
+    'test_infer_power', 'bin_edges_to_binspec', 'linear_bin_centers',
+    'poisson_llh', 'spacetime_separation', 'generate_anisotropy_str',
+    'generate_geom_meta', 'generate_unique_ids', 'spherical_volume',
+    'sph2cart', 'get_primary_interaction_str', 'get_primary_interaction_tex',
     'force_little_endian', 'hash_obj', 'get_file_md5'
 ]
+
+__author__ = 'J.L. Lanfranchi'
+__license__ = '''Copyright 2017 The IceCube Collaboration
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
 
 
 # -- Default choices we've made -- #
@@ -95,9 +110,10 @@ DFLT_SPE_RECO_NAME = 'SPEFit2'
 CLSIM_TABLE_FNAME_PROTO = 'clsim_table_set_{hashval:s}_string_{string}_depth_{depth_idx:d}_seed_{seed}.fits'
 """String template for CLSim ("raw") retro tables. Note that `string` can
 either be a specific string number OR either "ic" or "dc" indicating a generic
-DOM of one of these two types located at the center of the detector, where z location is averaged over all DOMs. `seed` can
-either be an integer or a human-readable range (e.g. "0-9" for a table that
-combines toegether seeds, 0, 1, ..., 9)"""
+DOM of one of these two types located at the center of the detector, where z
+location is averaged over all DOMs. `seed` can either be an integer or a
+human-readable range (e.g. "0-9" for a table that combines toegether seeds, 0,
+1, ..., 9)"""
 
 CLSIM_TABLE_METANAME_PROTO = 'clsim_table_set_{}_meta.json'
 
@@ -175,19 +191,24 @@ HypoParams8D = namedtuple( # pylint: disable=invalid-name
     field_names=('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
                  'track_energy', 'cascade_energy')
 )
-"""Hypothesis in 8 dimensions (parameters)"""
+"""Hypothesis in 8 dimensions (parameters). Units are: t/ns, {x,y,z}/m,
+{track_zenith,track_azimuth}/rad, {track_energy,cascade_energy}/GeV"""
 
 HypoParams10D = namedtuple( # pylint: disable=invalid-name
     typename='HypoParams10D',
     field_names=(HypoParams8D._fields + ('cascade_zenith', 'cascade_azimuth'))
 )
-"""Hypothesis in 10 dimensions (parameters)"""
+"""Hypothesis in 10 dimensions (parameters). Units are: t/ns, {x,y,z}/m,
+{track_zenith,track_azimuth}/rad, {track_energy,cascade_energy}/GeV,
+{cascade_zenith,cascade_azimuth}/rad"""
 
 TrackParams = namedtuple( # pylint: disable=invalid-name
     typename='TrackParams',
-    field_names=('t', 'x', 'y', 'z', 'zenith', 'azimuth', 'energy')
+    field_names=('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
+                 'track_energy')
 )
-"""Hypothesis for just the track (7 dimensions / parameters)"""
+"""Hypothesis for just the track (7 dimensions / parameters). Units are: t/ns,
+{x,y,z}/m, {track_zenith,track_azimuth}/rad, track_energy/GeV"""
 
 Event = namedtuple( # pylint: disable=invalid-name
     typename='Event',
@@ -491,7 +512,9 @@ def powerspace(start, stop, num, power):
     return bin_edges
 
 
-_inv_power_2nd_diff = lambda power, edges: np.diff(edges**(1/power), n=2)
+def inv_power_2nd_diff(power, edges):
+    """Second finite difference of edges**(1/power)"""
+    return np.diff(edges**(1/power), n=2)
 
 
 def infer_power(edges):
@@ -502,7 +525,7 @@ def infer_power(edges):
     power = None
     try:
         power = brentq(
-            f=_inv_power_2nd_diff,
+            f=inv_power_2nd_diff,
             a=1, b=100,
             maxiter=1000, xtol=atol, rtol=rtol,
             args=(first_three_edges,)
@@ -510,7 +533,7 @@ def infer_power(edges):
     except RuntimeError:
         raise ValueError('Edges do not appear to be power-spaced'
                          ' (optimizer did not converge)')
-    diff = _inv_power_2nd_diff(power, edges)
+    diff = inv_power_2nd_diff(power, edges)
     if not np.allclose(diff, diff[0], atol=1000*atol, rtol=10*rtol):
         raise ValueError('Edges do not appear to be power-spaced'
                          ' (power found does not hold for all edges)\n%s'
@@ -534,7 +557,8 @@ def test_infer_power():
         assert np.isclose(inferred_power, ref_power,
                           atol=1e-14, rtol=4*np.finfo(np.float).eps), ref_power
         total_time += t1 - t0
-    print('Average time to infer power: {} s'.format(total_time/len(ref_powers)))
+    print('Average time to infer power: {} s'
+          .format(total_time/len(ref_powers)))
     print('<< PASS : test_infer_power >>')
 
 
@@ -985,8 +1009,8 @@ def hash_obj(obj, prec=None, fmt='hex'):
     elif isinstance(obj, Iterable):
         hashable = tuple(hash_obj(x, prec=prec) for x in obj)
     else:
-        raise ValueError('key "{}" has value "{}" of unhandled type {}'
-                         .format(key, value, type(value)))
+        raise ValueError('`obj`="{}" is unhandled type {}'
+                         .format(obj, type(obj)))
 
     if not isinstance(hashable, basestring):
         hashable = pickle.dumps(hashable, pickle.HIGHEST_PROTOCOL)
@@ -1005,6 +1029,7 @@ def hash_obj(obj, prec=None, fmt='hex'):
 
 
 def test_hash_obj():
+    """Unit tests for `hash_obj` function"""
     obj = {'x': {'one': {1:[1, 2, {1:1, 2:2}], 2:2}, 'two': 2}, 'y': {1:1, 2:2}}
     print('base64:', hash_obj(obj, fmt='base64'))
     print('int   :', hash_obj(obj, fmt='int'))

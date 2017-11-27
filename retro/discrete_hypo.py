@@ -13,7 +13,23 @@ import numpy as np
 
 __all__ = ['DiscreteHypo']
 
+__author__ = 'J.L. Lanfranchi'
+__license__ = '''Copyright 2017 The IceCube Collaboration
 
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
+# TODO: use or get rid of limits?
 class DiscreteHypo(object):
     """Discretely-sampled event hypothesis.
 
@@ -28,7 +44,7 @@ class DiscreteHypo(object):
         kernels) in `kernel_kwargs`, and will be passed via **kwargs to the
         respective kernel function.
 
-    kernel_kwargs : None, dict, or iterable thereof the same length as `hypo_kernels`
+    kernel_kwargs : None, dict, or iterable thereof (len == len(`hypo_kernels`)
         Each dict contains keyword arguments to pass on to the respective
         kernel via **kwargs. An item in the iterable can be None for a kernel
         function that takes no additional kwargs.
@@ -66,7 +82,6 @@ class DiscreteHypo(object):
         self.hypo_kernels = hypo_kernels
         self.kernel_kwargs = kernel_kwargs
         self.limits = limits
-        self.kernels_and_kwargs = zip(self.hypo_kernels, self.kernel_kwargs)
 
     def get_pinfo_gen(self, hypo_params):
         """Evaluate the discrete hypothesis (all hypo kernels) given particular
@@ -74,7 +89,10 @@ class DiscreteHypo(object):
 
         Parameters
         ----------
-        hypo_params : HypoParams8D or HypoParams10D
+        hypo_params : HYPO_PARAMS_T
+            This is a module-level constant defined in ``__init__.py``, e.g.
+            retro.HypoParams8D. See docstring on the `HYPO_PARAMS_T` defined
+            for the specification of `hypo_params` including units.
 
         Returns
         -------
@@ -83,7 +101,7 @@ class DiscreteHypo(object):
 
         """
         pinfo_gen_arrays = []
-        for kernel, kwargs in self.kernels_and_kwargs:
+        for kernel, kwargs in zip(self.hypo_kernels, self.kernel_kwargs):
             pinfo_gen_arrays.append(kernel(hypo_params, **kwargs))
         pinfo_gen = np.concatenate(pinfo_gen_arrays, axis=0)
         return pinfo_gen
