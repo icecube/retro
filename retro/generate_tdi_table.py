@@ -34,31 +34,49 @@ any of the voxel(s) of this table.
 
 from __future__ import absolute_import, division, print_function
 
+
+__all__ = ['generate_tdi_table_meta', 'generate_tdi_table', 'parse_args']
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
-import os
 from os.path import abspath, dirname, isdir, isfile, join
+import sys
 import time
 
 import numpy as np
 import pyfits
 
-from pisa.utils.hash import hash_obj
+# TODO: remove PISA dependencies
 from pisa.utils.format import hrlist2list, list2hrlist
-from pisa.utils.timing import timediffstamp
 
-os.sys.path.append(dirname(dirname(abspath('__file__'))))
+if __name__ == '__main__' and __package__ is None:
+    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
 from retro import (TDI_TABLE_FNAME_PROTO, IC_DOM_QUANT_EFF,
                    DC_DOM_QUANT_EFF, POL_TABLE_NRBINS, POL_TABLE_NTBINS,
                    POL_TABLE_NTHETABINS, POL_TABLE_RMAX, POL_TABLE_RPWR)
-from retro import generate_anisotropy_str, generate_geom_meta
+from retro import generate_anisotropy_str, generate_geom_meta, hash_obj
 from retro.generate_binmap import generate_binmap
 from retro.shift_and_bin import shift_and_bin
 from retro.table_readers import load_t_r_theta_table
-
-
-__all__ = ['generate_tdi_table_meta', 'generate_tdi_table', 'parse_args']
 
 
 def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
@@ -124,7 +142,7 @@ def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         hash_params[param] = rounded_int
         kwargs[param] = float(rounded_int) / 10000
     hash_params['binwidth'] = int(np.round(hash_params['binwidth'] * 1e10))
-    tdi_hash = hash_obj(hash_params, hash_to='hex', full_hash=True)
+    tdi_hash = hash_obj(hash_params, fmt='hex')
 
     anisotropy_str = generate_anisotropy_str(anisotropy)
     fname = TDI_TABLE_FNAME_PROTO.format(
@@ -393,7 +411,8 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
                 exponent=exponent
             )
             t1 = time.time()
-            print('    Time to load Retro DOM table:', timediffstamp(t1 - t0))
+            print('    Time to load Retro DOM table: {} s'
+                  .format(np.round(t1 - t0, 3)))
 
             sp = photon_info.survival_prob[depth_idx].astype(np.float64)
             plength = photon_info.length[depth_idx].astype(np.float64)
@@ -422,8 +441,8 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             )
 
             t2 = time.time()
-            print("    Time to reduce Retro DOM table's time dimension:",
-                  timediffstamp(t2 - t1))
+            print("    Time to reduce Retro DOM table's time dimension: {} s"
+                  .format(np.round(t2 - t1, 3)))
 
             shift_and_bin(
                 ind_arrays=ind_arrays,
@@ -453,10 +472,11 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             print('    %d surv probs are exactly 1'
                   % np.sum(binned_one_minus_sp == 0))
             t3 = time.time()
-            print('    Time to shift and bin:', timediffstamp(t3 - t2))
+            print('    Time to shift and bin: {} s'
+                  .format(np.round(t3 - t2, 3)))
             print('')
 
-    print('Total time to shift and bin:', timediffstamp(t3 - t00))
+    print('Total time to shift and bin: {} s'.format(np.round(t3 - t00, 3)))
     print('')
 
     binned_sp = 1.0 - binned_one_minus_sp
@@ -476,7 +496,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     del binned_px_spv, binned_py_spv, binned_pz_spv
 
     t4 = time.time()
-    print('Time to normalize histograms:', timediffstamp(t4 - t3))
+    print('Time to normalize histograms: {} s'.format(np.round(t4 - t3, 3)))
     print('')
 
     arrays_names = [
@@ -497,10 +517,10 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         print('Saving %s to file\n%s\n' % (name, fpath))
         hdulist.writeto(fpath, clobber=True)
     t5 = time.time()
-    print('Time to save tables to disk:', timediffstamp(t5 - t4))
+    print('Time to save tables to disk: {} s'.format(np.round(t5 - t4, 3)))
     print('')
 
-    print('TOTAL RUN TIME:', timediffstamp(t5 - t00))
+    print('TOTAL RUN TIME: {} s'.format(np.round(t5 - t00, 3)))
 
     tdi_data = OrderedDict([
         ('binned_sp', binned_sp),

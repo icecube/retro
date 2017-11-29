@@ -8,21 +8,39 @@ file and accessing them in a consistent manner.
 
 from __future__ import absolute_import, division, print_function
 
-import os
+
+__all__ = ['Events']
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
 from os.path import abspath, basename, dirname
+import sys
 
 import h5py
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    os.sys.path.append(dirname(dirname(abspath(__file__))))
+    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
 from retro import DFLT_PULSE_SERIES, DFLT_ML_RECO_NAME, DFLT_SPE_RECO_NAME
 from retro import Event, Pulses
 from retro import expand, generate_unique_ids
 from retro.particles import ParticleArray
-
-
-__all__ = ['Events']
 
 
 class Events(object):

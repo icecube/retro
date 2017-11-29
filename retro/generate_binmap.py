@@ -8,8 +8,26 @@ Functions for mapping spherical bins to Cartesian bins.
 
 from __future__ import absolute_import, division, print_function
 
+
+__all__ = ['generate_binmap_meta', 'generate_binmap']
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
 from collections import OrderedDict
-import os
 from os.path import abspath, dirname, isdir, isfile, join
 import cPickle as pickle
 import sys
@@ -17,15 +35,13 @@ import time
 
 import numpy as np
 
-from pisa.utils.hash import hash_obj
-from pisa.utils.timing import timediffstamp
-
-os.sys.path.append(dirname(dirname(abspath('__file__'))))
+if __name__ == '__main__' and __package__ is None:
+    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
+from retro import hash_obj
 from retro import powerspace, spherical_volume
 from retro.sphbin2cartbin import sphbin2cartbin
-
-
-__all__ = ['generate_binmap_meta', 'generate_binmap']
 
 
 # TODO: does anisotropy need to be considered in the functions defined here?
@@ -81,7 +97,7 @@ def generate_binmap_meta(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
         ('antialias', antialias)
     ])
 
-    binmap_hash = hash_obj(kwargs, hash_to='hex', full_hash=True)
+    binmap_hash = hash_obj(kwargs, fmt='hex')
 
     print('kwargs:', kwargs)
 
@@ -170,7 +186,8 @@ def generate_binmap(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
         ind_arrays = data['ind_arrays']
         vol_arrays = data['vol_arrays']
         t1 = time.time()
-        print('  Time to load bin mapping from pickle:', timediffstamp(t1 - t0))
+        print('  Time to load bin mapping from pickle: {} ms'
+              .format(np.round((t1 - t0)*1000, 3)))
 
     else:
         sys.stdout.write('  Computing bin mapping...\n')
@@ -179,7 +196,8 @@ def generate_binmap(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
         t0 = time.time()
         ind_arrays, vol_arrays = sphbin2cartbin(**meta['kwargs'])
         t1 = time.time()
-        print('    Time to compute bin mapping:', timediffstamp(t1 - t0))
+        print('    Time to compute bin mapping: {} ms'
+              .format(np.round((t1 - t0)*1000, 3)))
 
         print('  Writing bin mapping to pickle file\n  "%s"' % fpath)
         data = OrderedDict([
@@ -189,7 +207,9 @@ def generate_binmap(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
         ])
         pickle.dump(data, file(fpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
         t2 = time.time()
-        print('    Time to pickle bin mapping:', timediffstamp(t2 - t1))
+        print('    Time to pickle bin mapping: {} ms'
+              .format(np.round((t2 - t1)*1000, 3)))
+
     print('')
 
     binned_vol = np.sum([va.sum() for va in vol_arrays])

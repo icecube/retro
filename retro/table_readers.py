@@ -8,21 +8,43 @@ Classes for reading and getting info from Retro tables.
 
 from __future__ import absolute_import, division, print_function
 
+
+__all__ = ['load_t_r_theta_table', 'pexp_t_r_theta', 'pexp_xyz',
+           'DOMTimePolarTables', 'TDICartTable']
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
 from copy import deepcopy
 from glob import glob
-import os
+from os import makedirs, remove
 from os.path import abspath, basename, dirname, isdir, isfile, join
+import sys
 import time
 
 import numba
 import numpy as np
 import pyfits
 
-from pisa.utils.format import hrlist2list, timediff
+from pisa.utils.format import hrlist2list
 
 if __name__ == '__main__' and __package__ is None:
-    os.sys.path.append(dirname(dirname(abspath(__file__))))
-
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
 from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
                    DC_RAW_TABLE_FNAME_PROTO, IC_RAW_TABLE_FNAME_PROTO,
                    DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
@@ -35,10 +57,6 @@ from retro import RetroPhotonInfo, TimeSphCoord
 from retro import (expand, force_little_endian, generate_anisotropy_str,
                    linear_bin_centers)
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
-
-
-__all__ = ['load_t_r_theta_table', 'pexp_t_r_theta', 'pexp_xyz',
-           'DOMTimePolarTables', 'TDICartTable']
 
 
 def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
@@ -390,12 +408,12 @@ class DOMRawTable(object):
         new_fpath = join(dest_dir, new_fname)
 
         if not isdir(dest_dir):
-            os.makedirs(dest_dir)
+            makedirs(dest_dir)
 
         if isfile(new_fpath):
             if overwrite:
                 print('WARNING: overwriting existing file at "%s"' % new_fpath)
-                os.remove(new_fpath)
+                remove(new_fpath)
             else:
                 print('There is an existing file at "%s"; not proceeding.'
                       % new_fpath)
@@ -924,7 +942,7 @@ class TDICartTable(object):
               ' bins are (%.3f m)³'
               % (self.n_tiles, tstr, self.x_min, self.x_max, self.y_min,
                  self.y_max, self.z_min, self.z_max, self.binwidth))
-        print('Time to load: %s' % timediff(time.time() - t0))
+        print('Time to load: {} s'.format(np.round(time.time() - t0, 3)))
 
     def get_photon_expectation(self, pinfo_gen):
         """Get the expectation for photon survival.

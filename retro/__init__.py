@@ -5,40 +5,6 @@ Basic module-wide definitions and simple types (namedtuples).
 
 from __future__ import absolute_import, division, print_function
 
-import base64
-from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
-import cPickle as pickle
-import hashlib
-import math
-from numbers import Number
-from os.path import abspath, dirname, expanduser, expandvars, join
-import re
-import struct
-from time import time
-
-import numpy as np
-import pyfits
-from scipy.optimize import brentq
-from scipy.special import gammaln
-
-NUMBA_AVAIL = False
-def dummy_func(x):
-    """Decorate to to see if Numba actually works"""
-    x += 1
-try:
-    from numba import jit as numba_jit
-    numba_jit(dummy_func)
-except Exception:
-    #logging.debug('Failed to import or use numba', exc_info=True)
-    def numba_jit(*args, **kwargs): # pylint: disable=unused-argument
-        """Dummy decorator to replace `numba.jit` when Numba is not present"""
-        def decorator(func):
-            """Decorator that smply returns the function being decorated"""
-            return func
-        return decorator
-else:
-    NUMBA_AVAIL = True
-
 
 __all__ = [
     # Defaults
@@ -77,8 +43,8 @@ __all__ = [
     'force_little_endian', 'hash_obj', 'get_file_md5'
 ]
 
-__author__ = 'J.L. Lanfranchi'
-__license__ = '''Copyright 2017 The IceCube Collaboration
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -91,6 +57,41 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
+
+
+import base64
+from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
+import cPickle as pickle
+import hashlib
+import math
+from numbers import Number
+from os.path import abspath, dirname, expanduser, expandvars, join
+import re
+import struct
+from time import time
+
+import numpy as np
+import pyfits
+from scipy.optimize import brentq
+from scipy.special import gammaln
+
+NUMBA_AVAIL = False
+def dummy_func(x):
+    """Decorate to to see if Numba actually works"""
+    x += 1
+try:
+    from numba import jit as numba_jit
+    numba_jit(dummy_func)
+except Exception:
+    #logging.debug('Failed to import or use numba', exc_info=True)
+    def numba_jit(*args, **kwargs): # pylint: disable=unused-argument
+        """Dummy decorator to replace `numba.jit` when Numba is not present"""
+        def decorator(func):
+            """Decorator that smply returns the function being decorated"""
+            return func
+        return decorator
+else:
+    NUMBA_AVAIL = True
 
 
 # -- Default choices we've made -- #

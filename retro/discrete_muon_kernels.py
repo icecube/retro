@@ -8,22 +8,11 @@ in discrete_hypo/DiscreteHypo class.
 
 from __future__ import absolute_import, division, print_function
 
-import math
-import os
-from os.path import abspath, dirname
-
-import numpy as np
-
-if __name__ == '__main__' and __package__ is None:
-    os.sys.path.append(dirname(dirname(abspath(__file__))))
-from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-                   TRACK_PHOTONS_PER_M)
-
 
 __all__ = ['ALL_REALS', 'const_energy_loss_muon']
 
-__author__ = 'J.L. Lanfranchi'
-__license__ = '''Copyright 2017 The IceCube Collaboration
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,6 +25,20 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
+
+
+import math
+from os.path import abspath, dirname
+import sys
+
+import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
+from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
+                   TRACK_PHOTONS_PER_M)
 
 
 ALL_REALS = (-np.inf, np.inf)
@@ -99,10 +102,16 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
 
     pinfo_gen = np.empty((n_samples, 8), dtype=np.float64)
     sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
-    pinfo_gen[:, 0] = hypo_params.t + dt
-    pinfo_gen[:, 1] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
-    pinfo_gen[:, 2] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
-    pinfo_gen[:, 3] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 0] = hypo_params.t + sampled_dt
+    pinfo_gen[:, 1] = (
+        hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    )
+    pinfo_gen[:, 2] = (
+        hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    )
+    pinfo_gen[:, 3] = (
+        hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    )
     pinfo_gen[:, 4] = photons_per_segment
     pinfo_gen[:, 5] = dir_x * 0.562
     pinfo_gen[:, 6] = dir_y * 0.562

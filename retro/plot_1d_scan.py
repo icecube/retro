@@ -5,12 +5,32 @@
 Plot likelihood scan results
 """
 
-from __future__ import absolute_import, division
+
+from __future__ import absolute_import, division, print_function
+
+
+__all__ = ['FNAME_TEMPLATE', 'parse_args', 'plot_1d_scan']
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
 
 from argparse import ArgumentParser
 import cPickle as pickle
-import os
 from os.path import abspath, dirname, join
+import sys
 
 import matplotlib as mpl
 mpl.use('Agg')
@@ -18,12 +38,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    os.sys.path.append(dirname(dirname(abspath(__file__))))
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
 from retro import HypoParams8D
 from retro import expand, get_primary_interaction_tex
-
-
-__all__ = ['FNAME_TEMPLATE', 'parse_args', 'plot_1d_scan']
 
 
 FNAME_TEMPLATE = 'scan_results_event_{event}_uid_{uid}_dims_{param}.pkl'

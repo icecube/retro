@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# pylint: disable=invalid-name
+# pylint: disable=wrong-import-position, invalid-name
 """
 Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
 """
@@ -16,8 +16,28 @@ Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
 
 from __future__ import absolute_import, division, print_function
 
+
+__all__ = ['generate_clsim_table_meta', 'generate_clsim_table', 'parse_args']
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller, Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
 from argparse import ArgumentParser
-import os
+from os import makedirs, remove
+from os.path import abspath, dirname, isdir, isfile, join
 import json
 import sys
 
@@ -31,12 +51,11 @@ from icecube.clsim.tablemaker.tabulator import TabulatePhotonsFromSource # pylin
 from I3Tray import I3Tray # pylint: disable=import-error
 
 if __name__ == '__main__' and __package__ is None:
-    os.sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
 from retro import CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_METANAME_PROTO
-from retro import generate_geom_meta, hash_obj
-
-
-__all__ = ['generate_clsim_table_meta', 'generate_clsim_table', 'parse_args']
+from retro import expand, generate_geom_meta, hash_obj
 
 
 IC_AVG_Z = [
@@ -206,9 +225,9 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
                          n_costhetadir_bins,
                          n_deltaphidir_bins,
                          overwrite=False):
-    outdir = os.path.expanduser(os.path.expandvars(outdir))
-    if not os.path.isdir(outdir):
-        os.makedirs(outdir)
+    outdir = expand(outdir)
+    if not isdir(outdir):
+        makedirs(outdir)
 
     n_bins = (n_r_bins * n_costheta_bins * n_t_bins * n_costhetadir_bins
               * n_deltaphidir_bins)
@@ -298,13 +317,13 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
     )
 
     hashval, metaname = generate_clsim_table_meta(**hashable_params)
-    metapath = os.path.join(outdir, metaname)
+    metapath = join(outdir, metaname)
 
     filename = CLSIM_TABLE_FNAME_PROTO.format(hashval=hashval, string=subdet,
                                               depth_idx=depth_idx, seed=seed)
-    filepath = os.path.join(outdir, filename)
+    filepath = join(outdir, filename)
 
-    #if os.path.isfile(metapath):
+    #if isfile(metapath):
     #    if overwrite:
     #        print('WARNING! Overwriting table metadata file at "{}"'
     #              .format(metapath))
@@ -321,10 +340,10 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
     print('Table will be written to\n  "{}"'.format(filepath))
     print('='*80)
 
-    if os.path.isfile(filepath):
+    if isfile(filepath):
         if overwrite:
             print('WARNING! Deleting existing table at "{}"'.format(filepath))
-            os.remove(filepath)
+            remove(filepath)
         else:
             raise ValueError('Table already exists at "{}"; not overwriting.'
                              .format(filepath))

@@ -11,22 +11,41 @@ At the moment, these likelihoods can be single points or 1d or 2d scans.
 
 from __future__ import absolute_import, division, print_function
 
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
 from argparse import ArgumentParser
 from collections import OrderedDict, Sequence
 from copy import deepcopy
 import cPickle as pickle
 from itertools import izip, product
-import os
+from os import makedirs
 from os.path import abspath, dirname, isdir, join
+import sys
 import time
 
 import numba # pylint: disable=unused-import
 import numpy as np
 from pyswarm import pso
-from pisa.utils.timing import timediffstamp
 
 if __name__ == '__main__' and __package__ is None:
-    os.sys.path.append(dirname(dirname(abspath(__file__))))
+    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
 from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS # pylint: disable=unused-import
 from retro import FTYPE, HYPO_PARAMS_T, HypoParams10D
 from retro import DETECTOR_GEOM_FILE
@@ -74,7 +93,7 @@ RESULTS_DIR = (
        '_jitsig%d' % JITTER_SIGMA if NUM_JITTER_SAMPLES > 1 else '')
 )
 if not isdir(RESULTS_DIR):
-    os.makedirs(expand(RESULTS_DIR), mode=0o2777)
+    makedirs(expand(RESULTS_DIR), mode=0o2777)
 
 ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
@@ -514,10 +533,10 @@ def main(events_fpath, tables_dir, geom_file=None, start_index=None,
 
             plot_1d_scan(dir=RESULTS_DIR, event=event.event, uid=event.uid)
             print('')
-            print('Time to scan (%d likelihoods): %s'
-                  % (num_likelihoods, timediffstamp(time_to_scan)))
-            print('Time to scan, dump, and plot:',
-                  timediffstamp(time.time() - t0))
+            print('Time to scan ({:d} likelihoods): {} s'
+                  .format(num_likelihoods, np.round(time_to_scan, 3)))
+            print('Time to scan, dump, and plot: {} s'
+                  .format(np.round(time.time() - t0, 3)))
             print('')
 
 

@@ -1,9 +1,31 @@
-cimport cython
+"""
+Create a mapping from spherical to 3D Cartesian bins, including the area of
+overlap.
+"""
 
-from libc.math cimport ceil, floor, round, sqrt, cos, sin
+
+__author__ = 'J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
+cimport cython
 
 import numpy as np
 cimport numpy as np
+
+from libc.math cimport ceil, floor, round, sqrt, cos, sin
 
 
 @cython.embedsignature(True)
@@ -15,6 +37,9 @@ def sphbin2cartbin(double r_max, double r_power,
                    int n_rbins, int n_costhetabins, int n_phibins,
                    double cart_binwidth, int oversample, int antialias):
     """
+    Create a mapping from spherical to 3D Cartesian bins, including the area of
+    overlap.
+
     Parameters
     ----------
     r_max : double

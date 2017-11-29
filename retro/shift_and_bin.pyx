@@ -4,13 +4,30 @@ theta) tables with time marginalized out) to each DOM location and aggregate
 their quantities (with appropriate weighting) in (x, y, z) retro tables.
 """
 
-cimport cython
 
-from libc.stdlib cimport free, malloc
-from libc.math cimport abs, ceil, round, sqrt
+__author__ = 'J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+
+cimport cython
 
 import numpy as np
 cimport numpy as np
+
+from libc.stdlib cimport free, malloc
+from libc.math cimport abs, ceil, round, sqrt
 
 
 @cython.embedsignature(True)
