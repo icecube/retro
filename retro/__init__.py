@@ -93,6 +93,7 @@ except Exception:
 else:
     NUMBA_AVAIL = True
 
+from pisa.utils.format import hrlist2list
 
 # -- Default choices we've made -- #
 
@@ -108,7 +109,7 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
-CLSIM_TABLE_FNAME_PROTO = 'clsim_table_set_{hashval:s}_string_{string}_depth_{depth_idx:d}_seed_{seed}.fits'
+CLSIM_TABLE_FNAME_PROTO = 'clsim_table_set_{hash_val:s}_string_{string}_depth_{depth_idx:d}_seed_{seed}.fits'
 """String template for CLSim ("raw") retro tables. Note that `string` can
 either be a specific string number OR either "ic" or "dc" indicating a generic
 DOM of one of these two types located at the center of the detector, where z
@@ -116,13 +117,33 @@ location is averaged over all DOMs. `seed` can either be an integer or a
 human-readable range (e.g. "0-9" for a table that combines toegether seeds, 0,
 1, ..., 9)"""
 
-CLSIM_TABLE_METANAME_PROTO = 'clsim_table_set_{}_meta.json'
+CLSIM_TABLE_FNAME_RE = re.compile(
+    r'''
+    clsim_table
+    _set_(?P<hash_val>[0-9a-f]+)
+    _string_(?P<string>[0-9a-z]+)
+    _depth_(?P<depth_idx>[0-9]+)
+    _seed_(?P<seed>[0-9]+)
+    \.fits
+    ''', re.IGNORECASE | re.VERBOSE
+)
 
-IC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}.fits'
-"""String template for IceCube single-DOM raw retro tables"""
+CLSIM_TABLE_METANAME_PROTO = 'clsim_table_set_{hash_val:s}_meta.json'
 
-DC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}.fits'
-"""String template for DeepCore single-DOM raw retro tables"""
+CLSIM_TABLE_METANAME_RE = re.compile(
+    r'''
+    clsim_table
+    _set_(?P<hash_val>[0-9a-f]+)
+    _meta
+    \.json
+    ''', re.IGNORECASE | re.VERBOSE
+)
+
+#IC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}.fits'
+#"""String template for IceCube single-DOM raw retro tables"""
+
+#DC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}.fits'
+#"""String template for DeepCore single-DOM raw retro tables"""
 
 IC_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}_r_cz_t_angles.fits'
 """String template for IceCube single-DOM final-level retro tables"""
@@ -1080,6 +1101,54 @@ def get_file_md5(fpath, blocksize=2**20):
                 break
             md5.update(buf)
     return md5.hexdigest()
+
+
+def interpret_clsim_table_fname(fname):
+    """Get fields from fname and interpret these (e.g. by covnerting into
+    appropriate Python types).
+
+    The fields are parsed into the following types / values:
+        - hash_val : str
+        - string : str (one of {'ic', 'dc'}) or int
+        - depth_idx : int
+        - seed : str (exactly '*'), int, or list of ints
+
+    Parameters
+    ----------
+    fname : string
+
+    Returns
+    -------
+    groupdict : dict
+
+    Raises
+    ------
+    ValueError
+        If ``basename(fname)`` does not match the regex
+        ``CLSIM_TABLE_FNAME_RE``
+
+    """
+    fname = basename(fname)
+    match = CLSIM_TABLE_FNAME_RE.match(fname)
+    if not match:
+        raise ValueError('File basename "{}" does not match regex {}'
+                         .format(fname, CLSIM_TABLE_FNAME_RE.pattern))
+    group_d = match.groupdict()
+
+    try:
+        group_d['string'] = int(group_d['string'])
+    except ValueError:
+        assert group_d['string'] in ['ic', 'dc']
+
+    try:
+        group_d['seed'] = int(group_d['seed'])
+    except ValueError:
+        if group_d['seed'] != '*':
+            group_d['seed'] = hrlist2list(group_d['seed'])
+
+    group_d['depth_idx'] = int(group_d['depth_idx'])
+
+    return group_d
 
 
 if __name__ == '__main__':

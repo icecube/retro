@@ -34,7 +34,7 @@ import sys
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,

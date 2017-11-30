@@ -51,7 +51,7 @@ from icecube.clsim.tablemaker.tabulator import TabulatePhotonsFromSource # pylin
 from I3Tray import I3Tray # pylint: disable=import-error
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_METANAME_PROTO
@@ -111,7 +111,7 @@ def generate_clsim_table_meta(r_binning_kw, t_binning_kw, costheta_binning_kw,
     """
     Returns
     -------
-    hashval : string
+    hash_val : string
         8 hex characters indicating hash value for the table
 
     metaname : string
@@ -139,10 +139,10 @@ def generate_clsim_table_meta(r_binning_kw, t_binning_kw, costheta_binning_kw,
         tray_kw_to_hash=tray_kw_to_hash
     )
 
-    hashval = hash_obj(hashable_params, fmt='hex')[:8]
-    metaname = CLSIM_TABLE_METANAME_PROTO.format(hashval)
+    hash_val = hash_obj(hashable_params, fmt='hex')[:8]
+    metaname = CLSIM_TABLE_METANAME_PROTO.format(hash_val=hash_val)
 
-    return hashval, metaname
+    return hash_val, metaname
 
 
 def parse_args(description=__doc__):
@@ -316,10 +316,10 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
         tray_kw_to_hash=tray_kw_to_hash
     )
 
-    hashval, metaname = generate_clsim_table_meta(**hashable_params)
+    hash_val, metaname = generate_clsim_table_meta(**hashable_params)
     metapath = join(outdir, metaname)
 
-    filename = CLSIM_TABLE_FNAME_PROTO.format(hashval=hashval, string=subdet,
+    filename = CLSIM_TABLE_FNAME_PROTO.format(hash_val=hash_val, string=subdet,
                                               depth_idx=depth_idx, seed=seed)
     filepath = join(outdir, filename)
 

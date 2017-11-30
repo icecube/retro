@@ -43,7 +43,7 @@ import numpy as np
 from pyswarm import pso
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS # pylint: disable=unused-import

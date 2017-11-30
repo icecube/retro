@@ -28,6 +28,7 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 
+from collections import OrderedDict
 from copy import deepcopy
 from glob import glob
 from os import makedirs, remove
@@ -46,7 +47,6 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
-                   DC_RAW_TABLE_FNAME_PROTO, IC_RAW_TABLE_FNAME_PROTO,
                    DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
                    TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
                    SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT,
@@ -57,6 +57,46 @@ from retro import RetroPhotonInfo, TimeSphCoord
 from retro import (expand, force_little_endian, generate_anisotropy_str,
                    linear_bin_centers)
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
+
+
+def load_clsim_table(fpath):
+    fpath = expand(fpath)
+    result = OrderedDict()
+    with pyfits.open(fpath) as table:
+
+        table_shape = table[0].data.shape
+        result['table_shape'] = table_shape
+
+        if len(table_shape) == 5:
+            # Cut off first and last bin in each dimension (underflow and
+            # overflow bins)
+            table_ = force_little_endian(table[0].data[1:-1, 1:-1, 1:-1, 1:-1, 1:-1])
+
+            n_photons = force_little_endian(table[0].header['_i3_n_photons'])
+            phase_refractive_index = force_little_endian(table[0].header['_i3_n_phase'])
+
+            # Space-time dimensions
+            r_bin_edges = force_little_endian(table[1].data) # meters
+            costheta_bin_edges = force_little_endian(table[2].data)
+            t_bin_edges = force_little_endian(table[3].data) # nanoseconds
+
+            # Photon directionality
+            costhetadir_bin_edges = force_little_endian(table[4].data)
+            deltaphidir_bin_edges = force_little_endian(table[5].data)
+
+            result['table'] = table_
+            result['n_photons'] = n_photons
+            result['phase_refractive_index'] = phase_refractive_index
+            result['r_bin_edges'] = r_bin_edges
+            result['costheta_bin_edges'] = costheta_bin_edges
+            result['t_bin_edges'] = t_bin_edges
+            result['costhetadir_bin_edges'] = costhetadir_bin_edges
+            result['deltaphidir_bin_edges'] = deltaphidir_bin_edges
+
+        else:
+            raise NotImplementedError('Shape {} not handled'.format(table_shape))
+
+    return result
 
 
 def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
@@ -296,65 +336,102 @@ class DOMRawTable(object):
     depth_idx : int
 
     angular_acceptance : float
+        Normalization for angular acceptance being less than 1
 
     """
-    def __init__(self, tables_dir, hash_val, string, depth_idx,
-                 angular_acceptance=0.338019664877):
+    def __init__(self, fpath=None, tables_dir=None, hash_val=None, string=None,
+                 depth_idx=None, angular_acceptance=0.338019664877):
         # Translation and validation of args
-        tables_dir = expand(tables_dir)
-        assert isdir(tables_dir)
         assert 0 < angular_acceptance <= 1
-
-        self.tables_dir = tables_dir
-        self.hash_val = hash_val
-        self.string = string
-        self.depth_idx = depth_idx
         self.angular_acceptance = angular_acceptance
 
-        self.string_idx = string - 1
-        if self.string_idx < 79:
-            self.subdet = 'ic'
-            self.fname_proto = IC_RAW_TABLE_FNAME_PROTO
-            self.dtp_fname_proto = IC_TABLE_FNAME_PROTO
+        if fpath is None:
+            tables_dir = expand(tables_dir)
+            assert isdir(tables_dir)
+            self.tables_dir = tables_dir
+            self.hash_val = hash_val
+
+            if isinstance(string, basestring):
+                assert generic_string
+                string = string.strip().lower()
+                assert string in ['ic', 'dc']
+                self.subdet = self.string = self.string_idx = string
+            else:
+                if self.string_idx < 79:
+                    self.subdet = 'ic'
+                    self.dtp_fname_proto = IC_TABLE_FNAME_PROTO
+                else:
+                    self.subdet = 'dc'
+                    self.dtp_fname_proto = DC_TABLE_FNAME_PROTO
+
+                if generic_string:
+                    self.string = self.string_idx = self.subdet
+                else:
+                    self.string = string
+                    self.string_idx = string - 1
+            self.depth_idx = depth_idx
+
+            fname = CLSIM_TABLE_FNAME_PROTO.format(
+                hash_val=hash_val,
+                string=self.string,
+                depth_idx=self.depth_idx,
+                seed=self.seed
+            )
+            self.fpath = join(self.tables_dir, fname)
         else:
-            self.subdet = 'dc'
-            self.fname_proto = DC_RAW_TABLE_FNAME_PROTO
-            self.dtp_fname_proto = DC_TABLE_FNAME_PROTO
+            assert tables_dir is None
+            assert hash_val is None
+            assert string is None
+            assert depth_idx is None
+            self.fpath = fpath
+            self.tables_dir = dirname(fpath)
 
-        self.fpath = join(
-            self.tables_dir,
-            self.fname_proto.format(depth_idx=depth_idx)
-        )
+        table_info = load_clsim_table(self.fpath)
 
-        with pyfits.open(self.fpath) as table:
-            # Cut off first and last bin in each dimension (underflow and
-            # overflow bins)
-            self.data = force_little_endian(table[0].data[1:-1, 1:-1, 1:-1, 1:-1, 1:-1])
+        self.table = table_info.pop('table')
+        self.table_shape = table_info.pop('table_shape')
+        self.n_photons = table_info.pop('n_photons')
+        self.phase_refractive_index = table_info['phase_refractive_index']
 
-            self.n_photons = force_little_endian(table[0].header['_i3_n_photons'])
-            self.phase_refractive_index = force_little_endian(table[0].header['_i3_n_phase'])
-
-            # Space-time dimensions
-            self.r_bin_edges = force_little_endian(table[1].data) # meters
-            self.costheta_bin_edges = force_little_endian(table[2].data)
-            self.t_bin_edges = force_little_endian(table[3].data) # nanoseconds
-
-            # Photon directionality
-            self.costhetadir_bin_edges = force_little_endian(table[4].data)
-            self.deltaphidir_bin_edges = force_little_endian(table[5].data)
+        #
+        self.r_bin_edges = table_info.pop('r_bin_edges')
+        self.t_bin_edges = table_info.pop('t_bin_edges')
+        self.costheta_bin_edges = table_info.pop('costheta_bin_edges')
 
         self.theta_bin_edges = np.arccos(self.costheta_bin_edges) # radians
-        self.thetadir_bin_edges = np.arccos(self.costhetadir_bin_edges) # radians
-
         self.costheta_centers = linear_bin_centers(self.costheta_bin_edges)
         self.theta_centers = np.arccos(self.costheta_centers) # radians
-        self.costhetadir_centers = linear_bin_centers(self.costhetadir_bin_edges)
-        self.thetadir_centers = np.arccos(self.costhetadir_centers) # radians
-        self.deltaphidir_centers = linear_bin_centers(self.deltaphidir_bin_edges) # radians
 
         t_bin_widths = np.diff(self.t_bin_edges)
         assert np.allclose(t_bin_widths, t_bin_widths[0])
         self.t_bin_width = np.mean(t_bin_widths)
+
+        if len(self.table_shape) == 5:
+            self.costhetadir_bin_edges = table_info.pop('costhetadir_bin_edges')
+            self.deltaphidir_bin_edges = table_info.pop('deltaphidir_bin_edges')
+
+            self.costhetadir_centers = linear_bin_centers(self.costhetadir_bin_edges)
+            self.thetadir_bin_edges = np.arccos(self.costhetadir_bin_edges) # radians
+            self.thetadir_centers = np.arccos(self.costhetadir_centers) # radians
+            self.deltaphidir_centers = linear_bin_centers(self.deltaphidir_bin_edges) # radians
+
+        else:
+            raise NotImplementedError
+
+        #with pyfits.open(self.fpath) as table:
+        #    # Cut off first and last bin in each dimension (underflow and
+
+        #    self.n_photons = force_little_endian(table[0].header['_i3_n_photons'])
+        #    self.phase_refractive_index = force_little_endian(table[0].header['_i3_n_phase'])
+
+        #    # Space-time dimensions
+        #    self.r_bin_edges = force_little_endian(table[1].data) # meters
+        #    self.costheta_bin_edges = force_little_endian(table[2].data)
+        #    self.t_bin_edges = force_little_endian(table[3].data) # nanoseconds
+
+        #    # Photon directionality
+        #    self.costhetadir_bin_edges = force_little_endian(table[4].data)
+        #    self.deltaphidir_bin_edges = force_little_endian(table[5].data)
 
         # Multiply the tabulated photon counts by a normalization factor to
         # arrive at a (reasonable, but still imperfect) suvival
@@ -378,7 +455,7 @@ class DOMRawTable(object):
         )
 
         # The photon direction is tabulated in dimensions 3 and 4
-        self.survival_prob = self.data.sum(axis=(3, 4)) * self.norm
+        #self.survival_prob = self.data.sum(axis=(3, 4)) * self.norm
 
     def export_dom_time_polar_table(self, dest_dir=None, overwrite=True):
         """Distill binned photon directionality information into a single

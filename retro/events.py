@@ -34,7 +34,7 @@ import h5py
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import DFLT_PULSE_SERIES, DFLT_ML_RECO_NAME, DFLT_SPE_RECO_NAME

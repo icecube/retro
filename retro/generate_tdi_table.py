@@ -67,7 +67,7 @@ import pyfits
 from pisa.utils.format import hrlist2list, list2hrlist
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath('__file__')))
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (TDI_TABLE_FNAME_PROTO, IC_DOM_QUANT_EFF,
