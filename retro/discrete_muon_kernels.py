@@ -9,9 +9,9 @@ in discrete_hypo/DiscreteHypo class.
 from __future__ import absolute_import, division, print_function
 
 
-__all__ = ['ALL_REALS', 'const_energy_loss_muon']
+__all__ = ['ALL_REALS', 'const_energy_loss_muon', 'table_energy_loss_muon']
 
-__author__ = 'P. Eller, J.L. Lanfranchi'
+__author__ = 'P. Eller, J.L. Lanfranchi, K. Crust'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,8 +28,10 @@ limitations under the License.'''
 
 
 import math
-from os.path import abspath, dirname
+from os.path import abspath, dirname, join
 import sys
+import csv
+from scipy import interpolate
 
 import numpy as np
 
@@ -42,6 +44,25 @@ from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
 
 
 ALL_REALS = (-np.inf, np.inf)
+#create spline (for table_energy_loss_muon)
+with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
+    reader = csv.reader(csvfile)
+    rows = []
+    for row in reader:
+        rows.append(row)
+    energies = rows[0]
+    stopping_power = rows[1]
+    energies.pop(0)
+    stopping_power.pop(0)
+    idx = 0
+    while idx < len(energies):
+        energies[idx] = float(energies[idx])
+        stopping_power[idx] = float(stopping_power[idx])
+        idx += 1
+
+spline = interpolate.splrep(energies, stopping_power, s=0)
+
+
 
 
 # TODO: use / check limits...?
@@ -118,3 +139,94 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     pinfo_gen[:, 7] = dir_z * 0.562
 
     return pinfo_gen
+
+
+def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
+    """
+    Discrete-time track hypothesis that calculates dE/dx as the muon travels using a spline tabulated data
+
+    Use as a hypo_kernel with DiscreteHypo class.
+
+    Parameters
+    ----------
+    hypo_params : HypoParams*
+        Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
+        `.track_azimuth`, and `.track_zenith` attributes.
+
+    limits
+        NOT IMPLEMENTED
+
+    dt : float
+        Time step in nanoseconds
+
+    Returns
+    -------
+    pinfo_gen : shape (N,8) numpy.ndarray, dtype float 32
+    """
+
+    track_energy = hypo_params.track_energy
+
+    #check for only cascade
+    if track_energy == 0:
+        pinfo_gen = np.array(
+            [[hypo_params.t,
+              hypo_params.x,
+              hypo_params.y,
+              hypo_params.z,
+              0,
+              0,
+              0,
+              0]],
+            dtype=np.float32
+        )
+        return pinfo_gen        
+
+    # create spline
+    #declare constants
+    segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
+    photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
+
+    #assign vertex
+    t = hypo_params.t
+    x = hypo_params.x
+    y = hypo_params.y
+    z = hypo_params.z
+
+    #assign dir_x, dir_y, dir_z for the track
+    #NOTE: ask justin about the negative sign on zenith
+    sin_zen = math.sin(hypo_params.track_zenith)
+    dir_x = -sin_zen * math.cos(hypo_params.track_azimuth)
+    dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
+    dir_z = -math.cos(hypo_params.track_zenith)
+
+    #create array at vertex
+    photon_array = np.array([t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562])
+    photon_array = photon_array[np.newaxis]
+
+    #loop through track, appending new photon dump on axis 0
+    #loop uses rest mass of 105.658 MeV/c^2 for muon
+    rest_mass = 0.105658
+    while True:
+
+        #move along track
+        t += dt
+        x += dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
+        y += dt * dir_y * SPEED_OF_LIGHT_M_PER_NS
+        z += dt * dir_z * SPEED_OF_LIGHT_M_PER_NS
+
+        #change energy of muon
+        dedx = interpolate.splev(track_energy, spline, der=0)
+        track_energy -= dedx * segment_length
+
+        #append new row if energy still above rest mass, else break out of loop
+        if track_energy > rest_mass:
+            photon_array = np.append(photon_array, np.array([t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562])[np.newaxis], axis=0)
+        else:
+            break
+
+
+    return photon_array
+
+
+
+
