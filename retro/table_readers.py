@@ -10,7 +10,7 @@ from __future__ import absolute_import, division, print_function
 
 
 __all__ = ['load_t_r_theta_table', 'pexp_t_r_theta', 'pexp_xyz',
-           'DOMTimePolarTables', 'TDICartTable']
+           'CLSimTable', 'DOMTimePolarTables', 'TDICartTable']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -47,7 +47,7 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
-                   DC_TABLE_FNAME_PROTO, IC_TABLE_FNAME_PROTO,
+                   CLSIM_TABLE_FNAME_PROTO, RETRO_DOM_TABLE_FNAME_PROTO,
                    TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
                    SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT,
                    POL_TABLE_RMAX, POL_TABLE_RPWR, POL_TABLE_DRPWR,
@@ -55,7 +55,7 @@ from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
                    POL_TABLE_NTHETABINS)
 from retro import RetroPhotonInfo, TimeSphCoord
 from retro import (expand, force_little_endian, generate_anisotropy_str,
-                   linear_bin_centers)
+                   interpret_clsim_table_fname, linear_bin_centers)
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
@@ -316,7 +316,7 @@ def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
     return expected_photon_count
 
 
-class DOMRawTable(object):
+class CLSimTable(object):
     """Load and use information from a single "raw" individual-DOM
     (time, r, theta, thetadir, deltaphidir)-binned Retro table.
 
@@ -340,7 +340,7 @@ class DOMRawTable(object):
 
     """
     def __init__(self, fpath=None, tables_dir=None, hash_val=None, string=None,
-                 depth_idx=None, angular_acceptance=0.338019664877):
+                 depth_idx=None, seed=None, angular_acceptance=0.338019664877):
         # Translation and validation of args
         assert 0 < angular_acceptance <= 1
         self.angular_acceptance = angular_acceptance
@@ -350,25 +350,23 @@ class DOMRawTable(object):
             assert isdir(tables_dir)
             self.tables_dir = tables_dir
             self.hash_val = hash_val
+            self.seed = seed
 
             if isinstance(string, basestring):
-                assert generic_string
-                string = string.strip().lower()
-                assert string in ['ic', 'dc']
-                self.subdet = self.string = self.string_idx = string
+                self.string = string.strip().lower()
+                assert self.string in ['ic', 'dc']
+                self.subdet = self.string
+                self.string_idx = None
+
             else:
+                self.string = string
+                self.string_idx = self.string - 1
+
                 if self.string_idx < 79:
                     self.subdet = 'ic'
-                    self.dtp_fname_proto = IC_TABLE_FNAME_PROTO
                 else:
                     self.subdet = 'dc'
-                    self.dtp_fname_proto = DC_TABLE_FNAME_PROTO
 
-                if generic_string:
-                    self.string = self.string_idx = self.subdet
-                else:
-                    self.string = string
-                    self.string_idx = string - 1
             self.depth_idx = depth_idx
 
             fname = CLSIM_TABLE_FNAME_PROTO.format(
@@ -378,13 +376,27 @@ class DOMRawTable(object):
                 seed=self.seed
             )
             self.fpath = join(self.tables_dir, fname)
+
         else:
             assert tables_dir is None
             assert hash_val is None
             assert string is None
             assert depth_idx is None
+
             self.fpath = fpath
             self.tables_dir = dirname(fpath)
+            info = interpret_clsim_table_fname(fpath)
+            self.string = info['string']
+            if isinstance(self.string, int):
+                self.string_idx = self.string - 1
+            else:
+                self.string_idx = None
+            self.hash_val = info['hash_val']
+            self.depth_idx = info['depth_idx']
+            self.seed = info['seed']
+
+        assert self.subdet in ['ic', 'dc']
+        self.dtp_fname_proto = RETRO_DOM_TABLE_FNAME_PROTO
 
         table_info = load_clsim_table(self.fpath)
 
@@ -393,7 +405,6 @@ class DOMRawTable(object):
         self.n_photons = table_info.pop('n_photons')
         self.phase_refractive_index = table_info['phase_refractive_index']
 
-        #
         self.r_bin_edges = table_info.pop('r_bin_edges')
         self.t_bin_edges = table_info.pop('t_bin_edges')
         self.costheta_bin_edges = table_info.pop('costheta_bin_edges')
@@ -448,8 +459,7 @@ class DOMRawTable(object):
         self.norm = (
             1
             / self.n_photons
-            / (SPEED_OF_LIGHT_M_PER_NS / self.phase_refractive_index)
-            / self.t_bin_width
+            / (SPEED_OF_LIGHT_M_PER_NS * self.t_bin_width / self.phase_refractive_index)
             * self.angular_acceptance
             * (len(self.costheta_bin_edges) - 1)
         )
@@ -496,15 +506,14 @@ class DOMRawTable(object):
                       % new_fpath)
                 return
 
-        (survival_prob, average_thetas, average_phis, lengths) = (
-            generate_t_r_theta_table(data=self.data,
-                                     survival_prob=self.survival_prob,
+        (survival_probs, average_thetas, average_phis, lengths) = (
+            generate_t_r_theta_table(table=self.table,
                                      thetadir_centers=self.thetadir_centers,
                                      deltaphidir_centers=self.deltaphidir_centers,
                                      theta_bin_edges=self.theta_bin_edges)
         )
         objects = [
-            pyfits.PrimaryHDU(survival_prob),
+            pyfits.PrimaryHDU(survival_probs),
             pyfits.ImageHDU(average_thetas.astype(np.float32)),
             pyfits.ImageHDU(average_phis.astype(np.float32)),
             pyfits.ImageHDU(lengths.astype(np.float32)),
@@ -578,19 +587,20 @@ class DOMTimePolarTables(object):
         string_idx = string - 1
         if string_idx < 79:
             subdet = 'ic'
-            fname_proto = IC_TABLE_FNAME_PROTO
             dom_quant_eff = IC_DOM_QUANT_EFF
             exponent = self.ic_exponent
         else:
             subdet = 'dc'
-            fname_proto = DC_TABLE_FNAME_PROTO
             dom_quant_eff = DC_DOM_QUANT_EFF
             exponent = self.dc_exponent
 
         if not force_reload and depth_idx in self.tables[subdet]:
             return
 
-        fpath = join(self.tables_dir, fname_proto.format(depth_idx=depth_idx))
+        fpath = join(
+            self.tables_dir,
+            RETRO_DOM_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
+        )
 
         photon_info, _ = load_t_r_theta_table(
             fpath=fpath,

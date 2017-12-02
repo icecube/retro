@@ -9,9 +9,10 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     # Defaults
     'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
-    'DFLT_SPE_RECO_NAME', 'CLSIM_TABLE_FNAME_PROTO',
-    'IC_RAW_TABLE_FNAME_PROTO', 'DC_RAW_TABLE_FNAME_PROTO',
-    'IC_TABLE_FNAME_PROTO', 'DC_TABLE_FNAME_PROTO', 'GEOM_FILE_PROTO',
+    'DFLT_SPE_RECO_NAME',
+    'CLSIM_TABLE_FNAME_PROTO', 'CLSIM_TABLE_FNAME_RE',
+    'RETRO_DOM_TABLE_FNAME_PROTO', 'RETRO_DOM_TABLE_FNAME_RE',
+    'GEOM_FILE_PROTO',
     'GEOM_META_PROTO', 'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO',
     'TDI_TABLE_FNAME_RE', 'NUMBA_AVAIL',
 
@@ -65,7 +66,7 @@ import cPickle as pickle
 import hashlib
 import math
 from numbers import Number
-from os.path import abspath, dirname, expanduser, expandvars, join
+from os.path import abspath, basename, dirname, expanduser, expandvars, join
 import re
 import struct
 from time import time
@@ -93,8 +94,6 @@ except Exception:
 else:
     NUMBA_AVAIL = True
 
-from pisa.utils.format import hrlist2list
-
 # -- Default choices we've made -- #
 
 DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, cache=True)
@@ -109,7 +108,14 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
-CLSIM_TABLE_FNAME_PROTO = 'clsim_table_set_{hash_val:s}_string_{string}_depth_{depth_idx:d}_seed_{seed}.fits'
+CLSIM_TABLE_FNAME_PROTO = (
+    'clsim_table'
+    '_set_{hash_val:s}'
+    '_string_{string}'
+    '_depth_{depth_idx:d}'
+    '_seed_{seed}'
+    '.fits'
+)
 """String template for CLSim ("raw") retro tables. Note that `string` can
 either be a specific string number OR either "ic" or "dc" indicating a generic
 DOM of one of these two types located at the center of the detector, where z
@@ -145,11 +151,33 @@ CLSIM_TABLE_METANAME_RE = re.compile(
 #DC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}.fits'
 #"""String template for DeepCore single-DOM raw retro tables"""
 
-IC_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}_r_cz_t_angles.fits'
-"""String template for IceCube single-DOM final-level retro tables"""
+RETRO_DOM_TABLE_FNAME_PROTO = (
+    'retro_dom_table'
+    '_set_{hash_val:s}'
+    '_string_{string}'
+    '_depth_{depth_idx:d}'
+    '_seed_{seed}'
+    '.fits'
+)
+"""String template for single-DOM "final-level" retro tables"""
 
-DC_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}_r_cz_t_angles.fits'
-"""String template for DeepCore single-DOM final-level retro tables"""
+RETRO_DOM_TABLE_FNAME_RE = re.compile(
+    r'''
+    retro_dom_table
+    _set_(?P<hash_val>[0-9a-f]+)
+    _string_(?P<string>[0-9a-z]+)
+    _depth_(?P<depth_idx>[0-9]+)
+    _seed_(?P<seed>[0-9]+)
+    \.fits
+    ''', re.IGNORECASE | re.VERBOSE
+)
+"""Regex for single-DOM retro tables"""
+
+#IC_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}_r_cz_t_angles.fits'
+#"""String template for IceCube single-DOM final-level retro tables"""
+#
+#DC_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}_r_cz_t_angles.fits'
+#"""String template for DeepCore single-DOM final-level retro tables"""
 
 GEOM_FILE_PROTO = 'geom_{hash:s}.npy'
 """File containing detector geometry as a Numpy 5D array with coordinates
@@ -1119,7 +1147,7 @@ def interpret_clsim_table_fname(fname):
 
     Returns
     -------
-    groupdict : dict
+    info : dict
 
     Raises
     ------
@@ -1128,27 +1156,29 @@ def interpret_clsim_table_fname(fname):
         ``CLSIM_TABLE_FNAME_RE``
 
     """
+    from pisa.utils.format import hrlist2list
+
     fname = basename(fname)
     match = CLSIM_TABLE_FNAME_RE.match(fname)
     if not match:
         raise ValueError('File basename "{}" does not match regex {}'
                          .format(fname, CLSIM_TABLE_FNAME_RE.pattern))
-    group_d = match.groupdict()
+    info = match.groupdict()
 
     try:
-        group_d['string'] = int(group_d['string'])
+        info['string'] = int(info['string'])
     except ValueError:
-        assert group_d['string'] in ['ic', 'dc']
+        assert info['string'] in ['ic', 'dc']
 
     try:
-        group_d['seed'] = int(group_d['seed'])
+        info['seed'] = int(info['seed'])
     except ValueError:
-        if group_d['seed'] != '*':
-            group_d['seed'] = hrlist2list(group_d['seed'])
+        if info['seed'] != '*':
+            info['seed'] = hrlist2list(info['seed'])
 
-    group_d['depth_idx'] = int(group_d['depth_idx'])
+    info['depth_idx'] = int(info['depth_idx'])
 
-    return group_d
+    return info
 
 
 if __name__ == '__main__':

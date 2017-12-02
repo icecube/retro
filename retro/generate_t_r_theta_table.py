@@ -63,8 +63,8 @@ def weighted_average(x, w):
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def generate_t_r_theta_table(data, survival_prob, thetadir_centers,
-                             deltaphidir_centers, theta_bin_edges):
+def generate_t_r_theta_table(table, thetadir_centers, deltaphidir_centers,
+                             theta_bin_edges):
     """Transform information from a raw single-DOM table (as output from CLSim)
     that is binned in (r, theta, t, theta_dir, deltaphi_dir) into a more
     compact representation, with a probability and an average direction vector
@@ -72,7 +72,7 @@ def generate_t_r_theta_table(data, survival_prob, thetadir_centers,
 
     Parameters
     ----------
-    data
+    table
     n_photons
     thetadir_centers
     deltaphidir_centers
@@ -80,7 +80,7 @@ def generate_t_r_theta_table(data, survival_prob, thetadir_centers,
 
     Returns
     -------
-    survival_prob
+    survival_probs
     average_thetas
     average_phis
     lengths
@@ -88,9 +88,13 @@ def generate_t_r_theta_table(data, survival_prob, thetadir_centers,
     """
     # Source tables are photon counts binned in
     # (r, theta, t, dir_theta, dir_phi)
-    n_r_bins = survival_prob.shape[0]
-    n_theta_bins = survival_prob.shape[1]
-    n_t_bins = survival_prob.shape[2]
+    n_r_bins = table.shape[0]
+    n_theta_bins = table.shape[1]
+    n_t_bins = table.shape[2]
+
+    # (Base) survival probability (that will be modified by directionalkity):
+    # We can either
+    # 1. Sum over the directionality dimensions, which means "probability that 
 
     # Destination tables are to be binned in (t, r, costheta) (there are as
     # many costheta bins as theta bins in the original tables)
@@ -105,7 +109,7 @@ def generate_t_r_theta_table(data, survival_prob, thetadir_centers,
         for theta_j in range(n_theta_bins):
             for t_k in range(n_t_bins):
                 # flip coszen?
-                weights = data[r_i, theta_j, t_k, ::-1, :].astype(np.float64)
+                weights = table[r_i, theta_j, t_k, ::-1, :].astype(np.float64)
                 weights_tot = weights.sum()
                 if weights_tot == 0:
                     # If no photons, just set the average direction to the
