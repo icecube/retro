@@ -420,7 +420,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
     if compress:
         print('Compressing table with zstandard via command line')
         print('  zstd -1 --rm "{}"'.format(filepath))
-        check_call(['zstd', '-1', '--rm', '"{}"'.format(filepath)])
+        check_call(['zstd', '-1', '--rm', filepath])
         print('done.')
 
 
