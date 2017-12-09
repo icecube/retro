@@ -36,9 +36,11 @@ limitations under the License.'''
 
 
 from argparse import ArgumentParser
-from os import makedirs, remove
+from os import access, environ, makedirs, pathsep, remove, X_OK
 from os.path import abspath, dirname, isdir, isfile, join
 import json
+from numbers import Integral
+from subprocess import check_call
 import sys
 
 import numpy as np
@@ -162,54 +164,57 @@ def parse_args(description=__doc__):
         help='Number of events to simulate'
     )
     parser.add_argument(
-        '--seed', type=int, default=0,
-        help='''Random seed to use, in range of 32 bit uint: [0, 2**32-1]
-        (default: 0)'''
+        '--seed', type=int, required=True,
+        help='Random seed to use, in range of 32 bit uint: [0, 2**32-1]'
     )
+
+    parser.add_argument(
+        '--tilt', action='store_true',
+        help='Enable tilt in ice model'
+    )
+
+    parser.add_argument(
+        '--r-max', type=float, required=True,
+        help='Radial binning maximum value, in meters'
+    )
+    parser.add_argument(
+        '--r-power', type=int, required=True,
+        help='Radial binning is regular in raidus to this power'
+    )
+    parser.add_argument(
+        '--n-r-bins', type=int, required=True,
+        help='Number of radial bins'
+    )
+
+    parser.add_argument(
+        '--t-max', type=float, required=True,
+        help='Time binning maximum value, in nanoseconds'
+    )
+    parser.add_argument(
+        '--n-t-bins', type=int, required=True,
+        help='Number of time bins'
+    )
+
+    parser.add_argument(
+        '--n-costheta-bins', type=int, required=True,
+        help='Number of costheta (cosine of zenith angle) bins'
+    )
+
+    parser.add_argument(
+        '--n-costhetadir-bins', type=int, required=True,
+        help='Number of costhetadir bins'
+    )
+    parser.add_argument(
+        '--n-deltaphidir-bins', type=int, required=True,
+        help='''Number of deltaphidir bins (Note: span from 0 to pi; code
+        assumes symmetry about 0)'''
+    )
+
     parser.add_argument(
         '--outdir', default='./',
         help='Save table to this directory (default: "./")'
     )
 
-    parser.add_argument(
-        '--r-max', type=float, default=400,
-        help='Radial binning maximum value, in meters (default: 400)'
-    )
-    parser.add_argument(
-        '--r-power', type=float, default=2,
-        help='Radial binning is regular in raidus to this power (default: 2)'
-    )
-    parser.add_argument(
-        '--n-r-bins', type=int, default=200,
-        help='Number of radial bins (default: 200)'
-    )
-
-    parser.add_argument(
-        '--t-min', type=float, default=0,
-        help='Time binning minimum value, in nanoseconds (default: 0)'
-    )
-    parser.add_argument(
-        '--t-max', type=float, default=3000,
-        help='Time binning maximum value, in nanoseconds (default: 3000)'
-    )
-    parser.add_argument(
-        '--n-t-bins', type=int, default=300,
-        help='Number of time bins (default: 300)'
-    )
-
-    parser.add_argument(
-        '--n-costheta-bins', type=int, default=40,
-        help='Number of costheta (cosine of zenith angle) bins (default: 40)'
-    )
-
-    parser.add_argument(
-        '--n-costhetadir-bins', type=int, default=40,
-        help='Number of costhetadir bins (default: 20)'
-    )
-    parser.add_argument(
-        '--n-deltaphidir-bins', type=int, default=40,
-        help='Number of deltaphidir bins (default: 20)'
-    )
     parser.add_argument(
         '--overwrite', action='store_true',
         help='Overwrite if the table already exists'
@@ -218,13 +223,25 @@ def parse_args(description=__doc__):
     return parser.parse_args()
 
 
-def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
+def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
                          r_max, r_power, n_r_bins,
-                         n_costheta_bins,
-                         t_min, t_max, n_t_bins,
-                         n_costhetadir_bins,
+                         t_max, n_t_bins,
+                         n_costheta_bins, n_costhetadir_bins,
                          n_deltaphidir_bins,
-                         overwrite=False):
+                         outdir, overwrite=False, compress=True):
+    assert isinstance(nevts, Integral) and nevts > 0
+    assert isinstance(seed, Integral) and 0 <= seed < 2**32
+    assert isinstance(r_power, Integral) and r_power > 0
+    assert isinstance(n_r_bins, Integral) and n_r_bins > 0
+    assert isinstance(n_t_bins, Integral) and n_t_bins > 0
+    assert isinstance(n_costheta_bins, Integral) and n_costheta_bins > 0
+    assert isinstance(n_costhetadir_bins, Integral) and n_costhetadir_bins > 0
+    assert isinstance(n_deltaphidir_bins, Integral) and n_deltaphidir_bins > 0
+
+    if compress and not any(access(join(path, 'zstd'), X_OK)
+                            for path in environ['PATH'].split(pathsep)):
+        raise ValueError('`zstd` command not found in path')
+
     outdir = expand(outdir)
     if not isdir(outdir):
         makedirs(outdir)
@@ -235,22 +252,23 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
     if n_bins > 2**32:
         raise ValueError(
             'The flattened bin index in CLSim is represented by uint32 which'
-            ' has max of 4294967296, but the binning specified comes to {}'
-            ' bins.'
-            .format(n_bins)
+            ' has a max of 4 294 967 296, but the binning specified comes to'
+            ' {} bins ({} times too many).'
+            .format(n_bins, n_bins / 2**32)
         )
 
     # Average Z coordinate (depth) for each layer of DOMs (see
     # `average_z_position.py`)
     # TODO: make these command-line arguments
 
+    t_min = 0 # ns
     r_min = 0 # meters
     costheta_min, costheta_max = -1, 1
     costhetadir_min, costhetadir_max = -1, 1
-    deltaphidir_min, deltaphidir_max = -np.pi, np.pi # rad
+    deltaphidir_min, deltaphidir_max = 0, np.pi # rad
 
     r_binning_kw = dict(
-        min=r_min, max=r_max, n_bins=n_r_bins, power=r_power
+        min=float(r_min), max=float(r_max), n_bins=int(n_r_bins), power=int(r_power)
     )
     costheta_binning_kw = dict(
         min=costheta_min, max=costheta_max, n_bins=n_costheta_bins
@@ -302,7 +320,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
         # tables
         NEvents=nevts,
         IceModel='spice_mie',
-        DisableTilt=True,
+        DisableTilt=not tilt,
         PhotonPrescale=1,
         Sensor='none',
     )
@@ -321,7 +339,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
 
     filename = CLSIM_TABLE_FNAME_PROTO.format(hash_val=hash_val, string=subdet,
                                               depth_idx=depth_idx, seed=seed)
-    filepath = join(outdir, filename)
+    filepath = abspath(join(outdir, filename))
 
     #if isfile(metapath):
     #    if overwrite:
@@ -340,13 +358,20 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
     print('Table will be written to\n  "{}"'.format(filepath))
     print('='*80)
 
-    if isfile(filepath):
+    exists_at = []
+    for fpath in [filepath, filepath + '.zst']:
+        if isfile(fpath):
+            exists_at.append(fpath)
+
+    if exists_at:
+        names = ', '.join('"{}"'.format(fp) for fp in exists_at)
         if overwrite:
-            print('WARNING! Deleting existing table at "{}"'.format(filepath))
-            remove(filepath)
+            print('WARNING! Deleting existing table(s) at ' + names)
+            for fpath in exists_at:
+                remove(fpath)
         else:
-            raise ValueError('Table already exists at "{}"; not overwriting.'
-                             .format(filepath))
+            raise ValueError('Table(s) already exist at {}; not'
+                             ' overwriting.'.format(names))
     print('')
 
     tray_kw_other = dict(
@@ -391,6 +416,12 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, outdir,
     tray.AddSegment(TabulatePhotonsFromSource, 'generator', **all_tray_kw)
     tray.Execute()
     tray.Finish()
+
+    if compress:
+        print('Compressing table with zstandard via command line')
+        print('  zstd -1 --rm "{}"'.format(filepath))
+        check_call(['zstd', '-1', '--rm', '"{}"'.format(filepath)])
+        print('done.')
 
 
 if __name__ == '__main__':
