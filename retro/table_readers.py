@@ -32,7 +32,9 @@ from collections import OrderedDict
 from copy import deepcopy
 from glob import glob
 from os import makedirs, remove
-from os.path import abspath, basename, dirname, isdir, isfile, join
+from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
+from StringIO import StringIO
+from subprocess import Popen, PIPE
 import sys
 import time
 
@@ -47,7 +49,8 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
-                   CLSIM_TABLE_FNAME_PROTO, RETRO_DOM_TABLE_FNAME_PROTO,
+                   CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_FNAME_RE,
+                   CLSIM_TABLE_METANAME_PROTO, RETRO_DOM_TABLE_FNAME_PROTO,
                    TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
                    SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT,
                    POL_TABLE_RMAX, POL_TABLE_RPWR, POL_TABLE_DRPWR,
@@ -60,18 +63,61 @@ from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
 def load_clsim_table(fpath):
-    fpath = expand(fpath)
-    result = OrderedDict()
-    with pyfits.open(fpath) as table:
+    """Load a CLSim table from disk (optionally compressed with zstd).
 
-        table_shape = table[0].data.shape
-        result['table_shape'] = table_shape
+    Parameters
+    ----------
+    fpath : string
+        Path to file to be loaded. If the file has extension 'zst', 'zstd', or
+        'zstandard', the file will be decompressed using the `python-zstandard`
+        Python library before passing to `pyfits` for interpreting.
 
-        if len(table_shape) == 5:
-            # Cut off first and last bin in each dimension (underflow and
-            # overflow bins)
-            table_ = force_little_endian(table[0].data[1:-1, 1:-1, 1:-1, 1:-1, 1:-1])
+    Returns
+    -------
+    table : dict
+        If the table is 5D, items are
+        - 'table' : np.ndarray
+        - 'table_shape' : tuple of int
+        - 'n_photons' : 
+        - 'phase_refractive_index' :
+        - 'r_bin_edges' :
+        - 'costheta_bin_edges' :
+        - 't_bin_edges' :
+        - 'costhetadir_bin_edges' :
+        - 'deltaphidir_bin_edges' :
 
+    """
+    fpath = abspath(expand(fpath))
+    _, ext = splitext(fpath)
+    ext = ext.lstrip('.')
+
+    table = OrderedDict()
+    if ext in ('zstd', 'zstandard', 'zst'):
+        # -c sends decompressed output to stdout
+        proc = Popen(['zstd', '-d', '-c', fpath], stdout=PIPE)
+        # Read from stdout of process
+        (proc_stdout, _) = proc.communicate()
+        # Give stdout str a file-like interface
+        fobj = StringIO(proc_stdout)
+    elif ext in ('fits',):
+        fobj = open(fpath, 'rb')
+    else:
+        raise ValueError('Unhandled extension "{}"'.format(ext))
+
+    try:
+        table = pyfits.open(fobj)
+
+        table_shape_incl_overflow = table[0].data.shape
+        table_shape = tuple(dim - 2 for dim in table_shape_incl_overflow)
+        n_dims = len(table_shape)
+        table['table_shape'] = table_shape
+
+        # Cut off first and last bin in each dimension (underflow and
+        # overflow bins)
+        slice_wo_overflow = (slice(1, -1),) * n_dims
+        table_ = force_little_endian(table[0].data[slice_wo_overflow])
+
+        if n_dims == 5:
             n_photons = force_little_endian(table[0].header['_i3_n_photons'])
             phase_refractive_index = force_little_endian(table[0].header['_i3_n_phase'])
 
@@ -84,19 +130,66 @@ def load_clsim_table(fpath):
             costhetadir_bin_edges = force_little_endian(table[4].data)
             deltaphidir_bin_edges = force_little_endian(table[5].data)
 
-            result['table'] = table_
-            result['n_photons'] = n_photons
-            result['phase_refractive_index'] = phase_refractive_index
-            result['r_bin_edges'] = r_bin_edges
-            result['costheta_bin_edges'] = costheta_bin_edges
-            result['t_bin_edges'] = t_bin_edges
-            result['costhetadir_bin_edges'] = costhetadir_bin_edges
-            result['deltaphidir_bin_edges'] = deltaphidir_bin_edges
+            table['table'] = table_
+            table['n_photons'] = n_photons
+            table['phase_refractive_index'] = phase_refractive_index
+            table['r_bin_edges'] = r_bin_edges
+            table['costheta_bin_edges'] = costheta_bin_edges
+            table['t_bin_edges'] = t_bin_edges
+            table['costhetadir_bin_edges'] = costhetadir_bin_edges
+            table['deltaphidir_bin_edges'] = deltaphidir_bin_edges
 
         else:
-            raise NotImplementedError('Shape {} not handled'.format(table_shape))
+            raise NotImplementedError(
+                '{}-dimensional table not handled'.format(n_dims)
+            )
 
-    return result
+    finally:
+        if hasattr(fobj, 'close'):
+            fobj.close()
+        del fobj
+
+    return table
+
+
+def combine_clsim_tables(fpaths):
+    """Combine multiple CLSim-produced tables together into a single table.
+
+    All tables specified must have the same binnings defined. Tables should
+    also be produced using different random seeds; if corresponding metadata
+    files can be found in the same directories as the CLSim tables, this will
+    be enforced prior to loading and combining the actual tables together.
+
+    Parameters
+    ----------
+    fpaths : sequence of strings
+
+    Returns
+    -------
+    aggregate_table
+
+    """
+    if isinstance(fpaths, basestring):
+        fpaths = [fpaths]
+
+    aggregate_table = None
+    for fpath in fpaths:
+        table = load_clsim_table(fpath)
+        if aggregate_table is None:
+            aggregate_table = table
+            continue
+
+        assert sorted(table.keys()) == sorted(aggregate_table.keys())
+
+        for key in table.keys():
+            if key in ['table', 'n_photons']:
+                continue
+            assert np.allclose(table[key], aggregate_table[key])
+
+        aggregate_table['table'] += table['table']
+        aggregate_table['n_photons'] += table['n_photons']
+
+    return aggregate_table
 
 
 def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
@@ -201,7 +294,9 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
 @numba.jit(**DFLT_NUMBA_JIT_KWARGS)
 def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
-                   avg_photon_theta, avg_photon_length, use_directionality):
+                   avg_photon_theta, avg_photon_length, use_directionality,
+                   t_min, t_max, n_t_bins, r_min, r_max, r_power, n_r_bins,
+                   n_costheta_bins):
     """Compute total expected photons in a DOM based on the (t,r,theta)-binned
     Retro DOM tables applied to a the generated photon info `pinfo_gen`.
 
@@ -214,12 +309,22 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     avg_photon_theta
     avg_photon_length
     use_directionality : bool
+    t_min : float
+    t_max : float
+    n_t_bins : int
+    r_min : float
+    r_max : float
+    r_power : float
+    n_r_bins : int
+    n_costheta_bins : int
 
     Returns
     -------
     expected_photon_count : float
 
     """
+    table_dt = (t_max - t_min) / n_t_bins
+    s
     expected_photon_count = 0.0
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
@@ -242,12 +347,12 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #    print('MAX_POL_TABLE_SPACETIME_SEP:', POL_TABLE_RMAX)
         #    continue
 
-        tbin_idx = int(np.floor(dt / POL_TABLE_DT))
+        tbin_idx = int(np.floor((dt - table_t_min) / table_dt))
         #if tbin_idx < 0 or tbin_idx >= -POL_TABLE_DT:
-        if tbin_idx < -POL_TABLE_NTBINS or tbin_idx >= 0:
+        if tbin_idx < -n_t_bins or tbin_idx >= 0:
             #print('t')
             continue
-        rbin_idx = int(np.floor(r**(1/POL_TABLE_RPWR) / POL_TABLE_DRPWR))
+        rbin_idx = int(np.floor(r**(1/r_power) / POL_TABLE_DRPWR))
         if rbin_idx < 0 or rbin_idx >= POL_TABLE_NRBINS:
             #print('r')
             continue

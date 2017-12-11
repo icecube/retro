@@ -11,6 +11,7 @@ __all__ = [
     'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
     'DFLT_SPE_RECO_NAME',
     'CLSIM_TABLE_FNAME_PROTO', 'CLSIM_TABLE_FNAME_RE',
+    'CLSIM_TABLE_METANAME_PROTO', 'CLSIM_TABLE_METANAME_RE',
     'RETRO_DOM_TABLE_FNAME_PROTO', 'RETRO_DOM_TABLE_FNAME_RE',
     'GEOM_FILE_PROTO',
     'GEOM_META_PROTO', 'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO',
@@ -36,11 +37,12 @@ __all__ = [
 
     # Functions
     'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
-    'hypo_to_track_params', 'powerspace', 'inv_power_2nd_diff', 'infer_power',
-    'test_infer_power', 'bin_edges_to_binspec', 'linear_bin_centers',
-    'poisson_llh', 'spacetime_separation', 'generate_anisotropy_str',
-    'generate_geom_meta', 'generate_unique_ids', 'spherical_volume',
-    'sph2cart', 'get_primary_interaction_str', 'get_primary_interaction_tex',
+    'hypo_to_track_params', 'linbin', 'test_linbin', 'powerspace', 'powerbin',
+    'test_powerbin', 'inv_power_2nd_diff', 'infer_power', 'test_infer_power',
+    'bin_edges_to_binspec', 'linear_bin_centers', 'poisson_llh',
+    'spacetime_separation', 'generate_anisotropy_str', 'generate_geom_meta',
+    'generate_unique_ids', 'spherical_volume', 'sph2cart',
+    'get_primary_interaction_str', 'get_primary_interaction_tex',
     'force_little_endian', 'hash_obj', 'get_file_md5'
 ]
 
@@ -82,6 +84,7 @@ def dummy_func(x):
     x += 1
 try:
     from numba import jit as numba_jit
+    from numba import vectorize as numba_vectorize
     numba_jit(dummy_func)
 except Exception:
     #logging.debug('Failed to import or use numba', exc_info=True)
@@ -91,6 +94,7 @@ except Exception:
             """Decorator that smply returns the function being decorated"""
             return func
         return decorator
+    numba_vectorize = numba_jit
 else:
     NUMBA_AVAIL = True
 
@@ -531,8 +535,9 @@ def hypo_to_track_params(hypo_params):
 def powerspace(start, stop, num, power):
     """Create bin edges evenly spaced w.r.t. ``x**power``.
 
-    Reverse engineered from JVS's power axis, with arguments defined with
-    analogy to :function:`numpy.linspace`.
+    Reverse engineered from Jakob van Santen's power axis, with arguments
+    defined with analogy to :function:`numpy.linspace` (adding `power` but
+    removing the `endpoint`, `retstep`, and `dtype` arguments).
 
     Parameters
     ----------
@@ -560,6 +565,225 @@ def powerspace(start, stop, num, power):
                               num=num)
     bin_edges = np.power(liner_edges, power)
     return bin_edges
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def _linbin_numba(val, start, stop, num):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : np.ndarray
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+    out_type
+
+    Returns
+    -------
+    bin_num : np.ndarray of dtype `out_type`
+
+    """
+    num_bins = num - 1
+    width = (stop - start) / num_bins
+    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
+    bin_num_flat = bin_num.flat
+    for i, v in enumerate(val.flat):
+        bin_num_flat[i] = (v - start) // width
+    return bin_num
+
+
+def _linbin_numpy(val, start, stop, num):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : np.ndarray
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+
+    Returns
+    -------
+    bin_num : np.ndarray of dtype `out_type`
+
+    """
+    num_bins = num - 1
+    width = (stop - start) / num_bins
+    bin_num = (val - start) // width
+    #if np.isscalar(bin_num):
+    #    bin_num = int(bin_num)
+    #else:
+    #    bin_num = 
+    return bin_num
+
+
+linbin = _linbin_numba
+
+
+def test_linbin():
+    """Unit tests for function `linbin`."""
+    kw = dict(start=0, stop=100, num=200)
+    bin_edges = np.linspace(**kw)
+
+    rand = np.random.RandomState(seed=0)
+    x = rand.uniform(0, 100, int(1e6))
+
+    test_args = (np.array([0.0]), np.float64(kw['start']),
+                 np.float64(kw['stop']), np.uint32(kw['num']))
+    _linbin_numba(*test_args)
+
+    test_args = (x, np.float64(kw['start']), np.float64(kw['stop']),
+                 np.uint32(kw['num']))
+    t0 = time()
+    bins_ref = np.digitize(x, bin_edges) - 1
+    t1 = time()
+    bins_test_numba = _linbin_numba(*test_args)
+    t2 = time()
+    bins_test_numpy = _linbin_numpy(*test_args)
+    t3 = time()
+
+    print('np.digitize:   {} s'.format(t1 - t0))
+    print('_linbin_numba: {} s'.format(t2 - t1))
+    print('_linbin_numpy: {} s'.format(t3 - t2))
+
+    assert np.all(bins_test_numba == bins_ref)
+    assert np.all(bins_test_numpy == bins_ref)
+    #assert isinstance(_linbin_numpy(1, **kw), int)
+
+    print('<< PASS : test_linbin >>')
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def _powerbin_numba(val, start, stop, num, power): #, out_type=np.uint64):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : np.ndarray
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+    power : float
+    out_type
+
+    Returns
+    -------
+    bin_num : np.ndarray of dtype `out_type`
+
+    """
+    num_bins = num - 1
+    inv_power = 1.0 / power
+    inv_power_start = start**inv_power
+    inv_power_stop = stop**inv_power
+    inv_power_width = (inv_power_stop - inv_power_start) / num_bins
+    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
+    bin_num_flat = bin_num.flat
+    for i, v in enumerate(val.flat):
+        bin_num_flat[i] = (v**inv_power - inv_power_start) // inv_power_width
+    return bin_num
+
+
+def _powerbin_numpy(val, start, stop, num, power):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : scalar or array
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+    power : float
+
+    Returns
+    -------
+    bin_num : int or np.ndarray of dtype int
+        If `val` is scalar, returns int; if `val` is a sequence or array-like,
+        returns `np.darray` of dtype int.
+
+    """
+    num_bins = num - 1
+    inv_power = 1 / power
+    inv_power_start = start**inv_power
+    inv_power_stop = stop**inv_power
+    inv_power_width = (inv_power_stop - inv_power_start) / num_bins
+    bin_num = (val**inv_power - inv_power_start) // inv_power_width
+    if np.isscalar(bin_num):
+        bin_num = int(bin_num)
+    else:
+        bin_num = bin_num.astype(int)
+    return bin_num
+
+
+powerbin = _powerbin_numpy
+
+
+#def powerbin(val, start, stop, num, power):
+#    """Determine the bin number(s) in a powerspace binning of value(s).
+#
+#    Parameters
+#    ----------
+#    val : scalar or array
+#    start : float
+#    stop : float
+#    num : int
+#        Number of bin _edges_ (number of bins is one less than `num`)
+#    power : float
+#
+#    Returns
+#    -------
+#    bin_num : int or np.ndarray of dtype int
+#        If `val` is scalar, returns int; if `val` is a sequence or array-like,
+#        returns `np.darray` of dtype int.
+#
+#    """
+#    if np.isscalar(val):
+#        val = np.array(val)
+#    else:
+#        val = np.asarray(val)
+#
+#    if num < 1000:
+#        pass
+
+
+def test_powerbin():
+    """Unit tests for function `powerbin`."""
+    kw = dict(start=0, stop=100, num=100, power=2)
+    bin_edges = powerspace(**kw)
+
+    rand = np.random.RandomState(seed=0)
+    x = rand.uniform(0, 100, int(1e6))
+
+    ftype = np.float32
+    utype = np.uint32
+    test_args = (ftype(kw['start']), ftype(kw['stop']),
+                 utype(kw['num']), utype(kw['power']))
+
+    # Run once to force compilation
+    _powerbin_numba(np.array([0.0], dtype=ftype), *test_args)
+
+    # Run actual tests / take timings
+    t0 = time()
+    bins_ref = np.digitize(x, bin_edges) - 1
+    t1 = time()
+    bins_test_numba = _powerbin_numba(x, *test_args)
+    t2 = time()
+    bins_test_numpy = _powerbin_numpy(x, *test_args)
+    t3 = time()
+
+    print('np.digitize:     {:e} s'.format(t1 - t0))
+    print('_powerbin_numba: {:e} s'.format(t2 - t1))
+    print('_powerbin_numpy: {:e} s'.format(t3 - t2))
+
+    assert np.all(bins_test_numba == bins_ref), str(bins_test_numba) + '\n' + str(bins_ref)
+    assert np.all(bins_test_numpy == bins_ref), str(bins_test_numpy) + '\n' + str(bins_ref)
+    #assert isinstance(_powerbin_numpy(1, **kw), int)
+
+    print('<< PASS : test_powerbin >>')
 
 
 def inv_power_2nd_diff(power, edges):
@@ -1184,3 +1408,5 @@ def interpret_clsim_table_fname(fname):
 if __name__ == '__main__':
     test_infer_power()
     test_hash_obj()
+    test_linbin()
+    test_powerbin()
