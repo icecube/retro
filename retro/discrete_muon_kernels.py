@@ -12,7 +12,7 @@ from __future__ import absolute_import, division, print_function
 __all__ = ['ALL_REALS', 'const_energy_loss_muon', 'table_energy_loss_muon']
 
 __author__ = 'P. Eller, J.L. Lanfranchi, K. Crust'
-__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+__license__ = '''Copyright 2017 Philipp Eller, Justin L. Lanfranchi, Kevin Crust
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,7 +44,9 @@ from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
 
 
 ALL_REALS = (-np.inf, np.inf)
-#create spline (for table_energy_loss_muon)
+
+
+# Create spline (for table_energy_loss_muon)
 with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
     reader = csv.reader(csvfile)
     rows = []
@@ -60,9 +62,7 @@ with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'),
         stopping_power[idx] = float(stopping_power[idx])
         idx += 1
 
-spline = interpolate.splrep(energies, stopping_power, s=0)
-
-
+SPLINE = interpolate.splrep(energies, stopping_power, s=0)
 
 
 # TODO: use / check limits...?
@@ -104,7 +104,7 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
               0,
               0,
               0]],
-            dtype=np.float64
+            dtype=np.float32
         )
         return pinfo_gen
 
@@ -121,7 +121,7 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
     dir_z = -math.cos(hypo_params.track_zenith)
 
-    pinfo_gen = np.empty((n_samples, 8), dtype=np.float64)
+    pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
     sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
     pinfo_gen[:, 0] = hypo_params.t + sampled_dt
     pinfo_gen[:, 1] = (
@@ -142,8 +142,8 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
 
 
 def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
-    """
-    Discrete-time track hypothesis that calculates dE/dx as the muon travels using a spline tabulated data
+    """Discrete-time track hypothesis that calculates dE/dx as the muon travels
+    using splined tabulated data.
 
     Use as a hypo_kernel with DiscreteHypo class.
 
@@ -163,10 +163,9 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     -------
     pinfo_gen : shape (N,8) numpy.ndarray, dtype float 32
     """
-
     track_energy = hypo_params.track_energy
 
-    #check for only cascade
+    # Check for only cascade
     if track_energy == 0:
         pinfo_gen = np.array(
             [[hypo_params.t,
@@ -179,54 +178,56 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
               0]],
             dtype=np.float32
         )
-        return pinfo_gen        
+        return pinfo_gen
 
-    # create spline
-    #declare constants
+    # Declare constants
     segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
-    #assign vertex
+    # Assign vertex
     t = hypo_params.t
     x = hypo_params.x
     y = hypo_params.y
     z = hypo_params.z
 
-    #assign dir_x, dir_y, dir_z for the track
+    # Assign dir_x, dir_y, dir_z for the track
     #NOTE: ask justin about the negative sign on zenith
     sin_zen = math.sin(hypo_params.track_zenith)
     dir_x = -sin_zen * math.cos(hypo_params.track_azimuth)
     dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
     dir_z = -math.cos(hypo_params.track_zenith)
 
-    #create array at vertex
-    photon_array = np.array([t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562])
-    photon_array = photon_array[np.newaxis]
+    # Create array at vertex
+    photon_array = [
+        (t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562)
+    ]
 
-    #loop through track, appending new photon dump on axis 0
-    #loop uses rest mass of 105.658 MeV/c^2 for muon
+    dx = dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
+    dy = dt * dir_y * SPEED_OF_LIGHT_M_PER_NS
+    dz = dt * dir_z * SPEED_OF_LIGHT_M_PER_NS
+
+    # Loop uses rest mass of 105.658 MeV/c^2 for muon
     rest_mass = 0.105658
+
+    # Loop through track, appending new photon dump on axis 0
     while True:
-
-        #move along track
+        # Move along track
         t += dt
-        x += dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
-        y += dt * dir_y * SPEED_OF_LIGHT_M_PER_NS
-        z += dt * dir_z * SPEED_OF_LIGHT_M_PER_NS
+        x += dx
+        y += dy
+        z += dz
 
-        #change energy of muon
-        dedx = interpolate.splev(track_energy, spline, der=0)
+        # Change energy of muon
+        dedx = interpolate.splev(track_energy, SPLINE, der=0)
         track_energy -= dedx * segment_length
 
-        #append new row if energy still above rest mass, else break out of loop
+        # Append new row if energy still above rest mass, else break out of
+        # loop
         if track_energy > rest_mass:
-            photon_array = np.append(photon_array, np.array([t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562])[np.newaxis], axis=0)
+            photon_array.append(
+                (t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562)
+            )
         else:
             break
 
-
-    return photon_array
-
-
-
-
+    return np.array(photon_array, dtype=np.float32)
