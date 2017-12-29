@@ -1,4 +1,4 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
@@ -32,38 +32,26 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 
+from os.path import abspath, dirname
+import sys
+
 import numpy as np
-import numba
+
+if __name__ == '__main__' and __package__ is None:
+    PARENT_DIR = dirname(dirname(abspath(__file__)))
+    if PARENT_DIR not in sys.path:
+        sys.path.append(PARENT_DIR)
+from retro import SPEED_OF_LIGHT_M_PER_NS, weighted_average
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def weighted_average(x, w):
-    """Average of elements in `x` weighted by `w`.
-
-    Parameters
-    ----------
-    x : numpy.ndarray
-        Values to average
-
-    w : numpy.ndarray
-        Weights, same shape as `x`
-
-    Returns
-    -------
-    avg : numpy.ndarray
-        Weighted average, same shape as `x`
-
-    """
-    sum_xw = 0.0
-    sum_w = 0.0
-    for x_i, w_i in zip(x, w):
-        sum_xw += x_i * w_i
-        sum_w += w_i
-    return sum_xw / sum_w
-
-
-@numba.jit(nopython=True, nogil=True, cache=True)
-def generate_t_r_theta_table(table, thetadir_centers, deltaphidir_centers,
+def generate_t_r_theta_table(table,
+                             n_photons,
+                             phase_refractive_index,
+                             t_bin_width,
+                             angular_acceptance_fract,
+                             thetadir_centers,
+                             deltaphidir_centers,
                              theta_bin_edges):
     """Transform information from a raw single-DOM table (as output from CLSim)
     that is binned in (r, theta, t, theta_dir, deltaphi_dir) into a more
@@ -74,6 +62,9 @@ def generate_t_r_theta_table(table, thetadir_centers, deltaphidir_centers,
     ----------
     table
     n_photons
+    phase_refractive_index
+    t_bin_width
+    angular_acceptance_fract
     thetadir_centers
     deltaphidir_centers
     theta_bin_edges
@@ -92,9 +83,26 @@ def generate_t_r_theta_table(table, thetadir_centers, deltaphidir_centers,
     n_theta_bins = table.shape[1]
     n_t_bins = table.shape[2]
 
-    # (Base) survival probability (that will be modified by directionalkity):
+    # (Base) survival probability (that will be modified by directionality):
     # We can either
-    # 1. Sum over the directionality dimensions, which means "probability that 
+    # 1. Sum over the directionality dimensions, which means "probability that
+    #    photon is going in any one of these directions is P_{det, tot}. This
+    #    is like the total area under a curve, but then we have to distribute
+    #    this total area among all the directions via the distribution we
+    #    parameterize as fn of dir vector length."
+    # 2. Max over directionality dimensions, which means "the best P_det occurs
+    #    if the photon is moving in this particular direction, whereupon it
+    #    will be detected with P_{det, max}. It gets worse from there according
+    #    to the distribution we parameterize as fn of dir vector length."
+
+    norm = (
+        1
+        / n_photons
+        / (SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+        / t_bin_width
+        * angular_acceptance_fract
+        * n_theta_bins
+    )
 
     # Destination tables are to be binned in (t, r, costheta) (there are as
     # many costheta bins as theta bins in the original tables)
@@ -154,7 +162,7 @@ def generate_t_r_theta_table(table, thetadir_centers, deltaphidir_centers,
                     n_theta_bins - 1 - theta_j
                 )
 
-                survival_probs[dest_bin] = survival_prob[r_i, theta_j, t_k]
+                survival_probs[dest_bin] = norm * table[r_i, theta_j, t_k]
                 average_thetas[dest_bin] = average_theta
                 average_phis[dest_bin] = average_phi
                 lengths[dest_bin] = length
