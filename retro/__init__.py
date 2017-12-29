@@ -35,15 +35,31 @@ __all__ = [
     'POL_TABLE_NTBINS', 'POL_TABLE_NRBINS', 'POL_TABLE_NTHETABINS',
     'IC_DOM_QUANT_EFF', 'DC_DOM_QUANT_EFF',
 
-    # Functions
-    'convert_to_namedtuple', 'expand', 'event_to_hypo_params',
-    'hypo_to_track_params', 'linbin', 'test_linbin', 'powerspace', 'powerbin',
-    'test_powerbin', 'inv_power_2nd_diff', 'infer_power', 'test_infer_power',
-    'bin_edges_to_binspec', 'linear_bin_centers', 'poisson_llh',
-    'spacetime_separation', 'generate_anisotropy_str', 'generate_geom_meta',
-    'generate_unique_ids', 'spherical_volume', 'sph2cart',
-    'get_primary_interaction_str', 'get_primary_interaction_tex',
-    'force_little_endian', 'hash_obj', 'get_file_md5'
+    # Particle naming conventions
+    'ABS_FLAV_STR', 'ABS_FLAV_TEX', 'BAR_NOBAR_STR', 'BAR_NOBAR_TEX',
+    'INT_TYPE_STR', 'INT_TYPE_TEX', 'PDG_STR', 'PDG_TEX', 'PDG_INTER_STR',
+    'PDG_INTER_TEX', 'STR_TO_PDG_INTER',
+
+    # Functions...
+
+    # Generic utils
+    'expand', 'mkdir', 'force_little_endian', 'hash_obj', 'test_hash_obj',
+    'get_file_md5', 'convert_to_namedtuple',
+
+    # Retro-specific functions
+    'event_to_hypo_params', 'hypo_to_track_params', 'generate_anisotropy_str',
+    'generate_geom_meta', 'generate_unique_ids', 'get_primary_interaction_str',
+    'get_primary_interaction_tex', 'interpret_clsim_table_fname',
+
+    # Binning / geometry
+    'linbin', 'test_linbin', 'powerbin', 'test_powerbin',
+    'powerspace', 'inv_power_2nd_diff', 'infer_power', 'test_infer_power',
+    'bin_edges_to_binspec', 'linear_bin_centers', 'spherical_volume',
+    'sph2cart', 'pol2cart', 'cart2pol', 'spacetime_separation',
+
+    # Other math
+    'poisson_llh', 'partial_poisson_llh', 'weighted_average',
+
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -65,9 +81,12 @@ limitations under the License.'''
 import base64
 from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
 import cPickle as pickle
+import errno
 import hashlib
+from itertools import product
 import math
 from numbers import Number
+from os import makedirs
 from os.path import abspath, basename, dirname, expanduser, expandvars, join
 import re
 import struct
@@ -94,7 +113,7 @@ except Exception:
             """Decorator that smply returns the function being decorated"""
             return func
         return decorator
-    numba_vectorize = numba_jit
+    numba_vectorize = numba_jit # pylint: disable=invalid-name
 else:
     NUMBA_AVAIL = True
 
@@ -410,46 +429,36 @@ efficiency. Multiplies the tabulated detection probabilities to yield the
 actual probabilitiy that a photon is detected."""
 
 
+# -- Particle / interaction type naming conventions -- #
+
+ABS_FLAV_STR = {12: 'nue', 13: 'numu', 14: 'nutau'}
+ABS_FLAV_TEX = {12: r'\nu_e', 13: r'\nu_\mu', 14: r'\nu_\tau'}
+
+BAR_NOBAR_STR = {-1: 'bar', 1: ''}
+BAR_NOBAR_TEX = {-1: r'\bar', 1: ''}
+
+INT_TYPE_STR = {1: 'cc', 2: 'nc'}
+INT_TYPE_TEX = {1: r'\, {\rm CC}', 2: r'\, {\rm NC}'}
+
+PDG_STR = {}
+PDG_TEX = {}
+for _bnb, _abs_code in product(BAR_NOBAR_STR.keys(), ABS_FLAV_STR.keys()):
+    PDG_STR[_abs_code*_bnb] = ABS_FLAV_STR[_abs_code] + BAR_NOBAR_STR[_bnb]
+    PDG_TEX[_abs_code*_bnb] = BAR_NOBAR_TEX[_bnb] + ABS_FLAV_TEX[_abs_code]
+
+PDG_INTER_STR = {}
+PDG_INTER_TEX = {}
+for _pdg, _it in product(PDG_STR.keys(), INT_TYPE_STR.keys()):
+    PDG_INTER_STR[(_pdg, _it)] = '%s_%s' % (PDG_STR[_pdg], INT_TYPE_STR[_it])
+    PDG_INTER_TEX[(_pdg, _it)] = '%s %s' % (PDG_TEX[_pdg], INT_TYPE_TEX[_it])
+
+STR_TO_PDG_INTER = {v: k for k, v in PDG_INTER_STR.items()}
+
+
 # -- Functions -- #
 
-def convert_to_namedtuple(val, nt_type):
-    """Convert ``val`` to a namedtuple of type ``nt_type``.
 
-    If ``val`` is:
-    * ``nt_type``: return without conversion
-    * Mapping: instantiate an ``nt_type`` via ``**val``
-    * Iterable or Sequence: instantiate an ``nt_type`` via ``*val``
-
-    Parameters
-    ----------
-    val : nt_type, Mapping, Iterable, or Sequence
-        Value to be converted
-
-    nt_type : namedtuple type
-        Namedtuple type (class)
-
-    Returns
-    -------
-    nt_val : nt_type
-        ``val`` converted to ``nt_type``
-
-    Raises
-    ------
-    TypeError
-        If ``val`` is not one of the above-specified types.
-
-    """
-    if isinstance(val, nt_type):
-        return val
-
-    if isinstance(val, Mapping):
-        return nt_type(**val)
-
-    if isinstance(val, (Iterable, Sequence)):
-        return nt_type(*val)
-
-    raise TypeError('Cannot convert %s to %s' % (type(val), nt_type))
-
+# -- Files, dirs, I/O functions -- #
 
 def expand(p):
     """Fully expand a path.
@@ -468,756 +477,25 @@ def expand(p):
     return abspath(expanduser(expandvars(p)))
 
 
-def event_to_hypo_params(event):
-    """Convert an event to hypothesis params, for purposes of defining "truth"
-    hypothesis.
-
-    For now, only works with HypoParams8D.
+def mkdir(d, mode=0o0750):
+    """Simple wrapper around os.makedirs to create a directory but not raise an
+    exception if the dir already exists
 
     Parameters
     ----------
-    event : likelihood.Event namedtuple
-
-    Returns
-    -------
-    params : HYPO_PARAMS_T namedtuple
-
-    """
-    assert HYPO_PARAMS_T is HypoParams8D
-
-    track_energy = event.track.energy
-    cascade_energy = event.cascade.energy
-    #if event.interaction == 1: # charged current
-    #    track_energy = event.neutrino.energy
-    #    cascade_energy = 0
-    #else: # neutral current (2)
-    #    track_energy = 0
-    #    cascade_energy = event.neutrino.energy
-
-    hypo_params = HYPO_PARAMS_T(
-        t=event.neutrino.t,
-        x=event.neutrino.x,
-        y=event.neutrino.y,
-        z=event.neutrino.z,
-        track_azimuth=event.neutrino.azimuth,
-        track_zenith=event.neutrino.zenith,
-        track_energy=track_energy,
-        cascade_energy=cascade_energy
-    )
-
-    return hypo_params
-
-
-def hypo_to_track_params(hypo_params):
-    """Extract track params from hypo params.
-
-    Parameters
-    ----------
-    hypo_params : HYPO_PARAMS_T namedtuple
-
-    Returns
-    -------
-    track_params : TrackParams namedtuple
+    d : string
+        Directory path
+    mode : integer
+        Permissions on created directory; see os.makedirs for details.
+    warn : bool
+        Whether to warn if directory already exists.
 
     """
-    track_params = TrackParams(
-        t=hypo_params.t,
-        x=hypo_params.x,
-        y=hypo_params.y,
-        z=hypo_params.z,
-        zenith=hypo_params.track_zenith,
-        azimuth=hypo_params.track_azimuth,
-        energy=hypo_params.track_energy
-    )
-    return track_params
-
-# TODO: add `endpoint`, `retstep`, and `dtype` kwargs
-def powerspace(start, stop, num, power):
-    """Create bin edges evenly spaced w.r.t. ``x**power``.
-
-    Reverse engineered from Jakob van Santen's power axis, with arguments
-    defined with analogy to :function:`numpy.linspace` (adding `power` but
-    removing the `endpoint`, `retstep`, and `dtype` arguments).
-
-    Parameters
-    ----------
-    start : float
-        Lower-most bin edge
-
-    stop : float
-        Upper-most bin edge
-
-    num : int
-        Number of edges (this defines ``num - 1`` bins)
-
-    power : float
-        Power-law to use for even spacing
-
-    Returns
-    -------
-    edges : numpy.ndarray of shape (1, num)
-        Edges
-
-    """
-    inv_power = 1 / power
-    liner_edges = np.linspace(start=np.power(start, inv_power),
-                              stop=np.power(stop, inv_power),
-                              num=num)
-    bin_edges = np.power(liner_edges, power)
-    return bin_edges
-
-
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def _linbin_numba(val, start, stop, num):
-    """Determine the bin number(s) in a powerspace binning of value(s).
-
-    Parameters
-    ----------
-    val : np.ndarray
-    start : float
-    stop : float
-    num : int
-        Number of bin _edges_ (number of bins is one less than `num`)
-    out_type
-
-    Returns
-    -------
-    bin_num : np.ndarray of dtype `out_type`
-
-    """
-    num_bins = num - 1
-    width = (stop - start) / num_bins
-    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
-    bin_num_flat = bin_num.flat
-    for i, v in enumerate(val.flat):
-        bin_num_flat[i] = (v - start) // width
-    return bin_num
-
-
-def _linbin_numpy(val, start, stop, num):
-    """Determine the bin number(s) in a powerspace binning of value(s).
-
-    Parameters
-    ----------
-    val : np.ndarray
-    start : float
-    stop : float
-    num : int
-        Number of bin _edges_ (number of bins is one less than `num`)
-
-    Returns
-    -------
-    bin_num : np.ndarray of dtype `out_type`
-
-    """
-    num_bins = num - 1
-    width = (stop - start) / num_bins
-    bin_num = (val - start) // width
-    #if np.isscalar(bin_num):
-    #    bin_num = int(bin_num)
-    #else:
-    #    bin_num = 
-    return bin_num
-
-
-linbin = _linbin_numba
-
-
-def test_linbin():
-    """Unit tests for function `linbin`."""
-    kw = dict(start=0, stop=100, num=200)
-    bin_edges = np.linspace(**kw)
-
-    rand = np.random.RandomState(seed=0)
-    x = rand.uniform(0, 100, int(1e6))
-
-    test_args = (np.array([0.0]), np.float64(kw['start']),
-                 np.float64(kw['stop']), np.uint32(kw['num']))
-    _linbin_numba(*test_args)
-
-    test_args = (x, np.float64(kw['start']), np.float64(kw['stop']),
-                 np.uint32(kw['num']))
-    t0 = time()
-    bins_ref = np.digitize(x, bin_edges) - 1
-    t1 = time()
-    bins_test_numba = _linbin_numba(*test_args)
-    t2 = time()
-    bins_test_numpy = _linbin_numpy(*test_args)
-    t3 = time()
-
-    print('np.digitize:   {} s'.format(t1 - t0))
-    print('_linbin_numba: {} s'.format(t2 - t1))
-    print('_linbin_numpy: {} s'.format(t3 - t2))
-
-    assert np.all(bins_test_numba == bins_ref)
-    assert np.all(bins_test_numpy == bins_ref)
-    #assert isinstance(_linbin_numpy(1, **kw), int)
-
-    print('<< PASS : test_linbin >>')
-
-
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def _powerbin_numba(val, start, stop, num, power): #, out_type=np.uint64):
-    """Determine the bin number(s) in a powerspace binning of value(s).
-
-    Parameters
-    ----------
-    val : np.ndarray
-    start : float
-    stop : float
-    num : int
-        Number of bin _edges_ (number of bins is one less than `num`)
-    power : float
-    out_type
-
-    Returns
-    -------
-    bin_num : np.ndarray of dtype `out_type`
-
-    """
-    num_bins = num - 1
-    inv_power = 1.0 / power
-    inv_power_start = start**inv_power
-    inv_power_stop = stop**inv_power
-    inv_power_width = (inv_power_stop - inv_power_start) / num_bins
-    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
-    bin_num_flat = bin_num.flat
-    for i, v in enumerate(val.flat):
-        bin_num_flat[i] = (v**inv_power - inv_power_start) // inv_power_width
-    return bin_num
-
-
-def _powerbin_numpy(val, start, stop, num, power):
-    """Determine the bin number(s) in a powerspace binning of value(s).
-
-    Parameters
-    ----------
-    val : scalar or array
-    start : float
-    stop : float
-    num : int
-        Number of bin _edges_ (number of bins is one less than `num`)
-    power : float
-
-    Returns
-    -------
-    bin_num : int or np.ndarray of dtype int
-        If `val` is scalar, returns int; if `val` is a sequence or array-like,
-        returns `np.darray` of dtype int.
-
-    """
-    num_bins = num - 1
-    inv_power = 1 / power
-    inv_power_start = start**inv_power
-    inv_power_stop = stop**inv_power
-    inv_power_width = (inv_power_stop - inv_power_start) / num_bins
-    bin_num = (val**inv_power - inv_power_start) // inv_power_width
-    if np.isscalar(bin_num):
-        bin_num = int(bin_num)
-    else:
-        bin_num = bin_num.astype(int)
-    return bin_num
-
-
-powerbin = _powerbin_numpy
-
-
-#def powerbin(val, start, stop, num, power):
-#    """Determine the bin number(s) in a powerspace binning of value(s).
-#
-#    Parameters
-#    ----------
-#    val : scalar or array
-#    start : float
-#    stop : float
-#    num : int
-#        Number of bin _edges_ (number of bins is one less than `num`)
-#    power : float
-#
-#    Returns
-#    -------
-#    bin_num : int or np.ndarray of dtype int
-#        If `val` is scalar, returns int; if `val` is a sequence or array-like,
-#        returns `np.darray` of dtype int.
-#
-#    """
-#    if np.isscalar(val):
-#        val = np.array(val)
-#    else:
-#        val = np.asarray(val)
-#
-#    if num < 1000:
-#        pass
-
-
-def test_powerbin():
-    """Unit tests for function `powerbin`."""
-    kw = dict(start=0, stop=100, num=100, power=2)
-    bin_edges = powerspace(**kw)
-
-    rand = np.random.RandomState(seed=0)
-    x = rand.uniform(0, 100, int(1e6))
-
-    ftype = np.float32
-    utype = np.uint32
-    test_args = (ftype(kw['start']), ftype(kw['stop']),
-                 utype(kw['num']), utype(kw['power']))
-
-    # Run once to force compilation
-    _powerbin_numba(np.array([0.0], dtype=ftype), *test_args)
-
-    # Run actual tests / take timings
-    t0 = time()
-    bins_ref = np.digitize(x, bin_edges) - 1
-    t1 = time()
-    bins_test_numba = _powerbin_numba(x, *test_args)
-    t2 = time()
-    bins_test_numpy = _powerbin_numpy(x, *test_args)
-    t3 = time()
-
-    print('np.digitize:     {:e} s'.format(t1 - t0))
-    print('_powerbin_numba: {:e} s'.format(t2 - t1))
-    print('_powerbin_numpy: {:e} s'.format(t3 - t2))
-
-    assert np.all(bins_test_numba == bins_ref), str(bins_test_numba) + '\n' + str(bins_ref)
-    assert np.all(bins_test_numpy == bins_ref), str(bins_test_numpy) + '\n' + str(bins_ref)
-    #assert isinstance(_powerbin_numpy(1, **kw), int)
-
-    print('<< PASS : test_powerbin >>')
-
-
-def inv_power_2nd_diff(power, edges):
-    """Second finite difference of edges**(1/power)"""
-    return np.diff(edges**(1/power), n=2)
-
-
-def infer_power(edges):
-    """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
-    first_three_edges = edges[:3]
-    atol = 1e-15
-    rtol = 4*np.finfo(np.float).eps
-    power = None
     try:
-        power = brentq(
-            f=inv_power_2nd_diff,
-            a=1, b=100,
-            maxiter=1000, xtol=atol, rtol=rtol,
-            args=(first_three_edges,)
-        )
-    except RuntimeError:
-        raise ValueError('Edges do not appear to be power-spaced'
-                         ' (optimizer did not converge)')
-    diff = inv_power_2nd_diff(power, edges)
-    if not np.allclose(diff, diff[0], atol=1000*atol, rtol=10*rtol):
-        raise ValueError('Edges do not appear to be power-spaced'
-                         ' (power found does not hold for all edges)\n%s'
-                         % str(diff))
-    return power
-
-
-def test_infer_power():
-    """Unit test for function `infer_power`"""
-    ref_powers = np.arange(1, 10, 0.001)
-    total_time = 0.0
-    for ref_power in ref_powers:
-        edges = powerspace(start=0, stop=400, num=201, power=ref_power)
-        try:
-            t0 = time()
-            inferred_power = infer_power(edges)
-            t1 = time()
-        except ValueError:
-            print(ref_power, edges)
+        makedirs(d, mode=mode)
+    except OSError as err:
+        if err.errno != errno.EEXIST:
             raise
-        assert np.isclose(inferred_power, ref_power,
-                          atol=1e-14, rtol=4*np.finfo(np.float).eps), ref_power
-        total_time += t1 - t0
-    print('Average time to infer power: {} s'
-          .format(total_time/len(ref_powers)))
-    print('<< PASS : test_infer_power >>')
-
-
-def bin_edges_to_binspec(edges):
-    """Convert bin edges to a binning specification (start, stop, and num_bins).
-
-    Note:
-    * t-bins are assumed to be linearly spaced in ``t``
-    * r-bins are assumed to be evenly spaced w.r.t. ``r**2``
-    * theta-bins are assumed to be evenly spaced w.r.t. ``cos(theta)``
-    * phi bins are assumed to be linearly spaced in ``phi``
-
-    Parameters
-    ----------
-    edges
-
-    Returns
-    -------
-    start : TimeSphCoord containing floats
-    stop : TimeSphCoord containing floats
-    num_bins : TimeSphCoord containing ints
-
-    """
-    dims = TimeSphCoord._fields
-    start = TimeSphCoord(*(np.min(getattr(edges, d)) for d in dims))
-    stop = TimeSphCoord(*(np.max(getattr(edges, d)) for d in dims))
-    num_bins = TimeSphCoord(*(len(getattr(edges, d)) - 1 for d in dims))
-
-    return start, stop, num_bins
-
-
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def linear_bin_centers(bin_edges):
-    """Return bin centers for bins defined in a linear space.
-
-    Parameters
-    ----------
-    bin_edges : sequence of numeric
-        Note that all numbers contained must be of the same dtype (this is a
-        limitation due to numba, at least as of version 0.35).
-
-    Returns
-    -------
-    bin_centers : numpy.ndarray
-        Length is one less than that of `bin_edges`, and datatype is inferred
-        from the first element of `bin_edges`.
-
-    """
-    num_edges = len(bin_edges)
-    bin_centers = np.empty(num_edges - 1, bin_edges.dtype)
-    edge0 = bin_edges[0]
-    for n in range(num_edges - 1):
-        edge1 = bin_edges[n + 1]
-        bin_centers[n] = 0.5 * (edge0 + edge1)
-        edge0 = edge1
-    return bin_centers
-
-
-def poisson_llh(expected, observed):
-    r"""Compute the log Poisson likelihood.
-
-    .. math::
-        {\rm observed} \cdot \log {\rm expected} - {\rm expected} \log \Gamma({\rm observed})
-
-    Parameters
-    ----------
-    expected
-        Expected value(s)
-
-    observed
-        Observed value(s)
-
-    Returns
-    -------
-    llh
-        Log likelihood(s)
-
-    """
-    # TODO: why is there a +1 here? Avoid zero observations? How does this
-    # affect the result, besides avoiding inf? Removed for now until we work
-    # this out...
-
-    #llh = observed * np.log(expected) - expected - gammaln(observed + 1)
-    llh = observed * np.log(expected) - expected - gammaln(observed)
-    return llh
-
-
-def partial_poisson_llh(expected, observed):
-    r"""Compute the log Poisson likelihood _excluding_ subtracting off
-    expected. This part, which constitutes an expected-but-not-observed
-    penalty, is intended to be taken care of outside this function.
-
-    .. math::
-        {\rm observed} \cdot \log {\rm expected} - \log \Gamma({\rm observed})
-
-    Parameters
-    ----------
-    expected
-        Expected value(s)
-
-    observed
-        Observed value(s)
-
-    Returns
-    -------
-    llh
-        Log likelihood(s)
-
-    """
-    # TODO: why is there a +1 here? Avoid zero observations? How does this
-    # affect the result, besides avoiding inf? Removed for now until we work
-    # this out...
-
-    llh = observed * np.log(expected) - expected - gammaln(observed)
-    return llh
-
-
-def spacetime_separation(dt, dx, dy, dz):
-    """Compute the separation between two events in spacetime. Negative values
-    are non-causal.
-
-    Parameters
-    ----------
-    dt, dx, dy, dz : numeric
-        Separation between events in nanoseconds (dt) and meters (dx, dy, and
-        dz).
-
-    """
-    return SPEED_OF_LIGHT_M_PER_NS*dt - np.sqrt(dx**2 + dy**2 + dz**2)
-
-
-def generate_anisotropy_str(anisotropy):
-    """Generate a string from anisotropy specification parameters.
-
-    Parameters
-    ----------
-    anisotropy : None or tuple of values
-
-    Returns
-    -------
-    anisotropy_str : string
-
-    """
-    if anisotropy is None:
-        anisotropy_str = 'none'
-    else:
-        anisotropy_str = '_'.join(str(param) for param in anisotropy)
-    return anisotropy_str
-
-
-def generate_geom_meta(geom):
-    """Generate geometry metadata dict. Currently, this sinmply hashes on the
-    geometry coordinates. Note that the values are rounded to the nearest
-    centimeter for hashing purposes. (Also, the values are converted to
-    integers at this precision to eliminate any possible float32 / float64
-    issues that could cause discrepancies in hash values for what we consider
-    to be equal geometries.)
-
-    Parameters
-    ----------
-    geom : shape (n_strings, n_depths, 3) numpy ndarray, dtype float{32,64}
-
-    Returns
-    -------
-    metadata : OrderedDict
-        Contains the item:
-            'hash' : length-8 str
-                Hex characters convert to a string of length 8
-
-    """
-    assert len(geom.shape) == 3
-    assert geom.shape[2] == 3
-    rounded_ints = np.round(geom * 100).astype(np.int)
-    geom_hash = hash_obj(rounded_ints, fmt='hex')[:8]
-    return OrderedDict([('hash', geom_hash)])
-
-
-def generate_unique_ids(events):
-    """Generate unique IDs from `event` fields because people are lazy
-    inconsiderate assholes.
-
-    Parameters
-    ----------
-    events : array of int
-
-    Returns
-    -------
-    uids : array of int
-
-    """
-    uids = (
-        events
-        + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
-    ).astype(int)
-    return uids
-
-
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def spherical_volume(rmin, rmax, dcostheta, dphi):
-    """Find volume of a finite element defined in spherical coordinates.
-
-    Parameters
-    ----------
-    rmin, rmax : float (in arbitrary distance units)
-        Difference between initial and final radii.
-
-    dcostheta : float
-        Difference between initial and final zenith angles' cosines (where
-        zenith angle is defined as out & down from +Z axis).
-
-    dphi : float (in units of radians)
-        Difference between initial and final azimuth angle (defined as positive
-        from +X-axis towards +Y-axis looking "down" on the XY-plane (i.e.,
-        looking in -Z direction).
-
-    Returns
-    -------
-    vol : float
-        Volume in units of the cube of the units that ``dr`` is provided in.
-        E.g. if those are provided in meters, ``vol`` will be in units of `m^3`.
-
-    """
-    return -dcostheta * (rmax**3 - rmin**3) * dphi / 3
-
-
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def sph2cart(r, theta, phi, x, y, z):
-    """Convert spherical coordinates to Cartesian.
-
-    Parameters
-    ----------
-    r, theta, phi : numeric of same shape
-
-    x, y, z : numpy.ndarrays of same shape as `r`, `theta`, `phi`
-        Result is stored in these arrays.
-
-    """
-    shape = r.shape
-    num_elements = int(np.prod(np.array(shape)))
-    r_flat = r.flat
-    theta_flat = theta.flat
-    phi_flat = phi.flat
-    x_flat = x.flat
-    y_flat = y.flat
-    z_flat = z.flat
-    for idx in range(num_elements):
-        rf = r_flat[idx]
-        thetaf = theta_flat[idx]
-        phif = phi_flat[idx]
-        rho = rf * math.sin(thetaf)
-        x_flat[idx] = rho * math.cos(phif)
-        y_flat[idx] = rho * math.sin(phif)
-        z_flat[idx] = rf * math.cos(thetaf)
-
-
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def pol2cart(r, theta, x, y):
-    """Convert plane polar (r, theta) to Cartesian (x, y) Coordinates.
-
-    Parameters
-    ----------
-    r, theta : numeric of same shape
-
-    x, y : numpy.ndarrays of same shape as `r`, `theta`
-        Result is stored in these arrays.
-
-    """
-    shape = r.shape
-    num_elements = int(np.prod(np.array(shape)))
-    r_flat = r.flat
-    theta_flat = theta.flat
-    x_flat = x.flat
-    y_flat = y.flat
-    for idx in range(num_elements):
-        rf = r_flat[idx]
-        tf = theta_flat[idx]
-        x_flat[idx] = rf * math.cos(tf)
-        y_flat[idx] = rf * math.sin(tf)
-
-
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def cart2pol(x, y, r, theta):
-    """Convert plane Cartesian (x, y) to plane polar (r, theta) Coordinates.
-
-    Parameters
-    ----------
-    x, y : numeric of same shape
-
-    r, theta : numpy.ndarrays of same shape as `x`, `y`
-        Result is stored in these arrays.
-
-    """
-    shape = x.shape
-    num_elements = int(np.prod(np.array(shape)))
-    x_flat = x.flat
-    y_flat = y.flat
-    r_flat = r.flat
-    theta_flat = theta.flat
-    for idx in range(num_elements):
-        xfi = x_flat[idx]
-        yfi = y_flat[idx]
-        r_flat[idx] = math.sqrt(xfi*xfi + yfi*yfi)
-        theta_flat[idx] = math.atan2(yfi, xfi)
-
-
-#@numba_jit(nopython=True, nogil=True, cache=True, parallel=True)
-#def sph2cart(r, theta, phi):
-#    """Convert spherical coordinates to Cartesian.
-#
-#    Parameters
-#    ----------
-#    r, theta, phi
-#        Spherical coordinates: radius, theta (zenith angle, defined as "out"
-#        from the +z-axis), and phi (azimuth angle, defined as positive from
-#        +x-axis to +y-axix)
-#
-#    Returns
-#    -------
-#    x, y, z
-#        Cartesian coordinates
-#
-#    """
-#    z = r * np.cos(theta)
-#    rsintheta = r * np.sin(theta)
-#    x = rsintheta * np.cos(phi)
-#    y = rsintheta * np.sin(phi)
-#    return x, y, z
-
-
-def get_primary_interaction_str(event):
-    """Produce simple string representation of event's primary neutrino and
-    interaction type (if present).
-
-    Parameters
-    ----------
-    event : Event namedtuple
-
-    Returns
-    -------
-    flavintstr : string
-
-    """
-    pdg = int(event.neutrino.pdg)
-    barnobar = {-1: r'bar', 1: ''}[np.sign(pdg)]
-    flav = {12: r'nue', 14: r'numu', 16: r'nutau'}[abs(pdg)]
-    int_type = {None: '', 1: r'_cc', 2: r'_nc'}[int(event.interaction)]
-    return flav + barnobar + int_type
-
-
-def get_primary_interaction_tex(event):
-    """Produce latex representation of event's primary neutrino and interaction
-    type (if present).
-
-    Parameters
-    ----------
-    event : Event namedtuple
-
-    Returns
-    -------
-    flavinttex : string
-
-    """
-    if isinstance(event, (tuple, Event)):
-        prim_int_str = get_primary_interaction_str(event)
-    elif isinstance(event, basestring):
-        prim_int_str = event
-    else:
-        raise TypeError('Unhandled type %s for argument `event`' % type(event))
-
-    if prim_int_str.startswith('nue'):
-        tex = r'\nu_e'
-    elif prim_int_str.startswith('numu'):
-        tex = r'\nu_\mu'
-    elif prim_int_str.startswith('nutau'):
-        tex = r'\nu_\tau'
-
-    if 'bar' in prim_int_str:
-        tex = r'\bar' + tex
-
-    if prim_int_str.endswith('_cc'):
-        tex += r'\,CC'
-    elif prim_int_str.endswith('_nc'):
-        tex += r'\,NC'
-
-    return tex
 
 
 def force_little_endian(x):
@@ -1355,6 +633,214 @@ def get_file_md5(fpath, blocksize=2**20):
     return md5.hexdigest()
 
 
+def convert_to_namedtuple(val, nt_type):
+    """Convert ``val`` to a namedtuple of type ``nt_type``.
+
+    If ``val`` is:
+    * ``nt_type``: return without conversion
+    * Mapping: instantiate an ``nt_type`` via ``**val``
+    * Iterable or Sequence: instantiate an ``nt_type`` via ``*val``
+
+    Parameters
+    ----------
+    val : nt_type, Mapping, Iterable, or Sequence
+        Value to be converted
+
+    nt_type : namedtuple type
+        Namedtuple type (class)
+
+    Returns
+    -------
+    nt_val : nt_type
+        ``val`` converted to ``nt_type``
+
+    Raises
+    ------
+    TypeError
+        If ``val`` is not one of the above-specified types.
+
+    """
+    if isinstance(val, nt_type):
+        return val
+
+    if isinstance(val, Mapping):
+        return nt_type(**val)
+
+    if isinstance(val, (Iterable, Sequence)):
+        return nt_type(*val)
+
+    raise TypeError('Cannot convert %s to %s' % (type(val), nt_type))
+
+
+# -- Retro-specific functions -- #
+
+
+def event_to_hypo_params(event):
+    """Convert an event to hypothesis params, for purposes of defining "truth"
+    hypothesis.
+
+    For now, only works with HypoParams8D.
+
+    Parameters
+    ----------
+    event : likelihood.Event namedtuple
+
+    Returns
+    -------
+    params : HYPO_PARAMS_T namedtuple
+
+    """
+    assert HYPO_PARAMS_T is HypoParams8D
+
+    track_energy = event.track.energy
+    cascade_energy = event.cascade.energy
+    #if event.interaction == 1: # charged current
+    #    track_energy = event.neutrino.energy
+    #    cascade_energy = 0
+    #else: # neutral current (2)
+    #    track_energy = 0
+    #    cascade_energy = event.neutrino.energy
+
+    hypo_params = HYPO_PARAMS_T(
+        t=event.neutrino.t,
+        x=event.neutrino.x,
+        y=event.neutrino.y,
+        z=event.neutrino.z,
+        track_azimuth=event.neutrino.azimuth,
+        track_zenith=event.neutrino.zenith,
+        track_energy=track_energy,
+        cascade_energy=cascade_energy
+    )
+
+    return hypo_params
+
+
+def hypo_to_track_params(hypo_params):
+    """Extract track params from hypo params.
+
+    Parameters
+    ----------
+    hypo_params : HYPO_PARAMS_T namedtuple
+
+    Returns
+    -------
+    track_params : TrackParams namedtuple
+
+    """
+    track_params = TrackParams(
+        t=hypo_params.t,
+        x=hypo_params.x,
+        y=hypo_params.y,
+        z=hypo_params.z,
+        zenith=hypo_params.track_zenith,
+        azimuth=hypo_params.track_azimuth,
+        energy=hypo_params.track_energy
+    )
+    return track_params
+
+
+def generate_anisotropy_str(anisotropy):
+    """Generate a string from anisotropy specification parameters.
+
+    Parameters
+    ----------
+    anisotropy : None or tuple of values
+
+    Returns
+    -------
+    anisotropy_str : string
+
+    """
+    if anisotropy is None:
+        anisotropy_str = 'none'
+    else:
+        anisotropy_str = '_'.join(str(param) for param in anisotropy)
+    return anisotropy_str
+
+
+def generate_geom_meta(geom):
+    """Generate geometry metadata dict. Currently, this sinmply hashes on the
+    geometry coordinates. Note that the values are rounded to the nearest
+    centimeter for hashing purposes. (Also, the values are converted to
+    integers at this precision to eliminate any possible float32 / float64
+    issues that could cause discrepancies in hash values for what we consider
+    to be equal geometries.)
+
+    Parameters
+    ----------
+    geom : shape (n_strings, n_depths, 3) numpy ndarray, dtype float{32,64}
+
+    Returns
+    -------
+    metadata : OrderedDict
+        Contains the item:
+            'hash' : length-8 str
+                Hex characters convert to a string of length 8
+
+    """
+    assert len(geom.shape) == 3
+    assert geom.shape[2] == 3
+    rounded_ints = np.round(geom * 100).astype(np.int)
+    geom_hash = hash_obj(rounded_ints, fmt='hex')[:8]
+    return OrderedDict([('hash', geom_hash)])
+
+
+def generate_unique_ids(events):
+    """Generate unique IDs from `event` fields because people are lazy
+    inconsiderate assholes.
+
+    Parameters
+    ----------
+    events : array of int
+
+    Returns
+    -------
+    uids : array of int
+
+    """
+    uids = (
+        events
+        + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
+    ).astype(int)
+    return uids
+
+
+def get_primary_interaction_str(event):
+    """Produce simple string representation of event's primary neutrino and
+    interaction type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavintstr : string
+
+    """
+    pdg = int(event.neutrino.pdg)
+    inter = int(event.interaction)
+    return PDG_INTER_STR[(pdg, inter)]
+
+
+def get_primary_interaction_tex(event):
+    """Produce latex representation of event's primary neutrino and interaction
+    type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavinttex : string
+
+    """
+    pdg = int(event.neutrino.pdg)
+    inter = int(event.interaction)
+    return PDG_INTER_TEX[(pdg, inter)]
+
+
 def interpret_clsim_table_fname(fname):
     """Get fields from fname and interpret these (e.g. by covnerting into
     appropriate Python types).
@@ -1403,6 +889,602 @@ def interpret_clsim_table_fname(fname):
     info['depth_idx'] = int(info['depth_idx'])
 
     return info
+
+
+# -- Binning / geometry functions -- #
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def _linbin_numba(val, start, stop, num):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : np.ndarray
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+    out_type
+
+    Returns
+    -------
+    bin_num : np.ndarray of dtype `out_type`
+
+    """
+    num_bins = num - 1
+    width = (stop - start) / num_bins
+    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
+    bin_num_flat = bin_num.flat
+    for i, v in enumerate(val.flat):
+        bin_num_flat[i] = (v - start) // width
+    return bin_num
+
+
+def _linbin_numpy(val, start, stop, num):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : np.ndarray
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+
+    Returns
+    -------
+    bin_num : np.ndarray of dtype `out_type`
+
+    """
+    num_bins = num - 1
+    width = (stop - start) / num_bins
+    bin_num = (val - start) // width
+    #if np.isscalar(bin_num):
+    #    bin_num = int(bin_num)
+    #else:
+    #    bin_num =
+    return bin_num
+
+
+linbin = _linbin_numba # pylint: disable=invalid-name
+
+
+def test_linbin():
+    """Unit tests for function `linbin`."""
+    kw = dict(start=0, stop=100, num=200)
+    bin_edges = np.linspace(**kw)
+
+    rand = np.random.RandomState(seed=0)
+    x = rand.uniform(0, 100, int(1e6))
+
+    test_args = (np.array([0.0]), np.float64(kw['start']),
+                 np.float64(kw['stop']), np.uint32(kw['num']))
+    _linbin_numba(*test_args)
+
+    test_args = (x, np.float64(kw['start']), np.float64(kw['stop']),
+                 np.uint32(kw['num']))
+    t0 = time()
+    bins_ref = np.digitize(x, bin_edges) - 1
+    t1 = time()
+    bins_test_numba = _linbin_numba(*test_args)
+    t2 = time()
+    bins_test_numpy = _linbin_numpy(*test_args)
+    t3 = time()
+
+    print('np.digitize:   {} s'.format(t1 - t0))
+    print('_linbin_numba: {} s'.format(t2 - t1))
+    print('_linbin_numpy: {} s'.format(t3 - t2))
+
+    assert np.all(bins_test_numba == bins_ref)
+    assert np.all(bins_test_numpy == bins_ref)
+    #assert isinstance(_linbin_numpy(1, **kw), int)
+
+    print('<< PASS : test_linbin >>')
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def _powerbin_numba(val, start, stop, num, power): #, out_type=np.uint64):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : np.ndarray
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+    power : float
+    out_type
+
+    Returns
+    -------
+    bin_num : np.ndarray of dtype `out_type`
+
+    """
+    num_bins = num - 1
+    inv_power = 1.0 / power
+    inv_power_start = start**inv_power
+    inv_power_stop = stop**inv_power
+    inv_power_width = (inv_power_stop - inv_power_start) / num_bins
+    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
+    bin_num_flat = bin_num.flat
+    for i, v in enumerate(val.flat):
+        bin_num_flat[i] = (v**inv_power - inv_power_start) // inv_power_width
+    return bin_num
+
+
+def _powerbin_numpy(val, start, stop, num, power):
+    """Determine the bin number(s) in a powerspace binning of value(s).
+
+    Parameters
+    ----------
+    val : scalar or array
+    start : float
+    stop : float
+    num : int
+        Number of bin _edges_ (number of bins is one less than `num`)
+    power : float
+
+    Returns
+    -------
+    bin_num : int or np.ndarray of dtype int
+        If `val` is scalar, returns int; if `val` is a sequence or array-like,
+        returns `np.darray` of dtype int.
+
+    """
+    num_bins = num - 1
+    inv_power = 1 / power
+    inv_power_start = start**inv_power
+    inv_power_stop = stop**inv_power
+    inv_power_width = (inv_power_stop - inv_power_start) / num_bins
+    bin_num = (val**inv_power - inv_power_start) // inv_power_width
+    if np.isscalar(bin_num):
+        bin_num = int(bin_num)
+    else:
+        bin_num = bin_num.astype(int)
+    return bin_num
+
+
+powerbin = _powerbin_numpy # pylint: disable=invalid-name
+
+
+#def powerbin(val, start, stop, num, power):
+#    """Determine the bin number(s) in a powerspace binning of value(s).
+#
+#    Parameters
+#    ----------
+#    val : scalar or array
+#    start : float
+#    stop : float
+#    num : int
+#        Number of bin _edges_ (number of bins is one less than `num`)
+#    power : float
+#
+#    Returns
+#    -------
+#    bin_num : int or np.ndarray of dtype int
+#        If `val` is scalar, returns int; if `val` is a sequence or array-like,
+#        returns `np.darray` of dtype int.
+#
+#    """
+#    if np.isscalar(val):
+#        val = np.array(val)
+#    else:
+#        val = np.asarray(val)
+#
+#    if num < 1000:
+#        pass
+
+
+def test_powerbin():
+    """Unit tests for function `powerbin`."""
+    kw = dict(start=0, stop=100, num=100, power=2)
+    bin_edges = powerspace(**kw)
+
+    rand = np.random.RandomState(seed=0)
+    x = rand.uniform(0, 100, int(1e6))
+
+    ftype = np.float32
+    utype = np.uint32
+    test_args = (ftype(kw['start']), ftype(kw['stop']),
+                 utype(kw['num']), utype(kw['power']))
+
+    # Run once to force compilation
+    _powerbin_numba(np.array([0.0], dtype=ftype), *test_args)
+
+    # Run actual tests / take timings
+    t0 = time()
+    bins_ref = np.digitize(x, bin_edges) - 1
+    t1 = time()
+    bins_test_numba = _powerbin_numba(x, *test_args)
+    t2 = time()
+    bins_test_numpy = _powerbin_numpy(x, *test_args)
+    t3 = time()
+
+    print('np.digitize:     {:e} s'.format(t1 - t0))
+    print('_powerbin_numba: {:e} s'.format(t2 - t1))
+    print('_powerbin_numpy: {:e} s'.format(t3 - t2))
+
+    assert np.all(bins_test_numba == bins_ref), str(bins_test_numba) + '\n' + str(bins_ref)
+    assert np.all(bins_test_numpy == bins_ref), str(bins_test_numpy) + '\n' + str(bins_ref)
+    #assert isinstance(_powerbin_numpy(1, **kw), int)
+
+    print('<< PASS : test_powerbin >>')
+
+
+# TODO: add `endpoint`, `retstep`, and `dtype` kwargs
+def powerspace(start, stop, num, power):
+    """Create bin edges evenly spaced w.r.t. ``x**power``.
+
+    Reverse engineered from Jakob van Santen's power axis, with arguments
+    defined with analogy to :function:`numpy.linspace` (adding `power` but
+    removing the `endpoint`, `retstep`, and `dtype` arguments).
+
+    Parameters
+    ----------
+    start : float
+        Lower-most bin edge
+
+    stop : float
+        Upper-most bin edge
+
+    num : int
+        Number of edges (this defines ``num - 1`` bins)
+
+    power : float
+        Power-law to use for even spacing
+
+    Returns
+    -------
+    edges : numpy.ndarray of shape (1, num)
+        Edges
+
+    """
+    inv_power = 1 / power
+    liner_edges = np.linspace(start=np.power(start, inv_power),
+                              stop=np.power(stop, inv_power),
+                              num=num)
+    bin_edges = np.power(liner_edges, power)
+    return bin_edges
+
+
+def inv_power_2nd_diff(power, edges):
+    """Second finite difference of edges**(1/power)"""
+    return np.diff(edges**(1/power), n=2)
+
+
+def infer_power(edges):
+    """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
+    first_three_edges = edges[:3]
+    atol = 1e-15
+    rtol = 4*np.finfo(np.float).eps
+    power = None
+    try:
+        power = brentq(
+            f=inv_power_2nd_diff,
+            a=1, b=100,
+            maxiter=1000, xtol=atol, rtol=rtol,
+            args=(first_three_edges,)
+        )
+    except RuntimeError:
+        raise ValueError('Edges do not appear to be power-spaced'
+                         ' (optimizer did not converge)')
+    diff = inv_power_2nd_diff(power, edges)
+    if not np.allclose(diff, diff[0], atol=1000*atol, rtol=10*rtol):
+        raise ValueError('Edges do not appear to be power-spaced'
+                         ' (power found does not hold for all edges)\n%s'
+                         % str(diff))
+    return power
+
+
+def test_infer_power():
+    """Unit test for function `infer_power`"""
+    ref_powers = np.arange(1, 10, 0.001)
+    total_time = 0.0
+    for ref_power in ref_powers:
+        edges = powerspace(start=0, stop=400, num=201, power=ref_power)
+        try:
+            t0 = time()
+            inferred_power = infer_power(edges)
+            t1 = time()
+        except ValueError:
+            print(ref_power, edges)
+            raise
+        assert np.isclose(inferred_power, ref_power,
+                          atol=1e-14, rtol=4*np.finfo(np.float).eps), ref_power
+        total_time += t1 - t0
+    print('Average time to infer power: {} s'
+          .format(total_time/len(ref_powers)))
+    print('<< PASS : test_infer_power >>')
+
+
+def bin_edges_to_binspec(edges):
+    """Convert bin edges to a binning specification (start, stop, and num_bins).
+
+    Note:
+    * t-bins are assumed to be linearly spaced in ``t``
+    * r-bins are assumed to be evenly spaced w.r.t. ``r**2``
+    * theta-bins are assumed to be evenly spaced w.r.t. ``cos(theta)``
+    * phi bins are assumed to be linearly spaced in ``phi``
+
+    Parameters
+    ----------
+    edges
+
+    Returns
+    -------
+    start : TimeSphCoord containing floats
+    stop : TimeSphCoord containing floats
+    num_bins : TimeSphCoord containing ints
+
+    """
+    dims = TimeSphCoord._fields
+    start = TimeSphCoord(*(np.min(getattr(edges, d)) for d in dims))
+    stop = TimeSphCoord(*(np.max(getattr(edges, d)) for d in dims))
+    num_bins = TimeSphCoord(*(len(getattr(edges, d)) - 1 for d in dims))
+
+    return start, stop, num_bins
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def linear_bin_centers(bin_edges):
+    """Return bin centers for bins defined in a linear space.
+
+    Parameters
+    ----------
+    bin_edges : sequence of numeric
+        Note that all numbers contained must be of the same dtype (this is a
+        limitation due to numba, at least as of version 0.35).
+
+    Returns
+    -------
+    bin_centers : numpy.ndarray
+        Length is one less than that of `bin_edges`, and datatype is inferred
+        from the first element of `bin_edges`.
+
+    """
+    num_edges = len(bin_edges)
+    bin_centers = np.empty(num_edges - 1, bin_edges.dtype)
+    edge0 = bin_edges[0]
+    for n in range(num_edges - 1):
+        edge1 = bin_edges[n + 1]
+        bin_centers[n] = 0.5 * (edge0 + edge1)
+        edge0 = edge1
+    return bin_centers
+
+
+def spacetime_separation(dt, dx, dy, dz):
+    """Compute the separation between two events in spacetime. Negative values
+    are non-causal.
+
+    Parameters
+    ----------
+    dt, dx, dy, dz : numeric
+        Separation between events in nanoseconds (dt) and meters (dx, dy, and
+        dz).
+
+    """
+    return SPEED_OF_LIGHT_M_PER_NS*dt - np.sqrt(dx**2 + dy**2 + dz**2)
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def spherical_volume(rmin, rmax, dcostheta, dphi):
+    """Find volume of a finite element defined in spherical coordinates.
+
+    Parameters
+    ----------
+    rmin, rmax : float (in arbitrary distance units)
+        Difference between initial and final radii.
+
+    dcostheta : float
+        Difference between initial and final zenith angles' cosines (where
+        zenith angle is defined as out & down from +Z axis).
+
+    dphi : float (in units of radians)
+        Difference between initial and final azimuth angle (defined as positive
+        from +X-axis towards +Y-axis looking "down" on the XY-plane (i.e.,
+        looking in -Z direction).
+
+    Returns
+    -------
+    vol : float
+        Volume in units of the cube of the units that ``dr`` is provided in.
+        E.g. if those are provided in meters, ``vol`` will be in units of `m^3`.
+
+    """
+    return -dcostheta * (rmax**3 - rmin**3) * dphi / 3
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def sph2cart(r, theta, phi, x, y, z):
+    """Convert spherical coordinates to Cartesian.
+
+    Parameters
+    ----------
+    r, theta, phi : numeric of same shape
+
+    x, y, z : numpy.ndarrays of same shape as `r`, `theta`, `phi`
+        Result is stored in these arrays.
+
+    """
+    shape = r.shape
+    num_elements = int(np.prod(np.array(shape)))
+    r_flat = r.flat
+    theta_flat = theta.flat
+    phi_flat = phi.flat
+    x_flat = x.flat
+    y_flat = y.flat
+    z_flat = z.flat
+    for idx in range(num_elements):
+        rf = r_flat[idx]
+        thetaf = theta_flat[idx]
+        phif = phi_flat[idx]
+        rho = rf * math.sin(thetaf)
+        x_flat[idx] = rho * math.cos(phif)
+        y_flat[idx] = rho * math.sin(phif)
+        z_flat[idx] = rf * math.cos(thetaf)
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def pol2cart(r, theta, x, y):
+    """Convert plane polar (r, theta) to Cartesian (x, y) Coordinates.
+
+    Parameters
+    ----------
+    r, theta : numeric of same shape
+
+    x, y : numpy.ndarrays of same shape as `r`, `theta`
+        Result is stored in these arrays.
+
+    """
+    shape = r.shape
+    num_elements = int(np.prod(np.array(shape)))
+    r_flat = r.flat
+    theta_flat = theta.flat
+    x_flat = x.flat
+    y_flat = y.flat
+    for idx in range(num_elements):
+        rf = r_flat[idx]
+        tf = theta_flat[idx]
+        x_flat[idx] = rf * math.cos(tf)
+        y_flat[idx] = rf * math.sin(tf)
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def cart2pol(x, y, r, theta):
+    """Convert plane Cartesian (x, y) to plane polar (r, theta) Coordinates.
+
+    Parameters
+    ----------
+    x, y : numeric of same shape
+
+    r, theta : numpy.ndarrays of same shape as `x`, `y`
+        Result is stored in these arrays.
+
+    """
+    shape = x.shape
+    num_elements = int(np.prod(np.array(shape)))
+    x_flat = x.flat
+    y_flat = y.flat
+    r_flat = r.flat
+    theta_flat = theta.flat
+    for idx in range(num_elements):
+        xfi = x_flat[idx]
+        yfi = y_flat[idx]
+        r_flat[idx] = math.sqrt(xfi*xfi + yfi*yfi)
+        theta_flat[idx] = math.atan2(yfi, xfi)
+
+
+#@numba_jit(nopython=True, nogil=True, cache=True, parallel=True)
+#def sph2cart(r, theta, phi):
+#    """Convert spherical coordinates to Cartesian.
+#
+#    Parameters
+#    ----------
+#    r, theta, phi
+#        Spherical coordinates: radius, theta (zenith angle, defined as "out"
+#        from the +z-axis), and phi (azimuth angle, defined as positive from
+#        +x-axis to +y-axix)
+#
+#    Returns
+#    -------
+#    x, y, z
+#        Cartesian coordinates
+#
+#    """
+#    z = r * np.cos(theta)
+#    rsintheta = r * np.sin(theta)
+#    x = rsintheta * np.cos(phi)
+#    y = rsintheta * np.sin(phi)
+#    return x, y, z
+
+
+# -- Other math functions -- #
+
+
+def poisson_llh(expected, observed):
+    r"""Compute the log Poisson likelihood.
+
+    .. math::
+        {\rm observed} \cdot \log {\rm expected} - {\rm expected} \log \Gamma({\rm observed})
+
+    Parameters
+    ----------
+    expected
+        Expected value(s)
+
+    observed
+        Observed value(s)
+
+    Returns
+    -------
+    llh
+        Log likelihood(s)
+
+    """
+    # TODO: why is there a +1 here? Avoid zero observations? How does this
+    # affect the result, besides avoiding inf? Removed for now until we work
+    # this out...
+
+    #llh = observed * np.log(expected) - expected - gammaln(observed + 1)
+    llh = observed * np.log(expected) - expected - gammaln(observed)
+    return llh
+
+
+def partial_poisson_llh(expected, observed):
+    r"""Compute the log Poisson likelihood _excluding_ subtracting off
+    expected. This part, which constitutes an expected-but-not-observed
+    penalty, is intended to be taken care of outside this function.
+
+    .. math::
+        {\rm observed} \cdot \log {\rm expected} - \log \Gamma({\rm observed})
+
+    Parameters
+    ----------
+    expected
+        Expected value(s)
+
+    observed
+        Observed value(s)
+
+    Returns
+    -------
+    llh
+        Log likelihood(s)
+
+    """
+    # TODO: why is there a +1 here? Avoid zero observations? How does this
+    # affect the result, besides avoiding inf? Removed for now until we work
+    # this out...
+    llh = observed * np.log(expected) - expected - gammaln(observed)
+    return llh
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def weighted_average(x, w):
+    """Average of elements in `x` weighted by `w`.
+
+    Parameters
+    ----------
+    x : numpy.ndarray
+        Values to average
+
+    w : numpy.ndarray
+        Weights, same shape as `x`
+
+    Returns
+    -------
+    avg : numpy.ndarray
+        Weighted average, same shape as `x`
+
+    """
+    sum_xw = 0.0
+    sum_w = 0.0
+    for x_i, w_i in zip(x, w):
+        sum_xw += x_i * w_i
+        sum_w += w_i
+    return sum_xw / sum_w
 
 
 if __name__ == '__main__':
