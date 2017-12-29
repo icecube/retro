@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 # pylint: disable=wrong-import-position, invalid-name
+
 """
 Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
 """
 
 
 # TODO: add angular sensitivity model to the values used to produce a hash
+#       (currently "as.h2-50cm")
 # TODO: command-line option to simply return the metadata for a config to e.g.
 #       extract a hash value one would expect from the given params
 # TODO: include detector geometry (probably original full detector geom...) in
@@ -223,12 +225,100 @@ def parse_args(description=__doc__):
     return parser.parse_args()
 
 
+# TODO: add parmeters for detector geometry, bulk ice model, hole ice model
+# (i.e. this means angular sensitivity curve in its current implementation,
+# though more advanced hole ice models could mean different things), and
+# whether to use time difference from direct time
 def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
                          r_max, r_power, n_r_bins,
                          t_max, n_t_bins,
                          n_costheta_bins, n_costhetadir_bins,
                          n_deltaphidir_bins,
                          outdir, overwrite=False, compress=True):
+    """Generate a CLSim table.
+
+    Parameters
+    ----------
+    subdet : string, {'ic', 'dc'}
+
+    depth_idx : int in [0, 59]
+
+    nevts : int > 0
+        Note that the number of photons is much larger than the number of
+        events (related to the "brightness" of the defined source)
+
+    seed : int in [0, 2**32)
+        Seed for CLSim's random number generator
+
+    tilt : bool
+        Whether to enable ice layer tilt in simulation
+
+    r_max : float > 0
+
+    r_power : int > 0
+
+    t_max : float > 0
+
+    n_t_bins : int > 0
+
+    n_costheta_bins : int > 0
+
+    n_costhetadir_bins : int > 0
+
+    n_deltaphidir_bins : int > 0
+
+    outdir : string
+
+    overwrite : bool, optional
+        Whether to overwrite an existing table (default: False)
+
+    compress : bool, optional
+        Whether to pass the resulting table through zstandard compression
+        (default: True)
+
+    Raises
+    ------
+    ValueError
+        If `compress` but `zstd` command-line utility cannot be found
+
+    AssertionError, ValueError
+        If illegal argument values are passed
+
+    ValueError
+        If `overwrite` is False and a table already exists at the target path
+
+    Notes
+    -----
+    Binnings are as follows:
+        * Radial binning is regular in the space of r**(1/r_power), with
+          `n_r_bins` spanning from `r_min` to `r_max`.
+        * Time binning is linearly spaced with `n_t_bins` spanning from `t_min`
+          to `t_max`
+        * Position zenith angle is binned regularly in the cosine of the zenith
+          angle with `n_costhetadir_bins` spanning from `costheta_min` to
+          `costheta_max`.
+        * Position azimuth angle is _not_ binned
+        * Photon directionality zenith angle is binned regularly in
+          cosine-zenith space, with `n_costhetadir_bins` spanning from
+          `costhetadir_min` to `costhetadir_max`
+        * Photon directionality azimuth angle, since position azimuth angle is
+          not binned, is translated into the absolute value of the azimuth
+          angle relative to the azimuth position of the photon; this is called
+          `deltaphidir`. There are `n_deltaphidir_bins` from `deltaphidir_min`
+          to `deltaphidir_max`.
+
+    The following are forced upon the above binning specifications (and
+    remaining parameters are specified as arguments to the function)
+        * t_min = 0
+        * r_min = 0
+        * costheta_min = -1
+        * costheta_max = 1
+        * costhetadir_min = -1
+        * costhetadir_max = 1
+        * deltaphidir_min = 0
+        * deltaphidir_min = pi (rad)
+
+    """
     assert isinstance(nevts, Integral) and nevts > 0
     assert isinstance(seed, Integral) and 0 <= seed < 2**32
     assert isinstance(r_power, Integral) and r_power > 0
@@ -314,7 +404,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
         # Number of events will affect the tables, but n=999 and n=1000 will be
         # very similar (and not statistically independent if the seed is the
         # same). But a user is likely to want to test out same settings but
-        # different statistics, so thesesets need different hashes (unless we
+        # different statistics, so these sets need different hashes (unless we
         # want the user to also specify the nevts when identifying a set...)
         # Therefore, this is included in the hash to indicate a common set of
         # tables
