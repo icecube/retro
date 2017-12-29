@@ -1,5 +1,5 @@
-# pylint: disable=wrong-import-position, too-many-instance-attributes, too-many-locals
 # -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, too-many-instance-attributes, too-many-locals
 
 """
 Classes for reading and getting info from Retro tables.
@@ -49,16 +49,14 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
-                   CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_FNAME_RE,
+                   CLSIM_TABLE_FNAME_PROTO,
                    CLSIM_TABLE_METANAME_PROTO, RETRO_DOM_TABLE_FNAME_PROTO,
                    TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
-                   SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_DT,
-                   POL_TABLE_RMAX, POL_TABLE_RPWR, POL_TABLE_DRPWR,
-                   POL_TABLE_DCOSTHETA, POL_TABLE_NTBINS, POL_TABLE_NRBINS,
-                   POL_TABLE_NTHETABINS)
+                   SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_NTHETABINS,
+                   POL_TABLE_DCOSTHETA, POL_TABLE_NRBINS, POL_TABLE_DRPWR)
 from retro import RetroPhotonInfo, TimeSphCoord
 from retro import (expand, force_little_endian, generate_anisotropy_str,
-                   interpret_clsim_table_fname, linear_bin_centers)
+                   interpret_clsim_table_fname, linear_bin_centers, mkdir)
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
@@ -78,7 +76,7 @@ def load_clsim_table(fpath):
         If the table is 5D, items are
         - 'table' : np.ndarray
         - 'table_shape' : tuple of int
-        - 'n_photons' : 
+        - 'n_photons' :
         - 'phase_refractive_index' :
         - 'r_bin_edges' :
         - 'costheta_bin_edges' :
@@ -95,9 +93,9 @@ def load_clsim_table(fpath):
     if ext in ('zstd', 'zstandard', 'zst'):
         # -c sends decompressed output to stdout
         proc = Popen(['zstd', '-d', '-c', fpath], stdout=PIPE)
-        # Read from stdout of process
+        # Read from stdout
         (proc_stdout, _) = proc.communicate()
-        # Give stdout str a file-like interface
+        # Give the string from stdout a file-like interface
         fobj = StringIO(proc_stdout)
     elif ext in ('fits',):
         fobj = open(fpath, 'rb')
@@ -105,9 +103,9 @@ def load_clsim_table(fpath):
         raise ValueError('Unhandled extension "{}"'.format(ext))
 
     try:
-        table = pyfits.open(fobj)
+        pf_table = pyfits.open(fobj)
 
-        table_shape_incl_overflow = table[0].data.shape
+        table_shape_incl_overflow = pf_table[0].data.shape # pylint: disable=no-member
         table_shape = tuple(dim - 2 for dim in table_shape_incl_overflow)
         n_dims = len(table_shape)
         table['table_shape'] = table_shape
@@ -115,22 +113,24 @@ def load_clsim_table(fpath):
         # Cut off first and last bin in each dimension (underflow and
         # overflow bins)
         slice_wo_overflow = (slice(1, -1),) * n_dims
-        table_ = force_little_endian(table[0].data[slice_wo_overflow])
+        table_vals = force_little_endian(pf_table[0].data[slice_wo_overflow]) # pylint: disable=no-member
 
         if n_dims == 5:
-            n_photons = force_little_endian(table[0].header['_i3_n_photons'])
-            phase_refractive_index = force_little_endian(table[0].header['_i3_n_phase'])
+            n_photons = force_little_endian(pf_table[0].header['_i3_n_photons']) # pylint: disable=no-member
+            phase_refractive_index = force_little_endian(
+                pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
+            )
 
             # Space-time dimensions
-            r_bin_edges = force_little_endian(table[1].data) # meters
-            costheta_bin_edges = force_little_endian(table[2].data)
-            t_bin_edges = force_little_endian(table[3].data) # nanoseconds
+            r_bin_edges = force_little_endian(pf_table[1].data) # meters # pylint: disable=no-member
+            costheta_bin_edges = force_little_endian(pf_table[2].data) # pylint: disable=no-member
+            t_bin_edges = force_little_endian(pf_table[3].data) # nanoseconds # pylint: disable=no-member
 
             # Photon directionality
-            costhetadir_bin_edges = force_little_endian(table[4].data)
-            deltaphidir_bin_edges = force_little_endian(table[5].data)
+            costhetadir_bin_edges = force_little_endian(pf_table[4].data) # pylint: disable=no-member
+            deltaphidir_bin_edges = force_little_endian(pf_table[5].data) # pylint: disable=no-member
 
-            table['table'] = table_
+            table['table'] = table_vals
             table['n_photons'] = n_photons
             table['phase_refractive_index'] = phase_refractive_index
             table['r_bin_edges'] = r_bin_edges
@@ -145,11 +145,91 @@ def load_clsim_table(fpath):
             )
 
     finally:
+        del pf_table
         if hasattr(fobj, 'close'):
             fobj.close()
         del fobj
 
     return table
+
+
+def summarize_clsim_table(table_fpath, table=None, save_summary=True,
+                          outdir=None):
+    """
+    Parameters
+    ----------
+    table_fpath : string
+        Path to table (or just the table's filename, if `outdir` is specified)
+
+    table : mapping, optional
+        If the table has already been loaded, it can be passed here to avoid
+        re-loading the table.
+
+    save_summary : bool
+        Whether to save the table summary to disk.
+
+    outdir : string, optional
+        If `save_summary` is True, write the summary to this directory. If
+        `outdir` is not specified and `save_summary` is True, the summary will
+        be written to the same directory that contains `table_fpath`.
+
+    """
+    if save_summary:
+        from pisa.utils.jsons import to_json
+
+    srcdir, fname = dirname(table_fpath), basename(table_fpath)
+    fname_info = interpret_clsim_table_fname(fname)
+
+    if outdir is None:
+        outdir = srcdir
+    mkdir(outdir)
+
+    metaname = (CLSIM_TABLE_METANAME_PROTO
+                .format(hash_val=fname_info['hash_val']))
+    metapath = join(outdir, metaname)
+
+    if table is None:
+        table = load_clsim_table(table_fpath)
+
+    table_summary = OrderedDict()
+    for key in table.keys():
+        if key in ['table']:
+            continue
+        table_summary[key] = table[key]
+    for key in ['hash_val', 'string', 'depth_idx', 'seed']:
+        table_summary[key] = fname_info[key]
+
+    # Save marginal distributions and info to file
+    norm = (
+        1
+        / table['n_photons']
+        / (SPEED_OF_LIGHT_M_PER_NS / table['phase_refractive_index']
+           * np.mean(np.diff(table['t_bin_edges'])))
+        * table['angular_acceptance_fract']
+        * (len(table['costheta_bin_edges']) - 1)
+    )
+    table_summary['norm'] = norm
+
+    dim_names = ['r', 'costheta', 't', 'costhetadir', 'deltaphidir']
+    n_dims = len(table['table_shape'])
+    assert n_dims == len(dim_names)
+
+    for keep_axis, ax_name in zip(list(range(n_dims), dim_names)):
+        remove_axes = list(range(n_dims))
+        remove_axes.pop(keep_axis)
+        dist = OrderedDict()
+        dist['bin_edges'] = table[ax_name + '_bin_edges']
+        dist['mean'] = norm * np.mean(table['table'], axis=remove_axes)
+        dist['max'] = norm * np.max(table['table'], axis=remove_axes)
+        table_summary[ax_name] = dist
+
+    if save_summary:
+        clsim_fname = CLSIM_TABLE_FNAME_PROTO.format(**fname_info)
+        base_fname, _ = splitext(clsim_fname)
+        outfpath = join(outdir, base_fname + '_summary.json')
+        to_json(table_summary, outfpath)
+
+    return table, table_summary
 
 
 def combine_clsim_tables(fpaths):
@@ -163,6 +243,7 @@ def combine_clsim_tables(fpaths):
     Parameters
     ----------
     fpaths : sequence of strings
+    plot : bool
 
     Returns
     -------
@@ -175,6 +256,8 @@ def combine_clsim_tables(fpaths):
     aggregate_table = None
     for fpath in fpaths:
         table = load_clsim_table(fpath)
+        table_summary = summarize_clsim_table(table)
+
         if aggregate_table is None:
             aggregate_table = table
             continue
@@ -324,8 +407,8 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
     """
     table_dt = (t_max - t_min) / n_t_bins
-    s
     expected_photon_count = 0.0
+    inv_r_power = 1 / r_power
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
 
@@ -347,19 +430,22 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #    print('MAX_POL_TABLE_SPACETIME_SEP:', POL_TABLE_RMAX)
         #    continue
 
-        tbin_idx = int(np.floor((dt - table_t_min) / table_dt))
+        tbin_idx = int(np.floor((dt - t_min) / table_dt))
         #if tbin_idx < 0 or tbin_idx >= -POL_TABLE_DT:
         if tbin_idx < -n_t_bins or tbin_idx >= 0:
             #print('t')
             continue
-        rbin_idx = int(np.floor(r**(1/r_power) / POL_TABLE_DRPWR))
+
+        rbin_idx = int(r**inv_r_power // POL_TABLE_DRPWR)
         if rbin_idx < 0 or rbin_idx >= POL_TABLE_NRBINS:
             #print('r')
             continue
+
         thetabin_idx = int(dz / (r * POL_TABLE_DCOSTHETA))
         if thetabin_idx < 0 or thetabin_idx >= POL_TABLE_NTHETABINS:
             #print('theta')
             continue
+
         #print(tbin_idx, rbin_idx, thetabin_idx)
         #raise Exception()
         surviving_count = (
@@ -440,15 +526,15 @@ class CLSimTable(object):
 
     depth_idx : int
 
-    angular_acceptance : float
+    angular_acceptance_fract : float
         Normalization for angular acceptance being less than 1
 
     """
     def __init__(self, fpath=None, tables_dir=None, hash_val=None, string=None,
-                 depth_idx=None, seed=None, angular_acceptance=0.338019664877):
+                 depth_idx=None, seed=None, angular_acceptance_fract=0.338019664877):
         # Translation and validation of args
-        assert 0 < angular_acceptance <= 1
-        self.angular_acceptance = angular_acceptance
+        assert 0 < angular_acceptance_fract <= 1
+        self.angular_acceptance_fract = angular_acceptance_fract
 
         if fpath is None:
             tables_dir = expand(tables_dir)
@@ -507,8 +593,10 @@ class CLSimTable(object):
 
         self.table = table_info.pop('table')
         self.table_shape = table_info.pop('table_shape')
+        self.n_dims = len(self.table_shape)
         self.n_photons = table_info.pop('n_photons')
-        self.phase_refractive_index = table_info['phase_refractive_index']
+        self.phase_refractive_index = table_info.pop('phase_refractive_index')
+        self.angular_acceptance_fract = angular_acceptance_fract
 
         self.r_bin_edges = table_info.pop('r_bin_edges')
         self.t_bin_edges = table_info.pop('t_bin_edges')
@@ -522,17 +610,20 @@ class CLSimTable(object):
         assert np.allclose(t_bin_widths, t_bin_widths[0])
         self.t_bin_width = np.mean(t_bin_widths)
 
-        if len(self.table_shape) == 5:
+        if self.n_dims == 5:
             self.costhetadir_bin_edges = table_info.pop('costhetadir_bin_edges')
-            self.deltaphidir_bin_edges = table_info.pop('deltaphidir_bin_edges')
-
+            self.deltaphidir_bin_edges = table_info.pop('deltaphidir_bin_edges') # radians
             self.costhetadir_centers = linear_bin_centers(self.costhetadir_bin_edges)
             self.thetadir_bin_edges = np.arccos(self.costhetadir_bin_edges) # radians
             self.thetadir_centers = np.arccos(self.costhetadir_centers) # radians
             self.deltaphidir_centers = linear_bin_centers(self.deltaphidir_bin_edges) # radians
-
         else:
-            raise NotImplementedError
+            raise NotImplementedError(
+                'Can only work with CLSim tables with 5 dimensions; got %d'
+                % self.n_dims
+            )
+
+        del table_info
 
         #with pyfits.open(self.fpath) as table:
         #    # Cut off first and last bin in each dimension (underflow and
@@ -553,8 +644,8 @@ class CLSimTable(object):
         # arrive at a (reasonable, but still imperfect) suvival
         # probability. Normalization is performed by:
         # * Dividing by total photons thrown
-        # * Dividing by the speed of light in ice, c / n, in m/ns
-        # * Dividing by time bin width in ns
+        # * Dividing by (speed of light in ice, c / n, in m/ns
+        #    multiplied by the bin width in ns; overall units are m)
         # * Multiplying by a correction for angular acceptance, in [0,1]
         # * Multiplying by the number of costheta bins (>= 1)
         # The result of applying this norm is in units of 1/meter, where
@@ -564,15 +655,16 @@ class CLSimTable(object):
         self.norm = (
             1
             / self.n_photons
-            / (SPEED_OF_LIGHT_M_PER_NS * self.t_bin_width / self.phase_refractive_index)
-            * self.angular_acceptance
+            / (SPEED_OF_LIGHT_M_PER_NS / self.phase_refractive_index
+               * self.t_bin_width)
+            * self.angular_acceptance_fract
             * (len(self.costheta_bin_edges) - 1)
         )
 
         # The photon direction is tabulated in dimensions 3 and 4
         #self.survival_prob = self.data.sum(axis=(3, 4)) * self.norm
 
-    def export_dom_time_polar_table(self, dest_dir=None, overwrite=True):
+    def export_t_r_theta_table(self, outdir=None, overwrite=True):
         """Distill binned photon directionality information into a single
         vector per bin and force azimuthal symmetry to reduce the table from a
         5D histogram of photon counts binned in
@@ -586,37 +678,42 @@ class CLSimTable(object):
 
         Parameters
         ----------
-        dest_dir : string, optional
+        outdir : string, optional
             If specified, store the DOM-time-polar table into this directory.
             Otherwise, if not specified, the table is stored in the same
             directory as the source table.
 
         """
-        if dest_dir is None:
-            dest_dir = self.tables_dir
-        dest_dir = expand(dest_dir)
+        if outdir is None:
+            outdir = self.tables_dir
+        outdir = expand(outdir)
 
         new_fname = self.dtp_fname_proto.format(depth_idx=self.depth_idx)
-        new_fpath = join(dest_dir, new_fname)
+        new_fpath = join(outdir, new_fname)
 
-        if not isdir(dest_dir):
-            makedirs(dest_dir)
+        if not isdir(outdir):
+            makedirs(outdir)
 
         if isfile(new_fpath):
             if overwrite:
                 print('WARNING: overwriting existing file at "%s"' % new_fpath)
                 remove(new_fpath)
             else:
-                print('There is an existing file at "%s"; not proceeding.'
-                      % new_fpath)
+                print('ERROR: There is an existing file at "%s"; not'
+                      ' proceeding.' % new_fpath)
                 return
 
-        (survival_probs, average_thetas, average_phis, lengths) = (
-            generate_t_r_theta_table(table=self.table,
-                                     thetadir_centers=self.thetadir_centers,
-                                     deltaphidir_centers=self.deltaphidir_centers,
-                                     theta_bin_edges=self.theta_bin_edges)
-        )
+        survival_probs, average_thetas, average_phis, lengths = \
+            generate_t_r_theta_table(
+                table=self.table,
+                n_photons=self.n_photons,
+                phase_refractive_index=self.phase_refractive_index,
+                t_bin_width=self.t_bin_width,
+                angular_acceptance_fract=self.angular_acceptance_fract,
+                thetadir_centers=self.thetadir_centers,
+                deltaphidir_centers=self.deltaphidir_centers,
+                theta_bin_edges=self.theta_bin_edges
+            )
         objects = [
             pyfits.PrimaryHDU(survival_probs),
             pyfits.ImageHDU(average_thetas.astype(np.float32)),
@@ -985,8 +1082,11 @@ class TDICartTable(object):
             x_float_idx = (meta['x_min'] - x_ref) / self.x_tile_width
             y_float_idx = (meta['y_min'] - y_ref) / self.y_tile_width
             z_float_idx = (meta['z_min'] - z_ref) / self.x_tile_width
-            for float_idx, tile_width in zip([x_float_idx, y_float_idx, z_float_idx],
-                                             [self.x_tile_width, self.y_tile_width, self.z_tile_width]):
+            indices_widths = (
+                [x_float_idx, y_float_idx, z_float_idx],
+                [self.x_tile_width, self.y_tile_width, self.z_tile_width]
+            )
+            for float_idx, tile_width in zip(indices_widths):
                 if abs(np.round(float_idx) - float_idx) * tile_width >= 1e-6:
                     continue
 
@@ -1095,7 +1195,7 @@ class TDICartTable(object):
                 )
 
                 with pyfits.open(fpath) as fits_table:
-                    data = force_little_endian(fits_table[0].data)
+                    data = force_little_endian(fits_table[0].data) # pylint: disable=no-member
 
                 if self.scale != 1 and table_name == 'survival_prob':
                     data = 1 - (1 - data)**self.scale
@@ -1240,5 +1340,3 @@ class TDICartTable(object):
 
     #def plot_projections(self):
     #    pass
-
-
