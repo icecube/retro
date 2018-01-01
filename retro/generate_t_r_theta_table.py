@@ -41,10 +41,10 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import SPEED_OF_LIGHT_M_PER_NS, weighted_average
+from retro import SPEED_OF_LIGHT_M_PER_NS, numba_jit, weighted_average
 
 
-@numba.jit(nopython=True, nogil=True, cache=True)
+@numba_jit(nopython=True, nogil=True, cache=True)
 def generate_t_r_theta_table(table,
                              n_photons,
                              phase_refractive_index,
