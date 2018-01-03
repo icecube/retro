@@ -106,6 +106,10 @@ def load_clsim_table(fpath):
         pf_table = pyfits.open(fobj)
 
         table_shape_incl_overflow = pf_table[0].data.shape # pylint: disable=no-member
+        n_photons = force_little_endian(pf_table[0].header['_i3_n_photons']) # pylint: disable=no-member
+        phase_refractive_index = force_little_endian(pf_table[0].header['_i3_n_phase']) # pylint: disable=no-member
+        raw_table = force_little_endian(pf_table[0].data) # pylint: disable=no-member
+
         table_shape = tuple(dim - 2 for dim in table_shape_incl_overflow)
         n_dims = len(table_shape)
         table['table_shape'] = table_shape
@@ -113,14 +117,23 @@ def load_clsim_table(fpath):
         # Cut off first and last bin in each dimension (underflow and
         # overflow bins)
         slice_wo_overflow = (slice(1, -1),) * n_dims
-        table_vals = force_little_endian(pf_table[0].data[slice_wo_overflow]) # pylint: disable=no-member
+        table_vals = raw_table[slice_wo_overflow]
+
+        underflow, overflow = [], []
+        for n in range(n_dims):
+            sl = tuple([slice(1, -1)]*n + [0] + [slice(1, -1)]*(n_dims - 1 - n))
+            underflow.append(raw_table[sl].sum())
+
+            sl = tuple([slice(1, -1)]*n + [-1] + [slice(1, -1)]*(n_dims - 1 - n))
+            overflow.append(raw_table[sl].sum())
+
+        table['table'] = table_vals
+        table['underflow'] = np.array(underflow)
+        table['overflow'] = np.array(overflow)
+        table['n_photons'] = n_photons
+        table['phase_refractive_index'] = phase_refractive_index
 
         if n_dims == 5:
-            n_photons = force_little_endian(pf_table[0].header['_i3_n_photons']) # pylint: disable=no-member
-            phase_refractive_index = force_little_endian(
-                pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
-            )
-
             # Space-time dimensions
             r_bin_edges = force_little_endian(pf_table[1].data) # meters # pylint: disable=no-member
             costheta_bin_edges = force_little_endian(pf_table[2].data) # pylint: disable=no-member
@@ -130,9 +143,6 @@ def load_clsim_table(fpath):
             costhetadir_bin_edges = force_little_endian(pf_table[4].data) # pylint: disable=no-member
             deltaphidir_bin_edges = force_little_endian(pf_table[5].data) # pylint: disable=no-member
 
-            table['table'] = table_vals
-            table['n_photons'] = n_photons
-            table['phase_refractive_index'] = phase_refractive_index
             table['r_bin_edges'] = r_bin_edges
             table['costheta_bin_edges'] = costheta_bin_edges
             table['t_bin_edges'] = t_bin_edges
@@ -817,7 +827,7 @@ class TDICartTable(object):
         self.tables_meta = None
 
         proto_table_fpath = glob(join(
-            self.tables_dir,
+            expand(self.tables_dir),
             'retro_tdi_table_%s_*survival_prob.fits' % self.proto_tile_hash
         ))
         if not proto_table_fpath:
@@ -936,7 +946,7 @@ class TDICartTable(object):
         # Work with "survival_prob" table filepaths, which generalizes to all
         # table filepaths (so long as they exist)
         fpaths = glob(join(
-            self.tables_dir, 'retro_tdi_table_*survival_prob.fits'
+            expand(self.tables_dir), 'retro_tdi_table_*survival_prob.fits'
         ))
 
         lowermost_corner = np.array([np.inf]*3)
