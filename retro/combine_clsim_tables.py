@@ -74,7 +74,7 @@ def combine_clsim_tables(table_fpaths, save=True, outdir=None):
 
     table_fpaths_tmp = []
     for fpath in table_fpaths:
-        table_fpaths_tmp.extend(expand(fp) for fp in glob(fpath))
+        table_fpaths_tmp.extend(fp for fp in glob(expand(fpath)))
     table_fpaths = table_fpaths_tmp
 
     if outdir is None:
