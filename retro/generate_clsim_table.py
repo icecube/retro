@@ -149,82 +149,6 @@ def generate_clsim_table_meta(r_binning_kw, t_binning_kw, costheta_binning_kw,
     return hash_val, metaname
 
 
-def parse_args(description=__doc__):
-    """Parese command line options"""
-    parser = ArgumentParser(description=description)
-    parser.add_argument(
-        '--subdet', required=True, choices=('ic', 'dc'),
-        help='Calculate for IceCube z-pos (ic) or DeepCore z-pos (dc)'
-    )
-    parser.add_argument(
-        '--depth-idx', type=int, required=True,
-        help='''z-position/depth index (referenced to either IceCube or
-        DeepCore average depths, according to which is passed to --subdet.'''
-    )
-    parser.add_argument(
-        '--nevts', type=int, required=True,
-        help='Number of events to simulate'
-    )
-    parser.add_argument(
-        '--seed', type=int, required=True,
-        help='Random seed to use, in range of 32 bit uint: [0, 2**32-1]'
-    )
-
-    parser.add_argument(
-        '--tilt', action='store_true',
-        help='Enable tilt in ice model'
-    )
-
-    parser.add_argument(
-        '--r-max', type=float, required=True,
-        help='Radial binning maximum value, in meters'
-    )
-    parser.add_argument(
-        '--r-power', type=int, required=True,
-        help='Radial binning is regular in raidus to this power'
-    )
-    parser.add_argument(
-        '--n-r-bins', type=int, required=True,
-        help='Number of radial bins'
-    )
-
-    parser.add_argument(
-        '--t-max', type=float, required=True,
-        help='Time binning maximum value, in nanoseconds'
-    )
-    parser.add_argument(
-        '--n-t-bins', type=int, required=True,
-        help='Number of time bins'
-    )
-
-    parser.add_argument(
-        '--n-costheta-bins', type=int, required=True,
-        help='Number of costheta (cosine of zenith angle) bins'
-    )
-
-    parser.add_argument(
-        '--n-costhetadir-bins', type=int, required=True,
-        help='Number of costhetadir bins'
-    )
-    parser.add_argument(
-        '--n-deltaphidir-bins', type=int, required=True,
-        help='''Number of deltaphidir bins (Note: span from 0 to pi; code
-        assumes symmetry about 0)'''
-    )
-
-    parser.add_argument(
-        '--outdir', default='./',
-        help='Save table to this directory (default: "./")'
-    )
-
-    parser.add_argument(
-        '--overwrite', action='store_true',
-        help='Overwrite if the table already exists'
-    )
-
-    return parser.parse_args()
-
-
 # TODO: add parmeters for detector geometry, bulk ice model, hole ice model
 # (i.e. this means angular sensitivity curve in its current implementation,
 # though more advanced hole ice models could mean different things), and
@@ -336,8 +260,12 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
     if not isdir(outdir):
         makedirs(outdir)
 
-    n_bins = (n_r_bins * n_costheta_bins * n_t_bins * n_costhetadir_bins
-              * n_deltaphidir_bins)
+    # Note: + 2 accounts for under/overflow bins in each dimension
+    n_bins = np.product(n_bins + 2 for n_bins in (n_r_bins,
+                                                  n_costheta_bins,
+                                                  n_t_bins,
+                                                  n_costhetadir_bins,
+                                                  n_deltaphidir_bins))
 
     if n_bins > 2**32:
         raise ValueError(
@@ -512,6 +440,82 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
         print('  zstd -1 --rm "{}"'.format(filepath))
         check_call(['zstd', '-1', '--rm', filepath])
         print('done.')
+
+
+def parse_args(description=__doc__):
+    """Parese command line options"""
+    parser = ArgumentParser(description=description)
+    parser.add_argument(
+        '--subdet', required=True, choices=('ic', 'dc'),
+        help='Calculate for IceCube z-pos (ic) or DeepCore z-pos (dc)'
+    )
+    parser.add_argument(
+        '--depth-idx', type=int, required=True,
+        help='''z-position/depth index (referenced to either IceCube or
+        DeepCore average depths, according to which is passed to --subdet.'''
+    )
+    parser.add_argument(
+        '--nevts', type=int, required=True,
+        help='Number of events to simulate'
+    )
+    parser.add_argument(
+        '--seed', type=int, required=True,
+        help='Random seed to use, in range of 32 bit uint: [0, 2**32-1]'
+    )
+
+    parser.add_argument(
+        '--tilt', action='store_true',
+        help='Enable tilt in ice model'
+    )
+
+    parser.add_argument(
+        '--r-max', type=float, required=True,
+        help='Radial binning maximum value, in meters'
+    )
+    parser.add_argument(
+        '--r-power', type=int, required=True,
+        help='Radial binning is regular in raidus to this power'
+    )
+    parser.add_argument(
+        '--n-r-bins', type=int, required=True,
+        help='Number of radial bins'
+    )
+
+    parser.add_argument(
+        '--t-max', type=float, required=True,
+        help='Time binning maximum value, in nanoseconds'
+    )
+    parser.add_argument(
+        '--n-t-bins', type=int, required=True,
+        help='Number of time bins'
+    )
+
+    parser.add_argument(
+        '--n-costheta-bins', type=int, required=True,
+        help='Number of costheta (cosine of zenith angle) bins'
+    )
+
+    parser.add_argument(
+        '--n-costhetadir-bins', type=int, required=True,
+        help='Number of costhetadir bins'
+    )
+    parser.add_argument(
+        '--n-deltaphidir-bins', type=int, required=True,
+        help='''Number of deltaphidir bins (Note: span from 0 to pi; code
+        assumes symmetry about 0)'''
+    )
+
+    parser.add_argument(
+        '--outdir', default='./',
+        help='Save table to this directory (default: "./")'
+    )
+
+    parser.add_argument(
+        '--overwrite', action='store_true',
+        help='Overwrite if the table already exists'
+    )
+
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
