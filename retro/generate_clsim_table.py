@@ -443,7 +443,13 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
 
 
 def parse_args(description=__doc__):
-    """Parese command line options"""
+    """Parese command line args.
+
+    Returns
+    -------
+    args : Namespace
+
+    """
     parser = ArgumentParser(description=description)
     parser.add_argument(
         '--subdet', required=True, choices=('ic', 'dc'),

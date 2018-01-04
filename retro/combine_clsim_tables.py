@@ -100,7 +100,7 @@ def parse_args(description=__doc__):
 
     Returns
     -------
-    args : namespace
+    args : Namespace
 
     """
     parser = ArgumentParser(description=description)
