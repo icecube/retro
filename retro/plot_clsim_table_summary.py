@@ -10,7 +10,8 @@ for one or more tables.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['plot_clsim_table_summary', 'parse_args', 'main']
+
+__all__ = ['formatter', 'plot_clsim_table_summary', 'parse_args', 'main']
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -42,6 +43,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from pisa.utils.jsons import from_json
+from pisa.utils.format import format_num
 
 if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
@@ -49,6 +51,95 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(PARENT_DIR)
 from retro import COLOR_CYCLE_ORTHOG
 from retro import expand, mkdir
+
+
+def formatter(mapping, key_only=False, fname=False):
+    """Formatter for labels to go in plots and and filenames.
+
+    Parameters
+    ----------
+    mapping : Mapping
+    key_only : bool
+    fname : bool
+
+    """
+    order = [
+        'hash_val', 'string', 'depth_idx', 'seed', 'table_shape',
+        'n_events', 'ice_model', 'tilt', 'n_photons', 'underflow', 'overflow'
+    ]
+
+    line_sep = '\n'
+
+    if fname:
+        for key in ['n_photons', 'underflow', 'overflow']:
+            order.remove(key)
+
+    label_strs = []
+    for key in order:
+        if key not in mapping:
+            continue
+
+        if key_only:
+            label_strs.append(key)
+            continue
+
+        if fname:
+            sep = '_'
+        else:
+            sep = '='
+
+        value = mapping[key]
+
+        if key == 'n_photons':
+            label_strs.append('n_photons{}{}'.format(
+                sep,
+                format_num(value, sigfigs=3, sci_thresh=(4, -3)))
+            )
+        elif key in ['depth_idx', 'seed', 'string', 'n_events', 'ice_model', 'tilt']:
+            label_strs.append('{}{}{}'.format(key, sep, value))
+        elif key == 'phase_refractive_index':
+            label_strs.append('n{}{:.3f}'.format(sep, value))
+        elif key in ('table_shape', 'underflow', 'overflow'):
+            if key == 'table_shape':
+                name = 'shape'
+            elif key == 'underflow':
+                name = 'uflow'
+            elif key == 'overflow':
+                name = 'oflow'
+
+            str_values = []
+            for v in value:
+                if float(v) == int(v):
+                    str_values.append(format(int(np.round(v)), 'd'))
+                else:
+                    str_values.append(format_num(v, sigfigs=2, sci_thresh=(4, -3)))
+
+            if fname:
+                val_str = '_'.join(str_values)
+                fmt = '{}'
+            else:
+                val_str = ', '.join(str_values)
+                fmt = '({})'
+
+            label_strs.append(('{}{}%s' % fmt).format(name, sep, val_str))
+
+        elif key == 'hash_val':
+            label_strs.append('hash{}{}'.format(sep, value))
+
+    if not label_strs:
+        return ''
+
+    if fname:
+        return '__'.join(label_strs)
+
+    label_lines = [label_strs[0]]
+    for label_str in label_strs[1:]:
+        if len(label_lines[-1]) + len(label_str) > 120:
+            label_lines.append(label_str)
+        else:
+            label_lines[-1] += ', ' + label_str
+
+    return line_sep.join(label_lines)
 
 
 def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
@@ -147,56 +238,9 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
             print('Different for some or all:\n{}'
                   .format(different_items.keys()))
 
-    def formatter(mapping, key_only=False, fname=False):
-        """Formatter for labels to go in plots and and filenames.
-
-        Parameters
-        ----------
-        mapping : Mapping
-        key_only : bool
-        fname : bool
-
-        """
-        order = [
-            'hash_val', 'string', 'depth_idx', 'seed', 'table_shape',
-            'n_events', 'n_photons', 'ice_model', 'tilt'
-        ]
-
-        label_strs = []
-        for key in order:
-            if key not in mapping:
-                continue
-
-            if key_only:
-                label_strs.append(key)
-                continue
-
-            if fname:
-                sep = '_'
-            else:
-                sep = '='
-
-            value = mapping[key]
-
-            if key == 'n_photons':
-                label_strs.append('n_photons{}{:.3e}'.format(sep, value))
-            elif key in ['depth_idx', 'seed', 'string', 'n_events', 'ice_model', 'tilt']:
-                label_strs.append('{}{}{}'.format(key, sep, value))
-            elif key == 'phase_refractive_index':
-                label_strs.append('n{}{:.3f}'.format(sep, value))
-            elif key == 'table_shape':
-                if fname:
-                    shape = '_'.join(str(x) for x in value)
-                    fmt = '{}'
-                else:
-                    shape = ', '.join(str(x) for x in value)
-                    fmt = '({})'
-                label_strs.append(('shape{}%s' % fmt).format(sep, shape))
-            elif key == 'hash_val':
-                label_strs.append('hash{}{}'.format(sep, value))
-        if fname:
-            return '__'.join(label_strs)
-        return ', '.join(label_strs)
+    for key, val in different_items.items():
+        print(key, ':', type(val))
+        print(' '*len(key), ' ', len(val))
 
     same_label = formatter(same_items)
 
@@ -209,7 +253,7 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
     n_dims = len(dim_names)
 
     fig_x = 10 # inches
-    fig_header_y = 0.25 # inches
+    fig_header_y = 0.35 # inches
     fig_one_axis_y = 5 # inches
     fig_all_axes_y = n_dims * fig_one_axis_y
     fig_y = fig_header_y + fig_all_axes_y # inches
@@ -262,7 +306,7 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
                 for ax, plot_kind in zip(dim_axes, plot_kinds):
                     vals = dim_info[plot_kind]
                     ax.step(bin_edges, [vals[0]] + list(vals),
-                            linewidth=1, clip_on=False,
+                            linewidth=1, clip_on=True,
                             label=label)
                     n_lines += 1
 
@@ -337,15 +381,10 @@ def parse_args(description=__doc__):
 
     Returns
     -------
-    args : namespace
+    args : Namespace
 
     """
     parser = ArgumentParser(description=description)
-    parser.add_argument(
-        '--summaries', nargs='+', required=True,
-        help='''Path(s) to summary JSON files to plot. Note that literal
-        strings are glob-expanded.'''
-    )
     parser.add_argument(
         '--save-formats', choices=('pdf', 'png'), nargs='+', default='pdf',
         help='''Save plots to chosen format(s). Choices are "pdf" and "png".'''
@@ -354,6 +393,11 @@ def parse_args(description=__doc__):
         '--outdir', default=None,
         help='''Directory to which to save the plot(s). Defaults to same
         directory as the present working directory.'''
+    )
+    parser.add_argument(
+        'summaries', nargs='+',
+        help='''Path(s) to summary JSON files to plot. Note that literal
+        strings are glob-expanded.'''
     )
     return parser.parse_args()
 
