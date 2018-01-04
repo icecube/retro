@@ -151,19 +151,19 @@ def parse_args(description=__doc__):
 
     Returns
     -------
-    args : namespace
+    args : Namespace
 
     """
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '--table-fpath', required=True, nargs='+',
-        help='''Path to CLSim table(s). Note that literal strings are
-        glob-expanded.'''
-    )
-    parser.add_argument(
         '--outdir', default=None,
         help='''Directory in which to save summary (if not specified, summary
         is saved to same directory as the table)'''
+    )
+    parser.add_argument(
+        'table-fpaths', nargs='+',
+        help='''Path(s) to CLSim table(s). Note that literal strings are
+        glob-expanded.'''
     )
     return parser.parse_args()
 
@@ -173,8 +173,8 @@ def main():
     args = parse_args()
     kwargs = vars(args)
     table_fpaths = []
-    for fpath in kwargs.pop('table_fpath'):
-        table_fpaths.extend(glob(fpath))
+    for fpath in kwargs.pop('table-fpaths'):
+        table_fpaths.extend(glob(expand(fpath)))
     for fpath in table_fpaths:
         kwargs['table_fpath'] = fpath
         summarize_clsim_table(**kwargs)
