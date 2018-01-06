@@ -261,11 +261,11 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
         makedirs(outdir)
 
     # Note: + 2 accounts for under/overflow bins in each dimension
-    n_bins = np.product(n_bins + 2 for n_bins in (n_r_bins,
-                                                  n_costheta_bins,
-                                                  n_t_bins,
-                                                  n_costhetadir_bins,
-                                                  n_deltaphidir_bins))
+    n_bins = np.product([n_bins + 2 for n_bins in (n_r_bins,
+                                                   n_costheta_bins,
+                                                   n_t_bins,
+                                                   n_costhetadir_bins,
+                                                   n_deltaphidir_bins)])
 
     if n_bins > 2**32:
         raise ValueError(
