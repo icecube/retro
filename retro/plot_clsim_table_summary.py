@@ -91,9 +91,9 @@ def formatter(mapping, key_only=False, fname=False):
         value = mapping[key]
 
         if key == 'n_photons':
-            label_strs.append('n_photons{}{}'.format(
-                sep,
-                format_num(value, sigfigs=3, sci_thresh=(4, -3)))
+            label_strs.append(
+                'n_photons{}{}'
+                .format(sep, format_num(value, sigfigs=3, sci_thresh=(4, -3)))
             )
         elif key in ['depth_idx', 'seed', 'string', 'n_events', 'ice_model', 'tilt']:
             label_strs.append('{}{}{}'.format(key, sep, value))
@@ -142,7 +142,7 @@ def formatter(mapping, key_only=False, fname=False):
     return line_sep.join(label_lines)
 
 
-def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
+def plot_clsim_table_summary(summaries, formats=None, outdir=None):
     """Plot the table summary produced by `summarize_clsim_table`.
 
     Parameters
@@ -151,11 +151,11 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
         If string(s) are provided, each is glob-expanded. See
         :method:`glob.glob` for valid syntax.
 
-    save_formats : None, string, or iterable of strings in {'pdf', 'png'}
+    formats : None, string, or iterable of strings in {'pdf', 'png'}
         If no formats are provided, the plot will not be saved.
 
     outdir : None or string
-        If `save_formats` is specified and `outdir` is None, the plots are
+        If `formats` is specified and `outdir` is None, the plots are
         saved to the present working directory.
 
     Returns
@@ -186,10 +186,10 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
             summary = from_json(summary)
             summaries[summary_n] = summary
 
-    if save_formats is None:
-        save_formats = []
-    elif isinstance(save_formats, basestring):
-        save_formats = [save_formats]
+    if formats is None:
+        formats = []
+    elif isinstance(formats, basestring):
+        formats = [formats]
 
     if outdir is not None:
         outdir = expand(outdir)
@@ -203,10 +203,10 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
             .format(orig_summaries)
         )
 
-    for n, save_format in enumerate(save_formats):
-        save_format = save_format.strip().lower()
-        assert save_format in ('pdf', 'png'), save_format
-        save_formats[n] = save_format
+    for n, fmt in enumerate(formats):
+        fmt = fmt.strip().lower()
+        assert fmt in ('pdf', 'png'), fmt
+        formats[n] = fmt
 
     all_items = OrderedDict()
     for summary in summaries:
@@ -237,10 +237,6 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
         if different_items:
             print('Different for some or all:\n{}'
                   .format(different_items.keys()))
-
-    for key, val in different_items.items():
-        print(key, ':', type(val))
-        print(' '*len(key), ' ', len(val))
 
     same_label = formatter(same_items)
 
@@ -365,9 +361,9 @@ def plot_clsim_table_summary(summaries, save_formats=None, outdir=None):
         fig.suptitle(suptitle, y=(fig_all_axes_y + fig_header_y*0.8) / fig_y,
                      fontsize=9)
 
-        for save_format in save_formats:
+        for fmt in formats:
             outfpath = ('clsim_table_summaries{}__{}.{}'
-                        .format(flabel, plot_kind, save_format))
+                        .format(flabel, plot_kind, fmt))
             if outdir:
                 outfpath = join(outdir, outfpath)
             fig.savefig(outfpath, dpi=300)
@@ -386,7 +382,7 @@ def parse_args(description=__doc__):
     """
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '--save-formats', choices=('pdf', 'png'), nargs='+', default='pdf',
+        '--formats', choices=('pdf', 'png'), nargs='+', default='pdf',
         help='''Save plots to chosen format(s). Choices are "pdf" and "png".'''
     )
     parser.add_argument(
