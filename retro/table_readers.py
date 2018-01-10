@@ -48,7 +48,7 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
-                   CLSIM_TABLE_FNAME_PROTO,
+                   CLSIM_TABLE_FNAME_V2_PROTO,
                    RETRO_DOM_TABLE_FNAME_PROTO,
                    TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
                    SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_NTHETABINS,
@@ -72,11 +72,13 @@ def load_clsim_table(fpath):
     Returns
     -------
     table : dict
-        If the table is 5D, items are
+        Items include
         - 'table' : np.ndarray
         - 'table_shape' : tuple of int
         - 'n_photons' :
         - 'phase_refractive_index' :
+
+        If the table is 5D, items also include
         - 'r_bin_edges' :
         - 'costheta_bin_edges' :
         - 't_bin_edges' :
@@ -142,6 +144,15 @@ def load_clsim_table(fpath):
             # Photon directionality
             costhetadir_bin_edges = force_little_endian(pf_table[4].data) # pylint: disable=no-member
             deltaphidir_bin_edges = force_little_endian(pf_table[5].data) # pylint: disable=no-member
+
+            #table['norm'] = (
+            #    1
+            #    / table['n_photons']
+            #    / (SPEED_OF_LIGHT_M_PER_NS / table['phase_refractive_index']
+            #       * np.mean(np.diff(table['t_bin_edges'])))
+            #    * table['angular_acceptance_fract']
+            #    * (len(table['costheta_bin_edges']) - 1)
+            #)
 
             table['r_bin_edges'] = r_bin_edges
             table['costheta_bin_edges'] = costheta_bin_edges
@@ -448,7 +459,7 @@ class CLSimTable(object):
 
             self.depth_idx = depth_idx
 
-            fname = CLSIM_TABLE_FNAME_PROTO.format(
+            fname = CLSIM_TABLE_FNAME_V2_PROTO.format(
                 hash_val=hash_val,
                 string=self.string,
                 depth_idx=self.depth_idx,

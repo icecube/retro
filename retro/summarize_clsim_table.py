@@ -33,6 +33,7 @@ from collections import OrderedDict
 from glob import glob
 from os.path import abspath, basename, dirname, isfile, join, splitext
 import sys
+from time import time
 
 import numpy as np
 
@@ -40,8 +41,7 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import (CLSIM_TABLE_METANAME_PROTO, CLSIM_TABLE_FNAME_PROTO,
-                   SPEED_OF_LIGHT_M_PER_NS)
+from retro import CLSIM_TABLE_METANAME_PROTO, SPEED_OF_LIGHT_M_PER_NS
 from retro import expand, interpret_clsim_table_fname, mkdir
 from retro.table_readers import load_clsim_table
 
@@ -78,18 +78,26 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         from pisa.utils.jsons import from_json, to_json
 
     table_fpath = expand(table_fpath)
-    srcdir, fname = dirname(table_fpath), basename(table_fpath)
-    fname_info = interpret_clsim_table_fname(fname)
+    srcdir, clsim_fname = dirname(table_fpath), basename(table_fpath)
+    invalid_fname = False
+    try:
+        fname_info = interpret_clsim_table_fname(clsim_fname)
+    except ValueError:
+        invalid_fname = True
+        fname_info = {}
 
     if outdir is None:
         outdir = srcdir
     outdir = expand(outdir)
     mkdir(outdir)
 
-    metaname = (CLSIM_TABLE_METANAME_PROTO
-                .format(hash_val=fname_info['hash_val']))
-    metapath = join(outdir, metaname)
-    if isfile(metapath):
+    if invalid_fname:
+        metapath = None
+    else:
+        metaname = (CLSIM_TABLE_METANAME_PROTO
+                    .format(hash_val=fname_info['hash_val']))
+        metapath = join(outdir, metaname)
+    if metapath and isfile(metapath):
         meta = from_json(metapath)
     else:
         meta = dict()
@@ -102,14 +110,26 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         if key in ['table']:
             continue
         summary[key] = table[key]
-    for key in ['hash_val', 'string', 'depth_idx', 'seed']:
-        summary[key] = fname_info[key]
-    summary['n_events'] = meta['tray_kw_to_hash']['NEvents']
-    summary['ice_model'] = meta['tray_kw_to_hash']['IceModel']
-    summary['tilt'] = not meta['tray_kw_to_hash']['DisableTilt']
-    for key, val in meta.items():
-        if key.endswith('_binning_kw'):
-            summary[key] = val
+    if fname_info:
+        for key in ['hash_val', 'string', 'depth_idx', 'seed']:
+            summary[key] = fname_info[key]
+    # TODO: Add hole ice info when added to tray_kw_to_hash
+    if meta:
+        summary['n_events'] = meta['tray_kw_to_hash']['NEvents']
+        summary['ice_model'] = meta['tray_kw_to_hash']['IceModel']
+        summary['tilt'] = not meta['tray_kw_to_hash']['DisableTilt']
+        for key, val in meta.items():
+            if key.endswith('_binning_kw'):
+                summary[key] = val
+    elif fname_info['fname_version'] == 1:
+        summary['n_events'] = fname_info['n_events']
+        summary['ice_model'] = 'spice_mie'
+        summary['tilt'] = False
+        summary['r_binning_kw'] = dict(min=0.0, max=400.0, n_bins=200, power=2)
+        summary['costheta_binning_kw'] = dict(min=-1, max=1, n_bins=40)
+        summary['t_binning_kw'] = dict(min=0.0, max=3000.0, n_bins=300)
+        summary['costhetadir_binning_kw'] = dict(min=-1, max=1, n_bins=20)
+        summary['deltaphidir_binning_kw'] = dict(min=0.0, max=np.pi, n_bins=20)
 
     # Save marginal distributions and info to file
     norm = (
@@ -137,7 +157,6 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         summary['dimensions'][ax_name] = axis
 
     if save_summary:
-        clsim_fname = CLSIM_TABLE_FNAME_PROTO.format(**fname_info)
         base_fname, _ = splitext(clsim_fname)
         outfpath = join(outdir, base_fname + '_summary.json')
         to_json(summary, outfpath)
@@ -170,6 +189,7 @@ def parse_args(description=__doc__):
 
 def main():
     """Main function for calling summarize_clsim_table as a script"""
+    t0 = time()
     args = parse_args()
     kwargs = vars(args)
     table_fpaths = []
@@ -178,6 +198,10 @@ def main():
     for fpath in table_fpaths:
         kwargs['table_fpath'] = fpath
         summarize_clsim_table(**kwargs)
+    total_time = time() - t0
+    avg_time = total_time / len(table_fpaths)
+    print('Time to summarize table(s): {} s (average {} s/table)'
+          .format(total_time, avg_time))
 
 
 if __name__ == '__main__':

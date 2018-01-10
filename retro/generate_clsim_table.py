@@ -58,7 +58,7 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_METANAME_PROTO
+from retro import CLSIM_TABLE_FNAME_V2_PROTO, CLSIM_TABLE_METANAME_PROTO
 from retro import expand, generate_geom_meta, hash_obj
 
 
@@ -355,8 +355,10 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
     hash_val, metaname = generate_clsim_table_meta(**hashable_params)
     metapath = join(outdir, metaname)
 
-    filename = CLSIM_TABLE_FNAME_PROTO.format(hash_val=hash_val, string=subdet,
-                                              depth_idx=depth_idx, seed=seed)
+    filename = CLSIM_TABLE_FNAME_V2_PROTO.format(hash_val=hash_val,
+                                                 string=subdet,
+                                                 depth_idx=depth_idx,
+                                                 seed=seed)
     filepath = abspath(join(outdir, filename))
 
     #if isfile(metapath):

@@ -10,7 +10,8 @@ __all__ = [
     # Defaults
     'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
     'DFLT_SPE_RECO_NAME',
-    'CLSIM_TABLE_FNAME_PROTO', 'CLSIM_TABLE_FNAME_RE',
+    'CLSIM_TABLE_FNAME_V1_RE',
+    'CLSIM_TABLE_FNAME_V2_PROTO', 'CLSIM_TABLE_FNAME_V2_RE',
     'CLSIM_TABLE_METANAME_PROTO', 'CLSIM_TABLE_METANAME_RE',
     'RETRO_DOM_TABLE_FNAME_PROTO', 'RETRO_DOM_TABLE_FNAME_RE',
     'GEOM_FILE_PROTO',
@@ -131,7 +132,17 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
-CLSIM_TABLE_FNAME_PROTO = (
+CLSIM_TABLE_FNAME_V1_RE = re.compile(
+    r'''
+    retro
+    _nevts(?P<n_events>[0-9]+)
+    _(?P<string>[0-9a-z]+)
+    _DOM(?P<depth_idx>[0-9]+)
+    \.fits
+    ''', re.IGNORECASE | re.VERBOSE
+)
+
+CLSIM_TABLE_FNAME_V2_PROTO = (
     'clsim_table'
     '_set_{hash_val:s}'
     '_string_{string}'
@@ -146,7 +157,7 @@ location is averaged over all DOMs. `seed` can either be an integer or a
 human-readable range (e.g. "0-9" for a table that combines toegether seeds, 0,
 1, ..., 9)"""
 
-CLSIM_TABLE_FNAME_RE = re.compile(
+CLSIM_TABLE_FNAME_V2_RE = re.compile(
     r'''
     clsim_table
     _set_(?P<hash_val>[0-9a-f]+)
@@ -877,10 +888,12 @@ def interpret_clsim_table_fname(fname):
     appropriate Python types).
 
     The fields are parsed into the following types / values:
-        - hash_val : str
+        - fname_version : int
+        - hash_val : None or str
         - string : str (one of {'ic', 'dc'}) or int
         - depth_idx : int
-        - seed : str (exactly '*'), int, or list of ints
+        - seed : None, str (exactly '*'), int, or list of ints
+        - n_events : None or int
 
     Parameters
     ----------
@@ -893,33 +906,53 @@ def interpret_clsim_table_fname(fname):
     Raises
     ------
     ValueError
-        If ``basename(fname)`` does not match the regex
-        ``CLSIM_TABLE_FNAME_RE``
+        If ``basename(fname)`` does not match the regexes
+        ``CLSIM_TABLE_FNAME_V1_RE`` or ``CLSIM_TABLE_FNAME_V2_RE``
 
     """
     from pisa.utils.format import hrlist2list
 
     fname = basename(fname)
-    match = CLSIM_TABLE_FNAME_RE.match(fname)
+    match = CLSIM_TABLE_FNAME_V2_RE.match(fname)
+    fname_version = 2
     if not match:
-        raise ValueError('File basename "{}" does not match regex {}'
-                         .format(fname, CLSIM_TABLE_FNAME_RE.pattern))
+        match = CLSIM_TABLE_FNAME_V1_RE.match(fname)
+        fname_version = 1
+    if not match:
+        raise ValueError('File basename "{}" does not match regex {} or legacy'
+                         ' regex {})'
+                         .format(fname, CLSIM_TABLE_FNAME_V2_RE.pattern,
+                                 CLSIM_TABLE_FNAME_V1_RE.pattern))
     info = match.groupdict()
+    info['fname_version'] = fname_version
 
     try:
         info['string'] = int(info['string'])
     except ValueError:
-        assert info['string'] in ['ic', 'dc']
+        assert isinstance(info['string'], basestring)
+        assert info['string'].lower() in ['ic', 'dc']
+        info['string'] = info['string'].lower()
 
-    try:
-        info['seed'] = int(info['seed'])
-    except ValueError:
-        if info['seed'] != '*':
-            info['seed'] = hrlist2list(info['seed'])
+    if fname_version == 1:
+        info['seed'] = None
+        info['hash_val'] = None
+    elif fname_version == 2:
+        info['n_events'] = None
+        try:
+            info['seed'] = int(info['seed'])
+        except ValueError:
+            if info['seed'] != '*':
+                info['seed'] = hrlist2list(info['seed'])
 
     info['depth_idx'] = int(info['depth_idx'])
 
-    return info
+    ordered_keys = ['fname_version', 'hash_val', 'string', 'depth_idx', 'seed',
+                    'n_events']
+    ordered_info = OrderedDict()
+    for key in ordered_keys:
+        ordered_info[key] = info[key]
+
+    return ordered_info
 
 
 # -- Binning / geometry functions -- #
