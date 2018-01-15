@@ -52,7 +52,8 @@ from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
                    RETRO_DOM_TABLE_FNAME_PROTO,
                    TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
                    SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_NTHETABINS,
-                   POL_TABLE_DCOSTHETA, POL_TABLE_NRBINS, POL_TABLE_DRPWR)
+                   POL_TABLE_DCOSTHETA, POL_TABLE_NRBINS, POL_TABLE_DRPWR,
+                   ZSTD_EXTENSIONS)
 from retro import RetroPhotonInfo, TimeSphCoord
 from retro import (expand, force_little_endian, generate_anisotropy_str,
                    interpret_clsim_table_fname, linear_bin_centers, numba_jit)
@@ -89,10 +90,10 @@ def load_clsim_table(fpath):
     fpath = abspath(expand(fpath))
     assert isfile(fpath)
     _, ext = splitext(fpath)
-    ext = ext.lstrip('.')
+    ext = ext.lstrip('.').lower()
 
     table = OrderedDict()
-    if ext in ('zstd', 'zstandard', 'zst'):
+    if ext in ZSTD_EXTENSIONS:
         # -c sends decompressed output to stdout
         proc = Popen(['zstd', '-d', '-c', fpath], stdout=PIPE)
         # Read from stdout

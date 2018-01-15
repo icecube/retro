@@ -17,6 +17,7 @@ __all__ = [
     'GEOM_FILE_PROTO',
     'GEOM_META_PROTO', 'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO',
     'TDI_TABLE_FNAME_RE', 'NUMBA_AVAIL', 'COLOR_CYCLE_ORTHOG',
+    'ZSTD_EXTENSIONS',
 
     # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -118,7 +119,7 @@ except Exception:
 else:
     NUMBA_AVAIL = True
 
-# -- Default choices we've made -- #
+# -- Default choices we've made and constants -- #
 
 DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, cache=True)
 """kwargs to pass to numba.jit"""
@@ -495,6 +496,9 @@ COLOR_CYCLE_ORTHOG = (
 """Use via: ``mpl.rc('axes', color_cycle=colorCycleOrthog)``
 Modified from
 http://stackoverflow.com/questions/470690/how-to-automatically-generate-n-distinct-colors"""
+
+ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
+"""Extensions recognized as zstandard-compressed files"""
 
 
 # -- Functions -- #

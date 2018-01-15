@@ -157,7 +157,11 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         summary['dimensions'][ax_name] = axis
 
     if save_summary:
-        base_fname, _ = splitext(clsim_fname)
+        ext = None
+        base_fname = clsim_fname
+        while ext not in ['', '.fits']:
+            base_fname, ext = splitext(base_fname)
+            ext = ext.lower()
         outfpath = join(outdir, base_fname + '_summary.json')
         to_json(summary, outfpath)
         print('saved summary to "{}"'.format(outfpath))
