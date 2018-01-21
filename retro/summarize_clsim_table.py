@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, too-many-instance-attributes, too-many-locals
+# pylint: disable=wrong-import-position
 
 """
 Generate a json file summarizing a CLSim table
@@ -31,6 +31,7 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 from glob import glob
+from itertools import product
 from os.path import abspath, basename, dirname, isfile, join, splitext
 import sys
 from time import time
@@ -68,10 +69,10 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
 
     Returns
     -------
-    table : dictionary
+    table
         See `load_clsim_table` for details of the data structure
 
-    summary : dictionary
+    summary : OrderedDict
 
     """
     if save_summary:
@@ -107,11 +108,11 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
 
     summary = OrderedDict()
     for key in table.keys():
-        if key in ['table']:
+        if key == 'table':
             continue
         summary[key] = table[key]
     if fname_info:
-        for key in ['hash_val', 'string', 'depth_idx', 'seed']:
+        for key in ('hash_val', 'string', 'depth_idx', 'seed'):
             summary[key] = fname_info[key]
     # TODO: Add hole ice info when added to tray_kw_to_hash
     if meta:
@@ -142,9 +143,16 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
     )
     summary['norm'] = norm
 
-    dim_names = ['r', 'costheta', 't', 'costhetadir', 'deltaphidir']
+    dim_names = ('r', 'costheta', 't', 'costhetadir', 'deltaphidir')
     n_dims = len(table['table_shape'])
     assert n_dims == len(dim_names)
+
+    # Apply norm to underflow and overflow so magnitudes can be compared
+    # relative to plotted marginal distributions
+    for flow, idx in product(('underflow', 'overflow'), range(n_dims)):
+        summary[flow][idx] = summary[flow][idx] * norm
+
+    nonzero_table = np.ma.masked_equal(table['table'], 0)
 
     summary['dimensions'] = OrderedDict()
     for keep_axis, ax_name in zip(tuple(range(n_dims)), dim_names):
@@ -152,14 +160,21 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         remove_axes.pop(keep_axis)
         remove_axes = tuple(remove_axes)
         axis = OrderedDict()
-        axis['mean'] = norm * np.mean(table['table'], axis=remove_axes)
-        axis['max'] = norm * np.max(table['table'], axis=remove_axes)
+        axis['mean'] = norm * np.asarray(
+            np.mean(table['table'], axis=remove_axes)
+        )
+        axis['median'] = norm * np.asarray(
+            np.ma.median(nonzero_table, axis=remove_axes)
+        )
+        axis['max'] = norm * np.asarray(
+            np.max(table['table'], axis=remove_axes)
+        )
         summary['dimensions'][ax_name] = axis
 
     if save_summary:
         ext = None
         base_fname = clsim_fname
-        while ext not in ['', '.fits']:
+        while ext not in ('', '.fits'):
             base_fname, ext = splitext(base_fname)
             ext = ext.lower()
         outfpath = join(outdir, base_fname + '_summary.json')

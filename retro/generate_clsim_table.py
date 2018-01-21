@@ -281,24 +281,35 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
 
     t_min = 0 # ns
     r_min = 0 # meters
-    costheta_min, costheta_max = -1, 1
-    costhetadir_min, costhetadir_max = -1, 1
-    deltaphidir_min, deltaphidir_max = 0, np.pi # rad
+    costheta_min, costheta_max = -1.0, 1.0
+    costhetadir_min, costhetadir_max = -1.0, 1.0
+    deltaphidir_min, deltaphidir_max = 0.0, np.pi # rad
 
     r_binning_kw = dict(
-        min=float(r_min), max=float(r_max), n_bins=int(n_r_bins), power=int(r_power)
+        min=float(r_min),
+        max=float(r_max),
+        n_bins=int(n_r_bins),
+        power=int(r_power)
     )
     costheta_binning_kw = dict(
-        min=costheta_min, max=costheta_max, n_bins=n_costheta_bins
+        min=float(costheta_min),
+        max=float(costheta_max),
+        n_bins=int(n_costheta_bins)
     )
     t_binning_kw = dict(
-        min=t_min, max=t_max, n_bins=n_t_bins
+        min=float(t_min),
+        max=float(t_max),
+        n_bins=int(n_t_bins)
     )
     costhetadir_binning_kw = dict(
-        min=costhetadir_min, max=costhetadir_max, n_bins=n_costhetadir_bins
+        min=float(costhetadir_min),
+        max=float(costhetadir_max),
+        n_bins=int(n_costhetadir_bins)
     )
     deltaphidir_binning_kw = dict(
-        min=deltaphidir_min, max=deltaphidir_max, n_bins=n_deltaphidir_bins
+        min=float(deltaphidir_min),
+        max=float(deltaphidir_max),
+        n_bins=int(n_deltaphidir_bins)
     )
 
     axes = SphericalAxes([
@@ -312,7 +323,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
         LinearAxis(**costhetadir_binning_kw),
         # deltaphidir: photon direction, (impact) azimuth angle (rad)
         LinearAxis(**deltaphidir_binning_kw)
-    ])
+    ]) # yapf: disable
 
     if subdet.lower() == 'ic':
         z_pos = IC_AVG_Z[depth_idx]
@@ -340,7 +351,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
         IceModel='spice_mie',
         DisableTilt=not tilt,
         PhotonPrescale=1,
-        Sensor='none',
+        Sensor='none'
     )
 
     hashable_params = dict(

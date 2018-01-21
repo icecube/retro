@@ -72,7 +72,7 @@ def load_clsim_table(fpath):
 
     Returns
     -------
-    table : dict
+    table : OrderedDict
         Items include
         - 'table' : np.ndarray
         - 'table_shape' : tuple of int
@@ -445,7 +445,7 @@ class CLSimTable(object):
 
             if isinstance(string, basestring):
                 self.string = string.strip().lower()
-                assert self.string in ['ic', 'dc']
+                assert self.string in ('ic', 'dc')
                 self.subdet = self.string
                 self.string_idx = None
 
@@ -486,7 +486,7 @@ class CLSimTable(object):
             self.depth_idx = info['depth_idx']
             self.seed = info['seed']
 
-        assert self.subdet in ['ic', 'dc']
+        assert self.subdet in ('ic', 'dc')
         self.dtp_fname_proto = RETRO_DOM_TABLE_FNAME_PROTO
 
         table_info = load_clsim_table(self.fpath)
@@ -546,7 +546,7 @@ class CLSimTable(object):
         # * Dividing by total photons thrown
         # * Dividing by (speed of light in ice, c / n, in m/ns
         #    multiplied by the bin width in ns; overall units are m)
-        # * Multiplying by a correction for angular acceptance, in [0,1]
+        # * Multiplying by a correction for angular acceptance, in [0, 1]
         # * Multiplying by the number of costheta bins (>= 1)
         # The result of applying this norm is in units of 1/meter, where
         # this unit accounts for the fact that CLSim tabulates the same
@@ -998,7 +998,7 @@ class TDICartTable(object):
 
             # Store the metadata by relative tile index
             rel_idx = tuple(int(np.round(i))
-                            for i in [x_float_idx, y_float_idx, z_float_idx])
+                            for i in (x_float_idx, y_float_idx, z_float_idx))
             to_load_meta[rel_idx] = meta
 
         x_min, y_min, z_min = lowermost_corner
