@@ -164,7 +164,8 @@ def formatter(mapping, key_only=False, fname=False):
     return line_sep.join(label_lines)
 
 
-def plot_clsim_table_summary(summaries, formats=None, outdir=None):
+def plot_clsim_table_summary(summaries, formats=None, outdir=None,
+                             no_legend=False):
     """Plot the table summary produced by `summarize_clsim_table`.
 
     Plots are made of marginalized 1D distributions, where mean, median, and/or
@@ -183,6 +184,9 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None):
     outdir : None or string
         If `formats` is specified and `outdir` is None, the plots are
         saved to the present working directory.
+
+    no_legend : bool, optional
+        Do not display legend on plots (default is to display a legend)
 
     Returns
     -------
@@ -361,7 +365,7 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None):
             continue
         for dim_num, (dim_name, ax) in enumerate(zip(dim_names, all_axes[kind_idx])):
             #if dim_num == 0 and different_items:
-            if different_items:
+            if different_items and not no_legend:
                 ax.legend(loc='best', frameon=False,
                           prop=dict(size=7, family='monospace'))
 
@@ -421,6 +425,10 @@ def parse_args(description=__doc__):
         '--outdir', default=None,
         help='''Directory to which to save the plot(s). Defaults to same
         directory as the present working directory.'''
+    )
+    parser.add_argument(
+        '--no-legend', action='store_true',
+        help='''Do not display a legend on the individual plots'''
     )
     parser.add_argument(
         'summaries', nargs='+',
