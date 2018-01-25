@@ -33,7 +33,7 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from glob import glob
-from os.path import abspath, dirname, isfile, join
+from os.path import abspath, basename, dirname, isfile, join, splitext
 import sys
 
 import numpy as np
@@ -42,7 +42,7 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import expand, mkdir
+from retro import COMPR_EXTENSIONS, expand, mkdir
 from retro.table_readers import load_clsim_table_minimal
 
 
@@ -99,14 +99,15 @@ def combine_clsim_tables(table_fpaths, save, outdir=None, overwrite=False):
         table_fpaths_tmp.extend(glob(expand(fpath)))
     table_fpaths = sorted(table_fpaths_tmp)
 
+    output_fpaths = None
     if save:
         if outdir is None:
             outdir = dirname(table_fpaths[0])
         outdir = expand(outdir)
         mkdir(outdir)
+        output_fpaths = {k: join(outdir, k + '.npy') for k in ALL_KEYS}
         if not overwrite:
-            for key in VALIDATE_KEYS + SUM_KEYS:
-                fpath = join(outdir, key + '.npy')
+            for fpath in output_fpaths:
                 if isfile(fpath):
                     raise IOError('File {} exists'.format(fpath))
 
@@ -133,6 +134,16 @@ def combine_clsim_tables(table_fpaths, save, outdir=None, overwrite=False):
         del table
 
     if save:
+        basenames = []
+        for fpath in table_fpaths:
+            base = basename(fpath)
+            rootname, ext = splitext(base)
+            if ext.lstrip('.') in COMPR_EXTENSIONS:
+                base = rootname
+            basenames.append(base)
+        with open(join(outdir, 'source_tables.txt'), 'w') as fobj:
+            fobj.write('\n'.join(sorted(basenames, reverse=True)))
+
         for key in VALIDATE_KEYS + SUM_KEYS:
             fpath = join(outdir, key + '.npy')
             np.save(fpath, combined_table[key], allow_pickle=False)

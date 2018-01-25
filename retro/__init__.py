@@ -17,7 +17,7 @@ __all__ = [
     'GEOM_FILE_PROTO',
     'GEOM_META_PROTO', 'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO',
     'TDI_TABLE_FNAME_RE', 'NUMBA_AVAIL', 'COLOR_CYCLE_ORTHOG',
-    'ZSTD_EXTENSIONS',
+    'ZSTD_EXTENSIONS', 'COMPR_EXTENSIONS',
 
     # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -499,6 +499,9 @@ http://stackoverflow.com/questions/470690/how-to-automatically-generate-n-distin
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
 """Extensions recognized as zstandard-compressed files"""
+
+COMPR_EXTENSIONS = ZSTD_EXTENSIONS
+"""Extensions recognized as a compressed file"""
 
 
 # -- Functions -- #
