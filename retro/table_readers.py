@@ -9,8 +9,11 @@ Classes for reading and getting info from Retro tables.
 from __future__ import absolute_import, division, print_function
 
 
-__all__ = ['load_clsim_table', 'load_t_r_theta_table', 'pexp_t_r_theta',
-           'pexp_xyz', 'CLSimTable', 'DOMTimePolarTables', 'TDICartTable']
+__all__ = [
+    'open_table_file', 'load_clsim_table', 'load_clsim_table_minimal',
+    'load_t_r_theta_table', 'pexp_t_r_theta', 'pexp_xyz', 'CLSimTable',
+    'DOMTimePolarTables', 'TDICartTable'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -60,6 +63,105 @@ from retro import (expand, force_little_endian, generate_anisotropy_str,
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
+def open_table_file(fpath):
+    """Open a file directly if uncompressed or decompress if zstd compression
+    has been applied.
+
+    Parameters
+    ----------
+    fpath : string
+
+    Returns
+    -------
+    fobj : file-like object
+
+    """
+    fpath = abspath(expand(fpath))
+    assert isfile(fpath)
+    _, ext = splitext(fpath)
+    ext = ext.lstrip('.').lower()
+    if ext in ZSTD_EXTENSIONS:
+        # -c sends decompressed output to stdout
+        proc = Popen(['zstd', '-d', '-c', fpath], stdout=PIPE)
+        # Read from stdout
+        (proc_stdout, _) = proc.communicate()
+        # Give the string from stdout a file-like interface
+        fobj = StringIO(proc_stdout)
+    elif ext in ('fits',):
+        fobj = open(fpath, 'rb')
+    else:
+        raise ValueError('Unhandled extension "{}"'.format(ext))
+    return fobj
+
+
+def load_clsim_table_minimal(fpath):
+    """Load a CLSim table from disk (optionally compressed with zstd).
+
+    Similar to the `load_clsim_table` function but the full table, including
+    under/overflow bins is kept and no normalization or further processing is
+    performed on the table data besides populating the ouptput OrderedDict.
+
+    Parameters
+    ----------
+    fpath : string
+        Path to file to be loaded. If the file has extension 'zst', 'zstd', or
+        'zstandard', the file will be decompressed using the `python-zstandard`
+        Python library before passing to `pyfits` for interpreting.
+
+    Returns
+    -------
+    table : OrderedDict
+        Items include
+        - 'table_shape' : tuple of int
+        - 'table' : np.ndarray
+        - 'n_photons' :
+        - 'phase_refractive_index' :
+
+        If the table is 5D, items also include
+        - 'r_bin_edges' :
+        - 'costheta_bin_edges' :
+        - 't_bin_edges' :
+        - 'costhetadir_bin_edges' :
+        - 'deltaphidir_bin_edges' :
+
+    """
+    table = OrderedDict()
+
+    fobj = open_table_file(fpath)
+    try:
+        pf_table = pyfits.open(fobj)
+
+        table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
+        table['n_photons'] = force_little_endian(pf_table[0].header['_i3_n_photons']) # pylint: disable=no-member
+        table['phase_refractive_index'] = force_little_endian(pf_table[0].header['_i3_n_phase']) # pylint: disable=no-member
+
+        n_dims = len(table['table_shape'])
+        if n_dims == 5:
+            # Space-time dimensions
+            table['r_bin_edges'] = force_little_endian(pf_table[1].data) # meters # pylint: disable=no-member
+            table['costheta_bin_edges'] = force_little_endian(pf_table[2].data) # pylint: disable=no-member
+            table['t_bin_edges'] = force_little_endian(pf_table[3].data) # nanoseconds # pylint: disable=no-member
+
+            # Photon directionality
+            table['costhetadir_bin_edges'] = force_little_endian(pf_table[4].data) # pylint: disable=no-member
+            table['deltaphidir_bin_edges'] = force_little_endian(pf_table[5].data) # pylint: disable=no-member
+
+        else:
+            raise NotImplementedError(
+                '{}-dimensional table not handled'.format(n_dims)
+            )
+
+        table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
+
+    finally:
+        del pf_table
+        if hasattr(fobj, 'close'):
+            fobj.close()
+        del fobj
+
+    return table
+
+
 def load_clsim_table(fpath):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
@@ -87,24 +189,9 @@ def load_clsim_table(fpath):
         - 'deltaphidir_bin_edges' :
 
     """
-    fpath = abspath(expand(fpath))
-    assert isfile(fpath)
-    _, ext = splitext(fpath)
-    ext = ext.lstrip('.').lower()
-
     table = OrderedDict()
-    if ext in ZSTD_EXTENSIONS:
-        # -c sends decompressed output to stdout
-        proc = Popen(['zstd', '-d', '-c', fpath], stdout=PIPE)
-        # Read from stdout
-        (proc_stdout, _) = proc.communicate()
-        # Give the string from stdout a file-like interface
-        fobj = StringIO(proc_stdout)
-    elif ext in ('fits',):
-        fobj = open(fpath, 'rb')
-    else:
-        raise ValueError('Unhandled extension "{}"'.format(ext))
 
+    fobj = open_table_file(fpath)
     try:
         pf_table = pyfits.open(fobj)
 
@@ -115,7 +202,6 @@ def load_clsim_table(fpath):
 
         table_shape = tuple(dim - 2 for dim in table_shape_incl_overflow)
         n_dims = len(table_shape)
-        table['table_shape'] = table_shape
 
         # Cut off first and last bin in each dimension (underflow and
         # overflow bins)
@@ -130,21 +216,19 @@ def load_clsim_table(fpath):
             sl = tuple([slice(1, -1)]*n + [-1] + [slice(1, -1)]*(n_dims - 1 - n))
             overflow.append(raw_table[sl].sum())
 
-        table['table'] = table_vals
-        table['underflow'] = np.array(underflow)
-        table['overflow'] = np.array(overflow)
+        table['table_shape'] = table_shape
         table['n_photons'] = n_photons
         table['phase_refractive_index'] = phase_refractive_index
 
         if n_dims == 5:
             # Space-time dimensions
-            r_bin_edges = force_little_endian(pf_table[1].data) # meters # pylint: disable=no-member
-            costheta_bin_edges = force_little_endian(pf_table[2].data) # pylint: disable=no-member
-            t_bin_edges = force_little_endian(pf_table[3].data) # nanoseconds # pylint: disable=no-member
+            table['r_bin_edges'] = force_little_endian(pf_table[1].data) # meters # pylint: disable=no-member
+            table['costheta_bin_edges'] = force_little_endian(pf_table[2].data) # pylint: disable=no-member
+            table['t_bin_edges'] = force_little_endian(pf_table[3].data) # nanoseconds # pylint: disable=no-member
 
             # Photon directionality
-            costhetadir_bin_edges = force_little_endian(pf_table[4].data) # pylint: disable=no-member
-            deltaphidir_bin_edges = force_little_endian(pf_table[5].data) # pylint: disable=no-member
+            table['costhetadir_bin_edges'] = force_little_endian(pf_table[4].data) # pylint: disable=no-member
+            table['deltaphidir_bin_edges'] = force_little_endian(pf_table[5].data) # pylint: disable=no-member
 
             #table['norm'] = (
             #    1
@@ -154,17 +238,14 @@ def load_clsim_table(fpath):
             #    * table['angular_acceptance_fract']
             #    * (len(table['costheta_bin_edges']) - 1)
             #)
-
-            table['r_bin_edges'] = r_bin_edges
-            table['costheta_bin_edges'] = costheta_bin_edges
-            table['t_bin_edges'] = t_bin_edges
-            table['costhetadir_bin_edges'] = costhetadir_bin_edges
-            table['deltaphidir_bin_edges'] = deltaphidir_bin_edges
-
         else:
             raise NotImplementedError(
                 '{}-dimensional table not handled'.format(n_dims)
             )
+
+        table['table'] = table_vals
+        table['underflow'] = np.array(underflow)
+        table['overflow'] = np.array(overflow)
 
     finally:
         del pf_table
