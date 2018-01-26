@@ -149,7 +149,7 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
 
     # Apply norm to underflow and overflow so magnitudes can be compared
     # relative to plotted marginal distributions
-    for flow, idx in product(('underflow', 'overflow'), range(n_dims)):
+    for flow, idx in product(('underflow', 'overflow'), iter(range(n_dims))):
         summary[flow][idx] = summary[flow][idx] * norm
 
     retro.wstderr('Finding marginal distributions...\n')
@@ -198,7 +198,7 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         while ext not in ('', '.fits'):
             base_fname, ext = splitext(base_fname)
             ext = ext.lower()
-        outfpath = join(outdir, base_fname + '_summary.json')
+        outfpath = join(outdir, base_fname + '_summary.json.bz2')
         to_json(summary, outfpath)
         print('saved summary to "{}"'.format(outfpath))
 

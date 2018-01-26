@@ -138,11 +138,11 @@ def load_clsim_table_minimal(fpath, mmap=False):
             mmap_mode = None
         for key in MY_CLSIM_TABLE_KEYS:
             fpath = join(indir, key + '.npy')
-            retro.wstderr('  Loading {} from "{}" ...'.format(key, fpath))
+            retro.wstderr('    loading {} from "{}" ...'.format(key, fpath))
             t1 = time()
             table[key] = np.load(fpath, mmap_mode=mmap_mode)
             retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
-        retro.wstderr('  load took {} s\n'.format(np.round(time() - t0, 3)))
+        retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
         return table
 
     if mmap:
@@ -238,12 +238,12 @@ def load_clsim_table(fpath):
     # Cut off first and last bin in each dimension (underflow and
     # overflow bins)
     slice_wo_overflow = (slice(1, -1),) * n_dims
-    retro.wstderr('  Slicing to remove underflow/overflow bins...')
+    retro.wstderr('    slicing to remove underflow/overflow bins...')
     t0 = time()
     table_wo_overflow = table['table'][slice_wo_overflow]
     retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
 
-    retro.wstderr('  Slicing and summarizing underflow and overflow...')
+    retro.wstderr('    slicing and summarizing underflow and overflow...')
     t0 = time()
     underflow, overflow = [], []
     for n in range(n_dims):
