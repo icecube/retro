@@ -63,6 +63,13 @@ from retro import (expand, force_little_endian, generate_anisotropy_str,
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
+MY_CLSIM_TABLE_KEYS = [
+    'table_shape', 'n_photons', 'phase_refractive_index', 'r_bin_edges',
+    'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
+    'deltaphidir_bin_edges', 'table'
+]
+
+
 def open_table_file(fpath):
     """Open a file directly if uncompressed or decompress if zstd compression
     has been applied.
@@ -94,7 +101,7 @@ def open_table_file(fpath):
     return fobj
 
 
-def load_clsim_table_minimal(fpath):
+def load_clsim_table_minimal(fpath, mmap=False):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Similar to the `load_clsim_table` function but the full table, including
@@ -126,6 +133,25 @@ def load_clsim_table_minimal(fpath):
 
     """
     table = OrderedDict()
+
+    fpath = expand(fpath)
+
+    if isdir(fpath):
+        indir = fpath
+        if mmap:
+            mmap_mode = 'r'
+        else:
+            mmap_mode = None
+        for key in MY_CLSIM_TABLE_KEYS:
+            fpath = join(indir, key + '.npy')
+            print('Loading {} from "{}"'.format(key, fpath))
+            table[key] = np.load(fpath, mmap_mode=mmap_mode)
+        return table
+
+    if mmap:
+        raise ValueError('Cannot memory map a fits or compressed fits file')
+
+    print('Loading entire table contents from "{}"'.format(fpath))
 
     fobj = open_table_file(fpath)
     try:
@@ -191,67 +217,29 @@ def load_clsim_table(fpath):
     """
     table = OrderedDict()
 
-    fobj = open_table_file(fpath)
-    try:
-        pf_table = pyfits.open(fobj)
+    table = load_clsim_table_minimal(fpath)
 
-        table_shape_incl_overflow = pf_table[0].data.shape # pylint: disable=no-member
-        n_photons = force_little_endian(pf_table[0].header['_i3_n_photons']) # pylint: disable=no-member
-        phase_refractive_index = force_little_endian(pf_table[0].header['_i3_n_phase']) # pylint: disable=no-member
-        raw_table = force_little_endian(pf_table[0].data) # pylint: disable=no-member
+    n_dims = len(table['table_shape'])
 
-        table_shape = tuple(dim - 2 for dim in table_shape_incl_overflow)
-        n_dims = len(table_shape)
+    # Cut off first and last bin in each dimension (underflow and
+    # overflow bins)
+    slice_wo_overflow = (slice(1, -1),) * n_dims
+    print('Slicing to remove underflow/overflow bins...')
+    table_wo_overflow = table['table'][slice_wo_overflow]
 
-        # Cut off first and last bin in each dimension (underflow and
-        # overflow bins)
-        slice_wo_overflow = (slice(1, -1),) * n_dims
-        table_vals = raw_table[slice_wo_overflow]
+    underflow, overflow = [], []
+    for n in range(n_dims):
+        sl = tuple([slice(1, -1)]*n + [0] + [slice(1, -1)]*(n_dims - 1 - n))
+        print('Slicing to find underflow totals...')
+        underflow.append(table['table'][sl].sum())
 
-        underflow, overflow = [], []
-        for n in range(n_dims):
-            sl = tuple([slice(1, -1)]*n + [0] + [slice(1, -1)]*(n_dims - 1 - n))
-            underflow.append(raw_table[sl].sum())
+        sl = tuple([slice(1, -1)]*n + [-1] + [slice(1, -1)]*(n_dims - 1 - n))
+        print('Slicing to find overflow totals...')
+        overflow.append(table['table'][sl].sum())
 
-            sl = tuple([slice(1, -1)]*n + [-1] + [slice(1, -1)]*(n_dims - 1 - n))
-            overflow.append(raw_table[sl].sum())
-
-        table['table_shape'] = table_shape
-        table['n_photons'] = n_photons
-        table['phase_refractive_index'] = phase_refractive_index
-
-        if n_dims == 5:
-            # Space-time dimensions
-            table['r_bin_edges'] = force_little_endian(pf_table[1].data) # meters # pylint: disable=no-member
-            table['costheta_bin_edges'] = force_little_endian(pf_table[2].data) # pylint: disable=no-member
-            table['t_bin_edges'] = force_little_endian(pf_table[3].data) # nanoseconds # pylint: disable=no-member
-
-            # Photon directionality
-            table['costhetadir_bin_edges'] = force_little_endian(pf_table[4].data) # pylint: disable=no-member
-            table['deltaphidir_bin_edges'] = force_little_endian(pf_table[5].data) # pylint: disable=no-member
-
-            #table['norm'] = (
-            #    1
-            #    / table['n_photons']
-            #    / (SPEED_OF_LIGHT_M_PER_NS / table['phase_refractive_index']
-            #       * np.mean(np.diff(table['t_bin_edges'])))
-            #    * table['angular_acceptance_fract']
-            #    * (len(table['costheta_bin_edges']) - 1)
-            #)
-        else:
-            raise NotImplementedError(
-                '{}-dimensional table not handled'.format(n_dims)
-            )
-
-        table['table'] = table_vals
-        table['underflow'] = np.array(underflow)
-        table['overflow'] = np.array(overflow)
-
-    finally:
-        del pf_table
-        if hasattr(fobj, 'close'):
-            fobj.close()
-        del fobj
+    table['table'] = table_wo_overflow
+    table['underflow'] = np.array(underflow)
+    table['overflow'] = np.array(overflow)
 
     return table
 

@@ -122,7 +122,7 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         for key, val in meta.items():
             if key.endswith('_binning_kw'):
                 summary[key] = val
-    elif fname_info['fname_version'] == 1:
+    elif 'fname_version' in fname_info and fname_info['fname_version'] == 1:
         summary['n_events'] = fname_info['n_events']
         summary['ice_model'] = 'spice_mie'
         summary['tilt'] = False

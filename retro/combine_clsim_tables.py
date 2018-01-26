@@ -66,7 +66,7 @@ ALL_KEYS = VALIDATE_KEYS + SUM_KEYS
 """All keys expected to be in tables"""
 
 
-def combine_clsim_tables(table_fpaths, save, outdir=None, overwrite=False):
+def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
     """Combine multiple CLSim-produced tables together into a single table.
 
     All tables specified must have the same binnings defined. Tables should
@@ -79,37 +79,47 @@ def combine_clsim_tables(table_fpaths, save, outdir=None, overwrite=False):
     table_fpaths : string or iterable thereof
         Each string is glob-expanded
 
-    save : bool
-        Whether to save the result to disk.
-
     outdir : string, optional
-        Directory to which to save the combined table if `save` is True (if
-        `save` is True, then `outdir` _must_ be specified.)
+        Directory to which to save the combined table; if not specified, the
+        resulting table will be returned but not saved to disk.
 
     Returns
     -------
     combined_table
 
     """
+    # Get all input table filepaths, including glob expansion
+
     if isinstance(table_fpaths, basestring):
         table_fpaths = [table_fpaths]
-
     table_fpaths_tmp = []
     for fpath in table_fpaths:
         table_fpaths_tmp.extend(glob(expand(fpath)))
     table_fpaths = sorted(table_fpaths_tmp)
 
+    print(
+        'Found {} tables to combine:\n  {}'
+        .format(len(table_fpaths), '\n  '.join(table_fpaths))
+    )
+
+    # Formulate output filenames and check if they exist
+
     output_fpaths = None
-    if save:
-        if outdir is None:
-            outdir = dirname(table_fpaths[0])
+    if outdir is not None:
         outdir = expand(outdir)
         mkdir(outdir)
         output_fpaths = {k: join(outdir, k + '.npy') for k in ALL_KEYS}
+        output_fpaths['source_tables'] = join(outdir, 'source_tables.txt')
         if not overwrite:
             for fpath in output_fpaths:
                 if isfile(fpath):
                     raise IOError('File {} exists'.format(fpath))
+        print(
+            'Output files will be written to:\n  {}'
+            .format('\n  '.join(output_fpaths.values()))
+        )
+
+    # Combine the tables
 
     combined_table = None
     for fpath in table_fpaths:
@@ -133,7 +143,9 @@ def combine_clsim_tables(table_fpaths, save, outdir=None, overwrite=False):
 
         del table
 
-    if save:
+    # Save the data to npy files on disk
+
+    if outdir is not None:
         basenames = []
         for fpath in table_fpaths:
             base = basename(fpath)
@@ -141,12 +153,16 @@ def combine_clsim_tables(table_fpaths, save, outdir=None, overwrite=False):
             if ext.lstrip('.') in COMPR_EXTENSIONS:
                 base = rootname
             basenames.append(base)
-        with open(join(outdir, 'source_tables.txt'), 'w') as fobj:
-            fobj.write('\n'.join(sorted(basenames, reverse=True)))
 
-        for key in VALIDATE_KEYS + SUM_KEYS:
-            fpath = join(outdir, key + '.npy')
-            np.save(fpath, combined_table[key], allow_pickle=False)
+        fpath = output_fpaths['source_tables']
+        with open(fpath, 'w') as fobj:
+            fobj.write('\n'.join(sorted(basenames)))
+        print('Wrote "{}"'.format(fpath))
+
+        for key in ALL_KEYS:
+            fpath = output_fpaths[key]
+            np.save(fptath, combined_table[key])
+            print('Wrote "{}"'.format(fpath))
 
     return combined_table
 
@@ -177,7 +193,7 @@ def main():
     """Main function for calling combine_clsim_tables as a script"""
     args = parse_args()
     kwargs = vars(args)
-    combine_clsim_tables(save=True, **kwargs)
+    combine_clsim_tables(**kwargs)
 
 
 if __name__ == '__main__':
