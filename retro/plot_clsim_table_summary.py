@@ -64,14 +64,24 @@ def formatter(mapping, key_only=False, fname=False):
 
     """
     order = [
-        'hash_val', 'string', 'depth_idx', 'seed', 'table_shape',
-        'n_events', 'ice_model', 'tilt', 'n_photons', 'underflow', 'overflow'
-    ]
+        'hash_val',
+        'string',
+        'depth_idx',
+        'seed',
+        'table_shape',
+        'n_events',
+        'ice_model',
+        'tilt',
+        'n_photons',
+        'norm',
+        'underflow',
+        'overflow'
+    ] # yapf: disable
 
     line_sep = '\n'
 
     if fname:
-        for key in ['n_photons', 'underflow', 'overflow']:
+        for key in ('n_photons', 'norm', 'underflow', 'overflow'):
             order.remove(key)
 
     label_strs = []
@@ -92,13 +102,18 @@ def formatter(mapping, key_only=False, fname=False):
 
         if key == 'n_photons':
             label_strs.append(
-                'n_photons{}{}'
-                .format(sep, format_num(value, sigfigs=3, sci_thresh=(4, -3)))
+                '{}{}{}'.format(
+                    key, sep, format_num(value, sigfigs=3, sci_thresh=(4, -3))
+                )
             )
-        elif key in ['depth_idx', 'seed', 'string', 'n_events', 'ice_model', 'tilt']:
+
+        elif key in ('depth_idx', 'seed', 'string', 'n_events', 'ice_model',
+                     'tilt'):
             label_strs.append('{}{}{}'.format(key, sep, value))
+
         elif key == 'phase_refractive_index':
             label_strs.append('n{}{:.3f}'.format(sep, value))
+
         elif key in ('table_shape', 'underflow', 'overflow'):
             if key == 'table_shape':
                 name = 'shape'
@@ -126,6 +141,13 @@ def formatter(mapping, key_only=False, fname=False):
         elif key == 'hash_val':
             label_strs.append('hash{}{}'.format(sep, value))
 
+        elif key == 'norm':
+            label_strs.append(
+                '{}{}{}'.format(
+                    key, sep, format_num(value, sigfigs=3, sci_thresh=(4, -3))
+                )
+            )
+
     if not label_strs:
         return ''
 
@@ -142,8 +164,13 @@ def formatter(mapping, key_only=False, fname=False):
     return line_sep.join(label_lines)
 
 
-def plot_clsim_table_summary(summaries, formats=None, outdir=None):
+def plot_clsim_table_summary(summaries, formats=None, outdir=None,
+                             no_legend=False):
     """Plot the table summary produced by `summarize_clsim_table`.
+
+    Plots are made of marginalized 1D distributions, where mean, median, and/or
+    max are used to marginalize out the remaining dimensions (where those are
+    present in the summaries)..
 
     Parameters
     ----------
@@ -158,11 +185,14 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None):
         If `formats` is specified and `outdir` is None, the plots are
         saved to the present working directory.
 
+    no_legend : bool, optional
+        Do not display legend on plots (default is to display a legend)
+
     Returns
     -------
-    figs : list of two :class:`matplotlib.figure.Figure`
+    all_figs : list of three :class:`matplotlib.figure.Figure`
 
-    axes : list of to lists of :class:`matplotlib.axes.Axes`
+    all_axes : list of three lists of :class:`matplotlib.axes.Axes`
 
     summaries : list of :class:`collections.OrderedDict`
         List of all summaries loaded
@@ -240,11 +270,15 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None):
 
     same_label = formatter(same_items)
 
-    strings = sorted(set(all_items['string']))
-    depths = sorted(set(all_items['depth_idx']))
-    seeds = sorted(set(all_items['seed']))
+    summary_has_detail = False
+    if set(['string', 'depth_idx', 'seed']).issubset(all_items.keys()):
+        summary_has_detail = True
+        strings = sorted(set(all_items['string']))
+        depths = sorted(set(all_items['depth_idx']))
+        seeds = sorted(set(all_items['seed']))
 
-    plot_kinds = ('mean', 'max')
+    plot_kinds = ('mean', 'median', 'max')
+    plot_kinds_with_data = set()
     dim_names = summaries[0]['dimensions'].keys()
     n_dims = len(dim_names)
 
@@ -254,57 +288,67 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None):
     fig_all_axes_y = n_dims * fig_one_axis_y
     fig_y = fig_header_y + fig_all_axes_y # inches
 
-    fig1, axes1 = plt.subplots(nrows=n_dims, ncols=1, squeeze=False,
-                               figsize=(fig_x, fig_y))
-    fig2, axes2 = plt.subplots(nrows=n_dims, ncols=1, squeeze=False,
-                               figsize=(fig_x, fig_y))
-    figs = [fig1, fig2]
-    axes1 = list(axes1.flat)
-    axes2 = list(axes2.flat)
-    axes = [axes1, axes2]
+    all_figs = []
+    all_axes = []
 
-    for ax_set in axes:
-        for ax in ax_set:
+    for plot_kind in plot_kinds:
+        fig, f_axes = plt.subplots(
+            nrows=n_dims, ncols=1, squeeze=False, figsize=(fig_x, fig_y)
+        )
+        all_figs.append(fig)
+        f_axes = list(f_axes.flat)
+        for ax in f_axes:
             ax.set_prop_cycle('color', COLOR_CYCLE_ORTHOG)
+        all_axes.append(f_axes)
 
     n_lines = 0
     xlims = [[np.inf, -np.inf]] * n_dims
 
-    labels_assigned = set()
-    for string, depth_idx, seed in product(strings, depths, seeds):
+    summaries_order = []
+    if summary_has_detail:
+        for string, depth_idx, seed in product(strings, depths, seeds):
+            for summary_n, summary in enumerate(summaries):
+                if (summary['string'] != string
+                        or summary['depth_idx'] != depth_idx
+                        or summary['seed'] != seed):
+                    continue
+                summaries_order.append((summary_n, summary))
+    else:
         for summary_n, summary in enumerate(summaries):
-            if (summary['string'] != string
-                    or summary['depth_idx'] != depth_idx
-                    or summary['seed'] != seed):
-                continue
+            summaries_order.append((summary_n, summary))
 
-            different_label = formatter({k: v[summary_n] for k, v in different_items.items()})
+    labels_assigned = set()
+    for summary_n, summary in summaries_order:
+        different_label = formatter({k: v[summary_n] for k, v in different_items.items()})
 
-            if different_label:
-                label = different_label
-                if label in labels_assigned:
-                    label = None
-                else:
-                    labels_assigned.add(label)
-            else:
+        if different_label:
+            label = different_label
+            if label in labels_assigned:
                 label = None
+            else:
+                labels_assigned.add(label)
+        else:
+            label = None
 
-            for dim_num, dim_name in enumerate(dim_names):
-                dim_info = summary['dimensions'][dim_name]
-                dim_axes = (axes1[dim_num], axes2[dim_num])
-                bin_edges = summary[dim_name + '_bin_edges']
-                if dim_name == 'deltaphidir':
-                    bin_edges /= np.pi
-                xlims[dim_num] = [
-                    min(xlims[dim_num][0], np.min(bin_edges)),
-                    max(xlims[dim_num][1], np.max(bin_edges))
-                ]
-                for ax, plot_kind in zip(dim_axes, plot_kinds):
-                    vals = dim_info[plot_kind]
-                    ax.step(bin_edges, [vals[0]] + list(vals),
-                            linewidth=1, clip_on=True,
-                            label=label)
-                    n_lines += 1
+        for dim_num, dim_name in enumerate(dim_names):
+            dim_info = summary['dimensions'][dim_name]
+            dim_axes = [f_axes[dim_num] for f_axes in all_axes]
+            bin_edges = summary[dim_name + '_bin_edges']
+            if dim_name == 'deltaphidir':
+                bin_edges /= np.pi
+            xlims[dim_num] = [
+                min(xlims[dim_num][0], np.min(bin_edges)),
+                max(xlims[dim_num][1], np.max(bin_edges))
+            ]
+            for ax, plot_kind in zip(dim_axes, plot_kinds):
+                if plot_kind not in dim_info:
+                    continue
+                plot_kinds_with_data.add(plot_kind)
+                vals = dim_info[plot_kind]
+                ax.step(bin_edges, [vals[0]] + list(vals),
+                        linewidth=1, clip_on=True,
+                        label=label)
+                n_lines += 1
 
     dim_labels = dict(
         r=r'$r$',
@@ -326,10 +370,12 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None):
     if different_flabel:
         flabel += '__differ__' + different_flabel
 
-    for kind_idx, (plot_kind, fig) in enumerate(zip(plot_kinds, figs)):
-        for dim_num, (dim_name, ax) in enumerate(zip(dim_names, axes[kind_idx])):
+    for kind_idx, (plot_kind, fig) in enumerate(zip(plot_kinds, all_figs)):
+        if plot_kind not in plot_kinds_with_data:
+            continue
+        for dim_num, (dim_name, ax) in enumerate(zip(dim_names, all_axes[kind_idx])):
             #if dim_num == 0 and different_items:
-            if different_items:
+            if different_items and not no_legend:
                 ax.legend(loc='best', frameon=False,
                           prop=dict(size=7, family='monospace'))
 
@@ -369,7 +415,7 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None):
             fig.savefig(outfpath, dpi=300)
             print('Saved image to "{}"'.format(outfpath))
 
-    return [fig1, fig2], [axes1, axes2], summaries
+    return all_figs, all_axes, summaries
 
 
 def parse_args(description=__doc__):
@@ -389,6 +435,10 @@ def parse_args(description=__doc__):
         '--outdir', default=None,
         help='''Directory to which to save the plot(s). Defaults to same
         directory as the present working directory.'''
+    )
+    parser.add_argument(
+        '--no-legend', action='store_true',
+        help='''Do not display a legend on the individual plots'''
     )
     parser.add_argument(
         'summaries', nargs='+',

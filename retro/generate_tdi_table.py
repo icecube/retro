@@ -70,10 +70,7 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import (TDI_TABLE_FNAME_PROTO, IC_DOM_QUANT_EFF,
-                   DC_DOM_QUANT_EFF, POL_TABLE_NRBINS, POL_TABLE_NTBINS,
-                   POL_TABLE_NTHETABINS, POL_TABLE_RMAX, POL_TABLE_RPWR)
-from retro import generate_anisotropy_str, generate_geom_meta, hash_obj
+import retro
 from retro.generate_binmap import generate_binmap
 from retro.shift_and_bin import shift_and_bin
 from retro.table_readers import load_t_r_theta_table
@@ -142,10 +139,10 @@ def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         hash_params[param] = rounded_int
         kwargs[param] = float(rounded_int) / 10000
     hash_params['binwidth'] = int(np.round(hash_params['binwidth'] * 1e10))
-    tdi_hash = hash_obj(hash_params, fmt='hex')
+    tdi_hash = retro.hash_obj(hash_params, fmt='hex')
 
-    anisotropy_str = generate_anisotropy_str(anisotropy)
-    fname = TDI_TABLE_FNAME_PROTO.format(
+    anisotropy_str = retro.generate_anisotropy_str(anisotropy)
+    fname = retro.TDI_TABLE_FNAME_PROTO[-1].format(
         tdi_hash=tdi_hash,
         anisotropy_str=anisotropy_str,
         table_name='',
@@ -235,11 +232,11 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     assert isdir(tables_dir)
     if dom_tables_hash is None:
         dom_tables_hash = 'none'
-        r_max = POL_TABLE_RMAX
-        r_power = POL_TABLE_RPWR
-        n_rbins = POL_TABLE_NRBINS
-        n_costhetabins = POL_TABLE_NTHETABINS
-        n_tbins = POL_TABLE_NTBINS
+        r_max = retro.POL_TABLE_RMAX
+        r_power = retro.POL_TABLE_RPWR
+        n_rbins = retro.POL_TABLE_NRBINS
+        n_costhetabins = retro.POL_TABLE_NTHETABINS
+        n_tbins = retro.POL_TABLE_NTBINS
     else:
         raise ValueError('Cannot handle non-None `dom_tables_hash`')
 
@@ -275,7 +272,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         else:
             subdet_doms[subdet] = np.concatenate(dom_string_list, axis=0)
     geom = geom[string_indices, :, :][:, depth_indices, :]
-    geom_meta = generate_geom_meta(geom)
+    geom_meta = retro.generate_geom_meta(geom)
     print('Geom uses strings %s, depth indices %s for a total of %d DOMs'
           % (list2hrlist([i+1 for i in string_indices]),
              list2hrlist(depth_indices),
@@ -342,7 +339,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
             fpath = join(tables_dir,
                          tdi_meta['fbasename'] + '_' + name + '.fits')
             with pyfits.open(fpath) as fits_file:
-                tmp = fits_file[0].data
+                tmp = fits_file[0].data # pylint: disable=no-member
             if name == 'survival_prob':
                 binned_sp = tmp
             elif name == 'avg_photon_x':
@@ -625,11 +622,11 @@ def parse_args(description=__doc__):
         modeled.'''
     )
     parser.add_argument(
-        '--ic-quant-eff', type=float, default=IC_DOM_QUANT_EFF,
+        '--ic-quant-eff', type=float, default=retro.IC_DOM_QUANT_EFF,
         help='''IceCube (non-DeepCore) DOM quantum efficiency'''
     )
     parser.add_argument(
-        '--dc-quant-eff', type=float, default=DC_DOM_QUANT_EFF,
+        '--dc-quant-eff', type=float, default=retro.DC_DOM_QUANT_EFF,
         help='''DeepCore DOM quantum efficiency'''
     )
     parser.add_argument(
