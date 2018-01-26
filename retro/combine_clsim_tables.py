@@ -10,7 +10,10 @@ Combine multiple Retro CLSim tables into a single table.
 from __future__ import absolute_import, division, print_function
 
 
-__all__ = ['combine_clsim_tables', 'parse_args', 'main']
+__all__ = [
+    'VALIDATE_KEYS', 'SUM_KEYS', 'ALL_KEYS',
+    'combine_clsim_tables', 'parse_args', 'main'
+]
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -29,9 +32,11 @@ limitations under the License.'''
 
 
 from argparse import ArgumentParser
+from collections import OrderedDict
 from glob import glob
-from os.path import abspath, dirname
+from os.path import abspath, basename, dirname, isfile, join, splitext
 import sys
+from time import time
 
 import numpy as np
 
@@ -39,11 +44,31 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import expand, mkdir
-from retro.table_readers import load_clsim_table
+import retro
+from retro.table_readers import load_clsim_table_minimal
 
 
-def combine_clsim_tables(table_fpaths, save=True, outdir=None):
+VALIDATE_KEYS = [
+    'table_shape',
+    'phase_refractive_index',
+    'r_bin_edges',
+    'costheta_bin_edges',
+    't_bin_edges',
+    'costhetadir_bin_edges',
+    'deltaphidir_bin_edges'
+] # yapf: disable
+"""Values corresponding to these keys must match in all loaded tables"""
+
+SUM_KEYS = [
+    'table', 'n_photons'
+] # yapf: disable
+"""Sum together values corresponding to these keys in all tables"""
+
+ALL_KEYS = VALIDATE_KEYS + SUM_KEYS
+"""All keys expected to be in tables"""
+
+
+def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
     """Combine multiple CLSim-produced tables together into a single table.
 
     All tables specified must have the same binnings defined. Tables should
@@ -56,41 +81,102 @@ def combine_clsim_tables(table_fpaths, save=True, outdir=None):
     table_fpaths : string or iterable thereof
         Each string is glob-expanded
 
-    save : bool
-        Whether to save the result to disk.
-
-    outdir : None or string
-        Directory to which to save the combined table if `save` is True. If
-        None is specified (the default), the table will be saved to the same
-        directory as the first file path found in `fpath`.
+    outdir : string, optional
+        Directory to which to save the combined table; if not specified, the
+        resulting table will be returned but not saved to disk.
 
     Returns
     -------
     combined_table
 
     """
+    t0_start = time()
+
+    # Get all input table filepaths, including glob expansion
+
     if isinstance(table_fpaths, basestring):
         table_fpaths = [table_fpaths]
-
     table_fpaths_tmp = []
     for fpath in table_fpaths:
-        table_fpaths_tmp.extend(fp for fp in glob(expand(fpath)))
-    table_fpaths = table_fpaths_tmp
+        table_fpaths_tmp.extend(glob(retro.expand(fpath)))
+    table_fpaths = sorted(table_fpaths_tmp)
 
-    if outdir is None:
-        outdir = dirname(table_fpaths[0])
-    mkdir(outdir)
+    retro.wstderr(
+        'Found {} tables to combine:\n  {}\n'
+        .format(len(table_fpaths), '\n  '.join(table_fpaths))
+    )
+
+    # Formulate output filenames and check if they exist
+
+    output_fpaths = None
+    if outdir is not None:
+        outdir = retro.expand(outdir)
+        retro.mkdir(outdir)
+        output_fpaths = OrderedDict(
+            ((k, join(outdir, k + '.npy')) for k in ALL_KEYS)
+        )
+        output_fpaths['source_tables'] = join(outdir, 'source_tables.txt')
+        if not overwrite:
+            for fpath in output_fpaths:
+                if isfile(fpath):
+                    raise IOError('File {} exists'.format(fpath))
+        retro.wstderr(
+            'Output files will be written to:\n  {}\n'
+            .format('\n  '.join(output_fpaths.values()))
+        )
+
+    # Combine the tables
 
     combined_table = None
     for fpath in table_fpaths:
-        table = load_clsim_table(expand(fpath))
+        table = load_clsim_table_minimal(fpath)
 
         if combined_table is None:
             combined_table = table
             continue
 
-        combined_table['table'] += table['table']
-        combined_table['n_photons'] += table['n_photons']
+        if set(table.keys()) != set(SUM_KEYS + VALIDATE_KEYS):
+            raise ValueError(
+                'Table keys {} do not match expected keys {}'
+                .format(sorted(table.keys()), sorted(ALL_KEYS))
+            )
+        for key in VALIDATE_KEYS:
+            if not np.array_equal(table[key], combined_table[key]):
+                raise ValueError('Unequal {} in file {}'.format(key, fpath))
+
+        for key in SUM_KEYS:
+            combined_table[key] += table[key]
+
+        del table
+
+    # Save the data to npy files on disk
+
+    if outdir is not None:
+        basenames = []
+        for fpath in table_fpaths:
+            base = basename(fpath)
+            rootname, ext = splitext(base)
+            if ext.lstrip('.') in retro.COMPR_EXTENSIONS:
+                base = rootname
+            basenames.append(base)
+
+        retro.wstderr('Writing files:\n')
+
+        for key in ALL_KEYS:
+            fpath = output_fpaths[key]
+            retro.wstderr('  {} ...'.format(fpath))
+            t0 = time()
+            np.save(fpath, combined_table[key])
+            retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
+
+        fpath = output_fpaths['source_tables']
+        retro.wstderr('  {} ...'.format(fpath))
+        t0 = time()
+        with open(fpath, 'w') as fobj:
+            fobj.write('\n'.join(sorted(basenames)))
+        retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
+
+    retro.wstderr('Total time to combine tables: {} s\n'.format(np.round(time() - t0_start, 3)))
 
     return combined_table
 
@@ -110,7 +196,7 @@ def parse_args(description=__doc__):
         glob-expanded.'''
     )
     parser.add_argument(
-        '--outdir', default=None,
+        '--outdir', required=True,
         help='''Directory to which to save the combined table. Defaults to same
         directory as the first file path specified by --table-fpaths.'''
     )

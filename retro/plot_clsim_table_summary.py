@@ -270,9 +270,12 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None,
 
     same_label = formatter(same_items)
 
-    strings = sorted(set(all_items['string']))
-    depths = sorted(set(all_items['depth_idx']))
-    seeds = sorted(set(all_items['seed']))
+    summary_has_detail = False
+    if set(['string', 'depth_idx', 'seed']).issubset(all_items.keys()):
+        summary_has_detail = True
+        strings = sorted(set(all_items['string']))
+        depths = sorted(set(all_items['depth_idx']))
+        seeds = sorted(set(all_items['seed']))
 
     plot_kinds = ('mean', 'median', 'max')
     plot_kinds_with_data = set()
@@ -301,44 +304,51 @@ def plot_clsim_table_summary(summaries, formats=None, outdir=None,
     n_lines = 0
     xlims = [[np.inf, -np.inf]] * n_dims
 
-    labels_assigned = set()
-    for string, depth_idx, seed in product(strings, depths, seeds):
+    summaries_order = []
+    if summary_has_detail:
+        for string, depth_idx, seed in product(strings, depths, seeds):
+            for summary_n, summary in enumerate(summaries):
+                if (summary['string'] != string
+                        or summary['depth_idx'] != depth_idx
+                        or summary['seed'] != seed):
+                    continue
+                summaries_order.append((summary_n, summary))
+    else:
         for summary_n, summary in enumerate(summaries):
-            if (summary['string'] != string
-                    or summary['depth_idx'] != depth_idx
-                    or summary['seed'] != seed):
-                continue
+            summaries_order.append((summary_n, summary))
 
-            different_label = formatter({k: v[summary_n] for k, v in different_items.items()})
+    labels_assigned = set()
+    for summary_n, summary in summaries_order:
+        different_label = formatter({k: v[summary_n] for k, v in different_items.items()})
 
-            if different_label:
-                label = different_label
-                if label in labels_assigned:
-                    label = None
-                else:
-                    labels_assigned.add(label)
-            else:
+        if different_label:
+            label = different_label
+            if label in labels_assigned:
                 label = None
+            else:
+                labels_assigned.add(label)
+        else:
+            label = None
 
-            for dim_num, dim_name in enumerate(dim_names):
-                dim_info = summary['dimensions'][dim_name]
-                dim_axes = [f_axes[dim_num] for f_axes in all_axes]
-                bin_edges = summary[dim_name + '_bin_edges']
-                if dim_name == 'deltaphidir':
-                    bin_edges /= np.pi
-                xlims[dim_num] = [
-                    min(xlims[dim_num][0], np.min(bin_edges)),
-                    max(xlims[dim_num][1], np.max(bin_edges))
-                ]
-                for ax, plot_kind in zip(dim_axes, plot_kinds):
-                    if plot_kind not in dim_info:
-                        continue
-                    plot_kinds_with_data.add(plot_kind)
-                    vals = dim_info[plot_kind]
-                    ax.step(bin_edges, [vals[0]] + list(vals),
-                            linewidth=1, clip_on=True,
-                            label=label)
-                    n_lines += 1
+        for dim_num, dim_name in enumerate(dim_names):
+            dim_info = summary['dimensions'][dim_name]
+            dim_axes = [f_axes[dim_num] for f_axes in all_axes]
+            bin_edges = summary[dim_name + '_bin_edges']
+            if dim_name == 'deltaphidir':
+                bin_edges /= np.pi
+            xlims[dim_num] = [
+                min(xlims[dim_num][0], np.min(bin_edges)),
+                max(xlims[dim_num][1], np.max(bin_edges))
+            ]
+            for ax, plot_kind in zip(dim_axes, plot_kinds):
+                if plot_kind not in dim_info:
+                    continue
+                plot_kinds_with_data.add(plot_kind)
+                vals = dim_info[plot_kind]
+                ax.step(bin_edges, [vals[0]] + list(vals),
+                        linewidth=1, clip_on=True,
+                        label=label)
+                n_lines += 1
 
     dim_labels = dict(
         r=r'$r$',
