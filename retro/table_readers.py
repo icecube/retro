@@ -389,8 +389,12 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
     """
     table_dt = (t_max - t_min) / n_t_bins
+    table_dr = (r_max - r_max) / n_r_bins
+    table_dcostheta = 2 / n_costheta_bins
     expected_photon_count = 0.0
     inv_r_power = 1 / r_power
+    table_dr_pwr = (r_max-r_min)**inv_r_power / n_r_bins
+
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
 
@@ -413,26 +417,32 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #    continue
 
         tbin_idx = int(np.floor((dt - t_min) / table_dt))
+        #print('tbin_idx: ',tbin_idx)
+        #if tbin_idx < -n_t_bins or tbin_idx >= 0:
         #if tbin_idx < 0 or tbin_idx >= -retro.POL_TABLE_DT:
-        if tbin_idx < -n_t_bins or tbin_idx >= 0:
+        if tbin_idx > n_t_bins or tbin_idx < 0:
             #print('t')
             continue
 
-        rbin_idx = int(r**inv_r_power // retro.POL_TABLE_DRPWR)
-        if rbin_idx < 0 or rbin_idx >= retro.POL_TABLE_NRBINS:
+        rbin_idx = int((r-r_min)**inv_r_power / table_dr_pwr)
+        #print('rbin_idx: ',rbin_idx)
+        if rbin_idx < 0 or rbin_idx >= n_r_bins:
             #print('r')
             continue
 
-        thetabin_idx = int(dz / (r * retro.POL_TABLE_DCOSTHETA))
-        if thetabin_idx < 0 or thetabin_idx >= retro.POL_TABLE_NTHETABINS:
-            #print('theta')
+        costhetabin_idx = int(-(dz / r) / table_dcostheta)
+        #print('costhetabin_idx: ',costhetabin_idx)
+        if costhetabin_idx < 0 or costhetabin_idx >= n_costheta_bins:
+            #print('costheta')
             continue
 
         #print(tbin_idx, rbin_idx, thetabin_idx)
         #raise Exception()
         surviving_count = (
-            p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
+            p_count * survival_prob[tbin_idx, rbin_idx, costhetabin_idx]
         )
+
+        #print(surviving_count)
 
         # TODO: Include simple ice photon prop asymmetry here? Might need to
         # use both phi angle relative to DOM _and_ photon directionality
@@ -775,6 +785,7 @@ class DOMTimePolarTables(object):
         self.ic_exponent = ic_exponent
         self.dc_exponent = dc_exponent
         self.tables = {'ic': {}, 'dc': {}}
+        self.bin_edges = {'ic': {}, 'dc': {}}
 
     def load_table(self, string, depth_idx, force_reload=False):
         """Load a table from disk into memory.
@@ -816,7 +827,7 @@ class DOMTimePolarTables(object):
             )
         )
 
-        photon_info, _ = load_t_r_theta_table(
+        photon_info, bin_edges = load_t_r_theta_table(
             fpath=fpath,
             depth_idx=depth_idx,
             scale=dom_quant_eff,
@@ -832,6 +843,8 @@ class DOMTimePolarTables(object):
             length=(photon_info.length[depth_idx]
                     * np.cos(photon_info.deltaphi[depth_idx]))
         )
+
+        self.bin_edges[subdet][depth_idx] = bin_edges
 
     def load_tables(self):
         """Load all tables"""
@@ -874,6 +887,7 @@ class DOMTimePolarTables(object):
         else:
             subdet = 'dc'
         table = self.tables[subdet][depth_idx]
+        bin_edges = self.bin_edges[subdet][depth_idx]
         survival_prob = table.survival_prob
         avg_photon_theta = table.theta
         avg_photon_length = table.length
@@ -883,7 +897,16 @@ class DOMTimePolarTables(object):
                               survival_prob=survival_prob,
                               avg_photon_theta=avg_photon_theta,
                               avg_photon_length=avg_photon_length,
-                              use_directionality=use_directionality)
+                              use_directionality=use_directionality,
+                              t_min=bin_edges.t[0],
+                              t_max=bin_edges.t[-1],
+                              n_t_bins=len(bin_edges.t)-1,
+                              r_min=bin_edges.r[0],
+                              r_max=bin_edges.r[-1],
+                              r_power=2,
+                              n_r_bins=len(bin_edges.r)-1,
+                              n_costheta_bins=len(bin_edges.theta)-1,
+                              )
 
 
 # TODO: convert to using exponent rather than scale (scale will be applied via
