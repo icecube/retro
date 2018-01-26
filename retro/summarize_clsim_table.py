@@ -95,7 +95,7 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
     if invalid_fname:
         metapath = None
     else:
-        metaname = (retro.CLSIM_TABLE_METANAME_PROTO
+        metaname = (retro.CLSIM_TABLE_METANAME_PROTO[-1]
                     .format(hash_val=fname_info['hash_val']))
         metapath = join(outdir, metaname)
     if metapath and isfile(metapath):

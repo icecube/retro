@@ -10,8 +10,7 @@ __all__ = [
     # Defaults
     'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
     'DFLT_SPE_RECO_NAME',
-    'CLSIM_TABLE_FNAME_V1_RE',
-    'CLSIM_TABLE_FNAME_V2_PROTO', 'CLSIM_TABLE_FNAME_V2_RE',
+    'CLSIM_TABLE_FNAME_RE', 'CLSIM_TABLE_FNAME_PROTO',
     'CLSIM_TABLE_METANAME_PROTO', 'CLSIM_TABLE_METANAME_RE',
     'RETRO_DOM_TABLE_FNAME_PROTO', 'RETRO_DOM_TABLE_FNAME_RE',
     'GEOM_FILE_PROTO',
@@ -134,86 +133,102 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
-CLSIM_TABLE_FNAME_V1_RE = re.compile(
-    r'''
-    retro
-    _nevts(?P<n_events>[0-9]+)
-    _(?P<string>[0-9a-z]+)
-    _DOM(?P<depth_idx>[0-9]+)
-    \.fits
-    ''', re.IGNORECASE | re.VERBOSE
-)
+CLSIM_TABLE_FNAME_RE = [
+    re.compile(
+        r'''
+        retro
+        _nevts(?P<n_events>[0-9]+)
+        _(?P<string>[0-9a-z]+)
+        _DOM(?P<depth_idx>[0-9]+)
+        \.fits
+        ''', re.IGNORECASE | re.VERBOSE
+    ),
+    re.compile(
+        r'''
+        clsim_table
+        _set_(?P<hash_val>[0-9a-f]+)
+        _string_(?P<string>[0-9a-z]+)
+        _depth_(?P<depth_idx>[0-9]+)
+        _seed_(?P<seed>[0-9]+)
+        \.fits
+        ''', re.IGNORECASE | re.VERBOSE
+    )
+]
 
-CLSIM_TABLE_FNAME_V2_PROTO = (
-    'clsim_table'
-    '_set_{hash_val:s}'
-    '_string_{string}'
-    '_depth_{depth_idx:d}'
-    '_seed_{seed}'
-    '.fits'
-)
-"""String template for CLSim ("raw") retro tables. Note that `string` can
+CLSIM_TABLE_FNAME_PROTO = [
+    (
+        'retro_nevts1000_{string}_DOM{depth_idx:d}.fits.*'
+    ),
+    (
+        'clsim_table'
+        '_set_{hash_val:s}'
+        '_string_{string}'
+        '_depth_{depth_idx:d}'
+        '_seed_{seed}'
+        '.fits'
+    )
+]
+"""String templates for CLSim ("raw") retro tables. Note that `string` can
 either be a specific string number OR either "ic" or "dc" indicating a generic
 DOM of one of these two types located at the center of the detector, where z
 location is averaged over all DOMs. `seed` can either be an integer or a
 human-readable range (e.g. "0-9" for a table that combines toegether seeds, 0,
 1, ..., 9)"""
 
-CLSIM_TABLE_FNAME_V2_RE = re.compile(
-    r'''
-    clsim_table
-    _set_(?P<hash_val>[0-9a-f]+)
-    _string_(?P<string>[0-9a-z]+)
-    _depth_(?P<depth_idx>[0-9]+)
-    _seed_(?P<seed>[0-9]+)
-    \.fits
-    ''', re.IGNORECASE | re.VERBOSE
-)
+CLSIM_TABLE_METANAME_PROTO = [
+    'clsim_table_set_{hash_val:s}_meta.json'
+]
 
-CLSIM_TABLE_METANAME_PROTO = 'clsim_table_set_{hash_val:s}_meta.json'
+CLSIM_TABLE_METANAME_RE = [
+    re.compile(
+        r'''
+        clsim_table
+        _set_(?P<hash_val>[0-9a-f]+)
+        _meta
+        \.json
+        ''', re.IGNORECASE | re.VERBOSE
+    )
+]
 
-CLSIM_TABLE_METANAME_RE = re.compile(
-    r'''
-    clsim_table
-    _set_(?P<hash_val>[0-9a-f]+)
-    _meta
-    \.json
-    ''', re.IGNORECASE | re.VERBOSE
-)
+RETRO_DOM_TABLE_FNAME_PROTO = [
+    (
+        'retro_nevts1000'
+        '_{string:s}'
+        '_DOM{depth_idx:d}'
+        '_r_cz_t_angles.fits'
+    ),
+    (
+        'retro_dom_table'
+        '_set_{hash_val:s}'
+        '_string_{string}'
+        '_depth_{depth_idx:d}'
+        '_seed_{seed}'
+        '.fits'
+    )
+]
+"""String templates for single-DOM "final-level" retro tables"""
 
-#IC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}.fits'
-#"""String template for IceCube single-DOM raw retro tables"""
-
-#DC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}.fits'
-#"""String template for DeepCore single-DOM raw retro tables"""
-
-RETRO_DOM_TABLE_FNAME_PROTO = (
-    'retro_dom_table'
-    '_set_{hash_val:s}'
-    '_string_{string}'
-    '_depth_{depth_idx:d}'
-    '_seed_{seed}'
-    '.fits'
-)
-"""String template for single-DOM "final-level" retro tables"""
-
-RETRO_DOM_TABLE_FNAME_RE = re.compile(
-    r'''
-    retro_dom_table
-    _set_(?P<hash_val>[0-9a-f]+)
-    _string_(?P<string>[0-9a-z]+)
-    _depth_(?P<depth_idx>[0-9]+)
-    _seed_(?P<seed>[0-9]+)
-    \.fits
-    ''', re.IGNORECASE | re.VERBOSE
-)
+RETRO_DOM_TABLE_FNAME_RE = [
+    re.compile(
+        r'''
+        retro_nevts1000
+        _(?P<string>[0-9a-z]+)
+        _DOM(?P<depth_idx>[0-9]+)
+        _r_cz_t_angles\.fits.*
+        ''', re.IGNORECASE | re.VERBOSE
+    ),
+    re.compile(
+        r'''
+        retro_dom_table
+        _set_(?P<hash_val>[0-9a-f]+)
+        _string_(?P<string>[0-9a-z]+)
+        _depth_(?P<depth_idx>[0-9]+)
+        _seed_(?P<seed>[0-9]+)
+        \.fits.*
+        ''', re.IGNORECASE | re.VERBOSE
+    )
+]
 """Regex for single-DOM retro tables"""
-
-#IC_TABLE_FNAME_PROTO = 'retro_nevts1000_IC_DOM{depth_idx:d}_r_cz_t_angles.fits'
-#"""String template for IceCube single-DOM final-level retro tables"""
-#
-#DC_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}_r_cz_t_angles.fits'
-#"""String template for DeepCore single-DOM final-level retro tables"""
 
 GEOM_FILE_PROTO = 'geom_{hash:s}.npy'
 """File containing detector geometry as a Numpy 5D array with coordinates
@@ -225,25 +240,27 @@ GEOM_META_PROTO = 'geom_{hash:s}_meta.json'
 DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
-TDI_TABLE_FNAME_PROTO = (
-    'retro_tdi_table'
-    '_{tdi_hash:s}'
-    '_binmap_{binmap_hash:s}'
-    '_geom_{geom_hash:s}'
-    '_domtbl_{dom_tables_hash:s}'
-    '_times_{times_str:s}'
-    '_x{x_min:.3f}_{x_max:.3f}'
-    '_y{y_min:.3f}_{y_max:.3f}'
-    '_z{z_min:.3f}_{z_max:.3f}'
-    '_bw{binwidth:.9f}'
-    '_anisot_{anisotropy_str:s}'
-    '_icqe{ic_dom_quant_eff:.5f}'
-    '_dcqe{dc_dom_quant_eff:.5f}'
-    '_icexp{ic_exponent:.5f}'
-    '_dcexp{dc_exponent:.5f}'
-    '_{table_name:s}'
-    '.fits'
-)
+TDI_TABLE_FNAME_PROTO = [
+    (
+        'retro_tdi_table'
+        '_{tdi_hash:s}'
+        '_binmap_{binmap_hash:s}'
+        '_geom_{geom_hash:s}'
+        '_domtbl_{dom_tables_hash:s}'
+        '_times_{times_str:s}'
+        '_x{x_min:.3f}_{x_max:.3f}'
+        '_y{y_min:.3f}_{y_max:.3f}'
+        '_z{z_min:.3f}_{z_max:.3f}'
+        '_bw{binwidth:.9f}'
+        '_anisot_{anisotropy_str:s}'
+        '_icqe{ic_dom_quant_eff:.5f}'
+        '_dcqe{dc_dom_quant_eff:.5f}'
+        '_icexp{ic_exponent:.5f}'
+        '_dcexp{dc_exponent:.5f}'
+        '_{table_name:s}'
+        '.fits'
+    )
+]
 """Time- and DOM-independent (TDI) table file names follow this template"""
 
 TDI_TABLE_FNAME_RE = re.compile(
@@ -927,22 +944,22 @@ def interpret_clsim_table_fname(fname):
     ------
     ValueError
         If ``basename(fname)`` does not match the regexes
-        ``CLSIM_TABLE_FNAME_V1_RE`` or ``CLSIM_TABLE_FNAME_V2_RE``
+        ``CLSIM_TABLE_FNAME_RE``
 
     """
     from pisa.utils.format import hrlist2list
 
     fname = basename(fname)
-    match = CLSIM_TABLE_FNAME_V2_RE.match(fname)
-    fname_version = 2
+    fname_version = None
+    for fname_version in range(len(CLSIM_TABLE_FNAME_RE) - 1, -1, -1):
+        match = CLSIM_TABLE_FNAME_RE[fname_version].match(fname)
+        if match:
+            break
     if not match:
-        match = CLSIM_TABLE_FNAME_V1_RE.match(fname)
-        fname_version = 1
-    if not match:
-        raise ValueError('File basename "{}" does not match regex {} or legacy'
-                         ' regex {})'
-                         .format(fname, CLSIM_TABLE_FNAME_V2_RE.pattern,
-                                 CLSIM_TABLE_FNAME_V1_RE.pattern))
+        raise ValueError(
+            'File basename "{}" does not match regex {} or any legacy regexes'
+            .format(fname, CLSIM_TABLE_FNAME_RE[-1].pattern)
+        )
     info = match.groupdict()
     info['fname_version'] = fname_version
 

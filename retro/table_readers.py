@@ -335,25 +335,20 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
                 1 - (1 - data * scale)**exponent
             )
 
-        data = retro.force_little_endian(table[1].data)
-        photon_info.theta[depth_idx] = data
+        photon_info.theta[depth_idx] = retro.force_little_endian(table[1].data)
 
-        data = retro.force_little_endian(table[2].data)
-        photon_info.deltaphi[depth_idx] = data
+        photon_info.deltaphi[depth_idx] = retro.force_little_endian(table[2].data)
 
-        data = retro.force_little_endian(table[3].data)
-        photon_info.length[depth_idx] = data
+        photon_info.length[depth_idx] = retro.force_little_endian(table[3].data)
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.
         data = retro.force_little_endian(table[4].data)
         t = - data[::-1]
 
-        data = retro.force_little_endian(table[5].data)
-        r = data
+        r = retro.force_little_endian(table[5].data)
 
-        data = retro.force_little_endian(table[6].data)
-        theta = data
+        theta = retro.force_little_endian(table[6].data)
 
         bin_edges = retro.TimeSphCoord(
             t=t, r=r, theta=theta, phi=np.array([], dtype=t.dtype)
@@ -516,12 +511,22 @@ class CLSimTable(object):
     angular_acceptance_fract : float
         Normalization for angular acceptance being less than 1
 
+    naming_version : int or None
+        Version of naming for CLSim table (original is 0). Passing None uses
+        the latest version. Note that any derived tables use the latest naming
+        version regardless of what is passed here.
+
     """
     def __init__(self, fpath=None, tables_dir=None, hash_val=None, string=None,
-                 depth_idx=None, seed=None, angular_acceptance_fract=0.338019664877):
+                 depth_idx=None, seed=None,
+                 angular_acceptance_fract=0.338019664877, naming_version=None):
         # Translation and validation of args
         assert 0 < angular_acceptance_fract <= 1
         self.angular_acceptance_fract = angular_acceptance_fract
+
+        if naming_version is None:
+            naming_version = len(retro.CLSIM_TABLE_FNAME_PROTO) - 1
+        fname_proto = retro.CLSIM_TABLE_FNAME_PROTO[naming_version]
 
         if fpath is None:
             tables_dir = retro.expand(tables_dir)
@@ -547,7 +552,7 @@ class CLSimTable(object):
 
             self.depth_idx = depth_idx
 
-            fname = retro.CLSIM_TABLE_FNAME_V2_PROTO.format(
+            fname = fname_proto.format(
                 hash_val=hash_val,
                 string=self.string,
                 depth_idx=self.depth_idx,
@@ -574,7 +579,7 @@ class CLSimTable(object):
             self.seed = info['seed']
 
         assert self.subdet in ('ic', 'dc')
-        self.dtp_fname_proto = retro.RETRO_DOM_TABLE_FNAME_PROTO
+        self.dtp_fname_proto = retro.RETRO_DOM_TABLE_FNAME_PROTO[-1]
 
         table_info = load_clsim_table(self.fpath)
 
@@ -688,7 +693,8 @@ class CLSimTable(object):
             else:
                 retro.wstderr(
                     'ERROR: There is an existing file at "%s"; not'
-                    ' proceeding.\n' % new_fpath)
+                    ' proceeding.\n' % new_fpath
+                )
                 return
 
         survival_probs, average_thetas, average_phis, lengths = \
@@ -743,9 +749,14 @@ class DOMTimePolarTables(object):
         multiplier; see :attr:`retro.IC_DOM_QUANT_EFF` and
         :attr:`retro.DC_DOM_QUANT_EFF`).
 
+    naming_version : int or None
+        Version of naming for single-DOM+directionality tables (original is 0).
+        Passing None uses the latest version. Note that any derived tables use
+        the latest naming version regardless of what is passed here.
+
     """
     def __init__(self, tables_dir, hash_val, geom, use_directionality,
-                 ic_exponent=1, dc_exponent=1):
+                 ic_exponent=1, dc_exponent=1, naming_version=None):
         # Translation and validation of args
         tables_dir = retro.expand(tables_dir)
         assert isdir(tables_dir)
@@ -753,6 +764,9 @@ class DOMTimePolarTables(object):
         assert isinstance(use_directionality, bool)
         assert ic_exponent >= 0
         assert dc_exponent >= 0
+        if naming_version is None:
+            naming_version = len(retro.RETRO_DOM_TABLE_FNAME_PROTO) - 1
+        self.dom_table_fname_proto = retro.RETRO_DOM_TABLE_FNAME_PROTO[naming_version]
 
         self.tables_dir = tables_dir
         self.hash_val = hash_val
@@ -767,10 +781,12 @@ class DOMTimePolarTables(object):
 
         Parameters
         ----------
-        string : int
-            Indexed from 1
+        string : int in [1, 86]
+            Indexed from 1, currently 1-86
 
-        depth_idx : int
+        depth_idx : int in [0, 59]
+            Indexed from 0, currently 0-59
+
         force_reload : bool
 
         """
@@ -789,7 +805,9 @@ class DOMTimePolarTables(object):
 
         fpath = join(
             self.tables_dir,
-            retro.RETRO_DOM_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
+            self.dom_table_fname_proto.format(
+                subdet=subdet, depth_idx=depth_idx
+            )
         )
 
         photon_info, _ = load_t_r_theta_table(
@@ -994,7 +1012,7 @@ class TDICartTable(object):
 
         """
         fname = basename(fpath)
-        match = retro.TDI_TABLE_FNAME_RE.match(fname)
+        match = retro.TDI_TABLE_FNAME_RE[-1].match(fname)
         if match is None:
             return None
         meta = match.groupdict()
@@ -1177,7 +1195,7 @@ class TDICartTable(object):
             for table_name, table in to_fill:
                 fpath = join(
                     self.tables_dir,
-                    retro.TDI_TABLE_FNAME_PROTO.format(
+                    retro.TDI_TABLE_FNAME_PROTO[-1].format(
                         table_name=table_name, anisotropy_str=anisotropy_str,
                         **kwargs
                     ).lower()
