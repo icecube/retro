@@ -186,15 +186,22 @@ CLSIM_TABLE_METANAME_RE = re.compile(
 #DC_RAW_TABLE_FNAME_PROTO = 'retro_nevts1000_DC_DOM{depth_idx:d}.fits'
 #"""String template for DeepCore single-DOM raw retro tables"""
 
+#RETRO_DOM_TABLE_FNAME_PROTO = (
+#    'retro_dom_table'
+#    '_set_{hash_val:s}'
+#    '_string_{string}'
+#    '_depth_{depth_idx:d}'
+#    '_seed_{seed}'
+#    '.fits'
+#)
+#"""String template for single-DOM "final-level" retro tables"""
+
 RETRO_DOM_TABLE_FNAME_PROTO = (
-    'retro_dom_table'
-    '_set_{hash_val:s}'
-    '_string_{string}'
-    '_depth_{depth_idx:d}'
-    '_seed_{seed}'
-    '.fits'
+    'retro_nevts1000'
+    '_{det}'
+    '_DOM{dom}'
+    '_r_cz_t_angles.fits'
 )
-"""String template for single-DOM "final-level" retro tables"""
 
 RETRO_DOM_TABLE_FNAME_RE = re.compile(
     r'''
@@ -221,7 +228,7 @@ GEOM_FILE_PROTO = 'geom_{hash:s}.npy'
 GEOM_META_PROTO = 'geom_{hash:s}_meta.json'
 """File containing metadata about source of detector geometry"""
 
-DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
+DETECTOR_GEOM_FILE = join(dirname(dirname(abspath(__file__))), 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
 TDI_TABLE_FNAME_PROTO = (

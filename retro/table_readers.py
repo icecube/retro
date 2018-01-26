@@ -699,9 +699,15 @@ class DOMTimePolarTables(object):
         if not force_reload and depth_idx in self.tables[subdet]:
             return
 
+        det= 'IC' if subdet=='ic' else 'DC'
+
+        #fpath = join(
+        #    self.tables_dir,
+        #    RETRO_DOM_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
+        #)
         fpath = join(
             self.tables_dir,
-            RETRO_DOM_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
+            RETRO_DOM_TABLE_FNAME_PROTO.format(dom=depth_idx,det=det)
         )
 
         photon_info, _ = load_t_r_theta_table(
