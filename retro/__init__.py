@@ -45,8 +45,8 @@ __all__ = [
     # Functions...
 
     # Generic utils
-    'expand', 'mkdir', 'force_little_endian', 'hash_obj', 'test_hash_obj',
-    'get_file_md5', 'convert_to_namedtuple',
+    'expand', 'mkdir', 'wstdout', 'wstderr', 'force_little_endian', 'hash_obj',
+    'test_hash_obj', 'get_file_md5', 'convert_to_namedtuple',
 
     # Retro-specific functions
     'event_to_hypo_params', 'hypo_to_track_params', 'generate_anisotropy_str',
@@ -92,6 +92,7 @@ from os import makedirs
 from os.path import abspath, basename, dirname, expanduser, expandvars, join
 import re
 import struct
+import sys
 from time import time
 
 import numpy as np
@@ -545,6 +546,18 @@ def mkdir(d, mode=0o0750):
     except OSError as err:
         if err.errno != errno.EEXIST:
             raise
+
+
+def wstdout(s):
+    """Write `s` to stdout and flush the buffer"""
+    sys.stdout.write(s)
+    sys.stdout.flush()
+
+
+def wstderr(s):
+    """Write `s` to stderr and flush the buffer"""
+    sys.stderr.write(s)
+    sys.stderr.flush()
 
 
 def force_little_endian(x):

@@ -39,7 +39,7 @@ from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
 from StringIO import StringIO
 from subprocess import Popen, PIPE
 import sys
-import time
+from time import time
 
 import numpy as np
 import pyfits
@@ -50,16 +50,7 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import (DFLT_NUMBA_JIT_KWARGS, IC_DOM_QUANT_EFF, DC_DOM_QUANT_EFF,
-                   CLSIM_TABLE_FNAME_V2_PROTO,
-                   RETRO_DOM_TABLE_FNAME_PROTO,
-                   TDI_TABLE_FNAME_PROTO, TDI_TABLE_FNAME_RE,
-                   SPEED_OF_LIGHT_M_PER_NS, POL_TABLE_NTHETABINS,
-                   POL_TABLE_DCOSTHETA, POL_TABLE_NRBINS, POL_TABLE_DRPWR,
-                   ZSTD_EXTENSIONS)
-from retro import RetroPhotonInfo, TimeSphCoord
-from retro import (expand, force_little_endian, generate_anisotropy_str,
-                   interpret_clsim_table_fname, linear_bin_centers, numba_jit)
+import retro
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
@@ -83,11 +74,11 @@ def open_table_file(fpath):
     fobj : file-like object
 
     """
-    fpath = abspath(expand(fpath))
+    fpath = abspath(retro.expand(fpath))
     assert isfile(fpath)
     _, ext = splitext(fpath)
     ext = ext.lstrip('.').lower()
-    if ext in ZSTD_EXTENSIONS:
+    if ext in retro.ZSTD_EXTENSIONS:
         # -c sends decompressed output to stdout
         proc = Popen(['zstd', '-d', '-c', fpath], stdout=PIPE)
         # Read from stdout
@@ -134,9 +125,12 @@ def load_clsim_table_minimal(fpath, mmap=False):
     """
     table = OrderedDict()
 
-    fpath = expand(fpath)
+    fpath = retro.expand(fpath)
+
+    retro.wstderr('Loading table from {} ...\n'.format(fpath))
 
     if isdir(fpath):
+        t0 = time()
         indir = fpath
         if mmap:
             mmap_mode = 'r'
@@ -144,40 +138,58 @@ def load_clsim_table_minimal(fpath, mmap=False):
             mmap_mode = None
         for key in MY_CLSIM_TABLE_KEYS:
             fpath = join(indir, key + '.npy')
-            print('Loading {} from "{}"'.format(key, fpath))
+            retro.wstderr('  Loading {} from "{}" ...'.format(key, fpath))
+            t1 = time()
             table[key] = np.load(fpath, mmap_mode=mmap_mode)
+            retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
+        retro.wstderr('  load took {} s\n'.format(np.round(time() - t0, 3)))
         return table
 
     if mmap:
         raise ValueError('Cannot memory map a fits or compressed fits file')
 
-    print('Loading entire table contents from "{}"'.format(fpath))
-
+    t0 = time()
     fobj = open_table_file(fpath)
     try:
         pf_table = pyfits.open(fobj)
 
         table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
-        table['n_photons'] = force_little_endian(pf_table[0].header['_i3_n_photons']) # pylint: disable=no-member
-        table['phase_refractive_index'] = force_little_endian(pf_table[0].header['_i3_n_phase']) # pylint: disable=no-member
+        table['n_photons'] = retro.force_little_endian(
+            pf_table[0].header['_i3_n_photons'] # pylint: disable=no-member
+        )
+        table['phase_refractive_index'] = retro.force_little_endian(
+            pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
+        )
 
         n_dims = len(table['table_shape'])
         if n_dims == 5:
             # Space-time dimensions
-            table['r_bin_edges'] = force_little_endian(pf_table[1].data) # meters # pylint: disable=no-member
-            table['costheta_bin_edges'] = force_little_endian(pf_table[2].data) # pylint: disable=no-member
-            table['t_bin_edges'] = force_little_endian(pf_table[3].data) # nanoseconds # pylint: disable=no-member
+            table['r_bin_edges'] = retro.force_little_endian(
+                pf_table[1].data # meters # pylint: disable=no-member
+            )
+            table['costheta_bin_edges'] = retro.force_little_endian(
+                pf_table[2].data # pylint: disable=no-member
+            )
+            table['t_bin_edges'] = retro.force_little_endian(
+                pf_table[3].data # nanoseconds # pylint: disable=no-member
+            )
 
             # Photon directionality
-            table['costhetadir_bin_edges'] = force_little_endian(pf_table[4].data) # pylint: disable=no-member
-            table['deltaphidir_bin_edges'] = force_little_endian(pf_table[5].data) # pylint: disable=no-member
+            table['costhetadir_bin_edges'] = retro.force_little_endian(
+                pf_table[4].data # pylint: disable=no-member
+            )
+            table['deltaphidir_bin_edges'] = retro.force_little_endian(
+                pf_table[5].data # pylint: disable=no-member
+            )
 
         else:
             raise NotImplementedError(
                 '{}-dimensional table not handled'.format(n_dims)
             )
 
-        table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
+        table['table'] = retro.force_little_endian(pf_table[0].data) # pylint: disable=no-member
+
+        retro.wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
 
     finally:
         del pf_table
@@ -219,23 +231,28 @@ def load_clsim_table(fpath):
 
     table = load_clsim_table_minimal(fpath)
 
+    retro.wstderr('Interpreting table...\n')
+    t0 = time()
     n_dims = len(table['table_shape'])
 
     # Cut off first and last bin in each dimension (underflow and
     # overflow bins)
     slice_wo_overflow = (slice(1, -1),) * n_dims
-    print('Slicing to remove underflow/overflow bins...')
+    retro.wstderr('  Slicing to remove underflow/overflow bins...')
+    t0 = time()
     table_wo_overflow = table['table'][slice_wo_overflow]
+    retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
 
+    retro.wstderr('  Slicing and summarizing underflow and overflow...')
+    t0 = time()
     underflow, overflow = [], []
     for n in range(n_dims):
         sl = tuple([slice(1, -1)]*n + [0] + [slice(1, -1)]*(n_dims - 1 - n))
-        print('Slicing to find underflow totals...')
         underflow.append(table['table'][sl].sum())
 
         sl = tuple([slice(1, -1)]*n + [-1] + [slice(1, -1)]*(n_dims - 1 - n))
-        print('Slicing to find overflow totals...')
         overflow.append(table['table'][sl].sum())
+    retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
 
     table['table'] = table_wo_overflow
     table['underflow'] = np.array(underflow)
@@ -267,19 +284,19 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
         applied to each DOM's table _after_ `scale`. See `Notes` for more
         info.
 
-    photon_info : None or RetroPhotonInfo namedtuple of dicts
+    photon_info : None or retro.RetroPhotonInfo namedtuple of dicts
         If None, creates a new RetroPhotonInfo namedtuple with empty dicts to
         fill. If one is provided, the existing component dictionaries are
         updated.
 
     Returns
     -------
-    photon_info : RetroPhotonInfo namedtuple of dicts
+    photon_info : retro.RetroPhotonInfo namedtuple of dicts
         Tuple fields are 'survival_prob', 'theta', 'phi', and 'length'. Each
         dict is keyed by `depth_idx` and values are the arrays loaded
         from the FITS file.
 
-    bin_edges : TimeSphCoord namedtuple
+    bin_edges : retro.TimeSphCoord namedtuple
         Each element of the tuple is an array of bin edges.
 
     Notes
@@ -304,12 +321,12 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
     if photon_info is None:
         empty_dicts = []
-        for _ in RetroPhotonInfo._fields:
+        for _ in retro.RetroPhotonInfo._fields:
             empty_dicts.append({})
-        photon_info = RetroPhotonInfo(*empty_dicts)
+        photon_info = retro.RetroPhotonInfo(*empty_dicts)
 
-    with pyfits.open(expand(fpath)) as table:
-        data = force_little_endian(table[0].data)
+    with pyfits.open(retro.expand(fpath)) as table:
+        data = retro.force_little_endian(table[0].data)
 
         if scale == exponent == 1:
             photon_info.survival_prob[depth_idx] = data
@@ -318,33 +335,34 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
                 1 - (1 - data * scale)**exponent
             )
 
-        data = force_little_endian(table[1].data)
+        data = retro.force_little_endian(table[1].data)
         photon_info.theta[depth_idx] = data
 
-        data = force_little_endian(table[2].data)
+        data = retro.force_little_endian(table[2].data)
         photon_info.deltaphi[depth_idx] = data
 
-        data = force_little_endian(table[3].data)
+        data = retro.force_little_endian(table[3].data)
         photon_info.length[depth_idx] = data
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.
-        data = force_little_endian(table[4].data)
+        data = retro.force_little_endian(table[4].data)
         t = - data[::-1]
 
-        data = force_little_endian(table[5].data)
+        data = retro.force_little_endian(table[5].data)
         r = data
 
-        data = force_little_endian(table[6].data)
+        data = retro.force_little_endian(table[6].data)
         theta = data
 
-        bin_edges = TimeSphCoord(t=t, r=r, theta=theta,
-                                 phi=np.array([], dtype=t.dtype))
+        bin_edges = retro.TimeSphCoord(
+            t=t, r=r, theta=theta, phi=np.array([], dtype=t.dtype)
+        )
 
     return photon_info, bin_edges
 
 
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
 def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
                    avg_photon_theta, avg_photon_length, use_directionality,
                    t_min, t_max, n_t_bins, r_min, r_max, r_power, n_r_bins,
@@ -394,24 +412,24 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         r = np.sqrt(rho2 + dz**2)
 
         #spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
-        #if spacetime_sep < 0 or spacetime_sep >= POL_TABLE_RMAX:
+        #if spacetime_sep < 0 or spacetime_sep >= retro.POL_TABLE_RMAX:
         #    print('spacetime_sep:', spacetime_sep)
-        #    print('MAX_POL_TABLE_SPACETIME_SEP:', POL_TABLE_RMAX)
+        #    print('retro.MAX_POL_TABLE_SPACETIME_SEP:', retro.POL_TABLE_RMAX)
         #    continue
 
         tbin_idx = int(np.floor((dt - t_min) / table_dt))
-        #if tbin_idx < 0 or tbin_idx >= -POL_TABLE_DT:
+        #if tbin_idx < 0 or tbin_idx >= -retro.POL_TABLE_DT:
         if tbin_idx < -n_t_bins or tbin_idx >= 0:
             #print('t')
             continue
 
-        rbin_idx = int(r**inv_r_power // POL_TABLE_DRPWR)
-        if rbin_idx < 0 or rbin_idx >= POL_TABLE_NRBINS:
+        rbin_idx = int(r**inv_r_power // retro.POL_TABLE_DRPWR)
+        if rbin_idx < 0 or rbin_idx >= retro.POL_TABLE_NRBINS:
             #print('r')
             continue
 
-        thetabin_idx = int(dz / (r * POL_TABLE_DCOSTHETA))
-        if thetabin_idx < 0 or thetabin_idx >= POL_TABLE_NTHETABINS:
+        thetabin_idx = int(dz / (r * retro.POL_TABLE_DCOSTHETA))
+        if thetabin_idx < 0 or thetabin_idx >= retro.POL_TABLE_NTHETABINS:
             #print('theta')
             continue
 
@@ -434,7 +452,7 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     return expected_photon_count
 
 
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
 def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
              survival_prob, avg_photon_x, avg_photon_y, avg_photon_z,
              use_directionality):
@@ -506,7 +524,7 @@ class CLSimTable(object):
         self.angular_acceptance_fract = angular_acceptance_fract
 
         if fpath is None:
-            tables_dir = expand(tables_dir)
+            tables_dir = retro.expand(tables_dir)
             assert isdir(tables_dir)
             self.tables_dir = tables_dir
             self.hash_val = hash_val
@@ -529,7 +547,7 @@ class CLSimTable(object):
 
             self.depth_idx = depth_idx
 
-            fname = CLSIM_TABLE_FNAME_V2_PROTO.format(
+            fname = retro.CLSIM_TABLE_FNAME_V2_PROTO.format(
                 hash_val=hash_val,
                 string=self.string,
                 depth_idx=self.depth_idx,
@@ -545,7 +563,7 @@ class CLSimTable(object):
 
             self.fpath = fpath
             self.tables_dir = dirname(fpath)
-            info = interpret_clsim_table_fname(fpath)
+            info = retro.interpret_clsim_table_fname(fpath)
             self.string = info['string']
             if isinstance(self.string, int):
                 self.string_idx = self.string - 1
@@ -556,7 +574,7 @@ class CLSimTable(object):
             self.seed = info['seed']
 
         assert self.subdet in ('ic', 'dc')
-        self.dtp_fname_proto = RETRO_DOM_TABLE_FNAME_PROTO
+        self.dtp_fname_proto = retro.RETRO_DOM_TABLE_FNAME_PROTO
 
         table_info = load_clsim_table(self.fpath)
 
@@ -572,7 +590,7 @@ class CLSimTable(object):
         self.costheta_bin_edges = table_info.pop('costheta_bin_edges')
 
         self.theta_bin_edges = np.arccos(self.costheta_bin_edges) # radians
-        self.costheta_centers = linear_bin_centers(self.costheta_bin_edges)
+        self.costheta_centers = retro.linear_bin_centers(self.costheta_bin_edges)
         self.theta_centers = np.arccos(self.costheta_centers) # radians
 
         t_bin_widths = np.diff(self.t_bin_edges)
@@ -582,10 +600,10 @@ class CLSimTable(object):
         if self.n_dims == 5:
             self.costhetadir_bin_edges = table_info.pop('costhetadir_bin_edges')
             self.deltaphidir_bin_edges = table_info.pop('deltaphidir_bin_edges') # radians
-            self.costhetadir_centers = linear_bin_centers(self.costhetadir_bin_edges)
+            self.costhetadir_centers = retro.linear_bin_centers(self.costhetadir_bin_edges)
             self.thetadir_bin_edges = np.arccos(self.costhetadir_bin_edges) # radians
             self.thetadir_centers = np.arccos(self.costhetadir_centers) # radians
-            self.deltaphidir_centers = linear_bin_centers(self.deltaphidir_bin_edges) # radians
+            self.deltaphidir_centers = retro.linear_bin_centers(self.deltaphidir_bin_edges) # radians
         else:
             raise NotImplementedError(
                 'Can only work with CLSim tables with 5 dimensions; got %d'
@@ -597,17 +615,17 @@ class CLSimTable(object):
         #with pyfits.open(self.fpath) as table:
         #    # Cut off first and last bin in each dimension (underflow and
 
-        #    self.n_photons = force_little_endian(table[0].header['_i3_n_photons'])
-        #    self.phase_refractive_index = force_little_endian(table[0].header['_i3_n_phase'])
+        #    self.n_photons = retro.force_little_endian(table[0].header['_i3_n_photons'])
+        #    self.phase_refractive_index = retro.force_little_endian(table[0].header['_i3_n_phase'])
 
         #    # Space-time dimensions
-        #    self.r_bin_edges = force_little_endian(table[1].data) # meters
-        #    self.costheta_bin_edges = force_little_endian(table[2].data)
-        #    self.t_bin_edges = force_little_endian(table[3].data) # nanoseconds
+        #    self.r_bin_edges = retro.force_little_endian(table[1].data) # meters
+        #    self.costheta_bin_edges = retro.force_little_endian(table[2].data)
+        #    self.t_bin_edges = retro.force_little_endian(table[3].data) # nanoseconds
 
         #    # Photon directionality
-        #    self.costhetadir_bin_edges = force_little_endian(table[4].data)
-        #    self.deltaphidir_bin_edges = force_little_endian(table[5].data)
+        #    self.costhetadir_bin_edges = retro.force_little_endian(table[4].data)
+        #    self.deltaphidir_bin_edges = retro.force_little_endian(table[5].data)
 
         # Multiply the tabulated photon counts by a normalization factor to
         # arrive at a (reasonable, but still imperfect) suvival
@@ -624,7 +642,7 @@ class CLSimTable(object):
         self.norm = (
             1
             / self.n_photons
-            / (SPEED_OF_LIGHT_M_PER_NS / self.phase_refractive_index
+            / (retro.SPEED_OF_LIGHT_M_PER_NS / self.phase_refractive_index
                * self.t_bin_width)
             * self.angular_acceptance_fract
             * (len(self.costheta_bin_edges) - 1)
@@ -655,7 +673,7 @@ class CLSimTable(object):
         """
         if outdir is None:
             outdir = self.tables_dir
-        outdir = expand(outdir)
+        outdir = retro.expand(outdir)
 
         new_fname = self.dtp_fname_proto.format(depth_idx=self.depth_idx)
         new_fpath = join(outdir, new_fname)
@@ -665,11 +683,12 @@ class CLSimTable(object):
 
         if isfile(new_fpath):
             if overwrite:
-                print('WARNING: overwriting existing file at "%s"' % new_fpath)
+                retro.wstderr('WARNING: overwriting existing file at "%s"\n' % new_fpath)
                 remove(new_fpath)
             else:
-                print('ERROR: There is an existing file at "%s"; not'
-                      ' proceeding.' % new_fpath)
+                retro.wstderr(
+                    'ERROR: There is an existing file at "%s"; not'
+                    ' proceeding.\n' % new_fpath)
                 return
 
         survival_probs, average_thetas, average_phis, lengths = \
@@ -728,7 +747,7 @@ class DOMTimePolarTables(object):
     def __init__(self, tables_dir, hash_val, geom, use_directionality,
                  ic_exponent=1, dc_exponent=1):
         # Translation and validation of args
-        tables_dir = expand(tables_dir)
+        tables_dir = retro.expand(tables_dir)
         assert isdir(tables_dir)
         assert len(geom.shape) == 3
         assert isinstance(use_directionality, bool)
@@ -758,11 +777,11 @@ class DOMTimePolarTables(object):
         string_idx = string - 1
         if string_idx < 79:
             subdet = 'ic'
-            dom_quant_eff = IC_DOM_QUANT_EFF
+            dom_quant_eff = retro.IC_DOM_QUANT_EFF
             exponent = self.ic_exponent
         else:
             subdet = 'dc'
-            dom_quant_eff = DC_DOM_QUANT_EFF
+            dom_quant_eff = retro.DC_DOM_QUANT_EFF
             exponent = self.dc_exponent
 
         if not force_reload and depth_idx in self.tables[subdet]:
@@ -770,7 +789,7 @@ class DOMTimePolarTables(object):
 
         fpath = join(
             self.tables_dir,
-            RETRO_DOM_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
+            retro.RETRO_DOM_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
         )
 
         photon_info, _ = load_t_r_theta_table(
@@ -782,7 +801,7 @@ class DOMTimePolarTables(object):
 
         #length = photon_info.length[depth_idx]
         #deltaphi = photon_info.deltaphi[depth_idx]
-        self.tables[subdet][depth_idx] = RetroPhotonInfo(
+        self.tables[subdet][depth_idx] = retro.RetroPhotonInfo(
             survival_prob=photon_info.survival_prob[depth_idx],
             theta=photon_info.theta[depth_idx],
             deltaphi=photon_info.deltaphi[depth_idx],
@@ -883,7 +902,7 @@ class TDICartTable(object):
     def __init__(self, tables_dir, proto_tile_hash, subvol=None, scale=1,
                  use_directionality=True):
         # Translation and validation of args
-        tables_dir = expand(tables_dir)
+        tables_dir = retro.expand(tables_dir)
         assert isdir(tables_dir)
         assert isinstance(use_directionality, bool)
         assert isinstance(proto_tile_hash, basestring)
@@ -908,7 +927,7 @@ class TDICartTable(object):
         self.tables_meta = None
 
         proto_table_fpath = glob(join(
-            expand(self.tables_dir),
+            retro.expand(self.tables_dir),
             'retro_tdi_table_%s_*survival_prob.fits' % self.proto_tile_hash
         ))
         if not proto_table_fpath:
@@ -975,7 +994,7 @@ class TDICartTable(object):
 
         """
         fname = basename(fpath)
-        match = TDI_TABLE_FNAME_RE.match(fname)
+        match = retro.TDI_TABLE_FNAME_RE.match(fname)
         if match is None:
             return None
         meta = match.groupdict()
@@ -1009,7 +1028,7 @@ class TDICartTable(object):
         if self.tables_loaded and not force_reload:
             return
 
-        t0 = time.time()
+        t0 = time()
 
         x_ref = self.proto_meta['x_min']
         y_ref = self.proto_meta['y_min']
@@ -1027,7 +1046,8 @@ class TDICartTable(object):
         # Work with "survival_prob" table filepaths, which generalizes to all
         # table filepaths (so long as they exist)
         fpaths = glob(join(
-            expand(self.tables_dir), 'retro_tdi_table_*survival_prob.fits'
+            retro.expand(self.tables_dir),
+            'retro_tdi_table_*survival_prob.fits'
         ))
 
         lowermost_corner = np.array([np.inf]*3)
@@ -1121,7 +1141,7 @@ class TDICartTable(object):
         else:
             avg_photon_x, avg_photon_y, avg_photon_z = None, None, None
 
-        anisotropy_str = generate_anisotropy_str(self.anisotropy)
+        anisotropy_str = retro.generate_anisotropy_str(self.anisotropy)
 
         tables_meta = {} #[[[None]*nz_tiles]*ny_tiles]*nx_tiles
         for meta in to_load_meta.values():
@@ -1157,14 +1177,14 @@ class TDICartTable(object):
             for table_name, table in to_fill:
                 fpath = join(
                     self.tables_dir,
-                    TDI_TABLE_FNAME_PROTO.format(
+                    retro.TDI_TABLE_FNAME_PROTO.format(
                         table_name=table_name, anisotropy_str=anisotropy_str,
                         **kwargs
                     ).lower()
                 )
 
                 with pyfits.open(fpath) as fits_table:
-                    data = force_little_endian(fits_table[0].data) # pylint: disable=no-member
+                    data = retro.force_little_endian(fits_table[0].data) # pylint: disable=no-member
 
                 if self.scale != 1 and table_name == 'survival_prob':
                     data = 1 - (1 - data)**self.scale
@@ -1203,7 +1223,7 @@ class TDICartTable(object):
               ' bins are (%.3f m)³'
               % (self.n_tiles, tstr, self.x_min, self.x_max, self.y_min,
                  self.y_max, self.z_min, self.z_max, self.binwidth))
-        print('Time to load: {} s'.format(np.round(time.time() - t0, 3)))
+        print('Time to load: {} s'.format(np.round(time() - t0, 3)))
 
     def get_photon_expectation(self, pinfo_gen):
         """Get the expectation for photon survival.

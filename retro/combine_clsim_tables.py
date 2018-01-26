@@ -32,9 +32,11 @@ limitations under the License.'''
 
 
 from argparse import ArgumentParser
+from collections import OrderedDict
 from glob import glob
 from os.path import abspath, basename, dirname, isfile, join, splitext
 import sys
+from time import time
 
 import numpy as np
 
@@ -42,7 +44,7 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import COMPR_EXTENSIONS, expand, mkdir
+import retro
 from retro.table_readers import load_clsim_table_minimal
 
 
@@ -88,17 +90,19 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
     combined_table
 
     """
+    t0_start = time()
+
     # Get all input table filepaths, including glob expansion
 
     if isinstance(table_fpaths, basestring):
         table_fpaths = [table_fpaths]
     table_fpaths_tmp = []
     for fpath in table_fpaths:
-        table_fpaths_tmp.extend(glob(expand(fpath)))
+        table_fpaths_tmp.extend(glob(retro.expand(fpath)))
     table_fpaths = sorted(table_fpaths_tmp)
 
-    print(
-        'Found {} tables to combine:\n  {}'
+    retro.wstderr(
+        'Found {} tables to combine:\n  {}\n'
         .format(len(table_fpaths), '\n  '.join(table_fpaths))
     )
 
@@ -106,16 +110,18 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
 
     output_fpaths = None
     if outdir is not None:
-        outdir = expand(outdir)
-        mkdir(outdir)
-        output_fpaths = {k: join(outdir, k + '.npy') for k in ALL_KEYS}
+        outdir = retro.expand(outdir)
+        retro.mkdir(outdir)
+        output_fpaths = OrderedDict(
+            ((k, join(outdir, k + '.npy')) for k in ALL_KEYS)
+        )
         output_fpaths['source_tables'] = join(outdir, 'source_tables.txt')
         if not overwrite:
             for fpath in output_fpaths:
                 if isfile(fpath):
                     raise IOError('File {} exists'.format(fpath))
-        print(
-            'Output files will be written to:\n  {}'
+        retro.wstderr(
+            'Output files will be written to:\n  {}\n'
             .format('\n  '.join(output_fpaths.values()))
         )
 
@@ -150,19 +156,27 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
         for fpath in table_fpaths:
             base = basename(fpath)
             rootname, ext = splitext(base)
-            if ext.lstrip('.') in COMPR_EXTENSIONS:
+            if ext.lstrip('.') in retro.COMPR_EXTENSIONS:
                 base = rootname
             basenames.append(base)
 
-        fpath = output_fpaths['source_tables']
-        with open(fpath, 'w') as fobj:
-            fobj.write('\n'.join(sorted(basenames)))
-        print('Wrote "{}"'.format(fpath))
+        retro.wstderr('Writing files:\n')
 
         for key in ALL_KEYS:
             fpath = output_fpaths[key]
-            np.save(fptath, combined_table[key])
-            print('Wrote "{}"'.format(fpath))
+            retro.wstderr('  {} ...'.format(fpath))
+            t0 = time()
+            np.save(fpath, combined_table[key])
+            retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
+
+        fpath = output_fpaths['source_tables']
+        retro.wstderr('  {} ...'.format(fpath))
+        t0 = time()
+        with open(fpath, 'w') as fobj:
+            fobj.write('\n'.join(sorted(basenames)))
+        retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
+
+    retro.wstderr('Total time to combine tables: {} s\n'.format(np.round(time() - t0_start, 3)))
 
     return combined_table
 
