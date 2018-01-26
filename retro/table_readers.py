@@ -239,7 +239,7 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
         photon_info = RetroPhotonInfo(*empty_dicts)
 
     with pyfits.open(expand(fpath)) as table:
-        data = force_little_endian(table[0].data)
+        data = force_little_endian(table[0].data) #photon survival probability
 
         if scale == exponent == 1:
             photon_info.survival_prob[depth_idx] = data
@@ -248,24 +248,24 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
                 1 - (1 - data * scale)**exponent
             )
 
-        data = force_little_endian(table[1].data)
+        data = force_little_endian(table[1].data) #photon directionality
         photon_info.theta[depth_idx] = data
 
-        data = force_little_endian(table[2].data)
+        data = force_little_endian(table[2].data) #photon directionality
         photon_info.deltaphi[depth_idx] = data
 
-        data = force_little_endian(table[3].data)
+        data = force_little_endian(table[3].data) #photon directionality
         photon_info.length[depth_idx] = data
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.
-        data = force_little_endian(table[4].data)
+        data = force_little_endian(table[4].data) #time bin edges
         t = - data[::-1]
 
-        data = force_little_endian(table[5].data)
+        data = force_little_endian(table[5].data) #r bin edges
         r = data
 
-        data = force_little_endian(table[6].data)
+        data = force_little_endian(table[6].data) #theta bin edges
         theta = data
 
         bin_edges = TimeSphCoord(t=t, r=r, theta=theta,
@@ -287,7 +287,7 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
     hit_time : float
     dom_coord : shape (3,) numpy ndarray, dtype float64
-    survival_prob
+    survival_prob 
     avg_photon_theta
     avg_photon_length
     use_directionality : bool
