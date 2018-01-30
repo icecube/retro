@@ -348,6 +348,10 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
         r = retro.force_little_endian(table[5].data)
 
+        r_volumes = np.square(0.5 * (r[1:] + r[:-1]))
+
+        photon_info.survival_prob[depth_idx] /= r_volumes[None,:,None]
+
         theta = retro.force_little_endian(table[6].data)
 
         bin_edges = retro.TimeSphCoord(
@@ -422,18 +426,19 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #if tbin_idx < 0 or tbin_idx >= -retro.POL_TABLE_DT:
         if tbin_idx > n_t_bins or tbin_idx < 0:
             #print('t')
+            #print('t at ',t,'with idx ',tbin_idx)
             continue
 
         rbin_idx = int((r-r_min)**inv_r_power / table_dr_pwr)
         #print('rbin_idx: ',rbin_idx)
         if rbin_idx < 0 or rbin_idx >= n_r_bins:
-            #print('r')
+            #print('r at ',r,'with idx ',rbin_idx)
             continue
 
-        costhetabin_idx = int(-(dz / r) / table_dcostheta)
+        costhetabin_idx = int((1 -(dz / r)) / table_dcostheta)
         #print('costhetabin_idx: ',costhetabin_idx)
         if costhetabin_idx < 0 or costhetabin_idx >= n_costheta_bins:
-            #print('costheta')
+            print('costheta out of range! This should not happen')
             continue
 
         #print(tbin_idx, rbin_idx, thetabin_idx)
@@ -802,7 +807,7 @@ class DOMTimePolarTables(object):
 
         """
         string_idx = string - 1
-        if string_idx < 79:
+        if string < 79:
             subdet = 'ic'
             dom_quant_eff = retro.IC_DOM_QUANT_EFF
             exponent = self.ic_exponent
@@ -882,7 +887,7 @@ class DOMTimePolarTables(object):
         string_idx = string - 1
 
         dom_coord = self.geom[string_idx, depth_idx]
-        if string_idx < 79:
+        if string < 79:
             subdet = 'ic'
         else:
             subdet = 'dc'
