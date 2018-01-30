@@ -2,10 +2,10 @@
 # pylint: disable=wrong-import-position
 
 """
-Load retro tables into RAM, then tales of icecube hdf5 files with events (hits
-series) in them as inputs and calculates lilkelihoods.
+Load retro tables into RAM, take icecube hdf5 files with events (hits
+series) in them as inputs, and calculate lilkelihoods.
 
-At the moment, these likelihoods can be single points or 1d or 2d scans.
+At the moment, these likelihoods can be single points, 1d scan, or 2d scan.
 """
 
 
@@ -53,7 +53,7 @@ from retro import (event_to_hypo_params, expand, poisson_llh,
                    get_primary_interaction_str)
 from retro.events import Events
 from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_kernels import const_energy_loss_muon # pylint: disable=unused-import
+from retro.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon # pylint: disable=unused-import
 from retro.discrete_cascade_kernels import point_cascade # pylint: disable=unused-import
 from retro.plot_1d_scan import plot_1d_scan
 from retro.table_readers import DOMTimePolarTables, TDICartTable # pylint: disable=unused-import
@@ -65,32 +65,21 @@ DFLT_EVENTS_FPATH = (
 )
 
 # (Almost) completely arbitrary first guesses
-EPS = 1.0
-EPS_STAT = EPS
-EPS_CLSIM_LENGTH_BINNING = EPS
-EPS_CLSIM_ANGLE_BINNING = EPS
 NOISE_CHARGE = 0.00000025 * 100
 CASCADE_E_SCALE = 1
 TRACK_E_SCALE = 1
-NUM_JITTER_SAMPLES = 1
-JITTER_SIGMA = 5
 
 NUM_SCAN_POINTS = 100
 HypoClass = DiscreteHypo
 HYPOCLASS_KWARGS = dict(time_increment=1)
-LLH_USE_AVGPHOT = False
 LLH_USE_NOHIT = False
 
 RESULTS_DIR = (
-    'results_avgphot%d_nohit%d%s_cesc%d_tesc%d_noise%.1e_jitsamp%d%s'
-    % (LLH_USE_AVGPHOT,
-       LLH_USE_NOHIT,
-       '_eps%.1f' % EPS if LLH_USE_AVGPHOT else '',
+    'results_nohit%d_cesc%d_tesc%d_noise%.1e'
+    % (LLH_USE_NOHIT,
        CASCADE_E_SCALE,
        TRACK_E_SCALE,
-       NOISE_CHARGE,
-       NUM_JITTER_SAMPLES,
-       '_jitsig%d' % JITTER_SIGMA if NUM_JITTER_SAMPLES > 1 else '')
+       NOISE_CHARGE)
 )
 if not isdir(RESULTS_DIR):
     makedirs(expand(RESULTS_DIR), mode=0o2777)
@@ -183,9 +172,6 @@ def get_neg_llh(pinfo_gen, event, dom_tables, tdi_table=None,
 
     neg_llh = 0
     noise_counts = 0
-
-    eps_angle = EPS_STAT + EPS_CLSIM_ANGLE_BINNING
-    eps_length = EPS_STAT + EPS_CLSIM_LENGTH_BINNING
 
     if tdi_table is not None:
         total_expected_q = tdi_table.get_photon_expectation(pinfo_gen=pinfo_gen)
@@ -511,14 +497,9 @@ def main(events_fpath, tables_dir, geom_file=None, start_index=None,
                     ('scan_values', scan_values),
                     ('neg_llh', neg_llh),
                     ('truth', tuple(getattr(truth_params, d) for d in dims)),
-                    ('LLH_USE_AVGPHOT', LLH_USE_AVGPHOT),
                     ('LLH_USE_NOHIT', LLH_USE_NOHIT),
-                    ('JITTER_SIGMA', JITTER_SIGMA),
-                    ('NUM_JITTER_SAMPLES', NUM_JITTER_SAMPLES),
                     ('CASCADE_E_SCALE', CASCADE_E_SCALE),
                     ('TRACK_E_SCALE', TRACK_E_SCALE),
-                    ('EPS_ANGLE', EPS_STAT + EPS_CLSIM_ANGLE_BINNING),
-                    ('EPS_LENGTH', EPS_STAT + EPS_CLSIM_LENGTH_BINNING),
                     ('NOISE_CHARGE', NOISE_CHARGE),
                 ])
                 fname = ('scan_results_event_%d_uid_%d_dims_%s.pkl'
