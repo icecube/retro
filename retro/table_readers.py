@@ -402,11 +402,15 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
 
+        # causally impossible
+        if hit_time < t:
+            continue
+
         # A photon that starts immediately in the past (before the DOM was hit)
         # will show up in the Retro DOM tables in the _last_ bin.
         # Therefore, invert the sign of the t coordinate and index sequentially
         # via e.g. -1, -2, ....
-        dt = hit_time - t
+        dt = t - hit_time
         dx = x - dom_coord[0]
         dy = y - dom_coord[1]
         dz = z - dom_coord[2]

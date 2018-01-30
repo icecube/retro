@@ -58,8 +58,8 @@ from retro.plot_1d_scan import plot_1d_scan
 from retro.table_readers import DOMTimePolarTables, TDICartTable # pylint: disable=unused-import
 
 
-#discrete_hypo = DiscreteHypo(hypo_kernels=[const_energy_loss_muon])
-discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade])
+discrete_hypo = DiscreteHypo(hypo_kernels=[const_energy_loss_muon])
+#discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade])
 
 
 geom_file = DETECTOR_GEOM_FILE
@@ -82,9 +82,11 @@ dom_tables = DOMTimePolarTables(
 dom_tables.load_tables()
 
 #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=20, cascade_energy=0)
-hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
+#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
+hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=-PI, track_energy=20, cascade_energy=0)
 
-f = open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb')
+#f = open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb')
+f = open('benchmark.pkl', 'rb')
 histos = pickle.load(f)
 
 
@@ -107,7 +109,7 @@ for dom in doms:
             #print(hit_time)
             expected_p = dom_tables.get_photon_expectation(
                                               pinfo_gen=pinfo_gen,
-                                              hit_time=-hit_time,
+                                              hit_time=hit_time,
                                               string=string,
                                               depth_idx=dom-1,
                                               )
