@@ -39,6 +39,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import AnchoredText
 
 if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
@@ -57,7 +58,8 @@ from retro.plot_1d_scan import plot_1d_scan
 from retro.table_readers import DOMTimePolarTables, TDICartTable # pylint: disable=unused-import
 
 
-discrete_hypo = DiscreteHypo(hypo_kernels=[const_energy_loss_muon])
+#discrete_hypo = DiscreteHypo(hypo_kernels=[const_energy_loss_muon])
+discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade])
 
 
 geom_file = DETECTOR_GEOM_FILE
@@ -79,31 +81,62 @@ dom_tables = DOMTimePolarTables(
 )
 dom_tables.load_tables()
 
-hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=20, cascade_energy=0)
+#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=20, cascade_energy=0)
+hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
+
+f = open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb')
+histos = pickle.load(f)
+
 
 pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
 
-strings = [79, 81, 86]
+strings = [36] + [79, 80, 81, 82, 83, 84, 85, 86] + [26, 27, 35, 37, 45, 46]
+#strings = [86]
 doms= range(25,60)
 
+norm = False
+norm2 = False
 
 hit_times =  np.linspace(0, 2000, 201)
+mid_points = 0.5* (hit_times[1:] + hit_times[:-1])
 
 for dom in doms:
     for string in strings:
         expected_ps = []
-        for hit_time in hit_times:
+        for hit_time in mid_points:
             #print(hit_time)
             expected_p = dom_tables.get_photon_expectation(
                                               pinfo_gen=pinfo_gen,
                                               hit_time=-hit_time,
                                               string=string,
-                                              depth_idx=dom
+                                              depth_idx=dom-1,
                                               )
             expected_ps.append(expected_p)
 
         expected_ps = np.array(expected_ps)
+        tot_retro = np.sum(expected_ps)
+        if norm:
+            expected_ps /= np.sum(expected_ps)
+
 
         plt.clf()
-        plt.plot(hit_times, expected_ps)
+        plt.plot(mid_points, expected_ps)
+        try:
+            #time = histos[string][dom]['time']
+            #weight = histos[string][dom]['weight']
+            h = np.nan_to_num(histos[string][dom])
+            tot_clsim = np.sum(h)
+            if norm:
+                h/= np.sum(h)
+            #if norm2:
+            #    h *= 200
+            plt.plot(mid_points, h)
+            a_text = AnchoredText('RETRO = %.5f, CLSIM = %.5f, ratio = %.5f'%(tot_retro, tot_clsim, tot_retro/tot_clsim), loc=2)
+            #print(tot_retro/tot_clsim)
+            plt.gca().add_artist(a_text)
+            #plt.plot(time, weight)
+            #plt.scatter(time, weight*10, s=1, marker='.', c='r')
+        except KeyError:
+            pass
+
         plt.savefig('dom_pdfs/retro_%s_%s.png'%(string,dom))
