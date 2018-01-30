@@ -374,7 +374,7 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
     hit_time : float
     dom_coord : shape (3,) numpy ndarray, dtype float64
-    survival_prob
+    survival_prob 
     avg_photon_theta
     avg_photon_length
     use_directionality : bool

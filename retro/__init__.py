@@ -1525,12 +1525,7 @@ def poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    # TODO: why is there a +1 here? Avoid zero observations? How does this
-    # affect the result, besides avoiding inf? Removed for now until we work
-    # this out...
-
-    #llh = observed * np.log(expected) - expected - gammaln(observed + 1)
-    llh = observed * np.log(expected) - expected - gammaln(observed)
+    llh = observed * np.log(expected) - expected - gammaln(observed + 1)
     return llh
 
 

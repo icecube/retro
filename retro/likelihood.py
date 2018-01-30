@@ -357,7 +357,7 @@ def main(events_fpath, tables_dir, geom_file=None, start_index=None,
     """
     # pylint: disable=no-member
 
-    print('Instantiate a hypoo class...')
+    print('Instantiate a hypo class...')
     discrete_hypo = DiscreteHypo(
         hypo_kernels=[const_energy_loss_muon, point_cascade]
     )
