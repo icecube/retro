@@ -352,6 +352,8 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
         photon_info.survival_prob[depth_idx] /= r_volumes[None,:,None]
 
+        #print(np.max(photon_info.survival_prob[depth_idx]))
+
         theta = retro.force_little_endian(table[6].data)
 
         bin_edges = retro.TimeSphCoord(
@@ -366,8 +368,10 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
                    avg_photon_theta, avg_photon_length, use_directionality,
                    t_min, t_max, n_t_bins, r_min, r_max, r_power, n_r_bins,
                    n_costheta_bins):
-    """Compute total expected photons in a DOM based on the (t,r,theta)-binned
-    Retro DOM tables applied to a the generated photon info `pinfo_gen`.
+    """Compute expected photons in a DOM based on the (t,r,theta)-binned
+    Retro DOM tables applied to a the generated photon info `pinfo_gen`,
+    and the total expected photon count (time integrated) -- the normalization
+    of the pdf.
 
     Parameters
     ----------
@@ -389,22 +393,19 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
     Returns
     -------
-    expected_photon_count : float
+    total_photon_count, expected_photon_count : (float, float)
 
     """
     table_dt = (t_max - t_min) / n_t_bins
     table_dr = (r_max - r_max) / n_r_bins
     table_dcostheta = 2 / n_costheta_bins
-    expected_photon_count = 0.0
+    expected_photon_count = 0.
+    total_photon_count = 0.
     inv_r_power = 1 / r_power
     table_dr_pwr = (r_max-r_min)**inv_r_power / n_r_bins
 
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
-
-        # causally impossible
-        if hit_time < t:
-            continue
 
         # A photon that starts immediately in the past (before the DOM was hit)
         # will show up in the Retro DOM tables in the _last_ bin.
@@ -424,15 +425,6 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #    print('retro.MAX_POL_TABLE_SPACETIME_SEP:', retro.POL_TABLE_RMAX)
         #    continue
 
-        tbin_idx = int(np.floor((dt - t_min) / table_dt))
-        #print('tbin_idx: ',tbin_idx)
-        #if tbin_idx < -n_t_bins or tbin_idx >= 0:
-        #if tbin_idx < 0 or tbin_idx >= -retro.POL_TABLE_DT:
-        if tbin_idx > n_t_bins or tbin_idx < 0:
-            #print('t')
-            #print('t at ',t,'with idx ',tbin_idx)
-            continue
-
         rbin_idx = int((r-r_min)**inv_r_power / table_dr_pwr)
         #print('rbin_idx: ',rbin_idx)
         if rbin_idx < 0 or rbin_idx >= n_r_bins:
@@ -443,6 +435,25 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #print('costhetabin_idx: ',costhetabin_idx)
         if costhetabin_idx < 0 or costhetabin_idx >= n_costheta_bins:
             print('costheta out of range! This should not happen')
+            continue
+
+        # time indep.
+        time_indep_count = (
+                p_count * np.sum(survival_prob[:, rbin_idx, costhetabin_idx])
+        )
+        total_photon_count += time_indep_count
+
+        # causally impossible
+        if hit_time < t:
+            continue
+
+        tbin_idx = int(np.floor((dt - t_min) / table_dt))
+        #print('tbin_idx: ',tbin_idx)
+        #if tbin_idx < -n_t_bins or tbin_idx >= 0:
+        #if tbin_idx < 0 or tbin_idx >= -retro.POL_TABLE_DT:
+        if tbin_idx > n_t_bins or tbin_idx < 0:
+            #print('t')
+            #print('t at ',t,'with idx ',tbin_idx)
             continue
 
         #print(tbin_idx, rbin_idx, thetabin_idx)
@@ -463,7 +474,7 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
         expected_photon_count += surviving_count
 
-    return expected_photon_count
+    return total_photon_count, expected_photon_count
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
@@ -881,7 +892,7 @@ class DOMTimePolarTables(object):
 
         Returns
         -------
-        expected_photon_count : float
+        total_photon_count, expected_photon_count : (float, float)
             Total expected surviving photon count
 
         """
