@@ -171,30 +171,53 @@ dom_tables.load_tables()
 #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
 #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=-PI, track_energy=20, cascade_energy=0)
 
-with open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0_events.pkl', 'rb') as f:
-#f = open('benchmark.pkl', 'rb')
+#with open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0_events.pkl', 'rb') as f:
+#with open('benchmark_events.pkl', 'rb') as f:
+with open('testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl', 'rb') as f:
     events = pickle.load(f)
 
-for i, event in enumerate(events[0:1]):
+#scan_points = np.linspace(1, 41, 21)
+#scan_points = np.linspace(-500, -300, 21)
+#scan_points = np.linspace(-100, 100, 21)
+scan_points = np.linspace(0, PI, 21)
+#scan_points = np.linspace(0, 2*PI, 21)
+llhs = []
+
+for i, event in enumerate(events[0:10]):
     print('\nevent ',i)
 
-    #for z_pos in np.linspace(-500, -300, 21):
-    for x_pos in np.linspace(-100, 100, 21):
-    #for t_pos in np.linspace(-1000, 1000, 21):
-    #for e_cscd in np.linspace(1, 41, 21):
+    llhs.append([])
+    for point in scan_points: 
 
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=z_pos, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-        hypo_params = HYPO_PARAMS_T(t=0, x=x_pos, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-        #hypo_params = HYPO_PARAMS_T(t=t_pos, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=e_cscd)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=point, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=point, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
+        #hypo_params = HYPO_PARAMS_T(t=point, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=point)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=point, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=point, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=point, track_zenith=PI/2., track_energy=20, cascade_energy=0)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=point, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
+        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=point, cascade_energy=0)
+        #hypo_params = HYPO_PARAMS_T(t=point, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
+        hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=point, track_energy=20, cascade_energy=0)
         pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
 
-        neg_llh = get_neg_llh(pinfo_gen, event, dom_tables)
+        llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
 
-        print('x = %i, llh = %.2f'%(x_pos,neg_llh))
-        #print('z = %i, llh = %.2f'%(z_pos,neg_llh))
-        #print('t = %i, llh = %.2f'%(t_pos,neg_llh))
-        #print('E = %i, llh = %.2f'%(e_cscd,neg_llh))
+llhs = np.array(llhs)
 
+for llh in llhs:
+    plt.plot(scan_points, llh)
+#plt.savefig('scans/llh_scan_z.png')
+#plt.savefig('scans/llh_scan_x.png')
+#plt.savefig('scans/trck_llh_scan_y.png')
+#plt.savefig('scans/llh_scan_t.png')
+#plt.savefig('scans/llh_scan_e_cscd.png')
+#plt.savefig('scans/trck_llh_scan_e_trck.png')
+#plt.savefig('scans/trck_llh_scan_t.png')
+#plt.savefig('scans/trck_llh_scan_x.png')
+plt.savefig('scans/trck2_llh_scan_zenith.png')
+#plt.savefig('scans/trck_llh_scan_azimuth.png')
+#plt.savefig('scans/trck_llh_scan_z.png')
     
 

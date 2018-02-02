@@ -325,7 +325,7 @@ Pulses = namedtuple( # pylint: disable=invalid-name
 
 RetroPhotonInfo = namedtuple( # pylint: disable=invalid-name
     typename='RetroPhotonInfo',
-    field_names=('survival_prob', 'theta', 'deltaphi', 'length')
+    field_names=('survival_prob', 'time_indep_survival_prob', 'theta', 'deltaphi', 'length')
 )
 """Info contained in (original) retro tables: Photon survival probability
 (survival_prob) and average photon direction and length (theta, deltaphi,

@@ -352,6 +352,8 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
         photon_info.survival_prob[depth_idx] /= r_volumes[None,:,None]
 
+        photon_info.time_indep_survival_prob[depth_idx] = np.sum(photon_info.survival_prob[depth_idx], axis=0)
+
         #print(np.max(photon_info.survival_prob[depth_idx]))
 
         theta = retro.force_little_endian(table[6].data)
@@ -364,7 +366,7 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
-def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
+def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob, time_indep_survival_prob,
                    avg_photon_theta, avg_photon_length, use_directionality,
                    t_min, t_max, n_t_bins, r_min, r_max, r_power, n_r_bins,
                    n_costheta_bins):
@@ -398,10 +400,10 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     """
     table_dt = (t_max - t_min) / n_t_bins
     table_dr = (r_max - r_max) / n_r_bins
-    table_dcostheta = 2 / n_costheta_bins
+    table_dcostheta = 2. / n_costheta_bins
     expected_photon_count = 0.
     total_photon_count = 0.
-    inv_r_power = 1 / r_power
+    inv_r_power = 1. / r_power
     table_dr_pwr = (r_max-r_min)**inv_r_power / n_r_bins
 
     for pgen_idx in range(pinfo_gen.shape[0]):
@@ -419,6 +421,12 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         rho2 = dx**2 + dy**2
         r = np.sqrt(rho2 + dz**2)
 
+        # we can already continue before computing the bin idx
+        if r > r_max:
+            continue
+        if r < r_min:
+            continue
+
         #spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
         #if spacetime_sep < 0 or spacetime_sep >= retro.POL_TABLE_RMAX:
         #    print('spacetime_sep:', spacetime_sep)
@@ -427,19 +435,19 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
         rbin_idx = int((r-r_min)**inv_r_power / table_dr_pwr)
         #print('rbin_idx: ',rbin_idx)
-        if rbin_idx < 0 or rbin_idx >= n_r_bins:
-            #print('r at ',r,'with idx ',rbin_idx)
-            continue
+        #if rbin_idx < 0 or rbin_idx >= n_r_bins:
+        #    #print('r at ',r,'with idx ',rbin_idx)
+        #    continue
 
         costhetabin_idx = int((1 -(dz / r)) / table_dcostheta)
         #print('costhetabin_idx: ',costhetabin_idx)
-        if costhetabin_idx < 0 or costhetabin_idx >= n_costheta_bins:
-            print('costheta out of range! This should not happen')
-            continue
+        #if costhetabin_idx < 0 or costhetabin_idx >= n_costheta_bins:
+        #    print('costheta out of range! This should not happen')
+        #    continue
 
         # time indep.
         time_indep_count = (
-                p_count * np.sum(survival_prob[:, rbin_idx, costhetabin_idx])
+                p_count * time_indep_survival_prob[rbin_idx, costhetabin_idx]
         )
         total_photon_count += time_indep_count
 
@@ -858,6 +866,7 @@ class DOMTimePolarTables(object):
         #deltaphi = photon_info.deltaphi[depth_idx]
         self.tables[subdet][depth_idx] = retro.RetroPhotonInfo(
             survival_prob=photon_info.survival_prob[depth_idx],
+            time_indep_survival_prob=photon_info.time_indep_survival_prob[depth_idx],
             theta=photon_info.theta[depth_idx],
             deltaphi=photon_info.deltaphi[depth_idx],
             length=(photon_info.length[depth_idx]
@@ -909,12 +918,14 @@ class DOMTimePolarTables(object):
         table = self.tables[subdet][depth_idx]
         bin_edges = self.bin_edges[subdet][depth_idx]
         survival_prob = table.survival_prob
+        time_indep_survival_prob = table.time_indep_survival_prob
         avg_photon_theta = table.theta
         avg_photon_length = table.length
         return pexp_t_r_theta(pinfo_gen=pinfo_gen,
                               hit_time=hit_time,
                               dom_coord=dom_coord,
                               survival_prob=survival_prob,
+                              time_indep_survival_prob=time_indep_survival_prob,
                               avg_photon_theta=avg_photon_theta,
                               avg_photon_length=avg_photon_length,
                               use_directionality=use_directionality,
