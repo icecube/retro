@@ -4,40 +4,15 @@
 """
 Load retro tables into RAM, then for a given hypothesis calculate llh for an event
 """
-
-
 from __future__ import absolute_import, division, print_function
 
-
-__author__ = 'P. Eller, J.L. Lanfranchi'
-__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.'''
-
-
-from argparse import ArgumentParser
-from collections import OrderedDict, Sequence
-from copy import deepcopy
 import cPickle as pickle
-from itertools import izip, product
-from os import makedirs
 from os.path import abspath, dirname, isdir, join
 import sys
 import time
 
-import numba # pylint: disable=unused-import
+import numba
 import numpy as np
-
-from scipy.special import gammaln
 
 import matplotlib
 matplotlib.use('Agg')
@@ -48,17 +23,14 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS, PI # pylint: disable=unused-import
-from retro import FTYPE, HYPO_PARAMS_T, HypoParams10D
+from retro import PI 
+from retro import HYPO_PARAMS_T
 from retro import DETECTOR_GEOM_FILE
-from retro import (event_to_hypo_params, expand, poisson_llh,
-                   get_primary_interaction_str)
-from retro.events import Events
+from retro import expand
 from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_kernels import const_energy_loss_muon # pylint: disable=unused-import
-from retro.discrete_cascade_kernels import point_cascade # pylint: disable=unused-import
-from retro.plot_1d_scan import plot_1d_scan
-from retro.table_readers import DOMTimePolarTables, TDICartTable # pylint: disable=unused-import
+from retro.discrete_muon_kernels import const_energy_loss_muon
+from retro.discrete_cascade_kernels import point_cascade
+from retro.table_readers import DOMTimePolarTables
 
 SMALL_P = 1e-8
 NOISE_Q = 0.1
@@ -189,7 +161,7 @@ llhs = np.array(llhs)
 
 # plot them
 for llh in llhs:
-    plt.plot(scan_points, llh)
+    plt.plot(scan_dims[scan_dim]['scan_points'], llh)
     plt.gca().set_xlabel(scan_dim)
     plt.gca().set_ylabel('-llh')
 plt.savefig('scans/%s.png'%scan_dim)
