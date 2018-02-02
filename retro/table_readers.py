@@ -40,6 +40,7 @@ from StringIO import StringIO
 from subprocess import Popen, PIPE
 import sys
 from time import time
+import math
 
 import numpy as np
 import pyfits
@@ -406,6 +407,9 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob, time_indep_sur
     inv_r_power = 1. / r_power
     table_dr_pwr = (r_max-r_min)**inv_r_power / n_r_bins
 
+    r2_max = r_max**2
+    r2_min = r_min**2
+
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
 
@@ -418,14 +422,15 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob, time_indep_sur
         dy = y - dom_coord[1]
         dz = z - dom_coord[2]
 
-        rho2 = dx**2 + dy**2
-        r = np.sqrt(rho2 + dz**2)
-
+        r2 = dx**2 + dy**2 + dz**2
         # we can already continue before computing the bin idx
-        if r > r_max:
+        if r2 > r2_max:
             continue
-        if r < r_min:
+        if r2 < r2_min:
             continue
+
+        r = math.sqrt(r2)
+
 
         #spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
         #if spacetime_sep < 0 or spacetime_sep >= retro.POL_TABLE_RMAX:

@@ -86,7 +86,7 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
 
     for string_idx in range(86):
         for dom_idx in range(60):
-            #print('string %i, DOM %i'%(string_idx+1, dom_idx+1))
+            start_t = time.time()
             total_observed_ps = 0.
             total_expected_ps = 0.
             try:
@@ -105,52 +105,36 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
                                               string=string_idx+1,
                                               depth_idx=dom_idx,
                                               )
-                    #print(total_expected_ps)
-                    #print('expected_p %.5f'%expected_p)
+                    # normalize to get pdf
                     P = expected_p / total_expected_ps
+                    # make sure they're not zero
                     probability = P + SMALL_P - P*SMALL_P
+                    # add them number of hit times
                     neg_llh -= weight * np.log(probability)
-                    #print('hit probability %.5f'%probability)
-                    # hit ptobability
             else:
+                # just want total_expected_ps, but using thr same function right now
                 total_expected_ps, expected_p = dom_tables.get_photon_expectation(
                                               pinfo_gen=pinfo_gen,
-                                              hit_time=0,
+                                              hit_time=-1000,
                                               string=string_idx+1,
                                               depth_idx=dom_idx,
                                               )
             
 
-            #if total_observed_ps > 0. and total_expected_ps > 0.:
-            #llh = total_observed_ps * np.log(total_expected_ps) - total_expected_ps - gammaln(total_observed_ps+1)
-            #print('expected %.3f, observed %.3f, llh = %.3f'%(total_expected_ps, total_observed_ps, llh))
-            #neg_llh -= llh
-
+            # add a noise floor
             N = total_expected_ps + NOISE_Q
+            # for 0,0 poisson is i think not well defined
             if not (total_observed_ps == 0. and total_expected_ps == 0.):
+                # add only non-constant part
                 neg_llh -= (total_observed_ps * np.log(N) - N)
+            stop_t = time.time()
 
-            ##total_expected_ps = max(total_expected_ps, SMALL_N)
-            #if total_observed_ps == 0:
-            #    neg_llh -= total_expected_ps
-            #else:
-            #    if total_expected_ps < SMALL_N:
-            #        total_expected_ps = SMALL_N
-            #        small_n_counts += 1
-            #    #poisson probability (skipping gamma)
-            #    #print('DOM %s, %s expected %.5f observed %.5f'%(string_idx, dom_idx, total_expected_ps, total_observed_ps))
-
-    #print('%i small p'%small_p_counts)
-    #print('%i small n'%small_n_counts)
     return neg_llh
 
 
 discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade, const_energy_loss_muon])
-
-
 geom_file = DETECTOR_GEOM_FILE
 tables_dir = '/data/icecube/retro_tables/full1000/'
-
 
 # Load detector geometry array
 print('Loading detector geometry from "%s"...' % expand(geom_file))
@@ -167,57 +151,47 @@ dom_tables = DOMTimePolarTables(
 )
 dom_tables.load_tables()
 
-#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=20, cascade_energy=0)
-#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=-PI, track_energy=20, cascade_energy=0)
+# create scan dimensions disctionary
+scan_dims = {}
+scan_dims['t'] = {'scan_points':np.linspace(-100, 100, 21)}
+scan_dims['x'] = {'scan_points':np.linspace(-100, 100, 21)}
+scan_dims['y'] = {'scan_points':np.linspace(-100, 100, 21)}
+scan_dims['z'] = {'scan_points':np.linspace(-500, -300, 21)}
+scan_dims['track_zenith'] = {'scan_points':np.linspace(0, PI, 21)}
+scan_dims['track_azimuth'] = {'scan_points':np.linspace(0, 2*PI, 21)}
+scan_dims['track_energy'] = {'scan_points':np.linspace(1, 41, 21)}
+scan_dims['cscd_energy'] = {'scan_points':np.linspace(1, 41, 21)}
+
+#open events file:
 
 #with open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0_events.pkl', 'rb') as f:
 #with open('benchmark_events.pkl', 'rb') as f:
 with open('testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl', 'rb') as f:
     events = pickle.load(f)
 
-#scan_points = np.linspace(1, 41, 21)
-#scan_points = np.linspace(-500, -300, 21)
-#scan_points = np.linspace(-100, 100, 21)
-scan_points = np.linspace(0, PI, 21)
-#scan_points = np.linspace(0, 2*PI, 21)
-llhs = []
+hypo = {'t':0, 'x':0, 'y':0, 'z':-400, 'track_zenith':PI, 'track_azimuth':0, 'track_energy':20, 'cascade_energy':0}
 
+scan_dim = 't'
+
+# scan multiple events
+llhs = []
 for i, event in enumerate(events[0:10]):
     print('\nevent ',i)
 
     llhs.append([])
-    for point in scan_points: 
-
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=point, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=point, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-        #hypo_params = HYPO_PARAMS_T(t=point, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=point)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=point, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=point, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=point, track_zenith=PI/2., track_energy=20, cascade_energy=0)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=point, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
-        #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=point, cascade_energy=0)
-        #hypo_params = HYPO_PARAMS_T(t=point, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
-        hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=point, track_energy=20, cascade_energy=0)
+    for point in scan_dims[scan_dim]['scan_points']: 
+        hypo[scan_dim] = point
+        hypo_params = HYPO_PARAMS_T(**hypo)
         pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
-
         llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
 
 llhs = np.array(llhs)
 
+# plot them
 for llh in llhs:
     plt.plot(scan_points, llh)
-#plt.savefig('scans/llh_scan_z.png')
-#plt.savefig('scans/llh_scan_x.png')
-#plt.savefig('scans/trck_llh_scan_y.png')
-#plt.savefig('scans/llh_scan_t.png')
-#plt.savefig('scans/llh_scan_e_cscd.png')
-#plt.savefig('scans/trck_llh_scan_e_trck.png')
-#plt.savefig('scans/trck_llh_scan_t.png')
-#plt.savefig('scans/trck_llh_scan_x.png')
-plt.savefig('scans/trck2_llh_scan_zenith.png')
-#plt.savefig('scans/trck_llh_scan_azimuth.png')
-#plt.savefig('scans/trck_llh_scan_z.png')
+    plt.gca().set_xlabel(scan_dim)
+    plt.gca().set_ylabel('-llh')
+plt.savefig('scans/%s.png'%scan_dim)
     
 
