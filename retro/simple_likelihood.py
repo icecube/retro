@@ -18,6 +18,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
+from matplotlib.patches import Rectangle
 
 if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
@@ -78,7 +79,10 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
                                               depth_idx=dom_idx,
                                               )
                     # normalize to get pdf
-                    P = expected_p / total_expected_ps
+                    if expected_p > 0.:
+                        P = expected_p / total_expected_ps
+                    else:
+                        P = 0.
                     # make sure they're not zero
                     probability = P + SMALL_P - P*SMALL_P
                     # add them number of hit times
@@ -125,14 +129,14 @@ dom_tables.load_tables()
 
 # create scan dimensions disctionary
 scan_dims = {}
-scan_dims['t'] = {'scan_points':np.linspace(-100, 100, 21)}
-scan_dims['x'] = {'scan_points':np.linspace(-100, 100, 21)}
+scan_dims['t'] = {'scan_points':np.linspace(-200, 200, 1001)}
+scan_dims['x'] = {'scan_points':np.linspace(-100, 100, 1001)}
 scan_dims['y'] = {'scan_points':np.linspace(-100, 100, 21)}
-scan_dims['z'] = {'scan_points':np.linspace(-500, -300, 21)}
-scan_dims['track_zenith'] = {'scan_points':np.linspace(0, PI, 21)}
-scan_dims['track_azimuth'] = {'scan_points':np.linspace(0, 2*PI, 21)}
-scan_dims['track_energy'] = {'scan_points':np.linspace(1, 41, 21)}
-scan_dims['cscd_energy'] = {'scan_points':np.linspace(1, 41, 21)}
+scan_dims['z'] = {'scan_points':np.linspace(-430, -370, 1001)}
+scan_dims['track_zenith'] = {'scan_points':np.linspace(0, PI, 1001)}
+scan_dims['track_azimuth'] = {'scan_points':np.linspace(0, 2*PI, 1001)}
+scan_dims['track_energy'] = {'scan_points':np.linspace(0, 40, 21)}
+scan_dims['cascade_energy'] = {'scan_points':np.linspace(0, 40, 21)}
 
 #open events file:
 
@@ -141,29 +145,76 @@ scan_dims['cscd_energy'] = {'scan_points':np.linspace(1, 41, 21)}
 with open('testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl', 'rb') as f:
     events = pickle.load(f)
 
-hypo = {'t':0, 'x':0, 'y':0, 'z':-400, 'track_zenith':PI, 'track_azimuth':0, 'track_energy':20, 'cascade_energy':0}
+hypo = {'t':0, 'x':0, 'y':0, 'z':-400, 'track_zenith':PI/2, 'track_azimuth':0, 'track_energy':20, 'cascade_energy':0}
 
-scan_dim = 't'
+def edges(centers):
+    d = np.diff(centers)/2
+    e = np.append(centers[0]-d[0], centers[:-1]+d)
+    return np.append(e, centers[-1]+d[-1])
 
-# scan multiple events
-llhs = []
-for i, event in enumerate(events[0:10]):
-    print('\nevent ',i)
+if True:
+    # 1-d scan:
+    scan_dim = 'track_zenith'
+    # scan multiple events
+    llhs = []
+    for i, event in enumerate(events[0:1]):
+        print('\nevent ',i)
 
-    llhs.append([])
-    for point in scan_dims[scan_dim]['scan_points']: 
-        hypo[scan_dim] = point
-        hypo_params = HYPO_PARAMS_T(**hypo)
-        pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
-        llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
+        llhs.append([])
+        for point in scan_dims[scan_dim]['scan_points']: 
+            hypo[scan_dim] = point
+            hypo_params = HYPO_PARAMS_T(**hypo)
+            pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
+            llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
 
-llhs = np.array(llhs)
+    llhs = np.array(llhs)
 
-# plot them
-for llh in llhs:
-    plt.plot(scan_dims[scan_dim]['scan_points'], llh)
-    plt.gca().set_xlabel(scan_dim)
-    plt.gca().set_ylabel('-llh')
-plt.savefig('scans/%s.png'%scan_dim)
-    
+    # plot them
+    for llh in llhs:
+        plt.plot(scan_dims[scan_dim]['scan_points'], llh)
+        plt.gca().set_xlabel(scan_dim)
+        plt.gca().set_ylabel('-llh')
+    plt.savefig('scans/%s.png'%scan_dim)
+
+if False:
+    # 2-d scan:
+
+    cmap = 'YlGnBu_r'
+
+    scan_dim_x = 'x'
+    scan_dim_y = 'z'
+
+    event = events[0]
+
+    llhs = []
+    for point_x in scan_dims[scan_dim_x]['scan_points']: 
+        llhs.append([])
+        for point_y in scan_dims[scan_dim_y]['scan_points']: 
+            hypo[scan_dim_x] = point_x
+            hypo[scan_dim_y] = point_y
+            hypo_params = HYPO_PARAMS_T(**hypo)
+            pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
+            llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
+            
+    llhs = np.array(llhs)
+    x = edges(scan_dims[scan_dim_x]['scan_points'])
+    y = edges(scan_dims[scan_dim_y]['scan_points'])
+    xx, yy = np.meshgrid(x, y)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    mg = ax.pcolormesh(xx, yy, llhs.T, cmap=cmap)
+    fig.colorbar(mg)
+    ax.set_xlabel(scan_dim_x)
+    ax.set_ylabel(scan_dim_y)
+    #truth
+    #ax.axvline(theta_true, color='r')
+    #ax.axhline(z_v_true, color='r')
+    #ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
+
+    # plot minimum:
+    m_x, m_y = np.unravel_index(llhs.argmin(), llhs.shape)
+    ax.add_patch(Rectangle((x[m_x], y[m_y]), (x[m_x+1] - x[m_x]), (y[m_y+1] - y[m_y]),alpha=1, fill=False, edgecolor='red', linewidth=2))
+
+    plt.savefig('scans/2d_%s_%s.png'%(scan_dim_x, scan_dim_y),dpi=150)
 
