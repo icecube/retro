@@ -47,6 +47,7 @@ i3_file = dataio.I3File(fname)
 
 counter = 0
 
+
 while i3_file.more():
     frame = i3_file.pop_frame()
     if not frame.Has('photons'):
@@ -59,6 +60,17 @@ while i3_file.more():
     if counter%100==0:
         print(counter)
     p = frame['photons']
+    mc = frame['I3MCTree']
+    MCtruth = {}
+    MCtruth['x'] = mc[0].pos[0]
+    MCtruth['y'] = mc[0].pos[1]
+    MCtruth['z'] = mc[0].pos[2]
+    MCtruth['t'] = mc[0].time
+    MCtruth['energy'] = mc[0].energy
+    MCtruth['type'] = str(mc[0].type)
+    MCtruth['azimuth'] = mc[0].dir.azimuth
+    MCtruth['zenith'] = mc[0].dir.zenith
+    raw_data['MC'] = MCtruth
     for DOM in p:
         DOM_key = DOM[0]
         string = int(DOM_key.string)

@@ -107,6 +107,13 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
 
     return neg_llh
 
+def zenith_astro_to_reco(zenith):
+    return PI - zenith
+
+def azimuth_astro_to_reco(azimuth):
+    return (azimuth - PI) % (2*PI)
+
+
 
 discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade, const_energy_loss_muon])
 geom_file = DETECTOR_GEOM_FILE
@@ -129,23 +136,22 @@ dom_tables.load_tables()
 
 # create scan dimensions disctionary
 scan_dims = {}
-scan_dims['t'] = {'scan_points':np.linspace(-200, 200, 1001)}
-scan_dims['x'] = {'scan_points':np.linspace(-100, 100, 1001)}
+scan_dims['t'] = {'scan_points':np.linspace(-200, 200, 101)}
+scan_dims['x'] = {'scan_points':np.linspace(-100, 100, 101)}
 scan_dims['y'] = {'scan_points':np.linspace(-100, 100, 21)}
-scan_dims['z'] = {'scan_points':np.linspace(-430, -370, 1001)}
-scan_dims['track_zenith'] = {'scan_points':np.linspace(0, PI, 1001)}
-scan_dims['track_azimuth'] = {'scan_points':np.linspace(0, 2*PI, 1001)}
+scan_dims['z'] = {'scan_points':np.linspace(-430, -370, 101)}
+scan_dims['track_zenith'] = {'scan_points':np.linspace(0, PI, 101)}
+scan_dims['track_azimuth'] = {'scan_points':np.linspace(0, 2*PI, 101)}
 scan_dims['track_energy'] = {'scan_points':np.linspace(0, 40, 21)}
 scan_dims['cascade_energy'] = {'scan_points':np.linspace(0, 40, 21)}
 
 #open events file:
 
 #with open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0_events.pkl', 'rb') as f:
-#with open('benchmark_events.pkl', 'rb') as f:
-with open('testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl', 'rb') as f:
+with open('benchmark_events.pkl', 'rb') as f:
+#with open('testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl', 'rb') as f:
     events = pickle.load(f)
 
-hypo = {'t':0, 'x':0, 'y':0, 'z':-400, 'track_zenith':PI/2, 'track_azimuth':0, 'track_energy':20, 'cascade_energy':0}
 
 def edges(centers):
     d = np.diff(centers)/2
@@ -157,8 +163,18 @@ if True:
     scan_dim = 'track_zenith'
     # scan multiple events
     llhs = []
-    for i, event in enumerate(events[0:1]):
+    for i, event in enumerate(events[0:10]):
         print('\nevent ',i)
+
+        hypo = {'t':event['MC']['t'],
+                'x':event['MC']['x'],
+                'y':event['MC']['y'],
+                'z':event['MC']['z'],
+                'track_zenith':zenith_astro_to_reco(event['MC']['zenith']),
+                'track_azimuth':azimuth_astro_to_reco(event['MC']['azimuth']),
+                'track_energy': event['MC']['energy'] if event['MC']['type'] == 'NuMu' else 0,
+                'cascade_energy': event['MC']['energy'] if event['MC']['type'] == 'NuE' else 0,
+                }
 
         llhs.append([])
         for point in scan_dims[scan_dim]['scan_points']: 
@@ -175,6 +191,7 @@ if True:
         plt.gca().set_xlabel(scan_dim)
         plt.gca().set_ylabel('-llh')
     plt.savefig('scans/%s.png'%scan_dim)
+
 
 if False:
     # 2-d scan:
