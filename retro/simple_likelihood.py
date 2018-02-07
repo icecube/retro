@@ -15,6 +15,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from scipy import optimize
 from argparse import ArgumentParser
+import socket
 
 import numba
 import numpy as np
@@ -135,7 +136,12 @@ def azimuth_astro_to_reco(azimuth):
 
 discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade, const_energy_loss_muon])
 geom_file = DETECTOR_GEOM_FILE
-tables_dir = '/data/icecube/retro_tables/full1000/'
+# ET:
+if socket.gethostname() in ['schwyz', 'uri', 'unterwalden']:
+    tables_dir = '/data/icecube/retro_tables/full1000/'
+# ACI
+else:
+    tables_dir = '/gpfs/group/dfc13/default/retro_tables/full1000/'
 
 # Load detector geometry array
 print('Loading detector geometry from "%s"...' % expand(geom_file))
