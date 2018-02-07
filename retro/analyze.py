@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 import matplotlib
@@ -9,15 +10,15 @@ from pymultinest.analyse import Analyzer
 llhs = []
 bestfits = []
 
-#for i in range(10):
-for i in [273]:
-    try:
-        a = Analyzer(8, outputfiles_basename = "/gpfs/scratch/pde3/retro/out/tol0.1_evt%i-"%i)
-        bestfit_params = a.get_best_fit()
-        llhs.append(bestfit_params['log_likelihood'])
-        bestfits.append(bestfit_params['parameters'])
-    except IOError:
-        pass
+for i in range(1000):
+    if os.path.exists('/gpfs/scratch/pde3/retro/log/run_%04d.log'%i):
+        try:
+            a = Analyzer(8, outputfiles_basename = "/gpfs/scratch/pde3/retro/out/tol0.1_evt%i-"%i)
+            bestfit_params = a.get_best_fit()
+            llhs.append(bestfit_params['log_likelihood'])
+            bestfits.append(bestfit_params['parameters'])
+        except IOError:
+            pass
 
 llhs = np.array(llhs)
 bestfits = np.array(bestfits)
