@@ -30,3 +30,6 @@ for i, name in enumerate(names):
     plt.savefig('reco_%s.png'%name)
     plt.clf()
 
+plt.hist(llhs)
+plt.gca().set_xlabel('llh')
+plt.savefig('reco_llh.png')
