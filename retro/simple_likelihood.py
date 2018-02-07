@@ -10,6 +10,10 @@ import cPickle as pickle
 from os.path import abspath, dirname, isdir, join
 import sys
 import time
+import itertools
+from copy import deepcopy
+from collections import OrderedDict
+from scipy import optimize
 
 import numba
 import numpy as np
@@ -136,12 +140,12 @@ dom_tables.load_tables()
 
 # create scan dimensions disctionary
 scan_dims = {}
-scan_dims['t'] = {'scan_points':np.linspace(-200, 200, 101)}
-scan_dims['x'] = {'scan_points':np.linspace(-100, 100, 101)}
+scan_dims['t'] = {'scan_points':np.linspace(-200, 200, 21)}
+scan_dims['x'] = {'scan_points':np.linspace(-100, 100, 21)}
 scan_dims['y'] = {'scan_points':np.linspace(-100, 100, 21)}
-scan_dims['z'] = {'scan_points':np.linspace(-430, -370, 101)}
-scan_dims['track_zenith'] = {'scan_points':np.linspace(0, PI, 101)}
-scan_dims['track_azimuth'] = {'scan_points':np.linspace(0, 2*PI, 101)}
+scan_dims['z'] = {'scan_points':np.linspace(-430, -370, 21)}
+scan_dims['track_zenith'] = {'scan_points':np.linspace(0, PI, 21)}
+scan_dims['track_azimuth'] = {'scan_points':np.linspace(0, 2*PI, 21)}
 scan_dims['track_energy'] = {'scan_points':np.linspace(0, 40, 21)}
 scan_dims['cascade_energy'] = {'scan_points':np.linspace(0, 40, 21)}
 
@@ -158,7 +162,151 @@ def edges(centers):
     e = np.append(centers[0]-d[0], centers[:-1]+d)
     return np.append(e, centers[-1]+d[-1])
 
+
+
+## OPTIMIZE
+
 if True:
+
+    event = events[0]
+    truth = {'t':event['MC']['t'],
+            'x':event['MC']['x'],
+            'y':event['MC']['y'],
+            'z':event['MC']['z'],
+            'track_zenith':zenith_astro_to_reco(event['MC']['zenith']),
+            'track_azimuth':azimuth_astro_to_reco(event['MC']['azimuth']),
+            'track_energy': event['MC']['energy'] if event['MC']['type'] == 'NuMu' else 0,
+            'cascade_energy': event['MC']['energy'] if event['MC']['type'] == 'NuE' else 0,
+            }
+    true_params = HYPO_PARAMS_T(**truth)
+    pinfo_gen = discrete_hypo.get_pinfo_gen(true_params)
+    print('Truth at llh=%.3f'%get_neg_llh(pinfo_gen, event, dom_tables))
+
+
+
+
+    # multinest
+    import pymultinest
+
+    def prior(cube, ndim, nparams):
+        # t
+        cube[0] = (cube[0] * 2000) - 1000
+        # x, y, z
+        cube[1] = (cube[1] * 1000) - 500
+        cube[2] = (cube[2] * 1000) - 500
+        cube[3] = (cube[3] * 1000) - 500
+        # zenith
+        cube[4] = cube[4] * PI
+        # azimuth
+        cube[5] = cube[5] * 2 * PI
+        # energy
+        #cube[6] = cube[6] * 200
+        # log uniform prior between 10^0 and 10^3
+        cube[6] = 10**(cube[6]*3)
+        # tarck fraction already (0,1)
+
+    def loglike(cube, ndim, nparams):
+        hypo_params = HYPO_PARAMS_T(t=cube[0],
+                                    x=cube[1],
+                                    y=cube[2],
+                                    z=cube[3],
+                                    track_zenith=cube[4],
+                                    track_azimuth=cube[5],
+                                    cascade_energy=cube[6]*(1-cube[7]),
+                                    track_energy=cube[6]*cube[7]
+                                    )
+        pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
+        return -get_neg_llh(pinfo_gen, event, dom_tables)
+
+    n_params = 8
+
+    pymultinest.run(loglike, prior, n_params,
+                    verbose=True,
+                    outputfiles_basename='out/1-',
+                    resume=False,
+                    n_live_points=160,
+                    evidence_tolerance=100,
+                    sampling_efficiency=0.8,
+                    max_modes=10,
+                    seed=0,
+                    max_iter=1000,
+                    )
+
+
+
+    #def minimizer_callable(x):
+    #    '''
+    #    x: [t, x, y, z, track_zenith, track_azimuth, energy, track_fraction]
+    #    '''
+    #    hypo_params = HYPO_PARAMS_T(t=x[0], x=x[1], y=x[2], z=x[3], track_zenith=x[4], track_azimuth=x[5], cascade_energy=x[6]*(1-x[7]), track_energy=x[6]*x[7])
+    #    pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
+    #    llh = get_neg_llh(pinfo_gen, event, dom_tables)
+    #    #print('%.2f, %s'%(llh, x))
+    #    return llh
+
+
+    #bounds = OrderedDict()
+    #bounds['t'] = (-1000, 1000)
+    #bounds['x'] = (-500, 500)
+    #bounds['y'] = (-500, 500)
+    #bounds['z'] = (-500, 500)
+    #bounds['track_zenith'] = (0, PI)
+    #bounds['track_azimuth'] = (0, 2*PI)
+    #bounds['energy'] = (0, 200)
+    #bounds['track_fraction'] = (0, 1)
+
+
+    # scipy
+    #res = optimize.differential_evolution(minimizer_callable, bounds=bounds.values(),
+    #                                      popsize=20,
+    #                                      disp=True,
+    #                                      polish=True,
+    #                                      tol=0.1,
+    #                                      strategy='best2bin',
+    #                                      )
+
+    #print(res)
+
+
+    # particle swarm:
+    #from pyswarm import pso
+
+    #lower_bounds = []
+    #upper_bounds = []
+    #for bound in bounds.values():
+    #    lower_bounds.append(bound[0])
+    #    upper_bounds.append(bound[1])
+    #xopt, fopt = pso(minimizer_callable, lower_bounds, upper_bounds,\
+    #                 debug=True,
+    #                 omega=10,
+    #                 phip=10,
+    #                 phig=10,
+    #                 )
+
+    #print(xopt, fopt)
+
+    # Bayesian optimization:
+    #def minimizer_callable(t,x,y,z,track_zenith,track_azimuth, energy, track_fraction):
+    #    hypo_params = HYPO_PARAMS_T(t=t, x=x, y=y, z=z, track_zenith=track_zenith, track_azimuth=track_azimuth, cascade_energy=energy*(1-track_fraction), track_energy=energy*track_fraction)
+    #    pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
+    #    return -get_neg_llh(pinfo_gen, event, dom_tables)
+
+    #from bayes_opt import BayesianOptimization
+    #bo = BayesianOptimization(minimizer_callable, bounds)
+    #gp_params = {'kernel': None,
+    #             'alpha': 1e-3,
+    #             'xi': 0.,
+    #             'acq': 'ei',
+    #             }
+
+    #bo.maximize(init_points=100, n_iter=50, **gp_params)
+    #print(bo.res['max'])
+
+
+## SCAN
+
+
+if False:
     # 1-d scan:
     scan_dim = 'track_zenith'
     # scan multiple events
@@ -198,40 +346,56 @@ if False:
 
     cmap = 'YlGnBu_r'
 
-    scan_dim_x = 'x'
-    scan_dim_y = 'z'
+    #scan_dim_x = 'track_energy'
+    #scan_dim_y = 'cascade_energy'
 
     event = events[0]
 
-    llhs = []
-    for point_x in scan_dims[scan_dim_x]['scan_points']: 
-        llhs.append([])
-        for point_y in scan_dims[scan_dim_y]['scan_points']: 
-            hypo[scan_dim_x] = point_x
-            hypo[scan_dim_y] = point_y
-            hypo_params = HYPO_PARAMS_T(**hypo)
-            pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
-            llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
-            
-    llhs = np.array(llhs)
-    x = edges(scan_dims[scan_dim_x]['scan_points'])
-    y = edges(scan_dims[scan_dim_y]['scan_points'])
-    xx, yy = np.meshgrid(x, y)
+    truth = {'t':event['MC']['t'],
+            'x':event['MC']['x'],
+            'y':event['MC']['y'],
+            'z':event['MC']['z'],
+            'track_zenith':zenith_astro_to_reco(event['MC']['zenith']),
+            'track_azimuth':azimuth_astro_to_reco(event['MC']['azimuth']),
+            'track_energy': event['MC']['energy'] if event['MC']['type'] == 'NuMu' else 0,
+            'cascade_energy': event['MC']['energy'] if event['MC']['type'] == 'NuE' else 0,
+            }
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    mg = ax.pcolormesh(xx, yy, llhs.T, cmap=cmap)
-    fig.colorbar(mg)
-    ax.set_xlabel(scan_dim_x)
-    ax.set_ylabel(scan_dim_y)
-    #truth
-    #ax.axvline(theta_true, color='r')
-    #ax.axhline(z_v_true, color='r')
-    #ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
+    for scan_dim_x, scan_dim_y in itertools.combinations(truth.keys(), 2):
+        print('scanning %s vs. %s'%(scan_dim_x, scan_dim_y))
+        hypo = deepcopy(truth)
 
-    # plot minimum:
-    m_x, m_y = np.unravel_index(llhs.argmin(), llhs.shape)
-    ax.add_patch(Rectangle((x[m_x], y[m_y]), (x[m_x+1] - x[m_x]), (y[m_y+1] - y[m_y]),alpha=1, fill=False, edgecolor='red', linewidth=2))
+        llhs = []
+        for point_x in scan_dims[scan_dim_x]['scan_points']: 
+            llhs.append([])
+            for point_y in scan_dims[scan_dim_y]['scan_points']: 
+                hypo[scan_dim_x] = point_x
+                hypo[scan_dim_y] = point_y
+                hypo_params = HYPO_PARAMS_T(**hypo)
+                pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
+                llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
+                
+        llhs = np.array(llhs)
+        x = edges(scan_dims[scan_dim_x]['scan_points'])
+        y = edges(scan_dims[scan_dim_y]['scan_points'])
+        xx, yy = np.meshgrid(x, y)
 
-    plt.savefig('scans/2d_%s_%s.png'%(scan_dim_x, scan_dim_y),dpi=150)
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        mg = ax.pcolormesh(xx, yy, llhs.T, cmap=cmap)
+        fig.colorbar(mg)
+        ax.set_xlabel(scan_dim_x)
+        ax.set_ylabel(scan_dim_y)
+        ax.plot(truth[scan_dim_x], truth[scan_dim_y], c='g', marker='*')
+        
+        #truth
+        #ax.axvline(theta_true, color='r')
+        #ax.axhline(z_v_true, color='r')
+        #ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
+
+        # plot minimum:
+        m_x, m_y = np.unravel_index(llhs.argmin(), llhs.shape)
+        ax.add_patch(Rectangle((x[m_x], y[m_y]), (x[m_x+1] - x[m_x]), (y[m_y+1] - y[m_y]),alpha=1, fill=False, edgecolor='red', linewidth=2))
+
+        plt.savefig('scans/2d_%s_%s.png'%(scan_dim_x, scan_dim_y),dpi=150)
 
