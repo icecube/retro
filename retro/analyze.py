@@ -9,9 +9,10 @@ from pymultinest.analyse import Analyzer
 llhs = []
 bestfits = []
 
-for i in range(10):
+#for i in range(10):
+for i in [273]:
     try:
-        a = Analyzer(8, outputfiles_basename = "out/tol0.1_evt%i-"%i)
+        a = Analyzer(8, outputfiles_basename = "/gpfs/scratch/pde3/retro/out/tol0.1_evt%i-"%i)
         bestfit_params = a.get_best_fit()
         llhs.append(bestfit_params['log_likelihood'])
         bestfits.append(bestfit_params['parameters'])
