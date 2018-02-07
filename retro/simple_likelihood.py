@@ -14,6 +14,7 @@ import itertools
 from copy import deepcopy
 from collections import OrderedDict
 from scipy import optimize
+from argparse import ArgumentParser
 
 import numba
 import numpy as np
@@ -39,6 +40,19 @@ from retro.table_readers import DOMTimePolarTables
 
 SMALL_P = 1e-8
 NOISE_Q = 0.1
+
+"""Parse command line arguments"""
+parser = ArgumentParser()
+parser.add_argument(
+    '-f', '--file', type=str, default='benchmark_events.pkl',
+    help='''Events pkl file, containing (string, DOM, charge, time per
+    event)''',
+)
+parser.add_argument(
+    '--index', default=0, type=int,
+    help='''Event index to be processed'''
+)
+args = parser.parse_args()
 
 def get_neg_llh(pinfo_gen, event, dom_tables):
     """Get log likelihood.
@@ -150,10 +164,7 @@ scan_dims['track_energy'] = {'scan_points':np.linspace(0, 40, 21)}
 scan_dims['cascade_energy'] = {'scan_points':np.linspace(0, 40, 21)}
 
 #open events file:
-
-#with open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0_events.pkl', 'rb') as f:
-with open('benchmark_events.pkl', 'rb') as f:
-#with open('testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl', 'rb') as f:
+with open(args.file, 'rb') as f:
     events = pickle.load(f)
 
 
@@ -168,16 +179,21 @@ def edges(centers):
 
 if True:
 
-    event = events[0]
+    # multinest
+    import pymultinest
+
+    #for i,event in enumerate(events):
+    event = events[args.index]
+
     truth = {'t':event['MC']['t'],
-            'x':event['MC']['x'],
-            'y':event['MC']['y'],
-            'z':event['MC']['z'],
-            'track_zenith':zenith_astro_to_reco(event['MC']['zenith']),
-            'track_azimuth':azimuth_astro_to_reco(event['MC']['azimuth']),
-            'track_energy': event['MC']['energy'] if event['MC']['type'] == 'NuMu' else 0,
-            'cascade_energy': event['MC']['energy'] if event['MC']['type'] == 'NuE' else 0,
-            }
+             'x':event['MC']['x'],
+             'y':event['MC']['y'],
+             'z':event['MC']['z'],
+             'track_zenith':zenith_astro_to_reco(event['MC']['zenith']),
+             'track_azimuth':azimuth_astro_to_reco(event['MC']['azimuth']),
+             'track_energy': event['MC']['energy'] if event['MC']['type'] == 'NuMu' else 0,
+             'cascade_energy': event['MC']['energy'] if event['MC']['type'] == 'NuE' else 0,
+             }
     true_params = HYPO_PARAMS_T(**truth)
     pinfo_gen = discrete_hypo.get_pinfo_gen(true_params)
     print('Truth at llh=%.3f'%get_neg_llh(pinfo_gen, event, dom_tables))
@@ -185,10 +201,12 @@ if True:
 
 
 
-    # multinest
-    import pymultinest
-
     def prior(cube, ndim, nparams):
+        '''
+        function needed by pymultinest in order to transform
+        the so called `cube` into the actual dimesnion of the parameter space.
+        The cube is [0,1]^n
+        '''
         # t
         cube[0] = (cube[0] * 2000) - 1000
         # x, y, z
@@ -206,6 +224,11 @@ if True:
         # tarck fraction already (0,1)
 
     def loglike(cube, ndim, nparams):
+        '''
+        callable function for multinest to get llh values
+        the cube here is after the prior function has been applied
+        to it - i.e. it alsready contains the actual parameter values
+        '''
         hypo_params = HYPO_PARAMS_T(t=cube[0],
                                     x=cube[1],
                                     y=cube[2],
@@ -222,14 +245,14 @@ if True:
 
     pymultinest.run(loglike, prior, n_params,
                     verbose=True,
-                    outputfiles_basename='out/1-',
+                    outputfiles_basename='out/tol0.1_evt%i-'%args.index,
                     resume=False,
                     n_live_points=160,
-                    evidence_tolerance=100,
+                    evidence_tolerance=0.1,
                     sampling_efficiency=0.8,
                     max_modes=10,
                     seed=0,
-                    max_iter=1000,
+                    max_iter=100000,
                     )
 
 
