@@ -249,9 +249,13 @@ if True:
 
     n_params = 8
 
+    if socket.gethostname() in ['schwyz', 'uri', 'unterwalden']:
+        outname = 'out/tol0.1_evt%i-'%args.index
+    else:
+        outname = '/gpfs/scratch/pde3/retro/out/tol0.1_evt%i-'%args.index
     pymultinest.run(loglike, prior, n_params,
                     verbose=True,
-                    outputfiles_basename='out/tol0.1_evt%i-'%args.index,
+                    outputfiles_basename=outname,
                     resume=False,
                     n_live_points=160,
                     evidence_tolerance=0.1,
