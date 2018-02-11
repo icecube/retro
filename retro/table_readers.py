@@ -40,6 +40,7 @@ from StringIO import StringIO
 from subprocess import Popen, PIPE
 import sys
 from time import time
+import math
 
 import numpy as np
 import pyfits
@@ -348,6 +349,14 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
         r = retro.force_little_endian(table[5].data)
 
+        r_volumes = np.square(0.5 * (r[1:] + r[:-1]))
+
+        photon_info.survival_prob[depth_idx] /= r_volumes[None,:,None]
+
+        photon_info.time_indep_survival_prob[depth_idx] = np.sum(photon_info.survival_prob[depth_idx], axis=0)
+
+        #print(np.max(photon_info.survival_prob[depth_idx]))
+
         theta = retro.force_little_endian(table[6].data)
 
         bin_edges = retro.TimeSphCoord(
@@ -358,19 +367,21 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
-def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
+def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob, time_indep_survival_prob,
                    avg_photon_theta, avg_photon_length, use_directionality,
                    t_min, t_max, n_t_bins, r_min, r_max, r_power, n_r_bins,
                    n_costheta_bins):
-    """Compute total expected photons in a DOM based on the (t,r,theta)-binned
-    Retro DOM tables applied to a the generated photon info `pinfo_gen`.
+    """Compute expected photons in a DOM based on the (t,r,theta)-binned
+    Retro DOM tables applied to a the generated photon info `pinfo_gen`,
+    and the total expected photon count (time integrated) -- the normalization
+    of the pdf.
 
     Parameters
     ----------
     pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
     hit_time : float
     dom_coord : shape (3,) numpy ndarray, dtype float64
-    survival_prob
+    survival_prob 
     avg_photon_theta
     avg_photon_length
     use_directionality : bool
@@ -385,12 +396,20 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
     Returns
     -------
-    expected_photon_count : float
+    total_photon_count, expected_photon_count : (float, float)
 
     """
     table_dt = (t_max - t_min) / n_t_bins
-    expected_photon_count = 0.0
-    inv_r_power = 1 / r_power
+    table_dr = (r_max - r_max) / n_r_bins
+    table_dcostheta = 2. / n_costheta_bins
+    expected_photon_count = 0.
+    total_photon_count = 0.
+    inv_r_power = 1. / r_power
+    table_dr_pwr = (r_max-r_min)**inv_r_power / n_r_bins
+
+    r2_max = r_max**2
+    r2_min = r_min**2
+
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
 
@@ -398,13 +417,20 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         # will show up in the Retro DOM tables in the _last_ bin.
         # Therefore, invert the sign of the t coordinate and index sequentially
         # via e.g. -1, -2, ....
-        dt = hit_time - t
+        dt = t - hit_time
         dx = x - dom_coord[0]
         dy = y - dom_coord[1]
         dz = z - dom_coord[2]
 
-        rho2 = dx**2 + dy**2
-        r = np.sqrt(rho2 + dz**2)
+        r2 = dx**2 + dy**2 + dz**2
+        # we can already continue before computing the bin idx
+        if r2 > r2_max:
+            continue
+        if r2 < r2_min:
+            continue
+
+        r = math.sqrt(r2)
+
 
         #spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
         #if spacetime_sep < 0 or spacetime_sep >= retro.POL_TABLE_RMAX:
@@ -412,27 +438,44 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #    print('retro.MAX_POL_TABLE_SPACETIME_SEP:', retro.POL_TABLE_RMAX)
         #    continue
 
+        rbin_idx = int((r-r_min)**inv_r_power / table_dr_pwr)
+        #print('rbin_idx: ',rbin_idx)
+        #if rbin_idx < 0 or rbin_idx >= n_r_bins:
+        #    #print('r at ',r,'with idx ',rbin_idx)
+        #    continue
+
+        costhetabin_idx = int((1 -(dz / r)) / table_dcostheta)
+        #print('costhetabin_idx: ',costhetabin_idx)
+        #if costhetabin_idx < 0 or costhetabin_idx >= n_costheta_bins:
+        #    print('costheta out of range! This should not happen')
+        #    continue
+
+        # time indep.
+        time_indep_count = (
+                p_count * time_indep_survival_prob[rbin_idx, costhetabin_idx]
+        )
+        total_photon_count += time_indep_count
+
+        # causally impossible
+        if hit_time < t:
+            continue
+
         tbin_idx = int(np.floor((dt - t_min) / table_dt))
+        #print('tbin_idx: ',tbin_idx)
+        #if tbin_idx < -n_t_bins or tbin_idx >= 0:
         #if tbin_idx < 0 or tbin_idx >= -retro.POL_TABLE_DT:
-        if tbin_idx < -n_t_bins or tbin_idx >= 0:
+        if tbin_idx > n_t_bins or tbin_idx < 0:
             #print('t')
-            continue
-
-        rbin_idx = int(r**inv_r_power // retro.POL_TABLE_DRPWR)
-        if rbin_idx < 0 or rbin_idx >= retro.POL_TABLE_NRBINS:
-            #print('r')
-            continue
-
-        thetabin_idx = int(dz / (r * retro.POL_TABLE_DCOSTHETA))
-        if thetabin_idx < 0 or thetabin_idx >= retro.POL_TABLE_NTHETABINS:
-            #print('theta')
+            #print('t at ',t,'with idx ',tbin_idx)
             continue
 
         #print(tbin_idx, rbin_idx, thetabin_idx)
         #raise Exception()
         surviving_count = (
-            p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
+            p_count * survival_prob[tbin_idx, rbin_idx, costhetabin_idx]
         )
+
+        #print(surviving_count)
 
         # TODO: Include simple ice photon prop asymmetry here? Might need to
         # use both phi angle relative to DOM _and_ photon directionality
@@ -444,7 +487,7 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
         expected_photon_count += surviving_count
 
-    return expected_photon_count
+    return total_photon_count, expected_photon_count
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
@@ -775,6 +818,7 @@ class DOMTimePolarTables(object):
         self.ic_exponent = ic_exponent
         self.dc_exponent = dc_exponent
         self.tables = {'ic': {}, 'dc': {}}
+        self.bin_edges = {'ic': {}, 'dc': {}}
 
     def load_table(self, string, depth_idx, force_reload=False):
         """Load a table from disk into memory.
@@ -791,7 +835,7 @@ class DOMTimePolarTables(object):
 
         """
         string_idx = string - 1
-        if string_idx < 79:
+        if string < 79:
             subdet = 'ic'
             dom_quant_eff = retro.IC_DOM_QUANT_EFF
             exponent = self.ic_exponent
@@ -803,14 +847,20 @@ class DOMTimePolarTables(object):
         if not force_reload and depth_idx in self.tables[subdet]:
             return
 
+        det= 'IC' if subdet=='ic' else 'DC'
+
+        #fpath = join(
+        #    self.tables_dir,
+        #    RETRO_DOM_TABLE_FNAME_PROTO.format(depth_idx=depth_idx)
+        #)
         fpath = join(
             self.tables_dir,
             self.dom_table_fname_proto.format(
-                subdet=subdet, depth_idx=depth_idx
+                subdet=subdet.upper(), depth_idx=depth_idx
             )
         )
 
-        photon_info, _ = load_t_r_theta_table(
+        photon_info, bin_edges = load_t_r_theta_table(
             fpath=fpath,
             depth_idx=depth_idx,
             scale=dom_quant_eff,
@@ -821,11 +871,14 @@ class DOMTimePolarTables(object):
         #deltaphi = photon_info.deltaphi[depth_idx]
         self.tables[subdet][depth_idx] = retro.RetroPhotonInfo(
             survival_prob=photon_info.survival_prob[depth_idx],
+            time_indep_survival_prob=photon_info.time_indep_survival_prob[depth_idx],
             theta=photon_info.theta[depth_idx],
             deltaphi=photon_info.deltaphi[depth_idx],
             length=(photon_info.length[depth_idx]
                     * np.cos(photon_info.deltaphi[depth_idx]))
         )
+
+        self.bin_edges[subdet][depth_idx] = bin_edges
 
     def load_tables(self):
         """Load all tables"""
@@ -853,7 +906,7 @@ class DOMTimePolarTables(object):
 
         Returns
         -------
-        expected_photon_count : float
+        total_photon_count, expected_photon_count : (float, float)
             Total expected surviving photon count
 
         """
@@ -863,21 +916,33 @@ class DOMTimePolarTables(object):
         string_idx = string - 1
 
         dom_coord = self.geom[string_idx, depth_idx]
-        if string_idx < 79:
+        if string < 79:
             subdet = 'ic'
         else:
             subdet = 'dc'
         table = self.tables[subdet][depth_idx]
+        bin_edges = self.bin_edges[subdet][depth_idx]
         survival_prob = table.survival_prob
+        time_indep_survival_prob = table.time_indep_survival_prob
         avg_photon_theta = table.theta
         avg_photon_length = table.length
         return pexp_t_r_theta(pinfo_gen=pinfo_gen,
                               hit_time=hit_time,
                               dom_coord=dom_coord,
                               survival_prob=survival_prob,
+                              time_indep_survival_prob=time_indep_survival_prob,
                               avg_photon_theta=avg_photon_theta,
                               avg_photon_length=avg_photon_length,
-                              use_directionality=use_directionality)
+                              use_directionality=use_directionality,
+                              t_min=bin_edges.t[0],
+                              t_max=bin_edges.t[-1],
+                              n_t_bins=len(bin_edges.t)-1,
+                              r_min=bin_edges.r[0],
+                              r_max=bin_edges.r[-1],
+                              r_power=2,
+                              n_r_bins=len(bin_edges.r)-1,
+                              n_costheta_bins=len(bin_edges.theta)-1,
+                              )
 
 
 # TODO: convert to using exponent rather than scale (scale will be applied via
