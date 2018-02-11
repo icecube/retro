@@ -3,43 +3,81 @@
 
 from __future__ import absolute_import, division, print_function
 
-from icecube.clsim.GetIceCubeDOMAcceptance import *
-from icecube import icetray, dataclasses
 import numpy as np
 
+from icecube.clsim.GetIceCubeDOMAcceptance import GetIceCubeDOMAcceptance
+from icecube import icetray, dataclasses
 
-def getPhaseRefIndex(wavelength):
-    x = wavelength/1000 # wavelength in micrometer
-    return 1.55749 - 1.57988*x + 3.99993*x**2 - 4.68271*x**3 + 2.09354*x**4
 
-def Cherenkov_dN_dXdwlen(wlen, beta=1):
-    value = (np.pi/(137*(wlen**2)))*(1 - 1/((beta*getPhaseRefIndex(wlen))**2))
+def get_phase_ref_index(wlen):
+    """
+    Parameters
+    ----------
+    wlen
+        Wavelength in units of nm
+
+    """
+    # convert wavelength to micrometers
+    wl_um = wlen/1000
+    return 1.55749 - 1.57988*wl_um + 3.99993*wl_um**2 - 4.68271*wl_um**3 + 2.09354*wl_um**4
+
+
+def cherenkov_dN_dXdwlen(wlen, beta=1):
+    """
+    Parameters
+    ----------
+    wlen
+        Wavelength in units of nm
+
+    beta
+        Beta factor of particle emitting the Cherenkov light
+
+    """
+    value = (np.pi / (137 * wlen**2)) * (1 - 1/((beta * get_phase_ref_index(wlen))**2))
     return np.where(value>0, value, 0)
 
 
-def dom_wavelength_acceptance():
+def dom_wavelength_acceptance(
+    wlens=np.arange(265, 680, 5), weight_by_cherenkov=True, beta=1
+):
+    """
+    Parameters
+    ----------
+    wlens : iterable
+        Wavelenghts, in nm
+
+    weight_by_cherenkov : bool
+        Whether to weight the acceptance by the Cherenkov spectrum
+
+    beta : float
+        Beta factor of particle emitting the Cherenkov light
+
+    """
     dom_acceptance = GetIceCubeDOMAcceptance()
     acceptance = []
     cherenkov = []
-    wavelengths = np.arange(265, 680, 5)
-    for wlen in wavelengths:
-        acceptance.append(dom_acceptance.GetValue(wlen*I3Units.nanometer) * Cherenkov_dN_dXdwlen(wlen))
-        cherenkov.append(Cherenkov_dN_dXdwlen(wlen))
-    integral = np.trapz(y=acceptance, x=wavelengths)
-    integral_cherenkov = np.trapz(y=cherenkov, x=wavelengths)
-    acceptance /= integral
-    wavelength_acceptance = np.array(zip(wavelengths, acceptance))
-    print('    wavelength (nm)  acceptance')
-    print(wavelength_acceptance)
-    print('integral =', integral)
+    for wlen in wlens:
+        acceptance.append(dom_acceptance.GetValue(wlen*I3Units.nanometer))
+        cherenkov.append(cherenkov_dN_dXdwlen(wlen=wlen, beta=beta))
+    combined = [a*c for a, c in zip(acceptance, cherenkov)]
+
+    integral_combined = np.trapz(y=combined, x=wlens)
+    integral_acceptance = np.trapz(y=acceptance, x=wlens)
+    integral_cherenkov = np.trapz(y=cherenkov, x=wlens)
+    combined /= integral_combined
+    wavelength_combined = np.array(zip(wlens, combined))
+    print('    wavelength (nm)  acceptance*cherenkov')
+    print(wavelength_combined)
+    print('combined integral =', integral_combined)
+    print('combined integral =', integral_combined)
     print('cherenkov integral = ', integral_cherenkov)
-    print('fraction (accept./cherenk.) = ', integral/integral_cherenkov)
+    print('fraction (combined accept. / cherenk.) = ', integral_combined/integral_cherenkov)
     header = (
         'Sampled DOM wavelength acceptance\n'
         'wavelength (nm), acceptance'
     )
     fpath = 'sampled_dom_wavelength_acceptance.csv'
-    np.savetxt(fpath, wavelength_acceptance, delimiter=',', header=header)
+    np.savetxt(fpath, wavelength_combined, delimiter=',', header=header)
     print('Saved sampled wavelength acceptance to "{}"'.format(fpath))
 
 

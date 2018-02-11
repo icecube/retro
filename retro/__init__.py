@@ -7,6 +7,9 @@ from __future__ import absolute_import, division, print_function
 
 
 __all__ = [
+    # Customized import
+    'numba_jit',
+
     # Defaults
     'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
     'DFLT_SPE_RECO_NAME',
@@ -56,7 +59,7 @@ __all__ = [
     'linbin', 'test_linbin', 'powerbin', 'test_powerbin',
     'powerspace', 'inv_power_2nd_diff', 'infer_power', 'test_infer_power',
     'bin_edges_to_binspec', 'linear_bin_centers', 'spherical_volume',
-    'sph2cart', 'pol2cart', 'cart2pol', 'spacetime_separation',
+    'sph2cart', 'pol2cart', 'cart2pol', 'cart2sph', 'spacetime_separation',
 
     # Other math
     'poisson_llh', 'partial_poisson_llh', 'weighted_average',
@@ -1399,7 +1402,8 @@ def spherical_volume(rmin, rmax, dcostheta, dphi):
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def sph2cart(r, theta, phi, x, y, z):
-    """Convert spherical coordinates to Cartesian.
+    """Convert spherical polar (r, theta, phi) to 3D Cartesian (x, y, z)
+    Coordinates.
 
     Parameters
     ----------
@@ -1418,13 +1422,13 @@ def sph2cart(r, theta, phi, x, y, z):
     y_flat = y.flat
     z_flat = z.flat
     for idx in range(num_elements):
-        rf = r_flat[idx]
-        thetaf = theta_flat[idx]
-        phif = phi_flat[idx]
-        rho = rf * math.sin(thetaf)
-        x_flat[idx] = rho * math.cos(phif)
-        y_flat[idx] = rho * math.sin(phif)
-        z_flat[idx] = rf * math.cos(thetaf)
+        rfi = r_flat[idx]
+        thetafi = theta_flat[idx]
+        phifi = phi_flat[idx]
+        rhofi = rfi * math.sin(thetafi)
+        x_flat[idx] = rhofi * math.cos(phifi)
+        y_flat[idx] = rhofi * math.sin(phifi)
+        z_flat[idx] = rfi * math.cos(thetafi)
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -1477,28 +1481,35 @@ def cart2pol(x, y, r, theta):
         theta_flat[idx] = math.atan2(yfi, xfi)
 
 
-#@numba_jit(nopython=True, nogil=True, cache=True, parallel=True)
-#def sph2cart(r, theta, phi):
-#    """Convert spherical coordinates to Cartesian.
-#
-#    Parameters
-#    ----------
-#    r, theta, phi
-#        Spherical coordinates: radius, theta (zenith angle, defined as "out"
-#        from the +z-axis), and phi (azimuth angle, defined as positive from
-#        +x-axis to +y-axix)
-#
-#    Returns
-#    -------
-#    x, y, z
-#        Cartesian coordinates
-#
-#    """
-#    z = r * np.cos(theta)
-#    rsintheta = r * np.sin(theta)
-#    x = rsintheta * np.cos(phi)
-#    y = rsintheta * np.sin(phi)
-#    return x, y, z
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def cart2sph(x, y, z, r, theta, phi):
+    """Convert 3D Cartesian (x, y, z) to spherical polar (r, theta, phi)
+    Coordinates.
+
+    Parameters
+    ----------
+    x, y, z : numeric of same shape
+
+    r, theta, phi : numpy.ndarrays of same shape as `x`, `y`, `z`
+        Result is stored in these arrays.
+
+    """
+    shape = x.shape
+    num_elements = int(np.prod(np.array(shape)))
+    x_flat = x.flat
+    y_flat = y.flat
+    z_flat = z.flat
+    r_flat = r.flat
+    theta_flat = theta.flat
+    phi_flat = phi.flat
+    for idx in range(num_elements):
+        xfi = x_flat[idx]
+        yfi = y_flat[idx]
+        zfi = z_flat[idx]
+        rfi = math.sqrt(xfi*xfi + yfi*yfi + zfi*zfi)
+        r_flat[idx] = rfi
+        phi_flat[idx] = math.atan2(yfi, xfi)
+        theta_flat[idx] = math.acos(zfi / rfi)
 
 
 # -- Other math functions -- #
