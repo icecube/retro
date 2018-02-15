@@ -5,7 +5,7 @@ from __future__ import absolute_import, division, print_function
 
 import numpy as np
 
-from icecube.clsim.GetIceCubeDOMAcceptance import GetIceCubeDOMAcceptance
+from icecube.clsim.GetIceCubeDOMAcceptance import I3Units, GetIceCubeDOMAcceptance
 from icecube import icetray, dataclasses
 
 
@@ -37,17 +37,12 @@ def cherenkov_dN_dXdwlen(wlen, beta=1):
     return np.where(value>0, value, 0)
 
 
-def dom_wavelength_acceptance(
-    wlens=np.arange(265, 680, 5), weight_by_cherenkov=True, beta=1
-):
+def dom_wavelength_acceptance(wlens=np.arange(265, 680, 5), beta=1):
     """
     Parameters
     ----------
     wlens : iterable
         Wavelenghts, in nm
-
-    weight_by_cherenkov : bool
-        Whether to weight the acceptance by the Cherenkov spectrum
 
     beta : float
         Beta factor of particle emitting the Cherenkov light
@@ -66,12 +61,15 @@ def dom_wavelength_acceptance(
     integral_cherenkov = np.trapz(y=cherenkov, x=wlens)
     combined /= integral_combined
     wavelength_combined = np.array(zip(wlens, combined))
+    wavelength_ckv_accept = np.array(zip(wlens, cherenkov, acceptance))
+
     print('    wavelength (nm)  acceptance*cherenkov')
     print(wavelength_combined)
-    print('combined integral =', integral_combined)
-    print('combined integral =', integral_combined)
-    print('cherenkov integral = ', integral_cherenkov)
-    print('fraction (combined accept. / cherenk.) = ', integral_combined/integral_cherenkov)
+    print('integral(acceptance):           {:.8e}'.format(integral_acceptance))
+    print('integral(Cherenkov):            {:.8e}'.format(integral_cherenkov))
+    print('integral(acceptance*Cherenkov): {:.8e}'.format(integral_combined))
+    print('fraction (combined. / cherenk.) = ', integral_combined/integral_cherenkov)
+
     header = (
         'Sampled DOM wavelength acceptance\n'
         'wavelength (nm), acceptance'
@@ -79,6 +77,14 @@ def dom_wavelength_acceptance(
     fpath = 'sampled_dom_wavelength_acceptance.csv'
     np.savetxt(fpath, wavelength_combined, delimiter=',', header=header)
     print('Saved sampled wavelength acceptance to "{}"'.format(fpath))
+
+    header = (
+        'Sampled Cherenkov distribution and DOM wavelength acceptance\n'
+        'wavelength (nm), Chernkov distr (normalized), acceptance'
+    )
+    fpath = 'sampled_cherenkov_distr_and_dom_acceptance_vs_wavelength.csv'
+    np.savetxt(fpath, wavelength_ckv_accept, delimiter=',', header=header)
+    print('Saved wavelen + Ckv distr + DOM accept to "{}"'.format(fpath))
 
 
 if __name__ == '__main__':
