@@ -240,7 +240,7 @@ GEOM_FILE_PROTO = 'geom_{hash:s}.npy'
 GEOM_META_PROTO = 'geom_{hash:s}_meta.json'
 """File containing metadata about source of detector geometry"""
 
-DETECTOR_GEOM_FILE = join(dirname(abspath(__file__)), 'data', 'geo_array.npy')
+DETECTOR_GEOM_FILE = join(dirname(dirname(abspath(__file__))), 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
 TDI_TABLE_FNAME_PROTO = [
@@ -329,7 +329,7 @@ Pulses = namedtuple( # pylint: disable=invalid-name
 
 RetroPhotonInfo = namedtuple( # pylint: disable=invalid-name
     typename='RetroPhotonInfo',
-    field_names=('survival_prob', 'theta', 'deltaphi', 'length')
+    field_names=('survival_prob', 'time_indep_survival_prob', 'theta', 'deltaphi', 'length')
 )
 """Info contained in (original) retro tables: Photon survival probability
 (survival_prob) and average photon direction and length (theta, deltaphi,
@@ -452,11 +452,13 @@ POL_TABLE_NTBINS = 300
 POL_TABLE_NRBINS = 200
 POL_TABLE_NTHETABINS = 40
 
-IC_DOM_QUANT_EFF = 0.25
+#IC_DOM_QUANT_EFF = 0.25
+IC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) IceCube (i.e. non-DeepCore)
 DOM quantum efficiency. Multiplies the tabulated detection probabilities to
 yield the actual probabilitiy that a photon is detected."""
-DC_DOM_QUANT_EFF = 0.35
+#DC_DOM_QUANT_EFF = 0.35
+DC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) DeepCore DOM quantum
 efficiency. Multiplies the tabulated detection probabilities to yield the
 actual probabilitiy that a photon is detected."""
@@ -1535,12 +1537,7 @@ def poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    # TODO: why is there a +1 here? Avoid zero observations? How does this
-    # affect the result, besides avoiding inf? Removed for now until we work
-    # this out...
-
-    #llh = observed * np.log(expected) - expected - gammaln(observed + 1)
-    llh = observed * np.log(expected) - expected - gammaln(observed)
+    llh = observed * np.log(expected) - expected - gammaln(observed + 1)
     return llh
 
 

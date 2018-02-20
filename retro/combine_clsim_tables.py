@@ -45,7 +45,9 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 import retro
-from retro.table_readers import load_clsim_table_minimal
+from retro.table_readers import (
+    generate_time_indep_table, load_clsim_table_minimal
+)
 
 
 VALIDATE_KEYS = [
@@ -60,7 +62,8 @@ VALIDATE_KEYS = [
 """Values corresponding to these keys must match in all loaded tables"""
 
 SUM_KEYS = [
-    'table', 'n_photons'
+    'n_photons',
+    'table'
 ] # yapf: disable
 """Sum together values corresponding to these keys in all tables"""
 
@@ -68,7 +71,8 @@ ALL_KEYS = VALIDATE_KEYS + SUM_KEYS
 """All keys expected to be in tables"""
 
 
-def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
+def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
+                         step_length=1.0):
     """Combine multiple CLSim-produced tables together into a single table.
 
     All tables specified must have the same binnings defined. Tables should
@@ -85,12 +89,27 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
         Directory to which to save the combined table; if not specified, the
         resulting table will be returned but not saved to disk.
 
+    overwrite : bool
+        Overwrite an existing table. If a table is found at the output path and
+        `overwrite` is False, the function simply returns.
+
+    step_length : float > 0 in units of meters
+        Needed for computing the normalization to apply to the `table` in order
+        to generate the `t_indep_table` (if the latter doesn't already exist).
+        Note that normalization constants due to `n_photons`,
+        `quantum_efficiency`, and `angular_acceptance_fract` as well as
+        normalization depending (only) upon radial bin (i.e 1/r^2 geometric
+        factor) are _not_ applied to the tables. The _only_ normalization
+        applied (and _only_ to `t_indep_table`) is the multiple-counting factor
+        that is a function of `step_length` and whichever of the time or radial
+        bin dimensions is smaller.
+
     Returns
     -------
     combined_table
 
     """
-    t0_start = time()
+    t_start = time()
 
     # Get all input table filepaths, including glob expansion
 
@@ -129,7 +148,9 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
 
     combined_table = None
     for fpath in table_fpaths:
-        table = load_clsim_table_minimal(fpath)
+        table = load_clsim_table_minimal(
+            fpath, step_length=step_length, mmap=True
+        )
 
         if combined_table is None:
             combined_table = table
@@ -140,6 +161,7 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
                 'Table keys {} do not match expected keys {}'
                 .format(sorted(table.keys()), sorted(ALL_KEYS))
             )
+
         for key in VALIDATE_KEYS:
             if not np.array_equal(table[key], combined_table[key]):
                 raise ValueError('Unequal {} in file {}'.format(key, fpath))
@@ -149,8 +171,17 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
 
         del table
 
-    # Save the data to npy files on disk
+    # Force quantum_efficiency and angular_acceptance_fract to 1 (these should
+    # be handled by the user at the time the table is used to represent a
+    # particular or subgroup of DOMs)
+    table['t_indep_table'] = generate_time_indep_table(
+        table=table,
+        quantum_efficiency=1,
+        angular_acceptance_fract=1
+    )
 
+    # Save the data to npy files on disk (in a sub-directory for all of this
+    # table's files)
     if outdir is not None:
         basenames = []
         for fpath in table_fpaths:
@@ -176,7 +207,10 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False):
             fobj.write('\n'.join(sorted(basenames)))
         retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
 
-    retro.wstderr('Total time to combine tables: {} s\n'.format(np.round(time() - t0_start, 3)))
+    retro.wstderr(
+        'Total time to combine tables: {} s\n'
+        .format(np.round(time() - t_start, 3))
+    )
 
     return combined_table
 

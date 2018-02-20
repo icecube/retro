@@ -113,7 +113,9 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     n_samples = int(np.floor(duration / dt))
     first_sample_t = dt/2
     final_sample_t = first_sample_t + (n_samples - 1) * dt
-    segment_length = length / n_samples
+    segment_length = 0.
+    if n_samples > 0:
+        segment_length = length / n_samples
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
     sin_zen = math.sin(hypo_params.track_zenith)

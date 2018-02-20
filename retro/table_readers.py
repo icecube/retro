@@ -40,6 +40,7 @@ from StringIO import StringIO
 from subprocess import Popen, PIPE
 import sys
 from time import time
+import math
 
 import numpy as np
 import pyfits
@@ -57,8 +58,102 @@ from retro.generate_t_r_theta_table import generate_t_r_theta_table
 MY_CLSIM_TABLE_KEYS = [
     'table_shape', 'n_photons', 'phase_refractive_index', 'r_bin_edges',
     'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
-    'deltaphidir_bin_edges', 'table'
+    'deltaphidir_bin_edges', 'table', 't_indep_table'
 ]
+
+TABLE_NORM_KEYS = [
+    'r_bin_edges', 'costhetadir_bin_edges', 't_bin_edges', 'n_photons',
+    'phase_refractive_index', 'step_length'
+]
+
+
+# TODO: set these more carefully and eventually allow for different angles
+CKV_COSTHETA = np.cos(np.deg2rad(48))
+CKV_SINTHETA = np.sin(np.deg2rad(48))
+
+NUM_PHI_SAMPLES = 1000
+
+
+@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
+def survival_prob_from_cone(costheta, sintheta, num_phi, rot_costheta,
+                            rot_sintheta, rot_cosphi, rot_sinphi,
+                            directional_survival_prob, costheta_bin_width,
+                            deltaphi_bin_width):
+    """Get a numerical approximation of the expected survival probability for
+    photons directed on a cone (as for Cherenkov emission) from Retro table's
+    photon-directionality slice.
+
+    Parameters
+    ----------
+    costheta, sintheta : scalar float
+        Cherenkov angle (half the cone's opening angle)
+
+    num_phi : scalar int
+        Number of azimuth samples of the circle where the cone intersects the
+        unit sphere. Increase `num_phi` for for higher accuracy.
+
+    rot_costheta, rot_sintheta, rot_cosphi, rot_sinphi : scalar float
+        Rotate the cone to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    directional_survival_prob : ndarray of shape (N_costhetadir x N_deltaphidir)
+        Note that the binning of the `directional_survival_prob` table slice is
+        expected to be (costhetadir, deltaphidir), and both are assumed to be
+        uniformly gridded in those coordinate spaces.
+
+    costheta_bin_width, deltaphi_bin_width : float
+        Bin widths; `deltaphi_bin_width` is in units of radians.
+
+    Returns
+    -------
+    survival_prob : scalar float
+        Numerically-approximated survival probability averaged over the entire
+        cone of photons.
+
+    """
+    # TODO: we can approximate the effects of "large" (space-time width of a
+    # bin) by spreading points out off of the circle to simulate the amount of
+    # spread expected for photons within the bin. Probably a high-order effect,
+    # so no need to do this now, just something to note for later.
+
+    bin_indices = []
+    counts = []
+    counts_total = 0
+
+    for idx in range(num_phi):
+        p_phi = 2*np.pi * float(idx)/float(num_phi + 1)
+        sin_p_phi = np.sin(p_phi)
+        cos_p_phi = np.cos(p_phi)
+        q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
+                      + (costheta * rot_costheta))
+        abs_q_phi = np.abs(np.arctan2(
+            (sin_p_phi * sintheta * rot_cosphi)
+            + (sintheta * rot_sinphi * cos_p_phi * rot_costheta)
+            + (rot_sinphi * rot_sintheta * costheta),
+
+            (-sin_p_phi * sintheta * rot_sinphi)
+            + (sintheta * cos_p_phi * rot_cosphi * rot_costheta)
+            + (rot_sintheta * costheta * rot_cosphi)
+        ))
+        costheta_bin = int((q_costheta + 1) // costheta_bin_width)
+        deltaphi_bin = int(abs_q_phi // deltaphi_bin_width)
+        coord = (costheta_bin, deltaphi_bin)
+        if coord in bin_indices:
+            idx = bin_indices.index(coord)
+            counts[idx] += 1
+        else:
+            bin_indices.append(coord)
+            counts.append(1)
+        counts_total += 1
+
+    survival_prob = 0.0
+    for idx, count in zip(bin_indices, counts):
+        survival_prob += directional_survival_prob[idx] * count
+
+    # NOTE: Don't use e.g. /= before return until the following is resolved:
+    #   https://github.com/numba/numba/issues/2746
+    survival_prob = survival_prob / float(counts_total)
+
+    return survival_prob
 
 
 def open_table_file(fpath):
@@ -92,11 +187,179 @@ def open_table_file(fpath):
     return fobj
 
 
-def load_clsim_table_minimal(fpath, mmap=False):
+def get_table_norm(n_photons, phase_refractive_index, step_length, r_bin_edges,
+                   costheta_bin_edges, t_bin_edges, quantum_efficiency,
+                   angular_acceptance_fract):
+    """Get the normalization array to use a raw CLSim table with Retro reco.
+
+    Note that the `norm` array returned is meant to _multiply_ the counts in
+    the raw CLSim table to obtain a survival probability.
+
+    Parameters
+    ----------
+    n_photons : int > 0
+        Number of photons thrown in the simulation.
+
+    phase_refractive_index : float > 0
+        Phase refractive index in the medium.
+
+    step_length : float > 0
+        Step length used in CLSim tabulator, in units of meters. (Hard-coded to
+        1 m in CLSim, but this is a paramter that ultimately could be changed.)
+
+    r_bin_edges : 1D numpy.ndarray, ascending values => 0 (meters)
+        Radial bin edges in units of meters.
+
+    costheta_bin_edges : 1D numpy.ndarray, ascending values in [-1, 1]
+        Cosine of the zenith angle bin edges; all must be equally spaced.
+
+    t_bin_edges : 1D numpy.ndarray, ascending values > 0 (nanoseconds)
+        Time bin eges in units of nanoseconds.
+
+    quantum_efficiency : float in (0, 1], optional
+        Average DOM quantum efficiency for converting photons to
+        photo electrons. Note that any shape to the quantum efficiency should
+        already be accounted for by simulating photons according to the
+        shape of that distribution. If not specific, defaults to 1.
+
+    angular_acceptance_fract : float in (0, 1], optional
+        Average DOM angular acceptance fraction, which modifies the
+        "efficiency" beyond that accounted for by `quantum_efficiency`.
+        Note that any shape to the angular accptance should already be
+        accounted for by simulating photons according to the
+        shape of that distribution. If not specified, defaults to 1.
+
+    Returns
+    -------
+    table_norm : numpy.ndarray of shape (n_r_bins, n_t_bins), values >= 0
+        The normalization is a function of both r- and t-bin (we assume
+        costheta binning is "regular"). To obtain a survival probability,
+        multiply the value in the CLSim table's bin by the appropriate
+        `table_norm` entry. I.e.:
+        ``survival_prob = raw_bin_val * table_norm[r_bin_idx, t_bin_idx]``.
+
+    """
+    n_costheta_bins = len(costheta_bin_edges) - 1
+
+    r_bin_widths = np.diff(r_bin_edges)
+    costheta_bin_widths = np.diff(costheta_bin_edges)
+    t_bin_widths = np.diff(t_bin_edges)
+
+    # We need costheta bins to all have same width for the logic below to hold
+    costheta_bin_width = costheta_bin_widths[0]
+    assert np.all(costheta_bin_widths == costheta_bin_width)
+
+    constant_part = (
+        # Number of photons, divided equally among the costheta bins
+        1 / (n_photons / n_costheta_bins)
+
+        # Correction for quantum efficiency of the DOM
+        * angular_acceptance_fract
+
+        # Correction for additional loss of sensitivity due to angular
+        # acceptance model
+        * quantum_efficiency
+    )
+
+    # A photon is tabulated every step_length meters; we want the
+    # average probability in each bin, so the count in the bin must be
+    # divided by the number of photons in the bin times the number of
+    # times each photon is counted.
+    speed_of_light_in_medum = ( # units = m/ns
+        retro.SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index
+    )
+
+    # t bin edges are in ns and speed_of_light_in_medum is m/ns
+    t_bin_widths_in_m = t_bin_widths * speed_of_light_in_medum
+
+    # TODO: Note that the actual counts will be rounded down (or are one fewer
+    # than indicated by this ratio if the ratio comres out to an integer). We
+    # don't account for this here, but we _might_ want to if it seems that this
+    # will make a difference (e.g. for small bins). Of course if the number
+    # comes out to zero, then... should we clip the lower-bound to 1? Go with
+    # the fraction we come up with here (since the first step is randomized)?
+    # And in fact, since the first step is randomized, it seems this ratio
+    # should be fine as is; but it's the 2D toy simulation that indicates that
+    # maybe the `floor` might be necessary. Someday we should really sort this
+    # whole normalization thing out!
+    counts_per_r = r_bin_widths / step_length
+    counts_per_t = t_bin_widths_in_m / step_length
+
+    # Take the smaller of counts_per_r and counts_per_t
+    table_norm = constant_part * np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
+
+    # Shape of the radial norm is 1D: (n_r_bins,)
+    r0 = r_bin_edges[:-1]
+    r1 = r_bin_edges[1:]
+    avg_radius = 3/4 * (r1**4 - r0**4) / (r1**3 - r0**3)
+    surf_area_at_avg_radius = avg_radius**2 * 2*np.pi * costheta_bin_width
+    radial_norm = 1 / surf_area_at_avg_radius
+    table_norm *= radial_norm[:, np.newaxis]
+
+    return table_norm
+
+
+def generate_time_indep_table(table, quantum_efficiency,
+                              angular_acceptance_fract, step_length=None):
+    """
+    Parameters
+    ----------
+    table : mapping
+    quantum_efficiency : float in (0, 1]
+    angular_acceptance_fract : float in (0, 1]
+    step_length : float in (0, 1]
+        Required if 'step_length' is not a key in `table`.
+
+    Returns
+    -------
+    t_indep_table : numpy.ndarray of size (n_r, n_costheta, n_costhetadir, n_deltaphidir)
+    t_indep_table_norm : scalar
+        This norm factor must be applied to the table in order to convert its
+        entries to survival probabilities.
+
+    """
+    if 'step_length' in table:
+        if step_length is not None:
+            assert step_length == table['step_length']
+        else:
+            step_length = table['step_length']
+
+    if step_length is None:
+        raise ValueError('Need either an value for the `step_length` argument'
+                         ' or "step_length"  in `table`.')
+
+    table_norm = get_table_norm(
+        quantum_efficiency=quantum_efficiency,
+        angular_acceptance_fract=angular_acceptance_fract,
+        step_length=step_length,
+        **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
+    )
+
+    # Indices in the Einstein sum are
+    #   table:
+    #     r=radius, c=costheta, t=time, q=costheta_dir, p=deltaphi_dir
+    #   norm:
+    #     r=radius, t=time
+    #   output:
+    #     r=radius, c=costheta, q=costhetadir, p=deltaphi_dir
+    t_indep_table = np.einsum(
+        'rctqp,rt->rcqp',
+        table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
+        table_norm,
+        optimize=True
+    )
+
+    t_indep_table_norm = quantum_efficiency * angular_acceptance_fract
+
+    return t_indep_table, t_indep_table_norm
+
+
+def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
+                             gen_t_indep=False):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Similar to the `load_clsim_table` function but the full table, including
-    under/overflow bins is kept and no normalization or further processing is
+    under/overflow bins, is kept and no normalization or further processing is
     performed on the table data besides populating the ouptput OrderedDict.
 
     Parameters
@@ -106,21 +369,32 @@ def load_clsim_table_minimal(fpath, mmap=False):
         'zstandard', the file will be decompressed using the `python-zstandard`
         Python library before passing to `pyfits` for interpreting.
 
+    step_length : float > 0 in units of meters, optional
+        Required if computing the `t_indep_table` (if `gen_t_indep` is True).
+
+    mmap : bool, optional
+        Whether to memory map the table (if it's stored in a directory
+        containing .npy files).
+
+    gen_t_indep : bool, optional
+        Generate the time-independent table if it does not exist.
+
     Returns
     -------
     table : OrderedDict
         Items include
         - 'table_shape' : tuple of int
         - 'table' : np.ndarray
+        - 't_indep_table' : np.ndarray
         - 'n_photons' :
         - 'phase_refractive_index' :
-
-        If the table is 5D, items also include
         - 'r_bin_edges' :
         - 'costheta_bin_edges' :
         - 't_bin_edges' :
         - 'costhetadir_bin_edges' :
         - 'deltaphidir_bin_edges' :
+        - 'table' :
+        - 't_indep_table' :
 
     """
     table = OrderedDict()
@@ -142,11 +416,14 @@ def load_clsim_table_minimal(fpath, mmap=False):
             t1 = time()
             table[key] = np.load(fpath, mmap_mode=mmap_mode)
             retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
+        if step_length is not None:
+            assert step_length == table['step_length']
         retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
         return table
 
     if mmap:
-        raise ValueError('Cannot memory map a fits or compressed fits file')
+        print('WARNING: Cannot memory map a fits or compressed fits file;'
+              ' ignoring `mmap=True`.')
 
     t0 = time()
     fobj = open_table_file(fpath)
@@ -160,6 +437,8 @@ def load_clsim_table_minimal(fpath, mmap=False):
         table['phase_refractive_index'] = retro.force_little_endian(
             pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
         )
+        if step_length is not None:
+            table['step_length'] = step_length
 
         n_dims = len(table['table_shape'])
         if n_dims == 5:
@@ -189,6 +468,13 @@ def load_clsim_table_minimal(fpath, mmap=False):
 
         table['table'] = retro.force_little_endian(pf_table[0].data) # pylint: disable=no-member
 
+        if gen_t_indep and 't_indep_table' not in table:
+            table['t_indep_table'] = generate_time_indep_table(
+                table=table,
+                quantum_efficiency=1,
+                angular_acceptance_fract=1
+            )
+
         retro.wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
 
     finally:
@@ -200,7 +486,8 @@ def load_clsim_table_minimal(fpath, mmap=False):
     return table
 
 
-def load_clsim_table(fpath):
+def load_clsim_table(fpath, step_length, angular_acceptance_fract,
+                     quantum_efficiency):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Parameters
@@ -214,8 +501,9 @@ def load_clsim_table(fpath):
     -------
     table : OrderedDict
         Items include
-        - 'table' : np.ndarray
         - 'table_shape' : tuple of int
+        - 'table' : np.ndarray
+        - 't_indep_table' : np.ndarray
         - 'n_photons' :
         - 'phase_refractive_index' :
 
@@ -225,11 +513,14 @@ def load_clsim_table(fpath):
         - 't_bin_edges' :
         - 'costhetadir_bin_edges' :
         - 'deltaphidir_bin_edges' :
+        - 'table_norm'
 
     """
     table = OrderedDict()
 
-    table = load_clsim_table_minimal(fpath)
+    table = load_clsim_table_minimal(fpath=fpath, step_length=step_length)
+    table['table_norm'] = get_table_norm(**{k: table[k] for k in TABLE_NORM_KEYS})
+    table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
 
     retro.wstderr('Interpreting table...\n')
     t0 = time()
@@ -348,6 +639,14 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
         r = retro.force_little_endian(table[5].data)
 
+        r_volumes = np.square(0.5 * (r[1:] + r[:-1]))
+
+        photon_info.survival_prob[depth_idx] /= r_volumes[np.newaxis, :, np.newaxis]
+
+        photon_info.time_indep_survival_prob[depth_idx] = np.sum(
+            photon_info.survival_prob[depth_idx], axis=0
+        )
+
         theta = retro.force_little_endian(table[6].data)
 
         bin_edges = retro.TimeSphCoord(
@@ -357,13 +656,307 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
     return photon_info, bin_edges
 
 
+def generate_pexp_5d_function(table, use_directionality=True):
+    """Generate a numba-compiled function for computing expected photon counts
+    at a DOM, where the table's binning info is used to pre-compute various
+    constants for the compiled function.
+
+    Parameters
+    ----------
+    table : mapping
+        As returned by `load_clsim_table_minimal`
+
+    use_directionality : bool, optional
+        If the source photons have directionality, use it in computing photon
+        expectations at the DOM.
+
+    Returns
+    -------
+    pexp_5d : callable
+    binning_info : dict
+        Binning parameters that uniquely identify the binning from the table.
+
+    """
+    r_min = np.min(table['r_bin_edges'])
+    r_max = np.max(table['r_bin_edges'])
+    rsquared_min = r_min*r_min
+    rsquared_max = r_max*r_max
+    r_power = retro.infer_power(table['r_bin_edges'])
+    inv_r_power = 1 / r_power
+    n_r_bins = len(table['r_bin_edges']) - 1
+    table_dr_pwr = (r_max - r_min)**inv_r_power / n_r_bins
+
+    n_costheta_bins = len(table['costheta_bin_edges']) - 1
+    table_dcostheta = 2 / n_costheta_bins
+
+    t_min = np.min(table['t_bin_edges'])
+    t_max = np.max(table['t_bin_edges'])
+    n_t_bins = len(table['t_bin_edges']) - 1
+    table_dt = (t_max - t_min) / n_t_bins
+
+    n_costhetadir_bins = len(table['costhetadir_bin_edges']) - 1
+    table_dcosthetadir = 2 / n_costhetadir_bins
+
+    n_deltaphidir_bins = len(table['deltaphidir_bin_edges']) - 1
+    table_dphidir = 2*np.pi / n_deltaphidir_bins
+    deltaphidir_one_sided = np.all(
+        (table['deltaphidir_bin_edges'] >= 0)
+        &
+        (table['deltaphidir_bin_edges'] <= np.pi)
+    )
+
+    if not deltaphidir_one_sided:
+        raise NotImplementedError('Only one-sided deltaphidir binning supported.')
+
+    binning_info = dict(
+        r_min=r_min, r_max=r_max, n_r_bins=n_r_bins, r_power=r_power,
+        n_costheta_bins=n_costheta_bins,
+        t_min=t_min, t_max=t_max, n_t_bins=n_t_bins,
+        n_costhetadir_bins=n_costhetadir_bins,
+        n_deltaphidir_bins=n_deltaphidir_bins,
+        deltaphidir_one_sided=deltaphidir_one_sided
+    )
+
+    @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
+    def pexp_5d(pinfo_gen, hit_time, dom_coord, table, table_norm,
+                t_indep_table, t_indep_table_norm):
+        """For a set of generated photons `pinfo_gen`, compute the expected
+        photons in a particular DOM at `hit_time` and the total expected
+        photons, independent of time.
+
+        This function utilizes the relative space-time coordinates _and_
+        directionality of the generated photons (via "raw" 5D CLSim tables) to
+        determine how many photons are expected to arrive at the DOM.
+
+        Retro DOM tables applied to the generated photon info `pinfo_gen`,
+        and the total expected photon count (time integrated) -- the
+        normalization of the pdf.
+
+        Parameters
+        ----------
+        pinfo_gen : shape (N, 8) ndarray
+            Information about the photons generated by the hypothesis.
+
+        hit_time : float, units of ns
+            Time at which the DOM recorded a hit (or multiple simultaneous
+            hits). Use np.nan to indicate no hit occurred.
+
+        dom_coord : shape (3,) ndarray
+            DOM (x, y, z) coordinate in meters (in terms of the IceCube
+            coordinate system).
+
+        table : shape (n_r, n_costheta, n_t, n_costhetadir, n_deltaphidir) ndarray
+            Time-dependent photon survival probability table.
+
+        table_norm : shape (n_r, n_t) ndarray
+            Normalization to apply to `table`, which is assumed to depend on
+            both r- and t-dimensions and therefore is an array.
+
+        t_indep_table : shape (n_r, n_costheta, n_costhetadir, n_deltaphidir) ndarray
+            Time-independent photon survival probability table.
+
+        t_indep_table_norm : float
+            r- and t-dependent normalization is assumed to already have been
+            applied to generate the t_indep_table, leaving only a possible
+            constant normalization that must still be applied (e.g.
+            ``quantum_efficiency*angular_acceptance_fract``).
+
+        Returns
+        -------
+        photons_at_all_times : float
+            Total photons due to the hypothesis expected to arrive at the
+            specified DOM for _all_ times.
+
+        photons_at_hit_time : float
+            Total photons due to the hypothesis expected to arrive at the
+            specified DOM at the time the DOM recorded the hit.
+
+        """
+        # Initialize accumulators (using double precision)
+
+        photons_at_all_times = np.float64(0.0)
+        photons_at_hit_time = np.float64(0.0)
+
+        # Initialize "prev_*" vars
+
+        prev_r_bin_idx = -1
+        prev_costheta_bin_idx = -1
+        prev_t_bin_idx = -1
+        if use_directionality:
+            prev_pdir_r = np.nan
+        else:
+            prev_pdir_r = 0
+            new_pdir_r = False
+
+        # Initialize cached values to nan since it's a bug if these are not
+        # computed at least the first time through and this will help ensure
+        # that such a bug shows itself
+
+        this_table_norm = np.nan
+
+        # Loop over the entries (one per row)
+
+        for pgen_idx in range(pinfo_gen.shape[0]):
+            # Info about the generated photons
+            t, x, y, z, p_count, pdir_x, pdir_y, pdir_z = pinfo_gen[pgen_idx, :]
+
+            # A photon that starts immediately in the past (before the DOM was hit)
+            # will show up in the raw CLSim Retro DOM tables in bin 0; the
+            # further in the past the photon started, the higher the time bin
+            # index.
+            dt = hit_time - t
+            dx = x - dom_coord[0]
+            dy = y - dom_coord[1]
+            dz = z - dom_coord[2]
+
+            rhosquared = dx*dx + dy*dy
+            rsquared = rhosquared + dz*dz
+
+            # Continue if photon is outside the radial binning limits
+            if rsquared >= rsquared_max or rsquared < rsquared_min:
+                continue
+
+            r = math.sqrt(rsquared)
+            r_bin_idx = int((r - r_min)**inv_r_power // table_dr_pwr)
+            costheta_bin_idx = int((1 - dz/r) // table_dcostheta)
+
+            new_r_bin = False
+            if r_bin_idx != prev_r_bin_idx:
+                new_r_bin = True
+                prev_r_bin_idx = r_bin_idx
+
+            new_costheta_bin = False
+            if costheta_bin_idx != prev_costheta_bin_idx:
+                new_costheta_bin = True
+                prev_costheta_bin_idx = costheta_bin_idx
+
+            if use_directionality:
+                pdir_rhosquared = pdir_x*pdir_x + pdir_y*pdir_y
+                pdir_r = math.sqrt(pdir_rhosquared + pdir_z*pdir_z)
+
+                new_pdir_r = False
+                if pdir_r != prev_pdir_r:
+                    new_pdir_r = True
+                    prev_pdir_r = pdir_r
+
+            # TODO: handle special cases for pdir_r:
+            #
+            #   pdir_r == 1 : Line emitter
+            #   pdir_r  > 1 : Gaussian profile with stddev (pdir_r - 1)
+            #
+            # Note that while pdir_r == 1 is a special case of both Cherenkov
+            # emission and Gaussian-profile emission, both of those are very
+            # computationally expensive compared to a simple
+            # perfectly-directional source, so we should handle all three
+            # separately.
+
+            if pdir_r == 0 and (new_pdir_r or new_r_bin or new_costheta_bin):
+                this_photons_at_all_times = np.mean(
+                    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                )
+            elif pdir_r < 1: # Cherenkov emitter
+                # Note that for these tables, we have to invert the photon
+                # direction relative to the vector from the DOM to the photon's
+                # vertex since simulation has photons going _away_ from the DOM
+                # that in reconstruction will hit the DOM if they're moving
+                # _towards_ the DOM.
+
+                pdir_rho = math.sqrt(pdir_rhosquared)
+
+                # Zenith angle is indep. of photon position relative to DOM
+                pdir_costheta = -pdir_z / pdir_r
+                pdir_sintheta = pdir_rho
+
+                # \Delta\phi depends on photon position relative to the DOM
+                pdir_cosdeltaphisquared = (-pdir_x*dx - pdir_y*dy) / rhosquared
+                pdir_cosdeltaphi = math.sqrt(pdir_cosdeltaphisquared)
+                pdir_sindeltaphi = math.sqrt(pdir_rhosquared - pdir_cosdeltaphisquared)
+
+                # Cherenkov angle is encoded in the length of the pdir vector
+                ckv_costheta = pdir_r
+                ckv_sintheta = math.sqrt(1 - pdir_r)
+
+                this_photons_at_all_times = survival_prob_from_cone(
+                    costheta=ckv_costheta,
+                    sintheta=ckv_sintheta,
+                    num_phi=NUM_PHI_SAMPLES,
+                    rot_costheta=pdir_costheta,
+                    rot_sintheta=pdir_sintheta,
+                    rot_cosphi=pdir_cosdeltaphi,
+                    rot_sinphi=pdir_sindeltaphi,
+                    directional_survival_prob=(
+                        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                    ),
+                    costheta_bin_width=table_dcosthetadir,
+                    deltaphi_bin_width=table_dphidir
+                )
+            elif pdir_r == 1: # line emitter
+                raise NotImplementedError('Line emitter not handled.')
+            else: # Gaussian emitter
+                raise NotImplementedError('Gaussian emitter not handled.')
+
+            photons_at_all_times += p_count * t_indep_table_norm * this_photons_at_all_times
+
+            # Causally impossible? (Note the comparison is written such that it
+            # will evaluate to True if hit_time is nan.)
+            if not t <= hit_time:
+                continue
+
+            # Is relative time outside binning?
+            if dt < t_min or dt >= t_max:
+                continue
+
+            t_bin_idx = int((dt - t_min) // table_dt)
+
+            new_t_bin = False
+            if t_bin_idx != prev_t_bin_idx:
+                new_t_bin = True
+                prev_t_bin_idx = t_bin_idx
+
+            if new_r_bin or new_t_bin:
+                this_table_norm = table_norm[r_bin_idx, t_bin_idx]
+
+            if pdir_r == 0 and (new_pdir_r or new_r_bin or new_costheta_bin or new_t_bin):
+                this_photons_at_hit_time = np.mean(
+                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                )
+            elif pdir_r < 1: # Cherenkov emitter
+                this_photons_at_hit_time = survival_prob_from_cone(
+                    costheta=ckv_costheta,
+                    sintheta=ckv_sintheta,
+                    num_phi=NUM_PHI_SAMPLES,
+                    rot_costheta=pdir_costheta,
+                    rot_sintheta=pdir_sintheta,
+                    rot_cosphi=pdir_cosdeltaphi,
+                    rot_sinphi=pdir_sindeltaphi,
+                    # Note that we assume we're indexing into a view of the
+                    # original table that has removed the under/overflow bins
+                    directional_survival_prob=(
+                        table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                    ),
+                    costheta_bin_width=table_dcosthetadir,
+                    deltaphi_bin_width=table_dphidir
+                )
+            elif pdir_r == 1: # line emitter
+                raise NotImplementedError('Line emitter not handled.')
+            else: # Gaussian emitter
+                raise NotImplementedError('Gaussian emitter not handled.')
+
+            photons_at_hit_time += p_count * this_table_norm * this_photons_at_hit_time
+
+        return photons_at_all_times, photons_at_hit_time
+
+    return pexp_5d, binning_info
+
+
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
 def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
-                   avg_photon_theta, avg_photon_length, use_directionality,
-                   t_min, t_max, n_t_bins, r_min, r_max, r_power, n_r_bins,
-                   n_costheta_bins):
-    """Compute total expected photons in a DOM based on the (t,r,theta)-binned
-    Retro DOM tables applied to a the generated photon info `pinfo_gen`.
+                   time_indep_survival_prob, t_min, t_max, n_t_bins, r_min,
+                   r_max, r_power, n_r_bins, n_costheta_bins):
+    """Compute expected photons in a DOM based on the (t,r,theta)-binned
+    Retro DOM tables applied to a the generated photon info `pinfo_gen`,
+    and the total expected photon count (time integrated) -- the normalization
+    of the pdf.
 
     Parameters
     ----------
@@ -371,9 +964,7 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
     hit_time : float
     dom_coord : shape (3,) numpy ndarray, dtype float64
     survival_prob
-    avg_photon_theta
-    avg_photon_length
-    use_directionality : bool
+    time_indep_survival_prob
     t_min : float
     t_max : float
     n_t_bins : int
@@ -385,12 +976,19 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
 
     Returns
     -------
-    expected_photon_count : float
+    total_photon_count, expected_photon_count : (float, float)
 
     """
     table_dt = (t_max - t_min) / n_t_bins
-    expected_photon_count = 0.0
-    inv_r_power = 1 / r_power
+    table_dcostheta = 2. / n_costheta_bins
+    expected_photon_count = 0.
+    total_photon_count = 0.
+    inv_r_power = 1. / r_power
+    table_dr_pwr = (r_max-r_min)**inv_r_power / n_r_bins
+
+    rsquared_max = r_max*r_max
+    rsquared_min = r_min*r_min
+
     for pgen_idx in range(pinfo_gen.shape[0]):
         t, x, y, z, p_count, p_x, p_y, p_z = pinfo_gen[pgen_idx, :] # pylint: disable=unused-variable
 
@@ -398,13 +996,19 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         # will show up in the Retro DOM tables in the _last_ bin.
         # Therefore, invert the sign of the t coordinate and index sequentially
         # via e.g. -1, -2, ....
-        dt = hit_time - t
+        dt = t - hit_time
         dx = x - dom_coord[0]
         dy = y - dom_coord[1]
         dz = z - dom_coord[2]
 
-        rho2 = dx**2 + dy**2
-        r = np.sqrt(rho2 + dz**2)
+        rsquared = dx**2 + dy**2 + dz**2
+        # we can already continue before computing the bin idx
+        if rsquared > rsquared_max:
+            continue
+        if rsquared < rsquared_min:
+            continue
+
+        r = math.sqrt(rsquared)
 
         #spacetime_sep = SPEED_OF_LIGHT_M_PER_NS*dt - r
         #if spacetime_sep < 0 or spacetime_sep >= retro.POL_TABLE_RMAX:
@@ -412,39 +1016,52 @@ def pexp_t_r_theta(pinfo_gen, hit_time, dom_coord, survival_prob,
         #    print('retro.MAX_POL_TABLE_SPACETIME_SEP:', retro.POL_TABLE_RMAX)
         #    continue
 
-        tbin_idx = int(np.floor((dt - t_min) / table_dt))
-        #if tbin_idx < 0 or tbin_idx >= -retro.POL_TABLE_DT:
-        if tbin_idx < -n_t_bins or tbin_idx >= 0:
+        r_bin_idx = int((r-r_min)**inv_r_power / table_dr_pwr)
+        #print('r_bin_idx: ',r_bin_idx)
+        #if r_bin_idx < 0 or r_bin_idx >= n_r_bins:
+        #    #print('r at ',r,'with idx ',r_bin_idx)
+        #    continue
+
+        costheta_bin_idx = int((1 -(dz / r)) / table_dcostheta)
+        #print('costheta_bin_idx: ',costheta_bin_idx)
+        #if costheta_bin_idx < 0 or costheta_bin_idx >= n_costheta_bins:
+        #    print('costheta out of range! This should not happen')
+        #    continue
+
+        # time indep.
+        time_indep_count = (
+            p_count * time_indep_survival_prob[r_bin_idx, costheta_bin_idx]
+        )
+        total_photon_count += time_indep_count
+
+        # causally impossible
+        if hit_time < t:
+            continue
+
+        t_bin_idx = int(np.floor((dt - t_min) / table_dt))
+        #print('t_bin_idx: ',t_bin_idx)
+        #if t_bin_idx < -n_t_bins or t_bin_idx >= 0:
+        #if t_bin_idx < 0 or t_bin_idx >= -retro.POL_TABLE_DT:
+        if t_bin_idx > n_t_bins or t_bin_idx < 0:
             #print('t')
+            #print('t at ',t,'with idx ',t_bin_idx)
             continue
 
-        rbin_idx = int(r**inv_r_power // retro.POL_TABLE_DRPWR)
-        if rbin_idx < 0 or rbin_idx >= retro.POL_TABLE_NRBINS:
-            #print('r')
-            continue
-
-        thetabin_idx = int(dz / (r * retro.POL_TABLE_DCOSTHETA))
-        if thetabin_idx < 0 or thetabin_idx >= retro.POL_TABLE_NTHETABINS:
-            #print('theta')
-            continue
-
-        #print(tbin_idx, rbin_idx, thetabin_idx)
+        #print(t_bin_idx, r_bin_idx, thetabin_idx)
         #raise Exception()
         surviving_count = (
-            p_count * survival_prob[tbin_idx, rbin_idx, thetabin_idx]
+            p_count * survival_prob[t_bin_idx, r_bin_idx, costheta_bin_idx]
         )
+
+        #print(surviving_count)
 
         # TODO: Include simple ice photon prop asymmetry here? Might need to
         # use both phi angle relative to DOM _and_ photon directionality
         # info...
 
-        # TODO: Incorporate photon direction info
-        if use_directionality:
-            pass
-
         expected_photon_count += surviving_count
 
-    return expected_photon_count
+    return total_photon_count, expected_photon_count
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
@@ -489,12 +1106,137 @@ def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
     return expected_photon_count
 
 
+class CLSimTables(object):
+    """
+    Class to interact with and obtain photon survival probabilities from a set
+    of CLSim tables.
+
+    Parameters
+    ----------
+    geom
+
+    """
+    def __init__(self, geom, use_directionality):
+        assert len(geom.shape) == 3
+        self.geom = geom
+        self.use_directionality = use_directionality
+        self.tables = {}
+        self.string_aggregation = None
+        self.depth_aggregation = None
+        self.pexp_func = None
+        self.binning_info = None
+
+    def load_clsim_table(self, fpath, string, depth_idx, step_length,
+                         angular_acceptance_fract, quantum_efficiency, mmap):
+        """Load a table into the set.
+
+        Parameters
+        ----------
+        fpath : string
+        string : int in [1, 86] or str in {'ic', 'dc'}
+        depth_idx : int in [0, 59] or str == 'all'
+        step_length : float > 0
+        angular_acceptance_fract : float in (0, 1]
+        quantum_efficiency : float in (0, 1]
+        mmap : bool
+
+        """
+        if isinstance(string, basestring):
+            string = string.strip().lower()
+            assert string in ['ic', 'dc']
+            self.string_aggregation = True
+        elif isinstance(string, int):
+            # `False` is ok but `None` is not ok
+            assert self.string_aggregation == False # pylint: disable=singleton-comparison
+            assert 1 <= string <= 86
+
+        if isinstance(depth_idx, basestring):
+            depth_idx = depth_idx.strip().lower()
+            assert depth_idx == 'all'
+            self.depth_aggregation = True
+        else:
+            # `False` is ok but `None` is not ok
+            assert self.depth_aggregation == False # pylint: disable=singleton-comparison
+            assert 0 <= depth_idx <= 59
+
+        assert step_length > 0
+        assert 0 < angular_acceptance_fract <= 1
+        assert 0 < quantum_efficiency <= 1
+
+        table = load_clsim_table_minimal(
+            fpath=fpath,
+            step_length=step_length,
+            mmap=mmap,
+            gen_t_indep=True
+        )
+
+        table['table_norm'] = get_table_norm(**{k: table[k] for k in TABLE_NORM_KEYS})
+        table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
+
+        pexp_5d, _ = generate_pexp_5d_function(table, self.use_directionality)
+
+        # NOTE: original tables have underflow (bin 0) and overflow (bin -1)
+        # bins, so whole-axis slices must exclude the first and last bins.
+        self.tables[(string, depth_idx)] = (
+            pexp_5d,
+            table['t_indep_table'],
+            table['t_indep_table_norm'],
+            table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
+            table['table_norm']
+        )
+
+    def get_photon_expectation(self, pinfo_gen, hit_time, string, depth_idx):
+        """
+        Parameters
+        ----------
+        pinfo_gen : shape (N, 8) numpy.ndarray
+            Info about photons generated photons by the event hypothesis.
+
+        hit_time : float, units of ns
+        string : int in [1, 86]
+        depth_idx : int in [0, 59]
+
+        Returns
+        -------
+        total_photon_count, expected_photon_count : float
+            See pexp_t_r_theta
+
+        """
+        # `string` goes from 1 to 86 but indexing is 0 to 85
+        dom_coord = self.geom[string - 1, depth_idx]
+
+        if self.string_aggregation:
+            if string < 79:
+                string = 'ic'
+            else:
+                string = 'dc'
+
+        if self.depth_aggregation:
+            depth_idx = 'all'
+
+        (pexp_5d,
+         t_indep_table,
+         t_indep_table_norm,
+         table,
+         table_norm) = self.tables[(string, depth_idx)]
+
+        return pexp_5d(
+            pinfo_gen=pinfo_gen,
+            hit_time=hit_time,
+            dom_coord=dom_coord,
+            t_indep_table=t_indep_table,
+            t_indep_table_norm=t_indep_table_norm,
+            table=table,
+            table_norm=table_norm,
+        )
+
+
 class CLSimTable(object):
     """Load and use information from a single "raw" individual-DOM
     (time, r, theta, thetadir, deltaphidir)-binned Retro table.
 
     Note that this is the table generated by CLSim, prior to any manipulations
-    performed for using the table with Retro, and is in the FITS file format.
+    performed for using the table with Retro.
 
     Parameters
     ----------
@@ -579,9 +1321,18 @@ class CLSimTable(object):
             self.seed = info['seed']
 
         assert self.subdet in ('ic', 'dc')
+        if self.subdet == 'ic':
+            self.quantum_efficiency = retro.IC_DOM_QUANT_EFF
+        elif self.subdet == 'dc':
+            self.quantum_efficiency = retro.DC_DOM_QUANT_EFF
+
         self.dtp_fname_proto = retro.RETRO_DOM_TABLE_FNAME_PROTO[-1]
 
-        table_info = load_clsim_table(self.fpath)
+        table_info = load_clsim_table(
+            self.fpath, step_length=1,
+            angular_acceptance_fract=self.angular_acceptance_fract,
+            quantum_efficiency=self.quantum_efficiency
+        )
 
         self.table = table_info.pop('table')
         self.table_shape = table_info.pop('table_shape')
@@ -604,57 +1355,32 @@ class CLSimTable(object):
 
         if self.n_dims == 5:
             self.costhetadir_bin_edges = table_info.pop('costhetadir_bin_edges')
-            self.deltaphidir_bin_edges = table_info.pop('deltaphidir_bin_edges') # radians
+            self.deltaphidir_bin_edges = table_info.pop('deltaphidir_bin_edges') # rad
             self.costhetadir_centers = retro.linear_bin_centers(self.costhetadir_bin_edges)
-            self.thetadir_bin_edges = np.arccos(self.costhetadir_bin_edges) # radians
-            self.thetadir_centers = np.arccos(self.costhetadir_centers) # radians
-            self.deltaphidir_centers = retro.linear_bin_centers(self.deltaphidir_bin_edges) # radians
+            self.thetadir_bin_edges = np.arccos(self.costhetadir_bin_edges) # rad
+            self.thetadir_centers = np.arccos(self.costhetadir_centers) # rad
+            self.deltaphidir_centers = retro.linear_bin_centers(self.deltaphidir_bin_edges) # rad
         else:
             raise NotImplementedError(
                 'Can only work with CLSim tables with 5 dimensions; got %d'
                 % self.n_dims
             )
 
+        self.table_norm = table_info.pop('table_norm')
+
         del table_info
 
-        #with pyfits.open(self.fpath) as table:
-        #    # Cut off first and last bin in each dimension (underflow and
-
-        #    self.n_photons = retro.force_little_endian(table[0].header['_i3_n_photons'])
-        #    self.phase_refractive_index = retro.force_little_endian(table[0].header['_i3_n_phase'])
-
-        #    # Space-time dimensions
-        #    self.r_bin_edges = retro.force_little_endian(table[1].data) # meters
-        #    self.costheta_bin_edges = retro.force_little_endian(table[2].data)
-        #    self.t_bin_edges = retro.force_little_endian(table[3].data) # nanoseconds
-
-        #    # Photon directionality
-        #    self.costhetadir_bin_edges = retro.force_little_endian(table[4].data)
-        #    self.deltaphidir_bin_edges = retro.force_little_endian(table[5].data)
-
-        # Multiply the tabulated photon counts by a normalization factor to
-        # arrive at a (reasonable, but still imperfect) suvival
-        # probability. Normalization is performed by:
-        # * Dividing by total photons thrown
-        # * Dividing by (speed of light in ice, c / n, in m/ns
-        #    multiplied by the bin width in ns; overall units are m)
-        # * Multiplying by a correction for angular acceptance, in [0, 1]
-        # * Multiplying by the number of costheta bins (>= 1)
-        # The result of applying this norm is in units of 1/meter, where
-        # this unit accounts for the fact that CLSim tabulates the same
-        # photon every meter it travels, hence the same photon results in
-        # multiple counts (as many as there are meters in its path).
-        self.norm = (
-            1
-            / self.n_photons
-            / (retro.SPEED_OF_LIGHT_M_PER_NS / self.phase_refractive_index
-               * self.t_bin_width)
-            * self.angular_acceptance_fract
-            * (len(self.costheta_bin_edges) - 1)
-        )
+        #self.norm = (
+        #    1
+        #    / self.n_photons
+        #    / (retro.SPEED_OF_LIGHT_M_PER_NS / self.phase_refractive_index
+        #       * self.t_bin_width)
+        #    * self.angular_acceptance_fract
+        #    * (len(self.costheta_bin_edges) - 1)
+        #)
 
         # The photon direction is tabulated in dimensions 3 and 4
-        #self.survival_prob = self.data.sum(axis=(3, 4)) * self.norm
+        #self.survival_prob = self.data.sum(axis=(3, 4)) * self.table_norm
 
     def export_t_r_theta_table(self, outdir=None, overwrite=True):
         """Distill binned photon directionality information into a single
@@ -766,6 +1492,7 @@ class DOMTimePolarTables(object):
         assert dc_exponent >= 0
         if naming_version is None:
             naming_version = len(retro.RETRO_DOM_TABLE_FNAME_PROTO) - 1
+        self.naming_version = naming_version
         self.dom_table_fname_proto = retro.RETRO_DOM_TABLE_FNAME_PROTO[naming_version]
 
         self.tables_dir = tables_dir
@@ -775,6 +1502,7 @@ class DOMTimePolarTables(object):
         self.ic_exponent = ic_exponent
         self.dc_exponent = dc_exponent
         self.tables = {'ic': {}, 'dc': {}}
+        self.bin_edges = {'ic': {}, 'dc': {}}
 
     def load_table(self, string, depth_idx, force_reload=False):
         """Load a table from disk into memory.
@@ -782,7 +1510,12 @@ class DOMTimePolarTables(object):
         Parameters
         ----------
         string : int in [1, 86]
-            Indexed from 1, currently 1-86
+            Indexed from 1, currently 1-86. Strings 1-78 are "regular" IceCube
+            strings, while strings 79-86 are DeepCore strings. (It should be
+            noted, though, that strings 79 and 80 are considered in-fill
+            strings, with "a mix of high quantum-efficiency and standard DOMs";
+            which are which is _not_ taken into consideration in the software
+            yet.)
 
         depth_idx : int in [0, 59]
             Indexed from 0, currently 0-59
@@ -790,8 +1523,7 @@ class DOMTimePolarTables(object):
         force_reload : bool
 
         """
-        string_idx = string - 1
-        if string_idx < 79:
+        if string < 79:
             subdet = 'ic'
             dom_quant_eff = retro.IC_DOM_QUANT_EFF
             exponent = self.ic_exponent
@@ -803,14 +1535,28 @@ class DOMTimePolarTables(object):
         if not force_reload and depth_idx in self.tables[subdet]:
             return
 
-        fpath = join(
-            self.tables_dir,
-            self.dom_table_fname_proto.format(
-                subdet=subdet, depth_idx=depth_idx
+        if self.naming_version == 0:
+            fpath = join(
+                self.tables_dir,
+                self.dom_table_fname_proto.format(
+                    string=subdet.upper(), depth_idx=depth_idx
+                )
             )
-        )
+        elif self.naming_version == 1:
+            raise NotImplementedError()
+            #fpath = join(
+            #    self.tables_dir,
+            #    self.dom_table_fname_proto.format(
+            #        hash_val=self.hash_val,
+            #        string=subdet,
+            #        depth_idx=depth_idx,
+            #        seed=seed, # TODO
+            #    )
+            #)
+        else:
+            raise NotImplementedError()
 
-        photon_info, _ = load_t_r_theta_table(
+        photon_info, bin_edges = load_t_r_theta_table(
             fpath=fpath,
             depth_idx=depth_idx,
             scale=dom_quant_eff,
@@ -821,11 +1567,14 @@ class DOMTimePolarTables(object):
         #deltaphi = photon_info.deltaphi[depth_idx]
         self.tables[subdet][depth_idx] = retro.RetroPhotonInfo(
             survival_prob=photon_info.survival_prob[depth_idx],
+            time_indep_survival_prob=photon_info.time_indep_survival_prob[depth_idx],
             theta=photon_info.theta[depth_idx],
             deltaphi=photon_info.deltaphi[depth_idx],
             length=(photon_info.length[depth_idx]
                     * np.cos(photon_info.deltaphi[depth_idx]))
         )
+
+        self.bin_edges[subdet][depth_idx] = bin_edges
 
     def load_tables(self):
         """Load all tables"""
@@ -853,7 +1602,7 @@ class DOMTimePolarTables(object):
 
         Returns
         -------
-        expected_photon_count : float
+        total_photon_count, expected_photon_count : (float, float)
             Total expected surviving photon count
 
         """
@@ -863,21 +1612,27 @@ class DOMTimePolarTables(object):
         string_idx = string - 1
 
         dom_coord = self.geom[string_idx, depth_idx]
-        if string_idx < 79:
+        if string < 79:
             subdet = 'ic'
         else:
             subdet = 'dc'
         table = self.tables[subdet][depth_idx]
+        bin_edges = self.bin_edges[subdet][depth_idx]
         survival_prob = table.survival_prob
-        avg_photon_theta = table.theta
-        avg_photon_length = table.length
+        time_indep_survival_prob = table.time_indep_survival_prob
         return pexp_t_r_theta(pinfo_gen=pinfo_gen,
                               hit_time=hit_time,
                               dom_coord=dom_coord,
                               survival_prob=survival_prob,
-                              avg_photon_theta=avg_photon_theta,
-                              avg_photon_length=avg_photon_length,
-                              use_directionality=use_directionality)
+                              time_indep_survival_prob=time_indep_survival_prob,
+                              t_min=bin_edges.t[0],
+                              t_max=bin_edges.t[-1],
+                              n_t_bins=len(bin_edges.t)-1,
+                              r_min=bin_edges.r[0],
+                              r_max=bin_edges.r[-1],
+                              r_power=2,
+                              n_r_bins=len(bin_edges.r)-1,
+                              n_costheta_bins=len(bin_edges.theta)-1)
 
 
 # TODO: convert to using exponent rather than scale (scale will be applied via
@@ -970,7 +1725,7 @@ class TDICartTable(object):
         self.anisotropy = proto_meta['anisotropy']
 
         if subvol is not None:
-            raise NotImplementedError
+            raise NotImplementedError()
             sv_x0, sv_x1 = subvol[0][0], subvol[0][1]
             sv_y0, sv_y1 = subvol[1][0], subvol[1][1]
             sv_z0, sv_z1 = subvol[2][0], subvol[2][1]

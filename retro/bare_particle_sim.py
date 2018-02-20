@@ -548,8 +548,11 @@ if __name__ == "__main__":
         print(" ** This usually means propagation is faster, but unrealistic."
               " Might differ from GPU type to GPU type.")
 
-    args.xml_file = args.outbase + ".xml"
-    args.i3_file = args.outbase + ".i3.bz2"
+
+    fname = '%s_E=%s_x=%s_y=%s_z=%s_coszen=%s_azimuth=%s'%(args.particle_type,args.energy,args.x,args.y,args.z,args.coszen,args.azimuth)
+
+    args.xml_file = args.outbase + fname + ".xml"
+    args.i3_file = args.outbase + fname + ".i3.bz2"
 
     run_test(args)
 
