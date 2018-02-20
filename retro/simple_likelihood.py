@@ -68,7 +68,7 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
 
     Returns
     -------
-    llh : float
+    neg_llh : float
         Negative of the log likelihood
 
     """
@@ -126,12 +126,13 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
 
     return neg_llh
 
+
 def zenith_astro_to_reco(zenith):
     return PI - zenith
 
+
 def azimuth_astro_to_reco(azimuth):
     return (azimuth - PI) % (2*PI)
-
 
 
 discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade, const_energy_loss_muon])

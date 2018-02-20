@@ -192,10 +192,11 @@ CLSIM_TABLE_METANAME_RE = [
         ''', re.IGNORECASE | re.VERBOSE
     )
 ]
+
 RETRO_DOM_TABLE_FNAME_PROTO = [
     (
         'retro_nevts1000'
-        '_{subdet:s}'
+        '_{string:s}'
         '_DOM{depth_idx:d}'
         '_r_cz_t_angles.fits'
     ),
