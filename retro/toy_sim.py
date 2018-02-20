@@ -10,6 +10,7 @@ normalization.
 
 from __future__ import absolute_import, division, print_function
 
+from collections import OrderedDict
 from time import time
 
 import numpy as np
@@ -137,49 +138,25 @@ def forward_survival_prob(absorption_length, binning, n_photons,
         (a norm not weighted by absorption length or DOM efficiency)
 
     """
-    t_start = time()
     dom_radius_sq = dom_radius**2 # m^2
 
-    r_edges = binning.r.bin_edges.m_as('m')
-    t_edges = binning.t.bin_edges.m_as('ns')
-    phi_edges = binning.phi.bin_edges.m_as('rad')
-    phidir_edges = binning.phidir.bin_edges.m_as('rad')
-
-    # Since we chose the first phi bin, sampling uniformly is "easy" in this
-    # region via rejection sampling
-    xmin = np.min(r_edges) * np.cos(np.max(phi_edges))
-    xmax = np.max(r_edges)
-    dx = xmax - xmin
-    ymin = 0
-    ymax = np.max(r_edges) * np.sin(np.max(phi_edges))
-    dy = ymax - ymin
+    r_edges = sorted(binning.r.bin_edges.m_as('m'))
+    t_edges = sorted(binning.t.bin_edges.m_as('ns'))
+    phi_edges = sorted(binning.phi.bin_edges.m_as('rad'))
+    phidir_edges = sorted(binning.phidir.bin_edges.m_as('rad'))
 
     rand = np.random.RandomState(seed)
-    x_samples = rand.uniform(low=xmin, high=xmax, size=n_photons*10)
-    y_samples = rand.uniform(low=ymin, high=ymax, size=n_photons*10)
-    r_samples = np.hypot(x_samples, y_samples)
-    phi_samples = np.arctan(y_samples / x_samples)
+    phi_samples = rand.uniform(phi_edges[0], phi_edges[1], n_photons)
+    r_samples = np.sqrt(rand.uniform(r_edges[0]**2, r_edges[-1]**2, n_photons))
+    x_samples = r_samples * np.cos(phi_samples)
+    y_samples = r_samples * np.sin(phi_samples)
 
-    rbi = np.digitize(r_samples, bins=r_edges)
-    pbi = np.digitize(phi_samples, bins=phi_edges)
-    inside_mask = (
-        (rbi > 0) & (rbi <= 1)
-        &
-        (pbi > 0) & (pbi <= 1)
-    )
-    x_samples = x_samples[inside_mask][:n_photons]
-    y_samples = y_samples[inside_mask][:n_photons]
-    r_samples = r_samples[inside_mask][:n_photons]
-    phi_samples = phi_samples[inside_mask][:n_photons]
-
-    # Dimensions other than $r$ and $\phi$ ($t$ and $\phi_{\rm dir}$) can be
-    # sampled directly from uniform distributions.
-
-    phidir_samples = rand.uniform(low=phidir_edges[0], high=phidir_edges[1], size=n_photons)
+    phidir_samples = rand.uniform(phidir_edges[0], phidir_edges[-1], n_photons)
 
     # Test for intersection with the circular DOM.
     # See http://mathworld.wolfram.com/Circle-LineIntersection.html
-    ray_distance = 10 * r_edges[1] # m
+
+    ray_distance = 10 * r_edges[-1] # m
 
     dx = ray_distance * np.cos(phidir_samples)
     dy = ray_distance * np.sin(phidir_samples)
@@ -189,10 +166,10 @@ def forward_survival_prob(absorption_length, binning, n_photons,
     dr_sq = dx**2 + dy**2
     discriminant = dom_radius_sq * dr_sq - determinant**2
 
-    # select out only values that intersect the DOM
+    # Select values that intersect the DOM
+
     mask = discriminant >= 0
     num_hits = mask.sum()
-    print('Number of photons that hit DOM in any t-bin (and at any angle of incidence):', num_hits)
     x = np.compress(mask, x_samples)
     y = np.compress(mask, y_samples)
     dx = np.compress(mask, dx)
@@ -221,8 +198,6 @@ def forward_survival_prob(absorption_length, binning, n_photons,
     mask = dist0sq < dist1sq
 
     distsq = np.where(mask, dist0sq, dist1sq)
-    #x_int = np.where(mask, x0_int, x1_int)
-    #y_int = np.where(mask, y0_int, y1_int)
 
     # Now select only those points that fall within the time bin
 
@@ -230,34 +205,12 @@ def forward_survival_prob(absorption_length, binning, n_photons,
     transit_time = dist / speed_of_light * 1e9 # ns
 
     mask = (transit_time >= t_edges[0]) & (transit_time < t_edges[1])
-
     num_hits = np.sum(mask)
-    print('Number of photons that hit DOM and fall in the t-bin (at any angle'
-          ' of incidence):', num_hits)
 
-    #x = np.compress(mask, x)
-    #y = np.compress(mask, y)
-    #dx = np.compress(mask, dx)
-    #dy = np.compress(mask, dy)
-    #endpt_x = np.compress(mask, endpt_x)
-    #endpt_y = np.compress(mask, endpt_y)
     dist = np.compress(mask, dist)
-    #distsq = np.compress(mask, distsq)
-    #x_int = np.compress(mask, x_int)
-    #y_int = np.compress(mask, y_int)
-
-    pdet = np.sum(dom_efficiency * np.exp(-dist / absorption_length)) / n_photons
-
-    print('{:.2e} of {:.2e} photons ({}%) actually struck the DOM (at any'
-          ' angle of incidence)'
-          .format(num_hits, n_photons, np.round(num_hits/n_photons*100, 3)))
-    print('phi bin subtends {}% of a full circle'
-          .format(np.round(100*np.diff(phi_edges/(2*np.pi))[0], 3)))
-    print('phi_dir bin subtends {}% of a full circle'
-          .format(np.round(100*np.diff(phidir_edges/(2*np.pi))[0], 3)))
-    print('Probability of the DOM detecting a photon with parameters within'
-          ' the chosen bin: {:.3e}'.format(pdet))
-    print('Time to calculate pdet: {:.3e} sec'.format(time() - t_start))
+    pdet = (
+        np.sum(dom_efficiency * np.exp(-dist / absorption_length)) / n_photons
+    )
 
     return pdet, num_hits
 
@@ -266,10 +219,7 @@ def retro_point_dom_survival_prob(absorption_length, binning, n_photons,
                                   dom_efficiency, dom_radius, speed_of_light,
                                   step_length, seed):
     """Retro simulation to find photon survival probability, starting photons
-    on the surface of the DOM.
-
-    Starting angles of the photons are randomized to be between +/-pi/2 off of
-    the DOM normal at the photon starting point.
+    at a point located at the center of the DOM.
 
     Parameters
     ----------
@@ -295,10 +245,15 @@ def retro_point_dom_survival_prob(absorption_length, binning, n_photons,
 
     seed : int in [0, 2**32)
 
+    Returns
+    -------
+    unnormed_pdet
+    num_hits
+
     """
     # Convert binning units to those expected internally
     units = dict(r='m', phi='rad', t='ns', phidir='rad')
-    binning = binning.to([units[name] for name in binning.names])
+    binning = binning.to(*[units[name] for name in binning.names])
 
     # TODO: use np.histogramdd to allow for arbitrary binning!
     assert binning.tot_num_bins == 1
@@ -311,19 +266,22 @@ def retro_point_dom_survival_prob(absorption_length, binning, n_photons,
 
     rand = np.random.RandomState(seed)
 
-    rand = np.random.RandomState(seed + 1)
     retro_phi_samples = rand.uniform(low=0, high=2*np.pi, size=n_photons)
     retro_phidir_samples = (retro_phi_samples + np.pi) % (2*np.pi)
     mask_phi = (retro_phi_samples >= phi_min) & (retro_phi_samples < phi_max)
     mask_phidir = (retro_phidir_samples >= phidir_min) & (retro_phidir_samples < phidir_max)
     mask = mask_phi & mask_phidir
 
-    num_hits = np.sum(mask)
+    num_photons_in_bin = np.sum(mask)
 
     retro_phi_samples = np.compress(mask, retro_phi_samples)
     retro_phidir_samples = np.compress(mask, retro_phidir_samples)
 
-    radial_samples_r0 = rand.uniform(r_min, r_max + step_length, size=num_hits)
+    radial_samples_r0 = rand.uniform(
+        low=r_min,
+        high=r_min + step_length,
+        size=num_photons_in_bin
+    )
 
     radial_samples = []
     r_kept = 0
@@ -340,9 +298,13 @@ def retro_point_dom_survival_prob(absorption_length, binning, n_photons,
 
     radial_samples = np.concatenate(radial_samples)
 
-    unnormed_pdet = np.sum(dom_efficiency * np.exp(-radial_samples / absorption_length))
+    num_counts = radial_samples.size
 
-    return unnormed_pdet, num_hits
+    unnormed_pdet = np.sum(
+        dom_efficiency * np.exp(-radial_samples / absorption_length)
+    )
+
+    return unnormed_pdet, num_photons_in_bin, num_counts
 
 
 def retro_finite_dom_survival_prob(absorption_length, binning, n_photons,
@@ -381,57 +343,80 @@ def retro_finite_dom_survival_prob(absorption_length, binning, n_photons,
     """
     # Convert binning units to those expected internally
     units = dict(r='m', phi='rad', t='ns', phidir='rad')
-    binning = binning.to([units[name] for name in binning.names])
+    binning = binning.to(*[units[name] for name in binning.names])
     r_max = np.max(binning.r.bin_edges.m)
+    phidir_min, phidir_max = binning.phidir.domain.m
 
     rand = np.random.RandomState(seed)
 
     # Photon starting point in polar coords (radius is just DOM radius)
     start_phi_samp = rand.uniform(low=0, high=2*np.pi, size=n_photons)
 
-    # Randomize photon direction by +/-pi/2 from the DOM normal (i.e., phi)
+    # Flip direction to be opposite of phi and randomize photon direction by
+    # +/-pi/2 from the DOM normal
     phidir_samp = (
-        start_phi_samp
-        + rand.uniform(low=-np.pi/2, high=np.pi/2, size=n_photons)
+        rand.uniform(
+            low=np.pi - np.pi/2,
+            high=np.pi + np.pi/2,
+            size=n_photons
+        )
+        + start_phi_samp
     ) % (2*np.pi)
+    mask = (phidir_samp >= phidir_min) & (phidir_samp < phidir_max)
+    n_phidir_keep = np.sum(mask)
+
+    start_phi_samp = np.compress(mask, start_phi_samp)
+    phidir_samp = np.compress(mask, phidir_samp)
 
     # Starting point in Cartesian coordinates
     x0 = dom_radius * np.cos(start_phi_samp)
     y0 = dom_radius * np.sin(start_phi_samp)
 
-    displ_first_samp = rand.uniform(low=0, high=step_length, size=n_photons)
+    displ_first_samp = rand.uniform(
+        low=0,
+        high=step_length,
+        size=n_phidir_keep
+    )
 
-    displ_samp_offsets = np.arange(0, 2*dom_radius + r_max + step_length, step_length)
+    displ_samp_offsets = np.arange(
+        0,
+        2*dom_radius + r_max + step_length,
+        step_length
+    )
     displ_samp = np.add.outer(displ_samp_offsets, displ_first_samp)
 
-    x_samp = x0 + displ_samp * np.cos(phidir_samp)
-    y_samp = y0 + displ_samp * np.sin(phidir_samp)
+    # Note negatives are due to direction being opposite in Retro
+    x_samp = x0 - displ_samp * np.cos(phidir_samp)
+    y_samp = y0 - displ_samp * np.sin(phidir_samp)
 
     # Need polar coords relative to origin to find what's inside the binning
     r_samp = np.hypot(x_samp, y_samp)
     t_samp = displ_samp / (speed_of_light / 1e9)
     phi_samp = np.arctan2(y_samp, x_samp)
 
-    # Duplicate phidir for each point
-    phidir_samp = np.stack([phidir_samp]*len(displ_samp_offsets))
-
     r_samp = r_samp.flatten()
     t_samp = t_samp.flatten()
     phi_samp = phi_samp.flatten()
-    phidir_samp = phidir_samp.flatten()
 
-    samp_map = dict(r=r_samp, t=t_samp, phi=phi_samp, phidir=phidir_samp)
-    samp = [samp_map[name] for name in binning.names]
+    samp_map = dict(r=r_samp, t=t_samp, phi=phi_samp)
+    samp = [samp_map[name] for name in binning.names if name != 'phidir']
+
+    bin_edges = OrderedDict(
+        [(name, binning[name].bin_edges)
+         for name in binning.names if name != 'phidir']
+    )
 
     unnormed_pdet, _ = np.histogramdd(
         samp,
-        bins=binning.bin_edges,
-        weights=dom_efficiency * np.exp(-displ_samp.flatten() / absorption_length)
+        bins=bin_edges.values(),
+        weights=np.exp(-displ_samp.flatten() / absorption_length),
+        normed=False
     )
+    unnormed_pdet *= dom_efficiency
 
-    num_hits, _ = np.histogramdd(samp, bins=binning.bin_edges)
+    num_counts, _ = np.histogramdd(samp, bins=bin_edges.values(), normed=False)
 
-    return unnormed_pdet, num_hits
+    return unnormed_pdet, num_counts
 
 
 def test_survival_prob():
