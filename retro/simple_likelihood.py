@@ -50,6 +50,10 @@ parser.add_argument(
     event)''',
 )
 parser.add_argument(
+    '-o', '--outdir', type=str, default='out/',
+    help='''output directory''',
+)
+parser.add_argument(
     '--index', default=0, type=int,
     help='''Event index to be processed'''
 )
@@ -250,10 +254,7 @@ if True:
 
     n_params = 8
 
-    if socket.gethostname() in ['schwyz', 'uri', 'unterwalden']:
-        outname = 'out/tol0.1_evt%i-'%args.index
-    else:
-        outname = '/gpfs/scratch/pde3/retro/out/tol0.1_evt%i-'%args.index
+    outname = '%s/tol0.1_evt%i-'%(args.outdir,args.index)
     pymultinest.run(loglike, prior, n_params,
                     verbose=True,
                     outputfiles_basename=outname,
