@@ -82,12 +82,14 @@ dom_tables = DOMTimePolarTables(
 dom_tables.load_tables()
 
 #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=20, cascade_energy=0)
-hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=-PI, track_energy=20, cascade_energy=0)
+hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=0, cascade_energy=20)
+#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
 
-f = open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb')
-#f = open('benchmark.pkl', 'rb')
-histos = pickle.load(f)
+#f = open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb')
+with open('../icetray_processing/cascade_step4_SRTInIcePulses_90_700_1.pkl', 'rb') as f:
+    srt_histos = pickle.load(f)
+with open('../icetray_processing/cascade_step4_SplitUncleanedInIcePulses.pkl', 'rb') as f:
+    uncleaned_histos = pickle.load(f)
 
 
 pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
@@ -126,13 +128,14 @@ for dom in doms:
         try:
             #time = histos[string][dom]['time']
             #weight = histos[string][dom]['weight']
-            h = np.nan_to_num(histos[string][dom])
+            h = np.nan_to_num(uncleaned_histos[string][dom])
             tot_clsim = np.sum(h)
             if norm:
                 h/= np.sum(h)
             #if norm2:
             #    h *= 200
             plt.plot(mid_points, h)
+            plt.plot(mid_points, np.nan_to_num(srt_histos[string][dom]), c='r')
             a_text = AnchoredText('RETRO = %.5f, CLSIM = %.5f, ratio = %.5f\n total_p = %.2f, sum = %.2f'%(tot_retro, tot_clsim, tot_retro/tot_clsim, total_p, np.sum(expected_ps)), loc=2)
             #print(tot_retro/tot_clsim)
             plt.gca().add_artist(a_text)
@@ -141,4 +144,5 @@ for dom in doms:
         except KeyError:
             pass
 
-        plt.savefig('dom_pdfs/retro_%s_%s.png'%(string,dom))
+        #plt.savefig('dom_pdfs/retro_%s_%s.png'%(string,dom))
+        plt.savefig('dom_hit_dists/retro_%s_%s.png'%(string,dom))
