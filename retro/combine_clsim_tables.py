@@ -67,7 +67,7 @@ SUM_KEYS = [
 ] # yapf: disable
 """Sum together values corresponding to these keys in all tables"""
 
-ALL_KEYS = VALIDATE_KEYS + SUM_KEYS
+ALL_KEYS = VALIDATE_KEYS + SUM_KEYS + ['t_indep_table']
 """All keys expected to be in tables"""
 
 
@@ -174,11 +174,12 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
     # Force quantum_efficiency and angular_acceptance_fract to 1 (these should
     # be handled by the user at the time the table is used to represent a
     # particular or subgroup of DOMs)
-    table['t_indep_table'] = generate_time_indep_table(
+    t_indep_table, _ = generate_time_indep_table(
         table=table,
         quantum_efficiency=1,
         angular_acceptance_fract=1
     )
+    table['t_indep_table'] = t_indep_table
 
     # Save the data to npy files on disk (in a sub-directory for all of this
     # table's files)

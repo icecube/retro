@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, invalid-name
 
 """
 Load retro tables into RAM, then for a given hypothesis generate the photon pdfs at a DOM
@@ -24,17 +24,12 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 
-from argparse import ArgumentParser
-from collections import OrderedDict, Sequence
-from copy import deepcopy
 import cPickle as pickle
-from itertools import izip, product
-from os import makedirs
-from os.path import abspath, dirname, isdir, join
+from itertools import product
+from os.path import abspath, dirname, join
 import sys
 import time
 
-import numba # pylint: disable=unused-import
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -45,100 +40,236 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import DC_DOM_JITTER_NS, IC_DOM_JITTER_NS, PI # pylint: disable=unused-import
-from retro import FTYPE, HYPO_PARAMS_T, HypoParams10D
-from retro import DETECTOR_GEOM_FILE
-from retro import (event_to_hypo_params, expand, poisson_llh,
-                   get_primary_interaction_str)
-from retro.events import Events
+import retro
 from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_kernels import const_energy_loss_muon # pylint: disable=unused-import
-from retro.discrete_cascade_kernels import point_cascade # pylint: disable=unused-import
-from retro.plot_1d_scan import plot_1d_scan
-from retro.table_readers import DOMTimePolarTables, TDICartTable # pylint: disable=unused-import
+from retro.discrete_muon_kernels import const_energy_loss_muon
+from retro.discrete_cascade_kernels import point_cascade
+from retro.table_readers import DOMTimePolarTables, TDICartTable, CLSimTables # pylint: disable=unused-import
 
 
-discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade,const_energy_loss_muon])
-#discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade])
+retro.DEBUG = 1
 
-
-geom_file = DETECTOR_GEOM_FILE
-tables_dir = '/data/icecube/retro_tables/full1000/'
-
-
-# Load detector geometry array
-print('Loading detector geometry from "%s"...' % expand(geom_file))
-detector_geometry = np.load(expand(geom_file))
-
-# Load tables
-print('Loading DOM tables...')
-dom_tables = DOMTimePolarTables(
-    tables_dir=tables_dir,
-    hash_val=None,
-    geom=detector_geometry,
-    use_directionality=False,
-    naming_version=0,
+# pylint: disable=line-too-long
+SIMULATIONS = dict(
+    upgoing_muon=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-400,
+            track_azimuth=0, track_zenith=np.pi,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='~/src/retro/data/benchmark.pkl'
+        #fwd_sim_histo_file='/home/peller/retro/retro/testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl'
+    ),
+    cascade=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-400,
+            track_azimuth=0, track_zenith=0,
+            track_energy=0, cascade_energy=20
+        ),
+        fwd_sim_histo_file='benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl'
+    ),
+    downgoing_muon=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-400,
+            track_azimuth=0, track_zenith=-retro.PI,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file=None
+    )
 )
-dom_tables.load_tables()
 
-#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=20, cascade_energy=0)
-hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=0, cascade_energy=20)
-#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=-PI, track_energy=20, cascade_energy=0)
-
-f = open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb')
-#f = open('benchmark.pkl', 'rb')
-histos = pickle.load(f)
+SIM_TO_TEST = 'upgoing_muon'
+#CODE_TO_TEST = 'dom_time_polar_tables'
+#CODE_TO_TEST = 'clsim_tables_no_dir'
+CODE_TO_TEST = 'orig_clsim_tables_my_norm_rndtheta10deg'
+NUM_PHI_SAMPLES = 100
 
 
-pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
-
+sim = SIMULATIONS[SIM_TO_TEST]
 strings = [36] + [79, 80, 81, 82, 83, 84, 85, 86] + [26, 27, 35, 37, 45, 46]
-#strings = [86]
-doms= range(25,60)
-
+#strings = [35, 36]
+doms = list(range(25, 60))
 norm = False
 norm2 = False
+hit_times = np.linspace(0, 2000, 201)
 
-hit_times =  np.linspace(0, 2000, 201)
-mid_points = 0.5* (hit_times[1:] + hit_times[:-1])
+t_start = time.time()
 
-for dom in doms:
-    for string in strings:
-        expected_ps = []
-        for hit_time in mid_points:
-            #print(hit_time)
-            total_p, expected_p = dom_tables.get_photon_expectation(
-                                              pinfo_gen=pinfo_gen,
-                                              hit_time=hit_time,
-                                              string=string,
-                                              depth_idx=dom-1,
-                                              )
-            expected_ps.append(expected_p)
+# Load detector geometry array
+print('Loading detector geometry from "%s"...' % retro.expand(retro.DETECTOR_GEOM_FILE))
+t0 = time.time()
+detector_geometry = np.load(retro.expand(retro.DETECTOR_GEOM_FILE))
+print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
-        expected_ps = np.array(expected_ps)
-        tot_retro = np.sum(expected_ps)
+t0 = time.time()
+if CODE_TO_TEST == 'dom_time_polar_tables':
+    print('Instantiating DOMTimePolarTables...')
+    retro_tables = DOMTimePolarTables(
+        tables_dir='/data/icecube/retro_tables/full1000/',
+        hash_val=None,
+        geom=detector_geometry,
+        use_directionality=False,
+        naming_version=0,
+    )
+    print('Loading tables...')
+    retro_tables.load_tables()
+
+elif 'clsim_tables' in CODE_TO_TEST:
+    use_directionality = False if 'no_dir' in CODE_TO_TEST else True
+    if use_directionality:
+        print('Instantiating CLSimTables (using directionality)...')
+    else:
+        print('Instantiating CLSimTables (NOT using directionality)...')
+
+    retro_tables = CLSimTables(
+        geom=detector_geometry,
+        use_directionality=use_directionality,
+        num_phi_samples=NUM_PHI_SAMPLES
+    )
+
+    if 'single_table' in CODE_TO_TEST:
+        print('Loading single table...')
+        table_path = '/fastio/justin/retro_tables/large_5d_notilt_string_dc_depth_0-59'
+        retro_tables.load_table(
+            fpath=table_path,
+            string='all',
+            depth_idx='all',
+            step_length=1,
+            angular_acceptance_fract=0.338019664877,
+            quantum_efficiency=1,
+            mmap=True
+        )
+    else:
+        print('Loading {} tables...'.format(2 * len(doms)))
+        for string, dom in product(('dc', 'ic'), doms):
+            depth_idx = dom - 1
+            if 'orig' in CODE_TO_TEST:
+                table_path = join(
+                    '/fastio/justin//retro_tables/full1000_npy',
+                    'full1000_{}{}'.format(string, depth_idx)
+                )
+            else:
+                table_path = join(
+                    '/data/icecube/retro_tables/large_5d_notilt_combined',
+                    'large_5d_notilt_string_{:s}_depth_{:d}'.format(string, depth_idx)
+                )
+
+            retro_tables.load_table(
+                fpath=table_path,
+                string=string,
+                depth_idx=depth_idx,
+                step_length=1,
+                angular_acceptance_fract=0.338019664877,
+                quantum_efficiency=1,
+                mmap=True
+            )
+else:
+    raise ValueError(CODE_TO_TEST)
+print(' ', np.round(time.time() - t0, 3), 'sec\n')
+
+
+print('Loading forward simulation histograms from "%s"...' % sim['fwd_sim_histo_file'])
+t0 = time.time()
+fwd_sim_histos = pickle.load(open(retro.expand(sim['fwd_sim_histo_file']), 'rb'))
+print(' ', np.round(time.time() - t0, 3), 'sec\n')
+
+print('Generating source photons from "point_cascade" + "const_energy_loss_muon" kernels')
+print('  fed with MC-true parameters:\n ', sim['mc_true_params'])
+t0 = time.time()
+discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade, const_energy_loss_muon])
+pinfo_gen = discrete_hypo.get_pinfo_gen(sim['mc_true_params'])
+print(' ', np.round(time.time() - t0, 3), 'sec\n')
+
+print('Getting expectations for {} strings: {}'.format(len(strings), strings))
+print('  ... and {} DOMs: {}'.format(len(doms), doms))
+t0 = time.time()
+
+sample_hit_times = 0.5 * (hit_times[:-1] + hit_times[1:])
+
+pexp_timings = []
+pgen_count = 0
+total_p = 0
+print('Average time to compute expected photons at DOM, per hit:')
+sys.stdout.write(' '*(12+3))
+for string, dom in product(strings, doms):
+    t00 = time.time()
+    depth_idx = dom - 1
+    pexp_at_hit_times = []
+    for hit_time in sample_hit_times.flat:
+        exp_p_at_all_t, exp_p_at_hit_t = retro_tables.get_photon_expectation(
+            pinfo_gen=pinfo_gen,
+            hit_time=hit_time,
+            string=string,
+            depth_idx=depth_idx,
+        )
+        pexp_at_hit_times.append(exp_p_at_hit_t)
+    pexp_timings.append(time.time() - t00)
+    pgen_count += sample_hit_times.size
+
+    pexp_at_hit_times = np.array(pexp_at_hit_times)
+    tot_retro = np.sum(pexp_at_hit_times)
+    if norm:
+        pexp_at_hit_times /= tot_retro
+
+    msg = '{:12.3f} ms'.format(np.round(np.mean(pexp_timings) * 1e3, 3))
+    sys.stdout.write('\b'*len(msg) + msg)
+
+    plt.clf()
+    plt.plot(sample_hit_times, pexp_at_hit_times, label='Retro')
+    tot_clsim = 0.0
+    try:
+        fwd_sim_histo = np.nan_to_num(fwd_sim_histos[string][dom])
+        tot_clsim = np.sum(fwd_sim_histo)
         if norm:
-            expected_ps /= np.sum(expected_ps)
+            fwd_sim_histo /= np.sum(fwd_sim_histo)
+        #if norm2:
+        #    fwd_sim_histo *= 200
+        plt.plot(sample_hit_times, fwd_sim_histo, label='CLSim fwd sim')
+    except KeyError:
+        pass
 
+    # Don't plot if both are 0
+    if tot_clsim == 0 and tot_retro == 0:
+        continue
 
-        plt.clf()
-        plt.plot(mid_points, expected_ps)
-        try:
-            #time = histos[string][dom]['time']
-            #weight = histos[string][dom]['weight']
-            h = np.nan_to_num(histos[string][dom])
-            tot_clsim = np.sum(h)
-            if norm:
-                h/= np.sum(h)
-            #if norm2:
-            #    h *= 200
-            plt.plot(mid_points, h)
-            a_text = AnchoredText('RETRO = %.5f, CLSIM = %.5f, ratio = %.5f\n total_p = %.2f, sum = %.2f'%(tot_retro, tot_clsim, tot_retro/tot_clsim, total_p, np.sum(expected_ps)), loc=2)
-            #print(tot_retro/tot_clsim)
-            plt.gca().add_artist(a_text)
-            #plt.plot(time, weight)
-            #plt.scatter(time, weight*10, s=1, marker='.', c='r')
-        except KeyError:
-            pass
+    a_text = AnchoredText(
+        '{sum} Retro t-dep = {retro:.5f}      {sum} Retro / {sum} CLSim = {ratio:.5f}\n'
+        '{sum} CLSim       = {clsim:.5f}\n'
+        'Retro t-indep = {exp_p_at_all_t:.5f}\n'
+        .format(
+            sum=r'$\Sigma$',
+            retro=tot_retro,
+            clsim=tot_clsim,
+            ratio=tot_retro/tot_clsim if tot_clsim != 0 else np.nan,
+            exp_p_at_all_t=exp_p_at_all_t
+        ),
+        loc=2,
+        prop=dict(family='monospace', size=10),
+        frameon=False,
+    )
+    ax = plt.gca()
+    ax.add_artist(a_text)
 
-        plt.savefig('dom_pdfs/retro_%s_%s.png'%(string,dom))
+    ax.set_xlim(np.min(hit_times), np.max(hit_times))
+    ax.set_ylim(0, ax.get_ylim()[1])
+    ax.set_title('String {}, DOM {}'.format(string, dom))
+    ax.set_xlabel('time (ns)')
+    ax.legend(loc='center left', frameon=False)
+
+    clsim_code = 'c' if tot_clsim > 0 else ''
+    retro_code = 'r' if tot_retro > 0 else ''
+
+    outdir = join('dom_pdfs', SIM_TO_TEST)
+    retro.mkdir(outdir)
+    fname = (
+        'retro_{code}_{string}_{dom}_{retro_code}_{clsim_code}'
+        .format(code=CODE_TO_TEST, string=string, dom=dom,
+                retro_code=retro_code, clsim_code=clsim_code)
+    )
+    plt.savefig(join(outdir, fname + '.png'))
+
+sys.stdout.write('\n\n')
+print(' ', 'Time to compute and plot:')
+print(' ', np.round(time.time() - t0, 3), 'sec\n')
+
+print('Body of script took {:.3f} sec'.format(time.time() - t_start))

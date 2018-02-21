@@ -11,7 +11,7 @@ __all__ = [
     'numba_jit',
 
     # Defaults
-    'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
+    'DEBUG', 'DFLT_NUMBA_JIT_KWARGS', 'DFLT_PULSE_SERIES', 'DFLT_ML_RECO_NAME',
     'DFLT_SPE_RECO_NAME',
     'CLSIM_TABLE_FNAME_RE', 'CLSIM_TABLE_FNAME_PROTO',
     'CLSIM_TABLE_METANAME_PROTO', 'CLSIM_TABLE_METANAME_RE',
@@ -123,6 +123,9 @@ else:
     NUMBA_AVAIL = True
 
 # -- Default choices we've made and constants -- #
+
+DEBUG = 0
+"""Level of debug messages to display"""
 
 DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, cache=True)
 """kwargs to pass to numba.jit"""

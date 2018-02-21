@@ -52,6 +52,7 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 import retro
+from retro import PI, TWO_PI
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
@@ -62,16 +63,106 @@ MY_CLSIM_TABLE_KEYS = [
 ]
 
 TABLE_NORM_KEYS = [
-    'r_bin_edges', 'costhetadir_bin_edges', 't_bin_edges', 'n_photons',
-    'phase_refractive_index', 'step_length'
+    'n_photons', 'phase_refractive_index', 'step_length', 'r_bin_edges',
+    'costheta_bin_edges', 't_bin_edges'
 ]
+"""All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
 
 
 # TODO: set these more carefully and eventually allow for different angles
 CKV_COSTHETA = np.cos(np.deg2rad(48))
 CKV_SINTHETA = np.sin(np.deg2rad(48))
 
-NUM_PHI_SAMPLES = 1000
+
+@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
+def survival_prob_from_smeared_cone(
+    theta, num_phi, rot_costheta, rot_sintheta, rot_cosphi,
+    rot_sinphi, directional_survival_prob, costheta_bin_width,
+    deltaphi_bin_width, random_delta_thetas
+):
+    """Get a numerical approximation of the expected survival probability for
+    photons directed on a cone (as for Cherenkov emission) from Retro table's
+    photon-directionality slice.
+
+    Parameters
+    ----------
+    theta : scalar float
+        Cherenkov angle (half the cone's opening angle)
+
+    num_phi : scalar int
+        Number of azimuth samples of the circle where the cone intersects the
+        unit sphere. Increase `num_phi` for for higher accuracy.
+
+    rot_costheta, rot_sintheta, rot_cosphi, rot_sinphi : scalar float
+        Rotate the cone to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    directional_survival_prob : ndarray of shape (N_costhetadir x N_deltaphidir)
+        Note that the binning of the `directional_survival_prob` table slice is
+        expected to be (costhetadir, deltaphidir), and both are assumed to be
+        uniformly gridded in those coordinate spaces.
+
+    costheta_bin_width, deltaphi_bin_width : float
+        Bin widths; `deltaphi_bin_width` is in units of radians.
+
+    random_delta_thetas : sequence of length >= num_phi
+        Offsets to apply to theta to achieve smearing.
+
+    Returns
+    -------
+    survival_prob : scalar float
+        Numerically-approximated survival probability averaged over the entire
+        cone of photons.
+
+    """
+    # TODO: we can approximate the effects of "large" (space-time width of a
+    # bin) by spreading points out off of the circle to simulate the amount of
+    # spread expected for photons within the bin. Probably a high-order effect,
+    # so no need to do this now, just something to note for later.
+
+    bin_indices = []
+    counts = []
+    counts_total = 0
+    num_indices = 0
+
+    for phi_idx in range(num_phi):
+        offset_theta = theta + random_delta_thetas[phi_idx]
+        costheta = math.cos(offset_theta)
+        sintheta = math.sin(offset_theta)
+
+        p_phi = TWO_PI * float(phi_idx) / float(num_phi + 1)
+        sin_p_phi = math.sin(p_phi)
+        cos_p_phi = math.cos(p_phi)
+        q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
+                      + (costheta * rot_costheta))
+        abs_q_phi = math.fabs(math.atan2(
+            (sin_p_phi * sintheta * rot_cosphi)
+            + (sintheta * rot_sinphi * cos_p_phi * rot_costheta)
+            + (rot_sinphi * rot_sintheta * costheta),
+
+            (-sin_p_phi * sintheta * rot_sinphi)
+            + (sintheta * cos_p_phi * rot_cosphi * rot_costheta)
+            + (rot_sintheta * costheta * rot_cosphi)
+        ))
+        costheta_bin = int((q_costheta + 1) // costheta_bin_width)
+        deltaphi_bin = int(abs_q_phi // deltaphi_bin_width)
+        coord = (costheta_bin, deltaphi_bin)
+        if coord in bin_indices:
+            counts[bin_indices.index(coord)] += 1
+        else:
+            bin_indices.append(coord)
+            counts.append(1)
+            num_indices += 1
+        counts_total += 1
+
+    survival_prob = 0.0
+    for i in range(num_indices):
+        survival_prob += directional_survival_prob[bin_indices[i]] * counts[i]
+
+    # NOTE: Don't use e.g. /= before return until the following is resolved:
+    #   https://github.com/numba/numba/issues/2746
+    survival_prob = survival_prob / float(counts_total)
+
+    return survival_prob
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
@@ -118,14 +209,15 @@ def survival_prob_from_cone(costheta, sintheta, num_phi, rot_costheta,
     bin_indices = []
     counts = []
     counts_total = 0
+    num_indices = 0
 
-    for idx in range(num_phi):
-        p_phi = 2*np.pi * float(idx)/float(num_phi + 1)
+    for phi_idx in range(num_phi):
+        p_phi = TWO_PI * float(phi_idx) / float(num_phi + 1)
         sin_p_phi = np.sin(p_phi)
         cos_p_phi = np.cos(p_phi)
         q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
                       + (costheta * rot_costheta))
-        abs_q_phi = np.abs(np.arctan2(
+        abs_q_phi = np.abs(math.atan2(
             (sin_p_phi * sintheta * rot_cosphi)
             + (sintheta * rot_sinphi * cos_p_phi * rot_costheta)
             + (rot_sinphi * rot_sintheta * costheta),
@@ -138,16 +230,16 @@ def survival_prob_from_cone(costheta, sintheta, num_phi, rot_costheta,
         deltaphi_bin = int(abs_q_phi // deltaphi_bin_width)
         coord = (costheta_bin, deltaphi_bin)
         if coord in bin_indices:
-            idx = bin_indices.index(coord)
-            counts[idx] += 1
+            counts[bin_indices.index(coord)] += 1
         else:
             bin_indices.append(coord)
             counts.append(1)
+            num_indices += 1
         counts_total += 1
 
     survival_prob = 0.0
-    for idx, count in zip(bin_indices, counts):
-        survival_prob += directional_survival_prob[idx] * count
+    for i in range(num_indices):
+        survival_prob += directional_survival_prob[bin_indices[i]] * counts[i]
 
     # NOTE: Don't use e.g. /= before return until the following is resolved:
     #   https://github.com/numba/numba/issues/2746
@@ -246,8 +338,8 @@ def get_table_norm(n_photons, phase_refractive_index, step_length, r_bin_edges,
     t_bin_widths = np.diff(t_bin_edges)
 
     # We need costheta bins to all have same width for the logic below to hold
-    costheta_bin_width = costheta_bin_widths[0]
-    assert np.all(costheta_bin_widths == costheta_bin_width)
+    costheta_bin_width = np.mean(costheta_bin_widths)
+    assert np.allclose(costheta_bin_widths, costheta_bin_width), costheta_bin_widths
 
     constant_part = (
         # Number of photons, divided equally among the costheta bins
@@ -287,15 +379,38 @@ def get_table_norm(n_photons, phase_refractive_index, step_length, r_bin_edges,
 
     # Take the smaller of counts_per_r and counts_per_t
     table_norm = constant_part * np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
+    assert table_norm.shape == (counts_per_r.size, counts_per_t.size)
 
-    # Shape of the radial norm is 1D: (n_r_bins,)
     r0 = r_bin_edges[:-1]
     r1 = r_bin_edges[1:]
+    # This is better ...
     avg_radius = 3/4 * (r1**4 - r0**4) / (r1**3 - r0**3)
-    surf_area_at_avg_radius = avg_radius**2 * 2*np.pi * costheta_bin_width
+    #avg_radius = 0.5 * (r0 + r1)
+    surf_area_at_avg_radius = avg_radius**2 * TWO_PI * costheta_bin_width
     radial_norm = 1 / surf_area_at_avg_radius
+    # ... than this:
+    #r_mid = (r0 + r1) / 2
+    #radial_norm = 1 / r_mid**2
+
+    # Shape of the radial norm is 1D: (n_r_bins,)
     table_norm *= radial_norm[:, np.newaxis]
 
+    # < DEBUG : copy norm from Philipp / generate_t_r_theta_table :
+    #table_norm = np.outer(
+    #    PI * radial_norm, # NOTE: pi factor needed to get agreement with old code
+    #    np.full(
+    #        shape=(len(t_bin_edges) - 1,),
+    #        fill_value=(
+    #            1
+    #            / n_photons
+    #            / (retro.SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+    #            / np.mean(t_bin_widths)
+    #            * angular_acceptance_fract
+    #            * quantum_efficiency
+    #            * n_costheta_bins
+    #        )
+    #    )
+    #)
     return table_norm
 
 
@@ -346,7 +461,7 @@ def generate_time_indep_table(table, quantum_efficiency,
         'rctqp,rt->rcqp',
         table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
         table_norm,
-        optimize=True
+        optimize=False # can change when we know if this helps
     )
 
     t_indep_table_norm = quantum_efficiency * angular_acceptance_fract
@@ -401,7 +516,8 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
 
     fpath = retro.expand(fpath)
 
-    retro.wstderr('Loading table from {} ...\n'.format(fpath))
+    if retro.DEBUG:
+        retro.wstderr('Loading table from {} ...\n'.format(fpath))
 
     if isdir(fpath):
         t0 = time()
@@ -412,13 +528,16 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
             mmap_mode = None
         for key in MY_CLSIM_TABLE_KEYS:
             fpath = join(indir, key + '.npy')
-            retro.wstderr('    loading {} from "{}" ...'.format(key, fpath))
+            if retro.DEBUG:
+                retro.wstderr('    loading {} from "{}" ...'.format(key, fpath))
             t1 = time()
             table[key] = np.load(fpath, mmap_mode=mmap_mode)
-            retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
-        if step_length is not None:
+            if retro.DEBUG:
+                retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
+        if step_length is not None and 'step_length' in table:
             assert step_length == table['step_length']
-        retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
+        if retro.DEBUG:
+            retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
         return table
 
     if mmap:
@@ -519,7 +638,12 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract,
     table = OrderedDict()
 
     table = load_clsim_table_minimal(fpath=fpath, step_length=step_length)
-    table['table_norm'] = get_table_norm(**{k: table[k] for k in TABLE_NORM_KEYS})
+    table['table_norm'] = get_table_norm(
+        angular_acceptance_fract=angular_acceptance_fract,
+        quantum_efficiency=quantum_efficiency,
+        step_length=step_length,
+        **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
+    )
     table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
 
     retro.wstderr('Interpreting table...\n')
@@ -656,7 +780,7 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
     return photon_info, bin_edges
 
 
-def generate_pexp_5d_function(table, use_directionality=True):
+def generate_pexp_5d_function(table, use_directionality, num_phi_samples):
     """Generate a numba-compiled function for computing expected photon counts
     at a DOM, where the table's binning info is used to pre-compute various
     constants for the compiled function.
@@ -669,6 +793,9 @@ def generate_pexp_5d_function(table, use_directionality=True):
     use_directionality : bool, optional
         If the source photons have directionality, use it in computing photon
         expectations at the DOM.
+
+    num_phi_samples : int, optional
+        Number of samples in the phi_dir to average over bin counts.
 
     Returns
     -------
@@ -698,11 +825,11 @@ def generate_pexp_5d_function(table, use_directionality=True):
     table_dcosthetadir = 2 / n_costhetadir_bins
 
     n_deltaphidir_bins = len(table['deltaphidir_bin_edges']) - 1
-    table_dphidir = 2*np.pi / n_deltaphidir_bins
+    table_dphidir = TWO_PI / n_deltaphidir_bins
     deltaphidir_one_sided = np.all(
         (table['deltaphidir_bin_edges'] >= 0)
         &
-        (table['deltaphidir_bin_edges'] <= np.pi)
+        (table['deltaphidir_bin_edges'] <= PI)
     )
 
     if not deltaphidir_one_sided:
@@ -716,6 +843,9 @@ def generate_pexp_5d_function(table, use_directionality=True):
         n_deltaphidir_bins=n_deltaphidir_bins,
         deltaphidir_one_sided=deltaphidir_one_sided
     )
+
+    delta_theta_sigma_deg = 10
+    random_delta_thetas = np.deg2rad(delta_theta_sigma_deg) * np.random.randn(num_phi_samples)
 
     @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d(pinfo_gen, hit_time, dom_coord, table, table_norm,
@@ -785,7 +915,7 @@ def generate_pexp_5d_function(table, use_directionality=True):
         if use_directionality:
             prev_pdir_r = np.nan
         else:
-            prev_pdir_r = 0
+            pdir_r = 0.0
             new_pdir_r = False
 
         # Initialize cached values to nan since it's a bug if these are not
@@ -804,10 +934,16 @@ def generate_pexp_5d_function(table, use_directionality=True):
             # will show up in the raw CLSim Retro DOM tables in bin 0; the
             # further in the past the photon started, the higher the time bin
             # index.
+            # < DEBUG:...
+            #dt = hit_time - t
+            #dx = x - dom_coord[0]
+            #dy = y - dom_coord[1]
+            #dz = z - dom_coord[2]
             dt = hit_time - t
-            dx = x - dom_coord[0]
-            dy = y - dom_coord[1]
-            dz = z - dom_coord[2]
+            dx = dom_coord[0] - x
+            dy = dom_coord[1] - y
+            dz = dom_coord[2] - z
+            # ... DEBUG >
 
             rhosquared = dx*dx + dy*dy
             rsquared = rhosquared + dz*dz
@@ -850,11 +986,12 @@ def generate_pexp_5d_function(table, use_directionality=True):
             # perfectly-directional source, so we should handle all three
             # separately.
 
-            if pdir_r == 0 and (new_pdir_r or new_r_bin or new_costheta_bin):
-                this_photons_at_all_times = np.mean(
-                    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                )
-            elif pdir_r < 1: # Cherenkov emitter
+            if pdir_r == 0.0: # isotropic emitter
+                if new_pdir_r or new_r_bin or new_costheta_bin:
+                    this_photons_at_all_times = np.mean(
+                        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                    )
+            elif pdir_r < 1.0: # Cherenkov emitter
                 # Note that for these tables, we have to invert the photon
                 # direction relative to the vector from the DOM to the photon's
                 # vertex since simulation has photons going _away_ from the DOM
@@ -864,22 +1001,25 @@ def generate_pexp_5d_function(table, use_directionality=True):
                 pdir_rho = math.sqrt(pdir_rhosquared)
 
                 # Zenith angle is indep. of photon position relative to DOM
-                pdir_costheta = -pdir_z / pdir_r
+                pdir_costheta = pdir_z / pdir_r
                 pdir_sintheta = pdir_rho
 
                 # \Delta\phi depends on photon position relative to the DOM
-                pdir_cosdeltaphisquared = (-pdir_x*dx - pdir_y*dy) / rhosquared
-                pdir_cosdeltaphi = math.sqrt(pdir_cosdeltaphisquared)
+                pdir_cosdeltaphisquared = (pdir_x*dx + pdir_y*dy) / rhosquared
+                sign = int(pdir_cosdeltaphisquared >= 0)
+                pdir_cosdeltaphi = sign * math.sqrt(sign * pdir_cosdeltaphisquared)
                 pdir_sindeltaphi = math.sqrt(pdir_rhosquared - pdir_cosdeltaphisquared)
 
                 # Cherenkov angle is encoded in the length of the pdir vector
                 ckv_costheta = pdir_r
                 ckv_sintheta = math.sqrt(1 - pdir_r)
+                ckv_theta = math.acos(ckv_costheta)
 
-                this_photons_at_all_times = survival_prob_from_cone(
-                    costheta=ckv_costheta,
-                    sintheta=ckv_sintheta,
-                    num_phi=NUM_PHI_SAMPLES,
+                this_photons_at_all_times = survival_prob_from_smeared_cone(
+                    #costheta=ckv_costheta,
+                    #sintheta=ckv_sintheta,
+                    theta=ckv_theta,
+                    num_phi=num_phi_samples,
                     rot_costheta=pdir_costheta,
                     rot_sintheta=pdir_sintheta,
                     rot_cosphi=pdir_cosdeltaphi,
@@ -888,9 +1028,10 @@ def generate_pexp_5d_function(table, use_directionality=True):
                         t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
                     ),
                     costheta_bin_width=table_dcosthetadir,
-                    deltaphi_bin_width=table_dphidir
+                    deltaphi_bin_width=table_dphidir,
+                    random_delta_thetas=random_delta_thetas
                 )
-            elif pdir_r == 1: # line emitter
+            elif pdir_r == 1.0: # line emitter
                 raise NotImplementedError('Line emitter not handled.')
             else: # Gaussian emitter
                 raise NotImplementedError('Gaussian emitter not handled.')
@@ -916,15 +1057,16 @@ def generate_pexp_5d_function(table, use_directionality=True):
             if new_r_bin or new_t_bin:
                 this_table_norm = table_norm[r_bin_idx, t_bin_idx]
 
-            if pdir_r == 0 and (new_pdir_r or new_r_bin or new_costheta_bin or new_t_bin):
-                this_photons_at_hit_time = np.mean(
-                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                )
-            elif pdir_r < 1: # Cherenkov emitter
+            if pdir_r == 0.0: # isotropic emitter
+                if new_pdir_r or new_r_bin or new_costheta_bin or new_t_bin:
+                    this_photons_at_hit_time = np.mean(
+                        table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                    )
+            elif pdir_r < 1.0: # Cherenkov emitter
                 this_photons_at_hit_time = survival_prob_from_cone(
                     costheta=ckv_costheta,
                     sintheta=ckv_sintheta,
-                    num_phi=NUM_PHI_SAMPLES,
+                    num_phi=num_phi_samples,
                     rot_costheta=pdir_costheta,
                     rot_sintheta=pdir_sintheta,
                     rot_cosphi=pdir_cosdeltaphi,
@@ -937,7 +1079,7 @@ def generate_pexp_5d_function(table, use_directionality=True):
                     costheta_bin_width=table_dcosthetadir,
                     deltaphi_bin_width=table_dphidir
                 )
-            elif pdir_r == 1: # line emitter
+            elif pdir_r == 1.0: # line emitter
                 raise NotImplementedError('Line emitter not handled.')
             else: # Gaussian emitter
                 raise NotImplementedError('Gaussian emitter not handled.')
@@ -1116,19 +1258,20 @@ class CLSimTables(object):
     geom
 
     """
-    def __init__(self, geom, use_directionality):
+    def __init__(self, geom, use_directionality, num_phi_samples):
         assert len(geom.shape) == 3
         self.geom = geom
         self.use_directionality = use_directionality
+        self.num_phi_samples = num_phi_samples
         self.tables = {}
         self.string_aggregation = None
         self.depth_aggregation = None
         self.pexp_func = None
         self.binning_info = None
 
-    def load_clsim_table(self, fpath, string, depth_idx, step_length,
-                         angular_acceptance_fract, quantum_efficiency, mmap):
-        """Load a table into the set.
+    def load_table(self, fpath, string, depth_idx, step_length,
+                   angular_acceptance_fract, quantum_efficiency, mmap):
+        """Load a table into the set of tables.
 
         Parameters
         ----------
@@ -1143,9 +1286,14 @@ class CLSimTables(object):
         """
         if isinstance(string, basestring):
             string = string.strip().lower()
-            assert string in ['ic', 'dc']
-            self.string_aggregation = True
+            assert string in ['ic', 'dc', 'all']
+            agg_mode = 'all' if string == 'all' else 'subdetector'
+            if self.string_aggregation is None:
+                self.string_aggregation = agg_mode
+            assert agg_mode == self.string_aggregation
         elif isinstance(string, int):
+            if self.string_aggregation is None:
+                self.string_aggregation = False
             # `False` is ok but `None` is not ok
             assert self.string_aggregation == False # pylint: disable=singleton-comparison
             assert 1 <= string <= 86
@@ -1153,8 +1301,12 @@ class CLSimTables(object):
         if isinstance(depth_idx, basestring):
             depth_idx = depth_idx.strip().lower()
             assert depth_idx == 'all'
-            self.depth_aggregation = True
+            if self.depth_aggregation is None:
+                self.depth_aggregation = True
+            assert self.depth_aggregation
         else:
+            if self.depth_aggregation is None:
+                self.depth_aggregation = False
             # `False` is ok but `None` is not ok
             assert self.depth_aggregation == False # pylint: disable=singleton-comparison
             assert 0 <= depth_idx <= 59
@@ -1170,10 +1322,19 @@ class CLSimTables(object):
             gen_t_indep=True
         )
 
-        table['table_norm'] = get_table_norm(**{k: table[k] for k in TABLE_NORM_KEYS})
+        table['step_length'] = step_length
+        table['table_norm'] = get_table_norm(
+            angular_acceptance_fract=angular_acceptance_fract,
+            quantum_efficiency=quantum_efficiency,
+            **{k: table[k] for k in TABLE_NORM_KEYS}
+        )
         table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
 
-        pexp_5d, _ = generate_pexp_5d_function(table, self.use_directionality)
+        pexp_5d, _ = generate_pexp_5d_function(
+            table=table,
+            use_directionality=self.use_directionality,
+            num_phi_samples=self.num_phi_samples
+        )
 
         # NOTE: original tables have underflow (bin 0) and overflow (bin -1)
         # bins, so whole-axis slices must exclude the first and last bins.
@@ -1205,7 +1366,9 @@ class CLSimTables(object):
         # `string` goes from 1 to 86 but indexing is 0 to 85
         dom_coord = self.geom[string - 1, depth_idx]
 
-        if self.string_aggregation:
+        if self.string_aggregation == 'all':
+            string = 'all'
+        elif self.string_aggregation == 'subdetector':
             if string < 79:
                 string = 'ic'
             else:
