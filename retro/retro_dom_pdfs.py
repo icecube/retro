@@ -46,7 +46,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(PARENT_DIR)
 import retro
 from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_kernels import const_energy_loss_muon
+from retro.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon
 from retro.discrete_cascade_kernels import point_cascade
 from retro.table_readers import DOMTimePolarTables, TDICartTable, CLSimTables # pylint: disable=unused-import
 
@@ -60,8 +60,9 @@ run_info = OrderedDict([
 retro.DEBUG = 0
 SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
-CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-#CODE_TO_TEST = 'clsim_tables_avgsurfareanorm_dt1.0_sigma0deg_100phi'
+#CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
+CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi'
+#CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GEOM_FILE = retro.expand(retro.DETECTOR_GEOM_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
 QUANTUM_EFFICIENCY = 1.0
@@ -285,7 +286,14 @@ t0 = time.time()
 fwd_sim_histos = pickle.load(open(retro.expand(sim['fwd_sim_histo_file']), 'rb'))
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
-print('Generating source photons from "point_cascade" + "const_energy_loss_muon" kernels')
+if 'dedx' in CODE_TO_TEST:
+    muon_kernel = table_energy_loss_muon
+    muon_kernel_label = 'table_energy_loss_muon'
+else:
+    muon_kernel = const_energy_loss_muon
+    muon_kernel_label = 'const_energy_loss_muon'
+
+print('Generating source photons from "point_cascade" + "{}" kernels'.format(muon_kernel_label))
 print('  fed with MC-true parameters:\n ', sim['mc_true_params'])
 t0 = time.time()
 
@@ -299,14 +307,14 @@ print('Generating track hypo (if present) with dt={}'.format(dt))
 kernel_kwargs = [dict(), dict(dt=dt)]
 
 discrete_hypo = DiscreteHypo(
-    hypo_kernels=[point_cascade, const_energy_loss_muon],
+    hypo_kernels=[point_cascade, muon_kernel],
     kernel_kwargs=kernel_kwargs
 )
 pinfo_gen = discrete_hypo.get_pinfo_gen(sim['mc_true_params'])
 
 
 run_info['hypo_class'] = 'DiscreteHypo'
-run_info['hypo_kernels'] = ['point_cascade', 'const_energy_loss_muon']
+run_info['hypo_kernels'] = ['point_cascade', muon_kernel_label]
 run_info['kernel_kwargs'] = kernel_kwargs
 
 
