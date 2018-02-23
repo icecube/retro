@@ -126,7 +126,6 @@ hit_times = np.linspace(0, 2000, 201)
 sample_hit_times = 0.5 * (hit_times[:-1] + hit_times[1:])
 
 
-
 run_info['strings'] = strings
 run_info['doms'] = doms
 run_info['hit_times'] = hit_times
