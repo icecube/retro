@@ -790,6 +790,8 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
         r = retro.force_little_endian(table[5].data)
 
+        # Previously used the following to get "agreement" w/ raw photon sim
+        #r_volumes = np.square(0.5 * (r[1:] + r[:-1]))
         #r_volumes = (0.5 * (r[1:] + r[:-1]))**2 * (r[1:] - r[:-1])
         r_volumes = 0.25 * (r[1:]**3 - r[:-1]**3)
 
