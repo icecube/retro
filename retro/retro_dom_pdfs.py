@@ -86,7 +86,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='~/src/retro/data/track_step4_SplitUncleanedInIcePulses.pkl'
+        fwd_sim_histo_file='/icecube/data/retro/sims/track_step4_SplitUncleanedInIcePulses.pkl'
     ),
     cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -94,7 +94,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=0,
             track_energy=0, cascade_energy=20
         ),
-        fwd_sim_histo_file='benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl'
+        fwd_sim_histo_file='/icecube/data/retro/sims/cascade_step4_SplitUncleanedInIcePulses.pkl'
     ),
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
