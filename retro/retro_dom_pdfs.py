@@ -67,7 +67,7 @@ GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
 STEP_LENGTH = 1.0
 MMAP = True
-TIME_WINDOW = 20e3 # ns
+TIME_WINDOW = 2e3 # ns
 
 outdir = retro.expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 retro.mkdir(outdir)
