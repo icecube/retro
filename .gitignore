@@ -19,5 +19,4 @@ build
 *.c
 *.i3
 *.i3.bz2
-*.pkl
 *.xml
