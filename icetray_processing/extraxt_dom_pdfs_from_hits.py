@@ -39,8 +39,8 @@ raw_data = {}
 histos = {}
 out = {}
 
-pulse_series = 'SRTInIcePulses_90_700_1'
-#pulse_series = 'SplitUncleanedInIcePulses'
+#pulse_series = 'SRTInIcePulses_90_700_1'
+pulse_series = 'SplitUncleanedInIcePulses'
 
 fname = sys.argv[1]
 i3_file = dataio.I3File(fname)
