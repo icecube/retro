@@ -86,7 +86,8 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='~/src/retro/data/benchmark.pkl'
+        #fwd_sim_histo_file='~/retro/retro/benchmark.pkl'
+        fwd_sim_histo_file='~/retro/icetray_processing/track_step4_SplitUncleanedInIcePulses.pkl'
         #fwd_sim_histo_file='/home/peller/retro/retro/testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl'
     ),
     cascade=dict(
@@ -100,7 +101,7 @@ SIMULATIONS = dict(
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-400,
-            track_azimuth=0, track_zenith=-retro.PI,
+            track_azimuth=0, track_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file=None
@@ -118,11 +119,11 @@ run_info['sim'] = OrderedDict([
 ])
 
 
-strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46]
+strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46] + [54, 62]
 #strings = [86]
 
 doms = list(range(25, 60+1))
-#doms = [40]
+#doms = [40, 45, 50]
 
 hit_times = np.linspace(0, 2000, 201)
 

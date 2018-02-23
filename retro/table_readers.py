@@ -394,9 +394,14 @@ def get_table_norm(
     inner_edges = r_bin_edges[:-1]
     outer_edges = r_bin_edges[1:]
 
+
     radial_midpoints = 0.5 * (inner_edges + outer_edges)
     inner_radius = np.where(inner_edges == 0, 0.01* radial_midpoints, inner_edges)
     avg_radius = 3/4 * (outer_edges**4 - inner_edges**4) / (outer_edges**3 - inner_edges**3)
+
+    volumes = (outer_edges**3 - inner_edges**3)
+    volumes *= 2 * costheta_bin_width
+
 
     surf_area_at_avg_radius = avg_radius**2 * TWO_PI * costheta_bin_width
     surf_area_at_inner_radius = inner_radius**2 * TWO_PI * costheta_bin_width
@@ -418,7 +423,7 @@ def get_table_norm(
         table_norm = np.outer(
             # NOTE: pi factor needed to get agreement with old code (why?);
             # 4 is needed for new clsim tables (why?)
-            4 * PI / surf_area_at_midpoints,
+            4 * PI / volumes,
             np.full(
                 shape=(len(t_bin_edges) - 1,),
                 fill_value=(
