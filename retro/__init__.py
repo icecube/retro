@@ -17,9 +17,9 @@ __all__ = [
     'CLSIM_TABLE_METANAME_PROTO', 'CLSIM_TABLE_METANAME_RE',
     'RETRO_DOM_TABLE_FNAME_PROTO', 'RETRO_DOM_TABLE_FNAME_RE',
     'GEOM_FILE_PROTO',
-    'GEOM_META_PROTO', 'DETECTOR_GEOM_FILE', 'TDI_TABLE_FNAME_PROTO',
-    'TDI_TABLE_FNAME_RE', 'NUMBA_AVAIL', 'COLOR_CYCLE_ORTHOG',
-    'ZSTD_EXTENSIONS', 'COMPR_EXTENSIONS',
+    'GEOM_META_PROTO', 'DETECTOR_GEOM_FILE', 'DETECTOR_GCD_DICT_FILE',
+    'TDI_TABLE_FNAME_PROTO', 'TDI_TABLE_FNAME_RE', 'NUMBA_AVAIL',
+    'COLOR_CYCLE_ORTHOG', 'ZSTD_EXTENSIONS', 'COMPR_EXTENSIONS',
 
     # Type/namedtuple definitions
     'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
@@ -244,6 +244,9 @@ GEOM_META_PROTO = 'geom_{hash:s}_meta.json'
 """File containing metadata about source of detector geometry"""
 
 DETECTOR_GEOM_FILE = join(dirname(dirname(abspath(__file__))), 'data', 'geo_array.npy')
+"""Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
+
+DETECTOR_GCD_DICT_FILE = join(dirname(dirname(abspath(__file__))), 'data', 'gcd_dict.pkl')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
 TDI_TABLE_FNAME_PROTO = [

@@ -878,11 +878,18 @@ def generate_pexp_5d_function(
         deltaphidir_one_sided=deltaphidir_one_sided
     )
 
-    random_delta_thetas = np.deg2rad(ckv_sigma_deg) * np.random.randn(num_phi_samples)
+    rand = np.random.RandomState(0)
+    random_delta_thetas = rand.normal(
+        loc=0,
+        scale=np.deg2rad(ckv_sigma_deg),
+        size=num_phi_samples
+    )
 
     @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d(pinfo_gen, hit_time, dom_coord, table, table_norm,
-                t_indep_table, t_indep_table_norm):
+    def pexp_5d(
+            pinfo_gen, hit_time, time_window, dom_coord, noise_rate_hz, table,
+            table_norm, t_indep_table, t_indep_table_norm
+        ):
         """For a set of generated photons `pinfo_gen`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
         photons, independent of time.
@@ -904,9 +911,16 @@ def generate_pexp_5d_function(
             Time at which the DOM recorded a hit (or multiple simultaneous
             hits). Use np.nan to indicate no hit occurred.
 
+        time_window : float, units of ns
+            The entire tine window of data considered, used to arrive at
+            expected total noise hits (along with `noise_rate_hz`).
+
         dom_coord : shape (3,) ndarray
             DOM (x, y, z) coordinate in meters (in terms of the IceCube
             coordinate system).
+
+        noise_rate_hz : float
+            Noise rate for the DOM, in Hz.
 
         table : shape (n_r, n_costheta, n_t, n_costhetadir, n_deltaphidir) ndarray
             Time-dependent photon survival probability table.
@@ -963,22 +977,17 @@ def generate_pexp_5d_function(
             # Info about the generated photons
             t, x, y, z, p_count, pdir_x, pdir_y, pdir_z = pinfo_gen[pgen_idx, :]
 
-            #print('t={}, x={}, y={}, z={}, p_count={}, pdir_x={}, pdir_y={}, pdir_z={}'.format(t, x, y, z, p_count, pdir_x, pdir_y, pdir_z))
+            #print('t={}, x={}, y={}, z={}, p_count={}, pdir_x={}, pdir_y={}, pdir_z={}'
+            #      .format(t, x, y, z, p_count, pdir_x, pdir_y, pdir_z))
 
             # A photon that starts immediately in the past (before the DOM was hit)
             # will show up in the raw CLSim Retro DOM tables in bin 0; the
             # further in the past the photon started, the higher the time bin
             # index.
-            # < DEBUG:...
-            #dt = hit_time - t
-            #dx = x - dom_coord[0]
-            #dy = y - dom_coord[1]
-            #dz = z - dom_coord[2]
             dt = hit_time - t
             dx = dom_coord[0] - x
             dy = dom_coord[1] - y
             dz = dom_coord[2] - z
-            # ... DEBUG >
 
             #print('dt={}, dx={}, dy={}, dz={}'.format(dt, dx, dy, dz))
 
@@ -1052,16 +1061,10 @@ def generate_pexp_5d_function(
                     1.0,
                     (pdir_x / pdir_rho) * (dx / rho) + (pdir_y / pdir_rho) * (dy / rho)
                 )
-                #try:
                 pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi * pdir_cosdeltaphi)
-                #except ValueError:
-                #    print('\n')
-                #    print('pdir_x={}, pdir_y={}, dx={}, dy={}, pdir_rhosquared={}, rhosquared={}'
-                #          .format(pdir_x, pdir_y, dx, dy, pdir_rhosquared, rhosquared))
-                #    print('pdir_cosdeltaphi={}'.format(pdir_cosdeltaphi))
-                #    raise
 
-                #print('pdir_cosdeltaphi={}, pdir_sindeltaphi={}'.format(pdir_cosdeltaphi, pdir_sindeltaphi))
+                #print('pdir_cosdeltaphi={}, pdir_sindeltaphi={}'
+                #      .format(pdir_cosdeltaphi, pdir_sindeltaphi))
 
                 # Cherenkov angle is encoded in the length of the pdir vector
                 ckv_costheta = pdir_r
@@ -1149,6 +1152,10 @@ def generate_pexp_5d_function(
             photons_at_hit_time += p_count * this_table_norm * this_photons_at_hit_time
             #print('photons_at_hit_time={}'.format(photons_at_hit_time))
             #print('XX FINISHED LOOP')
+
+        # NOTE: bug in numba whereby += might fail here!
+        photons_at_all_times = photons_at_all_times + noise_rate_hz * time_window * 1e-9
+        photons_at_hit_time = photons_at_hit_time + noise_rate_hz * table_dt * 1e-9
 
         return photons_at_all_times, photons_at_hit_time
 
@@ -1319,15 +1326,41 @@ class CLSimTables(object):
 
     Parameters
     ----------
-    geom
-    use_directionality
-    num_phi_samples
-    ckv_sigma_deg
+    geom : shape-(n_strings, n_doms, 3) array
+        x, y, z coordinates of all DOMs, in meters relative to the IceCube
+        coordinate system
+
+    rde : shape-(n_strings, n_doms) array
+        Relative DOM efficiencies (this accounts for quantum efficiency). Any
+        DOMs with either 0 or NaN rde will be disabled and return 0's for
+        expected photon counts.
+
+    noise_rate_hz : shape-(n_strings, n_doms) array
+        Noise rate for each DOM, in Hz.
+
+    use_directionality : bool
+        Enable or disable direcationality when computing expected photons at
+        the DOMs
+
+    num_phi_samples : int > 0
+        If using directionality, set how many samples around the Cherenkov cone
+        are used to find which (costheta_dir, deltaphi_dir) bins to use to
+        compute expected photon survival probability.
+
+    ckv_sigma_deg : float >= 0
+        If using directionality, Gaussian-smear the Cherenkov angle by this
+        meany degrees by randomly distributing the phi samples. Higher
+        `ckv_sigma_deg` could necessitate higher `num_phi_samples` to get an
+        accurate "smearing."
+
+    norm_version : string
+        (Temporary) Which version of the norm to use. Only for experimenting,
+        and will be removed once we figure the norm out.
 
     """
     def __init__(
-            self, geom, use_directionality, num_phi_samples, ckv_sigma_deg,
-            norm_version
+            self, geom, rde, noise_rate_hz, use_directionality,
+            num_phi_samples, ckv_sigma_deg, norm_version
         ):
         assert len(geom.shape) == 3
         self.geom = geom
@@ -1336,6 +1369,28 @@ class CLSimTables(object):
         self.ckv_sigma_deg = ckv_sigma_deg
         self.norm_version = norm_version
 
+        zero_mask = rde == 0
+        nan_mask = np.isnan(rde)
+        inf_mask = np.isinf(rde)
+        num_zero = np.count_nonzero(zero_mask)
+        num_nan = np.count_nonzero(nan_mask)
+        num_inf = np.count_nonzero(inf_mask)
+
+        if num_nan or num_inf or num_zero:
+            print(
+                "WARNING: RDE is zero for {} DOMs, NaN for {} DOMs and +/-inf"
+                " for {} DOMs.\n"
+                "These DOMs will be disabled and return 0's forexpected photon"
+                " computations."
+                .format(num_zero, num_nan, num_inf)
+            )
+        mask = zero_mask | nan_mask | inf_mask
+
+        self.operational_doms = ~mask
+        self.rde = np.ma.masked_where(mask, rde)
+        self.quantum_efficiency = 0.25 * self.rde
+        self.noise_rate_hz = np.ma.masked_where(mask, noise_rate_hz)
+
         self.tables = {}
         self.string_aggregation = None
         self.depth_aggregation = None
@@ -1343,22 +1398,40 @@ class CLSimTables(object):
         self.binning_info = None
 
     def load_table(
-            self, fpath, string, depth_idx, step_length,
-            angular_acceptance_fract, quantum_efficiency, mmap
+            self, fpath, string, dom, step_length, angular_acceptance_fract,
+            mmap
         ):
         """Load a table into the set of tables.
 
         Parameters
         ----------
         fpath : string
-        string : int in [1, 86] or str in {'ic', 'dc'}
-        depth_idx : int in [0, 59] or str == 'all'
+            Path to the table .fits file or table directory (in the case of the
+            Retro-formatted directory with .npy files).
+
+        string : int in [1, 86] or str in {'ic', 'dc', or 'all'}
+
+        dom : int in [1, 60] or str == 'all'
+
         step_length : float > 0
+            The stepLength parameter (in meters) used in CLSim tabulator code
+            for tabulating a single photon as it travels. This is a hard-coded
+            paramter set to 1 meter in the trunk version of the code, but it's
+            something we might play with to optimize table generation speed, so
+            just be warned that this _can_ change.
+
         angular_acceptance_fract : float in (0, 1]
-        quantum_efficiency : float in (0, 1]
+            Constant normalization factor to apply to correct for the integral
+            of the angular acceptance curve used in the simulation that
+            produced this table.
+
         mmap : bool
+            Whether to attempt to memory map the table (only applicable for
+            Retro npy-files-in-a-dir tables).
 
         """
+        subdet = None
+        single_dom_spec = True
         if isinstance(string, basestring):
             string = string.strip().lower()
             assert string in ['ic', 'dc', 'all']
@@ -1366,29 +1439,62 @@ class CLSimTables(object):
             if self.string_aggregation is None:
                 self.string_aggregation = agg_mode
             assert agg_mode == self.string_aggregation
-        elif isinstance(string, int):
+            subdet = string
+            single_dom_spec = False
+        else:
             if self.string_aggregation is None:
                 self.string_aggregation = False
             # `False` is ok but `None` is not ok
             assert self.string_aggregation == False # pylint: disable=singleton-comparison
             assert 1 <= string <= 86
+            if string <= 79:
+                subdet = 'ic'
+            else:
+                subdet = 'dc'
 
-        if isinstance(depth_idx, basestring):
-            depth_idx = depth_idx.strip().lower()
-            assert depth_idx == 'all'
+        if isinstance(dom, basestring):
+            dom = dom.strip().lower()
+            assert dom == 'all'
             if self.depth_aggregation is None:
                 self.depth_aggregation = True
             assert self.depth_aggregation
+            single_dom_spec = False
         else:
             if self.depth_aggregation is None:
                 self.depth_aggregation = False
             # `False` is ok but `None` is not ok
             assert self.depth_aggregation == False # pylint: disable=singleton-comparison
-            assert 0 <= depth_idx <= 59
+            assert 1 <= dom <= 60
 
         assert step_length > 0
         assert 0 < angular_acceptance_fract <= 1
-        assert 0 < quantum_efficiency <= 1
+
+        if single_dom_spec and not self.operational_doms[string - 1, dom - 1]:
+            print(
+                'WARNING: String {}, DOM {} is not operational, skipping'
+                ' loading the corresponding table'.format(string, dom)
+            )
+            return
+
+        if subdet == 'all':
+            qe_subvals = self.quantum_efficiency
+            noise_subvals = self.noise
+        elif subdet == 'ic':
+            qe_subvals = self.quantum_efficiency[:79, :]
+            noise_subvals = self.noise_rate_hz
+        elif subdet == 'dc':
+            qe_subvals = self.quantum_efficiency[79:, :]
+            noise_subvals = self.noise_rate_hz[79:, :]
+        else:
+            qe_subvals = self.quantum_efficiency[string - 1, :]
+            noise_subvals = self.noise_rate_hz[string - 1, :]
+
+        if dom == 'all':
+            quantum_efficiency = qe_subvals.mean()
+            noise_rate_hz = noise_subvals.mean()
+        else:
+            quantum_efficiency = qe_subvals[:, dom - 1].mean()
+            noise_rate_hz = noise_subvals[:, dom - 1].mean()
 
         table = load_clsim_table_minimal(
             fpath=fpath,
@@ -1415,15 +1521,18 @@ class CLSimTables(object):
 
         # NOTE: original tables have underflow (bin 0) and overflow (bin -1)
         # bins, so whole-axis slices must exclude the first and last bins.
-        self.tables[(string, depth_idx)] = (
+        self.tables[(string, dom)] = (
             pexp_5d,
             table['t_indep_table'],
             table['t_indep_table_norm'],
             table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
-            table['table_norm']
+            table['table_norm'],
+            noise_rate_hz
         )
 
-    def get_photon_expectation(self, pinfo_gen, hit_time, string, depth_idx):
+    def get_photon_expectation(
+            self, pinfo_gen, hit_time, time_window, string, dom
+        ):
         """
         Parameters
         ----------
@@ -1431,8 +1540,9 @@ class CLSimTables(object):
             Info about photons generated photons by the event hypothesis.
 
         hit_time : float, units of ns
+        time_window : float, units of ns
         string : int in [1, 86]
-        depth_idx : int in [0, 59]
+        dom : int in [1, 60]
 
         Returns
         -------
@@ -1440,8 +1550,12 @@ class CLSimTables(object):
             See pexp_t_r_theta
 
         """
-        # `string` goes from 1 to 86 but indexing is 0 to 85
-        dom_coord = self.geom[string - 1, depth_idx]
+        # `string` and `dom` are 1-indexed but array indices are 0-indexed
+        string_idx, dom_idx = string - 1, dom - 1
+        if not self.operational_doms[string_idx, dom_idx]:
+            return 0, 0
+
+        dom_coord = self.geom[string_idx, dom_idx]
 
         if self.string_aggregation == 'all':
             string = 'all'
@@ -1452,27 +1566,31 @@ class CLSimTables(object):
                 string = 'dc'
 
         if self.depth_aggregation:
-            depth_idx = 'all'
+            dom = 'all'
 
-        #print('string =', string, 'depth_idx =', depth_idx)
+        #print('string =', string, 'dom =', dom)
 
         (pexp_5d,
          t_indep_table,
          t_indep_table_norm,
          table,
-         table_norm) = self.tables[(string, depth_idx)]
+         table_norm,
+         noise_rate_hz) = self.tables[(string, dom)]
 
         return pexp_5d(
             pinfo_gen=pinfo_gen,
             hit_time=hit_time,
+            time_window=time_window,
             dom_coord=dom_coord,
-            t_indep_table=t_indep_table,
-            t_indep_table_norm=t_indep_table_norm,
+            noise_rate_hz=noise_rate_hz,
             table=table,
             table_norm=table_norm,
+            t_indep_table=t_indep_table,
+            t_indep_table_norm=t_indep_table_norm,
         )
 
 
+# TODO: remove this class!
 class CLSimTable(object):
     """Load and use information from a single "raw" individual-DOM
     (time, r, theta, thetadir, deltaphidir)-binned Retro table.
@@ -1504,6 +1622,9 @@ class CLSimTable(object):
     def __init__(self, fpath=None, tables_dir=None, hash_val=None, string=None,
                  depth_idx=None, seed=None,
                  angular_acceptance_fract=0.338019664877, naming_version=None):
+
+        print('WARNING: This class is deprecated and will be removed soon!')
+
         # Translation and validation of args
         assert 0 < angular_acceptance_fract <= 1
         self.angular_acceptance_fract = angular_acceptance_fract
@@ -1748,7 +1869,7 @@ class DOMTimePolarTables(object):
         self.tables = {'ic': {}, 'dc': {}}
         self.bin_edges = {'ic': {}, 'dc': {}}
 
-    def load_table(self, string, depth_idx, force_reload=False):
+    def load_table(self, string, dom, force_reload=False):
         """Load a table from disk into memory.
 
         Parameters
@@ -1761,7 +1882,7 @@ class DOMTimePolarTables(object):
             which are which is _not_ taken into consideration in the software
             yet.)
 
-        depth_idx : int in [0, 59]
+        dom : int in [1, 60]
             Indexed from 0, currently 0-59
 
         force_reload : bool
@@ -1776,9 +1897,10 @@ class DOMTimePolarTables(object):
             dom_quant_eff = retro.DC_DOM_QUANT_EFF
             exponent = self.dc_exponent
 
-        if not force_reload and depth_idx in self.tables[subdet]:
+        if not force_reload and dom in self.tables[subdet]:
             return
 
+        depth_idx = dom - 1
         if self.naming_version == 0:
             fpath = join(
                 self.tables_dir,
@@ -1826,11 +1948,10 @@ class DOMTimePolarTables(object):
         # time (though most time I expect to be disk-read times, this could
         # still help speed the process up)
         for string in range(1, 86+1):
-            for depth_idx in range(60):
-                self.load_table(string=string, depth_idx=depth_idx,
-                                force_reload=False)
+            for dom in range(1, 60+1):
+                self.load_table(string=string, dom=dom, force_reload=False)
 
-    def get_photon_expectation(self, pinfo_gen, hit_time, string, depth_idx,
+    def get_photon_expectation(self, pinfo_gen, hit_time, string, dom,
                                use_directionality=None):
         """Get the expectation for photon survival.
 
@@ -1854,6 +1975,7 @@ class DOMTimePolarTables(object):
             use_directionality = self.use_directionality
 
         string_idx = string - 1
+        depth_idx = dom - 1
 
         dom_coord = self.geom[string_idx, depth_idx]
         if string < 79:
