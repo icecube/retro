@@ -62,34 +62,41 @@ discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade,const_energy_loss_muon]
 #discrete_hypo = DiscreteHypo(hypo_kernels=[point_cascade])
 
 
-geom_file = DETECTOR_GEOM_FILE
 tables_dir = '/data/icecube/retro_tables/full1000/'
 
+with open('../data/gcd_dict.pkl', 'rb') as f:
+    gcd_dict = pickle.load(f)
 
-# Load detector geometry array
-print('Loading detector geometry from "%s"...' % expand(geom_file))
-detector_geometry = np.load(expand(geom_file))
 
 # Load tables
 print('Loading DOM tables...')
 dom_tables = DOMTimePolarTables(
     tables_dir=tables_dir,
     hash_val=None,
-    geom=detector_geometry,
+    geom=gcd_dict['geo'],
     use_directionality=False,
     naming_version=0,
 )
 dom_tables.load_tables()
 
 #hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=0, track_energy=20, cascade_energy=0)
-hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=0, cascade_energy=20)
-#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
+#hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=0, cascade_energy=20)
+hypo_params = HYPO_PARAMS_T(t=0, x=0, y=0, z=-400, track_azimuth=0, track_zenith=PI, track_energy=20, cascade_energy=0)
 
-#f = open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb')
-with open('../icetray_processing/cascade_step4_SRTInIcePulses_90_700_1.pkl', 'rb') as f:
+#with open('benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl', 'rb') as f:
+with open('./benchmark.pkl', 'rb') as f:
+    photon_histos = pickle.load(f)
+#with open('../icetray_processing/cascade_step4_SRTInIcePulses_90_700_1.pkl', 'rb') as f:
+with open('../icetray_processing/track_step4_SRTInIcePulses_90_700_1.pkl', 'rb') as f:
     srt_histos = pickle.load(f)
-with open('../icetray_processing/cascade_step4_SplitUncleanedInIcePulses.pkl', 'rb') as f:
+#with open('../icetray_processing/cascade_step4_SplitUncleanedInIcePulses.pkl', 'rb') as f:
+with open('../icetray_processing/track_step4_SplitUncleanedInIcePulses.pkl', 'rb') as f:
     uncleaned_histos = pickle.load(f)
+
+# from justin
+#with open('/home/justin/dom_pdfs/upgoing_muon/clsim_tables_avgsurfareanorm_dt1.0_sigma20deg_100phi/run_info.pkl', 'rb') as f:
+with open('/home/justin/dom_pdfs/upgoing_muon/clsim_tables_pdenorm_dt1.0_sigma5deg_100phi/run_info.pkl', 'rb') as f:
+    run_info = pickle.load(f)
 
 
 pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
@@ -102,11 +109,12 @@ norm = False
 norm2 = False
 
 hit_times =  np.linspace(0, 2000, 201)
-mid_points = 0.5* (hit_times[1:] + hit_times[:-1])
+mid_points = 0.5 * (hit_times[1:] + hit_times[:-1])
 
 for dom in doms:
     for string in strings:
         expected_ps = []
+        expected_hits = []
         for hit_time in mid_points:
             #print(hit_time)
             total_p, expected_p = dom_tables.get_photon_expectation(
@@ -116,29 +124,37 @@ for dom in doms:
                                               depth_idx=dom-1,
                                               )
             expected_ps.append(expected_p)
+            expected_hits.append((expected_p * 0.25 * gcd_dict['rde'][string-1, dom-1]) + gcd_dict['noise'][string-1, dom-1] * 10e-9)
 
         expected_ps = np.array(expected_ps)
+        expected_hits = np.array(expected_hits)
         tot_retro = np.sum(expected_ps)
         if norm:
             expected_ps /= np.sum(expected_ps)
 
 
         plt.clf()
-        plt.plot(mid_points, expected_ps)
+        #plt.plot(mid_points, expected_ps, label='retro photons')
+        plt.plot(mid_points, expected_hits, label='simplistic retro', c='cyan')
         try:
             #time = histos[string][dom]['time']
             #weight = histos[string][dom]['weight']
             h = np.nan_to_num(uncleaned_histos[string][dom])
-            tot_clsim = np.sum(h)
-            if norm:
-                h/= np.sum(h)
+            #tot_clsim = np.sum(h)
+            #if norm:
+            #    h/= np.sum(h)
             #if norm2:
             #    h *= 200
-            plt.plot(mid_points, h)
-            plt.plot(mid_points, np.nan_to_num(srt_histos[string][dom]), c='r')
-            a_text = AnchoredText('RETRO = %.5f, CLSIM = %.5f, ratio = %.5f\n total_p = %.2f, sum = %.2f'%(tot_retro, tot_clsim, tot_retro/tot_clsim, total_p, np.sum(expected_ps)), loc=2)
+            series =  (run_info['results'][(string, dom)]['pexp_at_hit_times'] * 0.25 * gcd_dict['rde'][string-1, dom-1]) + gcd_dict['noise'][string-1, dom-1] * 10e-9
+            plt.plot(mid_points, series, c='red', label='pde_norm justin_dir RDE + noise')
+
+            #plt.plot(mid_points, np.nan_to_num(srt_histos[string][dom]), c='r', label='SRT hits')
+            plt.plot(mid_points, h, label='Uncleaned hits', c='orange')
+            #plt.plot(mid_points, np.nan_to_num(photon_histos[string][dom]), c='b', label='photons')
+            plt.gca().legend(loc='upper right',ncol=1, frameon=False,numpoints=1)
+            #a_text = AnchoredText('RETRO = %.5f, CLSIM = %.5f, ratio = %.5f\n total_p = %.2f, sum = %.2f'%(tot_retro, tot_clsim, tot_retro/tot_clsim, total_p, np.sum(expected_ps)), loc=2)
             #print(tot_retro/tot_clsim)
-            plt.gca().add_artist(a_text)
+            #plt.gca().add_artist(a_text)
             #plt.plot(time, weight)
             #plt.scatter(time, weight*10, s=1, marker='.', c='r')
         except KeyError:
