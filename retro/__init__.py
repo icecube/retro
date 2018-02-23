@@ -448,13 +448,13 @@ POL_TABLE_NTBINS = 300
 POL_TABLE_NRBINS = 200
 POL_TABLE_NTHETABINS = 40
 
-IC_DOM_QUANT_EFF = 0.25
-#IC_DOM_QUANT_EFF = 1.
+#IC_DOM_QUANT_EFF = 0.25
+IC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) IceCube (i.e. non-DeepCore)
 DOM quantum efficiency. Multiplies the tabulated detection probabilities to
 yield the actual probabilitiy that a photon is detected."""
-DC_DOM_QUANT_EFF = 0.35
-#DC_DOM_QUANT_EFF = 1.
+#DC_DOM_QUANT_EFF = 0.35
+DC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) DeepCore DOM quantum
 efficiency. Multiplies the tabulated detection probabilities to yield the
 actual probabilitiy that a photon is detected."""
