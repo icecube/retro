@@ -88,6 +88,7 @@ def plot_run_info(
     all_string_dom_pairs = set()
     mc_true_params = None
     for filepath in files:
+        filepath = expanduser(expandvars(filepath))
         if isdir(filepath):
             filepath = join(filepath, 'run_info.pkl')
         with open(expanduser(expandvars(filepath)), 'rb') as fobj:
@@ -190,20 +191,20 @@ def plot_run_info(
 
             kl_div = None
             custom_label = label
-            if ref_y is not None: # and not ref_y_all_zeros:
-                abs_mean_diff = np.abs(np.mean(y - ref_y[1:]))
-                rel_abs_mean_diff = abs_mean_diff / np.sum(ref_y[1:])
+            #if ref_y is not None: # and not ref_y_all_zeros:
+            #    abs_mean_diff = np.abs(np.mean(y - ref_y[1:]))
+            #    #rel_abs_mean_diff = abs_mean_diff / np.sum(ref_y[1:])
 
-                mask = ref_y[1:] > 0
-                kl_ref_vals = ref_y[1:][mask]
-                kl_ref_vals /= np.sum(kl_ref_vals)
+            #    mask = ref_y[1:] > 0
+            #    kl_ref_vals = ref_y[1:][mask]
+            #    kl_ref_vals /= np.sum(kl_ref_vals)
 
-                y_prob_vals = y[mask]
-                y_prob_vals /= np.sum(y_prob_vals)
+            #    y_prob_vals = y[mask]
+            #    y_prob_vals /= np.sum(y_prob_vals)
 
-                with np.errstate(divide='ignore'):
-                    kl_div = -np.sum(kl_ref_vals * np.log(y_prob_vals / kl_ref_vals))
-                custom_label = format(rel_abs_mean_diff, '9.6f') + '  ' + label
+            #    with np.errstate(divide='ignore'):
+            #        kl_div = -np.sum(kl_ref_vals * np.log(y_prob_vals / kl_ref_vals))
+            #    custom_label = format(rel_abs_mean_diff, '9.6f') + '  ' + label
 
             if paired:
                 c_idx, ls_idx = divmod(plt_i, 2)
@@ -241,9 +242,9 @@ def plot_run_info(
         ax.yaxis.tick_left()
 
         #if kl_div is not None:
-        title = ' '*6 + 'Abs diff'.ljust(8) + '  ' + 'Simulation'
+        #title = ' '*6 + 'Abs diff'.ljust(8) + '  ' + 'Simulation'
         #else:
-        #    title = 'Sim'
+        title = 'Code'
 
         leg = ax.legend(
             title=title,
@@ -255,7 +256,7 @@ def plot_run_info(
         )
         plt.setp(leg.get_title(), family='monospace', fontsize=12)
         #if kl_div is not None:
-        leg._legend_box.align = "left"
+        #leg._legend_box.align = "left"
         leg.get_frame().set_linewidth(0)
         ax.set_xlabel('Time from event vertex (ns)', fontsize=14)
 
