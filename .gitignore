@@ -17,3 +17,6 @@ build
 *old
 *new
 *.c
+*.i3
+*.i3.bz2
+*.xml
