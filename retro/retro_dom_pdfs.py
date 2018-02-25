@@ -61,21 +61,21 @@ retro.DEBUG = 0
 SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi'
+CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma20deg_100phi_CKVangle'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
-GEOM_FILE = retro.expand(retro.DETECTOR_GEOM_FILE)
+GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
-QUANTUM_EFFICIENCY = 1.0
 STEP_LENGTH = 1.0
 MMAP = True
+TIME_WINDOW = 20e3 # ns
 
 outdir = retro.expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 retro.mkdir(outdir)
 
 
 run_info['sim_to_test'] = SIM_TO_TEST
-run_info['geom_file'] = GEOM_FILE
-run_info['geom_file_md5'] = hashlib.md5(open(GEOM_FILE, 'rb').read()).hexdigest()
+run_info['gcd_file'] = GCD_FILE
+run_info['gcd_file_md5'] = hashlib.md5(open(GCD_FILE, 'rb').read()).hexdigest()
 
 
 # pylint: disable=line-too-long
@@ -134,14 +134,19 @@ run_info['strings'] = strings
 run_info['doms'] = doms
 run_info['hit_times'] = hit_times
 run_info['sample_hit_times'] = sample_hit_times
+run_info['time_window'] = TIME_WINDOW
 
 
 t_start = time.time()
 
-# Load detector geometry array
-print('Loading detector geometry from "%s"...' % retro.expand(GEOM_FILE))
+# Load detector GCD
+print(
+    'Loading detector geometry, calibration, and RDE from "%s"...'
+    % retro.expand(GCD_FILE)
+)
 t0 = time.time()
-detector_geometry = np.load(retro.expand(GEOM_FILE))
+gcd = np.load(retro.expand(GCD_FILE))
+geom, rde, noise_rate_hz = gcd['geo'], gcd['rde'], gcd['noise']
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
 t0 = time.time()
@@ -152,7 +157,7 @@ if CODE_TO_TEST == 'dom_time_polar_tables':
     retro_tables = DOMTimePolarTables(
         tables_dir=tables_dir,
         hash_val=None,
-        geom=detector_geometry,
+        geom=geom,
         use_directionality=False,
         naming_version=0,
     )
@@ -199,7 +204,9 @@ elif 'clsim_tables' in CODE_TO_TEST:
             .format(ckv_sigma_deg, num_phi_samples, norm_version))
 
     retro_tables = CLSimTables(
-        geom=detector_geometry,
+        geom=geom,
+        rde=rde,
+        noise_rate_hz=noise_rate_hz,
         use_directionality=use_directionality,
         num_phi_samples=num_phi_samples,
         ckv_sigma_deg=ckv_sigma_deg,
@@ -220,10 +227,9 @@ elif 'clsim_tables' in CODE_TO_TEST:
         retro_tables.load_table(
             fpath=table_path,
             string='all',
-            depth_idx='all',
+            dom='all',
             step_length=STEP_LENGTH,
             angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
-            quantum_efficiency=QUANTUM_EFFICIENCY,
             mmap=MMAP
         )
 
@@ -233,7 +239,6 @@ elif 'clsim_tables' in CODE_TO_TEST:
                  ('fpath', table_path),
                  ('step_length', STEP_LENGTH),
                  ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
-                 ('quantum_efficiency', QUANTUM_EFFICIENCY),
                  ('mmap', MMAP)
              ])
             )
@@ -258,19 +263,16 @@ elif 'clsim_tables' in CODE_TO_TEST:
             retro_tables.load_table(
                 fpath=table_path,
                 string=string,
-                depth_idx=depth_idx,
+                dom=dom,
                 step_length=STEP_LENGTH,
                 angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
-                quantum_efficiency=QUANTUM_EFFICIENCY,
                 mmap=MMAP
             )
-
 
             tables[(string, dom)] = OrderedDict([
                 ('fpath', table_path),
                 ('step_length', STEP_LENGTH),
                 ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
-                ('quantum_efficiency', QUANTUM_EFFICIENCY),
                 ('mmap', MMAP)
             ])
 
@@ -319,9 +321,6 @@ run_info['hypo_kernels'] = ['point_cascade', muon_kernel_label]
 run_info['kernel_kwargs'] = kernel_kwargs
 
 
-## DEBUG
-#pinfo_gen = pinfo_gen[2:3, :]
-
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
 
@@ -347,19 +346,17 @@ for string, dom in product(strings, doms):
     if string != prev_string:
         prev_string = string
         print('String {} ({} DOMs)'.format(string, len(doms)))
-        #print('\n  Average time to compute expected photons at DOM, per hit:')
-        #sys.stdout.write('  ' + ' '*(12+3))
     sys.stdout.write('  DOM {}'.format(dom))
     t00 = time.time()
 
-    depth_idx = dom - 1
     pexp_at_hit_times = []
     for hit_time in sample_hit_times.flat:
         exp_p_at_all_t, exp_p_at_hit_t = retro_tables.get_photon_expectation(
             pinfo_gen=pinfo_gen,
             hit_time=hit_time,
+            time_window=TIME_WINDOW,
             string=string,
-            depth_idx=depth_idx,
+            dom=dom,
         )
         pexp_at_hit_times.append(exp_p_at_hit_t)
     pexp_timings.append(time.time() - t00)

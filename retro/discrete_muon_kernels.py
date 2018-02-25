@@ -45,6 +45,10 @@ from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
 
 ALL_REALS = (-np.inf, np.inf)
 
+#cosine of the cherenkov angle
+CKV_COS = 0.75
+# was 0.562
+
 
 # Create spline (for table_energy_loss_muon)
 with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
@@ -136,9 +140,9 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
         hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     )
     pinfo_gen[:, 4] = photons_per_segment
-    pinfo_gen[:, 5] = dir_x * 0.562
-    pinfo_gen[:, 6] = dir_y * 0.562
-    pinfo_gen[:, 7] = dir_z * 0.562
+    pinfo_gen[:, 5] = dir_x * CKV_COS
+    pinfo_gen[:, 6] = dir_y * CKV_COS
+    pinfo_gen[:, 7] = dir_z * CKV_COS
 
     return pinfo_gen
 
@@ -201,7 +205,7 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
 
     # Create array at vertex
     photon_array = [
-        (t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562)
+        (t, x, y, z, photons_per_segment, dir_x * CKV_COS, dir_y * CKV_COS, dir_z * CKV_COS)
     ]
 
     dx = dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
@@ -227,7 +231,7 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
         # loop
         if track_energy > rest_mass:
             photon_array.append(
-                (t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562)
+                (t, x, y, z, photons_per_segment, dir_x * CKV_COS, dir_y * CKV_COS, dir_z * CKV_COS)
             )
         else:
             break
