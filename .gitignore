@@ -6,7 +6,6 @@
 *.pyc
 *.i3
 *.i3.gz
-*.csv
 *.out
 .ipynb_checkpoints
 __pycache__
@@ -17,3 +16,6 @@ build
 *old
 *new
 *.c
+*.i3
+*.i3.bz2
+*.xml

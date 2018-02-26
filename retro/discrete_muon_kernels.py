@@ -46,8 +46,7 @@ from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
 ALL_REALS = (-np.inf, np.inf)
 
 #cosine of the cherenkov angle
-CKV_COS = 0.75
-# was 0.562
+COS_CKV = 0.764540803152
 
 
 # Create spline (for table_energy_loss_muon)
@@ -140,9 +139,9 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
         hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     )
     pinfo_gen[:, 4] = photons_per_segment
-    pinfo_gen[:, 5] = dir_x * CKV_COS
-    pinfo_gen[:, 6] = dir_y * CKV_COS
-    pinfo_gen[:, 7] = dir_z * CKV_COS
+    pinfo_gen[:, 5] = dir_x * COS_CKV
+    pinfo_gen[:, 6] = dir_y * COS_CKV
+    pinfo_gen[:, 7] = dir_z * COS_CKV
 
     return pinfo_gen
 
@@ -205,7 +204,7 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
 
     # Create array at vertex
     photon_array = [
-        (t, x, y, z, photons_per_segment, dir_x * CKV_COS, dir_y * CKV_COS, dir_z * CKV_COS)
+        (t, x, y, z, photons_per_segment, dir_x * COS_CKV, dir_y * COS_CKV, dir_z * COS_CKV)
     ]
 
     dx = dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
@@ -231,7 +230,7 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
         # loop
         if track_energy > rest_mass:
             photon_array.append(
-                (t, x, y, z, photons_per_segment, dir_x * CKV_COS, dir_y * CKV_COS, dir_z * CKV_COS)
+                (t, x, y, z, photons_per_segment, dir_x * COS_CKV, dir_y * COS_CKV, dir_z * COS_CKV)
             )
         else:
             break

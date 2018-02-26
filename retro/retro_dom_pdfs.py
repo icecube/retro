@@ -58,16 +58,17 @@ run_info = OrderedDict([
 
 
 retro.DEBUG = 0
-SIM_TO_TEST = 'upgoing_muon'
+#SIM_TO_TEST = 'downgoing_muon'
+SIM_TO_TEST = 'horizontal_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
-#CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma20deg_100phi_CKVangle'
+CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
+#CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi_CKVangle'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
 STEP_LENGTH = 1.0
 MMAP = True
-TIME_WINDOW = 20e3 # ns
+TIME_WINDOW = 2e3 # ns
 
 outdir = retro.expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 retro.mkdir(outdir)
@@ -86,9 +87,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        #fwd_sim_histo_file='~/retro/retro/benchmark.pkl'
-        fwd_sim_histo_file='~/retro/icetray_processing/track_step4_SplitUncleanedInIcePulses.pkl'
-        #fwd_sim_histo_file='/home/peller/retro/retro/testMuMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=0.0_azimuth=0.0_events.pkl'
+        fwd_sim_histo_file='/icecube/data/retro/sims/track_step4_SplitUncleanedInIcePulses.pkl'
     ),
     cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -96,15 +95,23 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=0,
             track_energy=0, cascade_energy=20
         ),
-        fwd_sim_histo_file='benchmarkEMinus_E=20.0_x=0.0_y=0.0_z=-400.0_coszen=-1.0_azimuth=0.0.pkl'
+        fwd_sim_histo_file='/icecube/data/retro/sims/cascade_step4_SplitUncleanedInIcePulses.pkl'
+    ),
+    horizontal_muon=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-350,
+            track_azimuth=0, track_zenith=np.pi/2,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='/home/peller/retro/icetray_processing/horizontal_track_step4_SplitUncleanedInIcePulses.pkl'
     ),
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
-            t=0, x=0, y=0, z=-400,
+            t=0, x=0, y=0, z=-300,
             track_azimuth=0, track_zenith=0,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file=None
+        fwd_sim_histo_file='/home/peller/retro/icetray_processing/downgoing_track_step4_SplitUncleanedInIcePulses.pkl'
     )
 )
 
