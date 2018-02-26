@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # pylint: disable=wrong-import-position, wildcard-import
 """
-read in an i3 file from CLsim and generate 'oversampled' photon arrival
+read in an i3 file contain SRT hit series and generate 'oversampled' hit
 distributions per DOM
 """
 
@@ -29,9 +29,6 @@ import pickle
 
 from icecube import dataclasses # pylint: disable=import-error, unused-import
 from icecube import dataio # pylint: disable=import-error
-from icecube.clsim import I3Photon
-
-from icecube.clsim.GetIceCubeDOMAcceptance import *
 
 import matplotlib.pyplot as plt
 
@@ -42,28 +39,29 @@ raw_data = {}
 histos = {}
 out = {}
 
+#pulse_series = 'SRTInIcePulses_90_700_1'
+pulse_series = 'SplitUncleanedInIcePulses'
+
 fname = sys.argv[1]
-
-dom_acceptance = GetIceCubeDOMAcceptance()
-
 i3_file = dataio.I3File(fname)
 
-n_bins = 200
-bins = np.linspace(0, 2000, n_bins+1)
+n_bins = 250
+bins = np.linspace(0, 3000, n_bins + 1)
 
 counter = 0
 
 while i3_file.more():
     frame = i3_file.pop_frame()
-    if not frame.Has('photons'):
+    if not frame.Has(pulse_series):
         continue
-    #if counter > 10000:
+    #if counter > 100:
     #    break
     counter += 1
     if counter%100==0:
         print(counter)
-    p = frame['photons']
-    for DOM in p:
+    hits = dataclasses.I3RecoPulseSeriesMap.from_frame(frame, pulse_series)
+    timeshift = frame['TimeShift'].value
+    for DOM in hits:
         DOM_key = DOM[0]
         times = []
         weights = []
@@ -71,51 +69,22 @@ while i3_file.more():
             #raw_data[DOM_key] = []
             raw_data[DOM_key] = {'time':[], 'weight':[]}
         for hit in DOM[1]:
-            raw_data[DOM_key]['time'].append(hit.time)
-            raw_data[DOM_key]['weight'].append(hit.weight*dom_acceptance.GetValue(hit.wavelength))
-            #times.append(hit.time)
-            #weights.append(hit.weight*dom_acceptance.GetValue(hit.wavelength))
-        #raw_data[DOM_key]['time'] = np.array(raw_data[DOM_key]['time'])
-        #raw_data[DOM_key]['weight'] = np.array(raw_data[DOM_key]['weight'])
-        #c, _ = np.histogram(raw_data[DOM_key]['time'], bins=n_bins, range=range)
-        #y, _ = np.histogram(times, bins=bins, weights=weights)
-        #raw_data[DOM_key].append(y)
-        #raw_data[DOM_key]['weight'].append(y)
-        #raw_data[DOM_key]['counts'] += np.nan_to_num(w/c)
+            raw_data[DOM_key]['time'].append(hit.time + timeshift)
+            raw_data[DOM_key]['weight'].append(hit.charge)
 
 for key, d in raw_data.items():
     string = int(key.string)
     dom = int(key.om)
-    #data = np.array(d)
-    #print(data)
-    #norm = np.nan_to_num(data/data)
-    #h = np.sum(data, axis=0) / np.sum(norm, axis=0)
-    #h = np.nan_to_num(h)
-    #print(h)
-    #h = np.true_divide(data.sum(axis=0),(data!=0).sum(axis=0))
-    #h = np.nan_to_num(h)
     time = np.array(d['time']).flatten()
     weight = np.array(d['weight']).flatten()
-    #print(time)
     hist, _ = np.histogram(time, bins=bins, weights=weight)
-    #print(hist)
-    #hist /= d['counts']
     hist /= counter
-    #hist = np.nan_to_num(hist)
-    #print(hist)
     if not histos.has_key(string):
         histos[string] = {}
     histos[string][dom] = hist
-    #if not out.has_key(string):
-    #    out[string] = {}
-    #if not out[string].has_key(dom):
-    #    out[string][dom] = {}
-    #out[string][dom]['time'] = 0.5*(bins[1:] + bins[:-1])
-    #out[string][dom]['weight'] = h
 
-outfile = open(fname.rstrip('.i3.bz2') + '.pkl', 'wb')
+outfile = open(fname.rstrip('.i3.bz2') + '_%s.pkl'%pulse_series, 'wb')
 pickle.dump(histos, outfile)
-#pickle.dump(out, outfile)
 outfile.close()
 
     # plotting
