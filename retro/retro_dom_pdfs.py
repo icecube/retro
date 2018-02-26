@@ -58,7 +58,7 @@ run_info = OrderedDict([
 
 
 retro.DEBUG = 0
-SIM_TO_TEST = 'upgoing_muon'
+SIM_TO_TEST = 'horizontal_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
 CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi'
@@ -98,12 +98,20 @@ SIMULATIONS = dict(
     ),
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
-            t=0, x=0, y=0, z=-400,
-            track_azimuth=0, track_zenith=-retro.PI,
+            t=0, x=0, y=0, z=-300,
+            track_azimuth=0, track_zenith=retro.PI,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file=None
-    )
+        fwd_sim_histo_file='~/retro/icetray_processing/downgoing_track_step4_SplitUncleanedInIcePulses.pkl'
+    ),
+    horizontal_muon=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-350,
+            track_azimuth=0, track_zenith=retro.PI/2,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='~/retro/icetray_processing/horizontal_track_step4_SplitUncleanedInIcePulses.pkl'
+    ),
 )
 
 
