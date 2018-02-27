@@ -32,7 +32,6 @@ from os.path import abspath, dirname, join
 import sys
 import csv
 from scipy import interpolate
-
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
@@ -46,7 +45,7 @@ from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
 ALL_REALS = (-np.inf, np.inf)
 
 
-# Create spline (for table_energy_loss_muon)
+# Load csv table of dedx values (for table_energy_loss_muon)
 with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
     reader = csv.reader(csvfile)
     rows = []
@@ -62,10 +61,12 @@ with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'),
         stopping_power[idx] = float(stopping_power[idx])
         idx += 1
 
+
+#create spline (for table_energy_loss_muon)
 SPLINE = interpolate.splrep(energies, stopping_power, s=0)
 
-
 # TODO: use / check limits...?
+#@profile
 def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     """Simple discrete-time track hypothesis.
 
@@ -167,7 +168,7 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     """
     track_energy = hypo_params.track_energy
 
-    # Check for only cascade
+    # Check for no track
     if track_energy == 0:
         pinfo_gen = np.array(
             [[hypo_params.t,
@@ -199,17 +200,18 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
     dir_z = -math.cos(hypo_params.track_zenith)
 
-    # Create array at vertex
-    photon_array = [
-        (t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562)
-    ]
+    
+    # Loop uses rest mass of 105.658 MeV/c^2 for muon
+    rest_mass = 0.105658
 
     dx = dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
     dy = dt * dir_y * SPEED_OF_LIGHT_M_PER_NS
     dz = dt * dir_z * SPEED_OF_LIGHT_M_PER_NS
 
-    # Loop uses rest mass of 105.658 MeV/c^2 for muon
-    rest_mass = 0.105658
+    # Create array at vertex
+    photon_array = [
+        (t, x, y, z, photons_per_segment, dir_x * 0.562, dir_y * 0.562, dir_z * 0.562)
+    ]
 
     # Loop through track, appending new photon dump on axis 0
     while True:
@@ -232,4 +234,8 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
         else:
             break
 
+
     return np.array(photon_array, dtype=np.float32)
+
+
+
