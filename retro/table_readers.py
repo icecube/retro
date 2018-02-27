@@ -10,6 +10,7 @@ from __future__ import absolute_import, division, print_function
 
 
 __all__ = '''
+    MACHINE_EPS
     MY_CLSIM_TABLE_KEYS
     TABLE_NORM_KEYS
     survival_prob_from_smeared_cone
@@ -69,6 +70,8 @@ import retro
 from retro import PI, TWO_PI
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
+
+MACHINE_EPS = 1e-16
 
 MY_CLSIM_TABLE_KEYS = [
     'table_shape', 'n_photons', 'phase_refractive_index', 'r_bin_edges',
@@ -150,7 +153,7 @@ def survival_prob_from_smeared_cone(
         costheta = math.cos(offset_theta)
         sintheta = math.sin(offset_theta)
 
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi + 1)
+        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
         sin_p_phi = math.sin(p_phi)
         cos_p_phi = math.cos(p_phi)
         q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
@@ -253,7 +256,7 @@ def survival_prob_from_cone(
     last_deltaphi_bin = num_deltaphi_bins - 1
 
     for phi_idx in range(num_phi):
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi + 1)
+        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
         sin_p_phi = np.sin(p_phi)
         cos_p_phi = np.cos(p_phi)
         q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
@@ -1094,27 +1097,45 @@ def generate_pexp_5d_function(
 
                 # Zenith angle is indep. of photon position relative to DOM
                 pdir_costheta = pdir_z / pdir_r
-                pdir_sintheta = pdir_rho
+                pdir_sintheta = pdir_rho / pdir_r
 
-                # \Delta\phi depends on photon position relative to the DOM
                 rho = math.sqrt(rhosquared)
-                pdir_cosdeltaphi = min(
-                    1.0,
-                    (pdir_x / pdir_rho) * (dx / rho) + (pdir_y / pdir_rho) * (dy / rho)
-                )
-                pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi * pdir_cosdeltaphi)
+
+                # \Delta\phi depends on photon position relative to the DOM...
+
+                # Below is the projection of pdir into the (x, y) plane and the
+                # projection of that onto the vector in that plane connecting
+                # the photon source to the DOM. We get the cosine of the angle
+                # between these vectors by solving the identity
+                #   `a dot b = |a| |b| cos(deltaphi)`
+                # for cos(deltaphi).
+                #
+                if pdir_rho <= MACHINE_EPS or rho <= MACHINE_EPS:
+                    pdir_cosdeltaphi = 1.0
+                    pdir_sindeltaphi = 0.0
+                else:
+                    pdir_cosdeltaphi = (
+                        pdir_x/pdir_rho * dx/rho + pdir_y/pdir_rho * dy/rho
+                    )
+                    # Note that the max and min here here in case numerical
+                    # precision issues cause the dot product to blow up.
+                    pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
+                    pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi * pdir_cosdeltaphi)
 
                 #print('pdir_cosdeltaphi={}, pdir_sindeltaphi={}'
                 #      .format(pdir_cosdeltaphi, pdir_sindeltaphi))
 
-                # Cherenkov angle is encoded in the length of the pdir vector
+                # Cherenkov angle is encoded as the projection of a length-1
+                # vector going in the Ckv direction onto the charged particle's
+                # direction. Ergo, in the length of the pdir vector is the
+                # cosine of the ckv angle.
                 ckv_costheta = pdir_r
                 #ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
                 ckv_theta = math.acos(ckv_costheta)
 
                 #print('ckv_theta={}'.format(ckv_theta*180/PI))
 
-                this_photons_at_all_times, _, _ = survival_prob_from_smeared_cone(
+                this_photons_at_all_times, _a, _b = survival_prob_from_smeared_cone(
                     #costheta=ckv_costheta,
                     #sintheta=ckv_sintheta,
                     theta=ckv_theta,
@@ -1168,7 +1189,7 @@ def generate_pexp_5d_function(
                         table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
                     )
             elif pdir_r < 1.0: # Cherenkov emitter
-                this_photons_at_hit_time, _, _ = survival_prob_from_smeared_cone(
+                this_photons_at_hit_time, _c, _d = survival_prob_from_smeared_cone(
                     #costheta=ckv_costheta,
                     #sintheta=ckv_sintheta,
                     theta=ckv_theta,
