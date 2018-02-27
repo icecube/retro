@@ -82,11 +82,14 @@ def long_cascade(hypo_params, limits=None, samples=1000):
     pinfo_gen
     """
 
-    #define vertex
-    t_v = hypo_params.t
-    x_v = hypo_params.x
-    y_v = hypo_params.y
-    z_v = hypo_params.z
+    #assign vertex
+    t = hypo_params.t
+    x = hypo_params.x
+    y = hypo_params.y
+    z = hypo_params.z
 
-    
+    #define photons per sample
+    photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / samples
+
+
 
