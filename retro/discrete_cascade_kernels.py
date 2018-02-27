@@ -64,3 +64,29 @@ def point_cascade(hypo_params, limits=None):
     pinfo_gen[0, 6] = 0
     pinfo_gen[0, 7] = 0
     return pinfo_gen
+
+def long_cascade(hypo_params, limits=None, samples=1000):
+    """
+    Cascade with both longitudinal and angular distributions
+
+    Use as a hypo_kernel with the DiscreteHypo class.
+
+    Parameters
+    ----------
+    hypo_params : MUST BE HypoParams10D
+    limits : NOT IMPLEMENTED
+    samples : integer, number of times to sample the distributions
+
+    Returns
+    -------
+    pinfo_gen
+    """
+
+    #define vertex
+    t_v = hypo_params.t
+    x_v = hypo_params.x
+    y_v = hypo_params.y
+    z_v = hypo_params.z
+
+    
+
