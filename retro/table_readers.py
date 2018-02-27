@@ -931,8 +931,8 @@ def generate_pexp_5d_function(
 
     @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d(
-            pinfo_gen, hit_time, time_window, dom_coord, noise_rate_hz, table,
-            table_norm, t_indep_table, t_indep_table_norm
+            pinfo_gen, hit_time, time_window, dom_coord, quantum_efficiency,
+            noise_rate_hz, table, table_norm, t_indep_table, t_indep_table_norm
         ):
         """For a set of generated photons `pinfo_gen`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
@@ -962,6 +962,10 @@ def generate_pexp_5d_function(
         dom_coord : shape (3,) ndarray
             DOM (x, y, z) coordinate in meters (in terms of the IceCube
             coordinate system).
+
+        quantum_efficiency : float in (0, 1]
+            Scale factor that reduces detected photons due to average quantum
+            efficiency of the DOM.
 
         noise_rate_hz : float
             Noise rate for the DOM, in Hz.
@@ -1215,9 +1219,14 @@ def generate_pexp_5d_function(
             #print('photons_at_hit_time={}'.format(photons_at_hit_time))
             #print('XX FINISHED LOOP')
 
-        # NOTE: bug in numba whereby += might fail here!
-        photons_at_all_times = photons_at_all_times + noise_rate_hz * time_window * 1e-9
-        photons_at_hit_time = photons_at_hit_time + noise_rate_hz * table_dt * 1e-9
+        photons_at_all_times = (
+            quantum_efficiency * photons_at_all_times
+            + noise_rate_hz * time_window * 1e-9
+        )
+        photons_at_hit_time = (
+            quantum_efficiency * photons_at_hit_time
+            + noise_rate_hz * table_dt * 1e-9
+        )
 
         return photons_at_all_times, photons_at_hit_time
 
@@ -1538,26 +1547,6 @@ class CLSimTables(object):
             )
             return
 
-        if subdet == 'all':
-            qe_subvals = self.quantum_efficiency
-            noise_subvals = self.noise_rate_hz
-        elif subdet == 'ic':
-            qe_subvals = self.quantum_efficiency[:79, :]
-            noise_subvals = self.noise_rate_hz
-        elif subdet == 'dc':
-            qe_subvals = self.quantum_efficiency[79:, :]
-            noise_subvals = self.noise_rate_hz[79:, :]
-        else:
-            qe_subvals = self.quantum_efficiency[string - 1, :]
-            noise_subvals = self.noise_rate_hz[string - 1, :]
-
-        if dom == 'all':
-            quantum_efficiency = qe_subvals.mean()
-            noise_rate_hz = noise_subvals.mean()
-        else:
-            quantum_efficiency = qe_subvals[:, dom - 1].mean()
-            noise_rate_hz = noise_subvals[:, dom - 1].mean()
-
         table = load_clsim_table_minimal(
             fpath=fpath,
             step_length=step_length,
@@ -1568,11 +1557,11 @@ class CLSimTables(object):
         table['step_length'] = step_length
         table['table_norm'] = get_table_norm(
             angular_acceptance_fract=angular_acceptance_fract,
-            quantum_efficiency=quantum_efficiency,
+            quantum_efficiency=1,
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
-        table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
+        table['t_indep_table_norm'] = angular_acceptance_fract
 
         pexp_5d, _ = generate_pexp_5d_function(
             table=table,
@@ -1589,7 +1578,6 @@ class CLSimTables(object):
             table['t_indep_table_norm'],
             table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
             table['table_norm'],
-            noise_rate_hz
         )
 
     def get_photon_expectation(
@@ -1618,6 +1606,8 @@ class CLSimTables(object):
             return 0, 0
 
         dom_coord = self.geom[string_idx, dom_idx]
+        dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
+        dom_noise_rate_hz = self.noise_rate_hz[string_idx, dom_idx]
 
         if self.string_aggregation == 'all':
             string = 'all'
@@ -1636,15 +1626,15 @@ class CLSimTables(object):
          t_indep_table,
          t_indep_table_norm,
          table,
-         table_norm,
-         noise_rate_hz) = self.tables[(string, dom)]
+         table_norm) = self.tables[(string, dom)]
 
         return pexp_5d(
             pinfo_gen=pinfo_gen,
             hit_time=hit_time,
             time_window=time_window,
             dom_coord=dom_coord,
-            noise_rate_hz=noise_rate_hz,
+            noise_rate_hz=dom_noise_rate_hz,
+            quantum_efficiency=dom_quantum_efficiency,
             table=table,
             table_norm=table_norm,
             t_indep_table=t_indep_table,
