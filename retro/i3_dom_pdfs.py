@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # pylint: disable=wrong-import-position, wildcard-import
 """
+read in an i3 file from CLsim and generate 'oversampled' photon arrival
+distributions per DOM
 """
 
 from __future__ import absolute_import, division, print_function

@@ -116,7 +116,7 @@ def generate_t_r_theta_table(table,
     for r_i in range(n_r_bins):
         for theta_j in range(n_theta_bins):
             for t_k in range(n_t_bins):
-                # flip coszen?
+                # flip coszen_dir (photon direction)
                 weights = table[r_i, theta_j, t_k, ::-1, :].astype(np.float64)
                 weights_tot = weights.sum()
                 if weights_tot == 0:
