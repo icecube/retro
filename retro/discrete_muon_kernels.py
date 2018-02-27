@@ -32,7 +32,6 @@ from os.path import abspath, dirname, join
 import sys
 import csv
 from scipy import interpolate
-from numba import jit
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
@@ -65,89 +64,6 @@ with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'),
 
 #create spline (for table_energy_loss_muon)
 SPLINE = interpolate.splrep(energies, stopping_power, s=0)
-
-#energies = np.array(energies)
-#stopping_power = np.array(stopping_power)
-##numba interpolation
-#@jit(nopython=True)
-#def numba_interpolate(x_data, y_data, x_inp, prev_upper_idx=-1):
-#    #no input previous index, begin checking at beginning for the proper values to interpolate between
-#    if prev_upper_idx == -1:
-#        idx = 0
-#        while x_inp > x_data[idx]:
-#            idx += 1
-#        else:
-#            lower_idx = idx - 1
-#            upper_idx = idx
-#    #previous index given, start there and decrease if necessary for the proper values to interpolate between
-#    else:
-#        if x_inp > x_data[prev_upper_idx - 1]:
-#            lower_idx = prev_upper_idx - 1
-#            upper_idx = prev_upper_idx
-#        else:
-#            idx = prev_upper_idx
-#            while x_inp < x_data[idx]:
-#                idx -= 1
-#            else:
-#                lower_idx = idx
-#                upper_idx = idx + 1
-#    
-#    slope = (y_data[upper_idx] - y_data[lower_idx]) / (x_data[upper_idx] - x_data[lower_idx])
-#    y_out = y_data[lower_idx] + slope * (x_inp - x_data[lower_idx])
-#    return y_out, upper_idx
-#
-#@profile
-#@jit()#nopython=True)
-#def numba_create_photon_matrix(t, x, y, z, photons_per_segment, dir_x, dir_y, dir_z, track_energy, dt):
-#    #assign variables
-#    t = t
-#    x = x
-#    y = y
-#    z = z
-#    track_energy = track_energy
-#    
-#    #declare constants
-#    segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
-#    rest_mass = 0.105658
-#
-#    #calculate directions with cherenkov projection
-#    dir_x_cher = dir_x * 0.562
-#    dir_y_cher = dir_y * 0.562
-#    dir_z_cher = dir_z * 0.562
-#
-#    #calculate changes in position for each segment
-#    dx = dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
-#    dy = dt * dir_y * SPEED_OF_LIGHT_M_PER_NS
-#    dz = dt * dir_z * SPEED_OF_LIGHT_M_PER_NS
-#
-#    #create array at vertex
-#    photon_array = [
-#        (t, x, y, z, photons_per_segment, dir_x_cher, dir_y_cher, dir_z_cher)
-#    ]
-#
-#
-#    #Loop through track
-#    while True:
-#        t += dt
-#        x += dx
-#        y += dy
-#        z += dz
-#
-#        dedx, prev_upper_idx = numba_interpolate(energies, stopping_power, track_energy)
-#        track_energy -= dedx * segment_length
-#        
-#
-#        if track_energy > rest_mass:
-#            photon_array.append(
-#                (t, x, y, z, photons_per_segment, dir_x_cher, dir_y_cher, dir_z_cher)
-#            )
-#        else:
-#            break
-#
-#    return photon_array
-#
-
-
 
 # TODO: use / check limits...?
 #@profile
@@ -228,7 +144,6 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     return pinfo_gen
 
 
-@profile
 def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     """Discrete-time track hypothesis that calculates dE/dx as the muon travels
     using splined tabulated data.
@@ -286,7 +201,6 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     dir_z = -math.cos(hypo_params.track_zenith)
 
     
-    # non-numba version
     # Loop uses rest mass of 105.658 MeV/c^2 for muon
     rest_mass = 0.105658
 
@@ -319,9 +233,6 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
             )
         else:
             break
-
-#    # numba version 
-#    photon_array = numba_create_photon_matrix(t, x, y, z, photons_per_segment, dir_x, dir_y, dir_z, track_energy, dt)
 
 
     return np.array(photon_array, dtype=np.float32)
