@@ -2,8 +2,8 @@
 # pylint: disable=wrong-import-position, wildcard-import, invalid-name
 
 """
-read in an i3 file from CLsim and generate 'oversampled' photon arrival
-distributions per DOM
+Read in an i3 file from CLsim and generate a pickle file containing the photon
+info (a dict containing time, wavelength, coszen, and weight for each DOM).
 """
 
 from __future__ import absolute_import, division, print_function
@@ -23,9 +23,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from collections import OrderedDict
-from os.path import basename, expandvars
+from os.path import basename, dirname, expanduser, expandvars, join
 import sys
 import pickle
 import re
@@ -34,29 +33,33 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 from icecube import dataclasses, simclasses, dataio # pylint: disable=import-error, unused-import
-#from icecube.clsim.GetIceCubeDOMAcceptance import *
 
+RETRO_DIR = dirname(dirname(__file__))
+if not RETRO_DIR:
+    RETRO_DIR = '../..'
 
-# dict to store the photons
+# dict to store the extracted info
 raw_data = OrderedDict([('doms', OrderedDict()), ('meta', OrderedDict())])
 
 fname = sys.argv[1]
 
-#dom_acceptance = GetIceCubeDOMAcceptance()
+orig_fname = fname
+fname = expanduser(expandvars(fname))
+fname_base = basename(fname).rstrip('.bz2').rstrip('.i3')
+outfpath = fname_base + '_photon_raw_data.pkl'
+print('Extracting photons from "{}"\nand writing info to "{}"'
+      .format(orig_fname, outfpath))
 
 i3_file = dataio.I3File(fname, 'r')
 
-n_bins = 250
-bins = np.linspace(0, 3000, n_bins+1)
-
-counter = 0
+num_sims = 0
 while i3_file.more():
     frame = i3_file.pop_frame()
     if not frame.Has('photons'):
         continue
 
-    counter += 1
-    if counter % 100 == 0:
+    num_sims += 1
+    if num_sims % 100 == 0:
         sys.stdout.write('.')
         sys.stdout.flush()
 
@@ -68,21 +71,14 @@ while i3_file.more():
                 ('time', []),
                 ('wavelength', []),
                 ('coszen', []),
-                #('original_weight', [])
             ])
 
         for photon in photon_info:
             raw_data['doms'][dom_key]['time'].append(photon.time)
             raw_data['doms'][dom_key]['wavelength'].append(photon.wavelength)
             raw_data['doms'][dom_key]['coszen'].append(np.cos(photon.dir.zenith))
-            #raw_data['doms'][dom_key]['original_weight'].append(photon.weight)
 
-            # This only serves to make the weights the same (and approx. 1)...
-            #raw_data['doms'][dom_key]['weight'].append(
-            #    photon.weight*dom_acceptance.GetValue(photon.wavelength)
-            #)
-
-if counter >= 100:
+if num_sims >= 100:
     sys.stdout.write('\n')
 
 
@@ -92,7 +88,8 @@ raw_data['doms'] = {
     (int(k.string), int(k.om)): v for k, v in raw_data['doms'].items()
 }
 
-# Sorted dict by (string, dom) such that output is guaranteed to be consistent
+# Sorted dict by (string, dom) such that output file is guaranteed to be
+# consistent
 sorted_data = OrderedDict()
 for dom in sorted(raw_data['doms'].keys()):
     data_dict = raw_data['doms'][dom]
@@ -115,7 +112,11 @@ raw_data['doms'] = sorted_data
 # Shortest wavelength (and therefore the point at which to normalize to 1) is
 # assumed to be 260 nm.
 wl_ckv_accept = np.loadtxt(
-    '../data/sampled_cherenkov_distr_and_dom_acceptance_vs_wavelength.csv',
+    join(
+        RETRO_DIR,
+        'data',
+        'sampled_cherenkov_distr_and_dom_acceptance_vs_wavelength.csv'
+    ),
     delimiter=','
 )
 wavelengths = wl_ckv_accept[:, 0]
@@ -125,17 +126,11 @@ ckv_distr_linterp = interp1d(
     y=ckv_distr,
     kind='linear'
 )
-ckv_at_260 = ckv_distr_linterp(260)
-ckv_distr_linterp = interp1d(
-    x=wavelengths,
-    y=ckv_distr / ckv_at_260,
-    kind='linear'
-)
 
 
-fname_base = basename(fname)
 match = re.match(r'.*holeice_([^_]*)', fname_base)
 if match is None:
+    print('Could not find hole ice model in filename; using "as.h2-50cm"')
     hole_ice_model = 'as.h2-50cm'
 else:
     hole_ice_model = match.groups()[0]
@@ -152,49 +147,30 @@ poly_coeffs = np.loadtxt(expandvars(
 # by negating the odd coefficients.
 flipped_coeffs = np.empty_like(poly_coeffs)
 flipped_coeffs[0::2] = poly_coeffs[0::2]
-flipped_coeffs[1::2] = -poly_coeffs[0::2]
+flipped_coeffs[1::2] = -poly_coeffs[1::2]
 
 angsens_poly = np.polynomial.Polynomial(flipped_coeffs, domain=(-1, 1))
 
 
 for key, data_dict in raw_data['doms'].items():
-    wl = data_dict['wavelength'] * 1e9
-    try:
-        ckv_wt = ckv_distr_linterp(wl)
-    except:
-        print(np.min(wl), np.max(wl))
-        raise
-
     cz = data_dict['coszen']
     try:
+        # Note that angular sensitivity _will_ modify the total number of
+        # photons detected, so we do not divide by the sum of weights here.
         angsens_wt = angsens_poly(cz)
     except:
         print(np.min(cz), np.max(cz))
         raise
 
-    data_dict['weight'] = ckv_wt * angsens_wt
+    #data_dict['weight'] = ckv_wt * angsens_wt / num_sims
+    data_dict['weight'] = angsens_wt / num_sims
 
     for k, array in data_dict.items():
         data_dict[k] = array.astype(np.float32)
 
-raw_data['meta']['num_sims'] = counter
+raw_data['meta']['num_sims'] = num_sims
 pickle.dump(
     raw_data,
-    open(fname_base + '_photon_raw_data.pkl', 'wb'),
+    open(outfpath, 'wb'),
     protocol=pickle.HIGHEST_PROTOCOL
 )
-
-#histos = OrderedDict()
-#for key, data in raw_data.items():
-#    if isinstance(key, basestring):
-#        continue
-#    hist, _ = np.histogram(data['time'], bins=bins, weights=data['weight'])
-#    hist /= counter
-#    histos[key] = hist
-#
-#basename = fname.rstrip('.bz2').rstrip('.i3')
-#pickle.dump(
-#    histos,
-#    open(basename + '_photon_histos.pkl', 'wb'),
-#    protocol=pickle.HIGHEST_PROTOCOL
-#)
