@@ -38,6 +38,9 @@ WL1 = 680
 def get_phase_refr_index(wlen):
     """Get the phase refractive index for ice as a function of wavelength.
 
+    See: https://wiki.icecube.wisc.edu/index.php/Refractive_index_of_ice#Numerical_values_for_ice
+    or eqn 3 in https://arxiv.org/abs/hep-ex/0008001v1
+
     Parameters
     ----------
     wlen
