@@ -58,7 +58,7 @@ run_info = OrderedDict([
 
 
 retro.DEBUG = 0
-SIM_TO_TEST = 'horizontal_muon'
+SIM_TO_TEST = 'downgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
 CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi'

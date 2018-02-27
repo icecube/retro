@@ -6,7 +6,6 @@
 *.pyc
 *.i3
 *.i3.gz
-*.csv
 *.out
 .ipynb_checkpoints
 __pycache__

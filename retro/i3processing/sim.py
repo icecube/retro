@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-#!/cvmfs/i3.opensciencegrid.org/py2-v2/icetray-start
+#!/cvmfs/i3.opensciencegrid.org/py2-v3/icetray-start
+# pylint: disable=unused-import
 
 
 """
-Simulate a bare muon for testing
+Simulate a charged lepton (muons, electrons, taus, and their antiparticles)
 """
 
 
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import os
@@ -17,22 +18,25 @@ import numpy as np
 
 from I3Tray import I3Tray
 from icecube import clsim
-from icecube.dataclasses import I3Geometry, I3Calibration, I3DetectorStatus, \
-        I3OMGeo, I3Orientation, I3DOMCalibration, I3DOMStatus, I3Particle, \
-        I3Position, I3Direction, I3MCTree
-from icecube.icetray import I3Module, I3Logger, I3LogLevel, I3Frame, I3Units,\
-        OMKey
+from icecube.dataclasses import (
+    I3Geometry, I3Calibration, I3DetectorStatus, I3OMGeo, I3Orientation,
+    I3DOMCalibration, I3DOMStatus, I3Particle, I3Position, I3Direction,
+    I3MCTree
+)
+from icecube.icetray import (
+    I3Module, I3Logger, I3LogLevel, I3Frame, I3Units, OMKey
+)
 # Import I3 modules to add to the icetray (even if only added by string below)
 from icecube import phys_services
 from icecube import sim_services
 
 
-class generateEvent(I3Module):
+class GenerateEvent(I3Module):
     def __init__(self, context):
         I3Module.__init__(self, context)
         self.AddParameter("I3RandomService", "the service", None)
         self.AddParameter("Type", "", I3Particle.ParticleType.EMinus)
-        self.AddParameter("Energy", "", 10.*I3Units.TeV)
+        self.AddParameter("Energy", "", 10. * I3Units.TeV)
         self.AddParameter("NEvents", "", 1)
         self.AddParameter("XCoord", "", 0.)
         self.AddParameter("YCoord", "", 0.)
@@ -79,48 +83,49 @@ class generateEvent(I3Module):
         self.PushFrame(frame)
 
         self.eventCounter += 1
-        if self.eventCounter==self.nEvents:
+        if self.eventCounter == self.nEvents:
             self.RequestSuspension()
 
 
 def run_test(args):
-    if args.verbosity == 0:
+    if args.v == 0:
         I3Logger.global_logger.set_level(I3LogLevel.LOG_WARN)
-    elif args.verbosity == 1:
+    elif args.v == 1:
         I3Logger.global_logger.set_level(I3LogLevel.LOG_INFO)
-    elif args.verbosity == 2:
+    elif args.v == 2:
         I3Logger.global_logger.set_level(I3LogLevel.LOG_DEBUG)
-    elif args.verbosity == 3:
+    elif args.v == 3:
         I3Logger.global_logger.set_level(I3LogLevel.LOG_TRACE)
     else:
-        raise ValueError("Unhandled verbosity level: %s", args.verbosity)
+        raise ValueError("Unhandled verbosity level: %s", args.v)
 
     MAX_RUN_NUM = int(1e9)
     assert args.run_num > 0 and args.run_num <= MAX_RUN_NUM
 
     tray = I3Tray()
 
-    tray.AddService(
-        "I3XMLSummaryServiceFactory", "summary",
-        OutputFileName=args.xml_file
-    )
+    #tray.AddService(
+    #    "I3XMLSummaryServiceFactory", "summary", OutputFileName=args.xml_file
+    #)
 
     # Random number generator
     randomService = phys_services.I3SPRNGRandomService(
-        seed=args.seed,
+        seed=123456,
         nstreams=MAX_RUN_NUM,
         streamnum=args.run_num
     )
 
     # Use a real GCD file for a real-world test
     tray.AddModule(
-        "I3InfiniteSource", "streams",
-        Prefix=expandvars(args.GCDFILE),
+        "I3InfiniteSource",
+        "streams",
+        Prefix=expandvars(args.gcdfile),
         Stream=I3Frame.DAQ
     )
 
     tray.AddModule(
-        "I3MCEventHeaderGenerator", "gen_header",
+        "I3MCEventHeaderGenerator",
+        "gen_header",
         Year=2009,
         DAQTime=158100000000000000,
         RunNumber=args.run_num,
@@ -129,16 +134,17 @@ def run_test(args):
     )
 
     tray.AddModule(
-        generateEvent, "generateEvent",
+        GenerateEvent,
+        "GenerateEvent",
         Type=eval("I3Particle.ParticleType." + args.particle_type),
         I3RandomService=randomService,
         NEvents=args.num_events,
-        Energy=args.energy*I3Units.GeV,
-        XCoord=args.x*I3Units.m,
-        YCoord=args.y*I3Units.m,
-        ZCoord=args.z*I3Units.m,
-        Zenith=np.arccos(args.coszen)*I3Units.rad,
-        Azimuth=args.azimuth*I3Units.rad,
+        Energy=args.energy * I3Units.GeV,
+        XCoord=args.x * I3Units.m,
+        YCoord=args.y * I3Units.m,
+        ZCoord=args.z * I3Units.m,
+        Zenith=np.arccos(args.coszen) * I3Units.rad,
+        Azimuth=args.azimuth * I3Units.rad,
     )
 
     # TODO: does PROPOSAL also propagate MuPlus and TauPlus? the tray segment
@@ -150,52 +156,58 @@ def run_test(args):
         from icecube.simprod.segments import PropagateMuons
         # Random service for muon propagation
         randomServiceForPropagators = phys_services.I3SPRNGRandomService(
-            seed=args.seed,
-            nstreams=MAX_RUN_NUM*2,
+            seed=123456,
+            nstreams=MAX_RUN_NUM * 2,
             streamnum=MAX_RUN_NUM + args.run_num
         )
         tray.AddSegment(
-            PropagateMuons, "PROPOSAL_propagator",
-            RandomService    = randomServiceForPropagators,
-            CylinderRadius   = 800*I3Units.m,
-            CylinderLength   = 1600*I3Units.m,
-            SaveState        = True,
-            InputMCTreeName  = "I3MCTree",
-            OutputMCTreeName = "I3MCTree",
+            PropagateMuons,
+            "PROPOSAL_propagator",
+            RandomService=randomServiceForPropagators,
+            CylinderRadius=800 * I3Units.m,
+            CylinderLength=1600 * I3Units.m,
+            SaveState=True,
+            InputMCTreeName="I3MCTree",
+            OutputMCTreeName="I3MCTree",
             #bremsstrahlung = ,
             #photonuclear_family= ,
             #photonuclear= ,
             #nuclear_shadowing= ,
         )
 
+    # Version of
     tray.AddSegment(
-        clsim.I3CLSimMakeHits, "makeCLSimHits",
-        UseCPUs                     = args.use_cpu,
-        UseGPUs                     = not args.use_cpu,
-        UseOnlyDeviceNumber         = args.device,
-        MCTreeName                  = "I3MCTree",
-        MMCTrackListName            = None,
-        MCPESeriesName              = "MCPESeriesMap",
-        PhotonSeriesName            = "photons",
-        ParallelEvents              = args.max_parallel_events,
-        #TotalEnergyToProcess        = 1e12,
-        RandomService               = randomService,
-        IceModelLocation            = args.ice_model,
-        DisableTilt                 = args.no_tilt,
-        UnWeightedPhotons           = False,
-        StopDetectedPhotons         = True,
-        PhotonHistoryEntries        = args.photon_history,
-        UseGeant4                   = args.use_geant4,
-        CrossoverEnergyEM           = 0,
-        CrossoverEnergyHadron       = 0,
-        DoNotParallelize            = args.no_parallel,
-        DOMOversizeFactor           = args.dom_oversize,
-        UnshadowedFraction          = 1.0,
-        UseHoleIceParameterization  = args.no_hole_ice,
-
-        ExtraArgumentsToI3CLSimModule = dict(
-            enableDoubleBuffering     = not args.single_buffer,
-            IgnoreNonIceCubeOMNumbers = False,
+        clsim.I3CLSimMakeHits,
+        "I3CLSimMakeHits",
+        UseCPUs=args.use_cpu,
+        UseGPUs=not args.use_cpu,
+        UseOnlyDeviceNumber=args.device,
+        MCTreeName="I3MCTree",
+        OutputMCTreeName=None,
+        FlasherInfoVectName=None,
+        FlasherPulseSeriesName=None,
+        MMCTrackListName="MMCTrackList",
+        MCPESeriesName="MCPESeriesMap",
+        PhotonSeriesName="photons",
+        ParallelEvents=args.max_parallel_events,
+        #TotalEnergyToProcess=0.,
+        RandomService=randomService,
+        IceModelLocation=args.ice_model,
+        DisableTilt=args.no_tilt,
+        UnWeightedPhotons=False,
+        UseGeant4=args.use_geant4,
+        #CrossoverEnergyEM=None,
+        #CrossoverEnergyHadron=None,
+        UseCascadeExtension=True,
+        StopDetectedPhotons=True,
+        PhotonHistoryEntries=args.photon_history,
+        DoNotParallelize=args.no_parallel,
+        DOMOversizeFactor=args.dom_oversize,
+        UnshadowedFraction=0.9,
+        HoleIceParameterization=args.hole_ice_model,
+        ExtraArgumentsToI3CLSimModule=dict(
+            enableDoubleBuffering=not args.single_buffer,
+            IgnoreNonIceCubeOMNumbers=False,
             #GenerateCherenkovPhotonsWithoutDispersion = False,
             #WavelengthGenerationBias  = ?,
             #IgnoreMuons               = False,
@@ -203,16 +215,15 @@ def run_test(args):
             #Geant4PhysicsListName     = ?
             #Geant4MaxBetaChangePerStep= ?
             #Geant4MaxNumPhotonsPerStep= ?
-            doublePrecision           = args.double_precision,
+            doublePrecision=args.double_precision,
             #FixedNumberOfAbsorptionLengths = np.nan,
             #LimitWorkgroupSize        = 0,
-        )
+        ),
+        If=lambda f: True
     )
 
     tray.AddModule(
-        "I3Writer", "write",
-        CompressionLevel=9,
-        filename=args.i3_file
+        "I3Writer", "write", CompressionLevel=9, filename=args.i3_file
     )
 
     tray.AddModule("TrashCan", "the can")
@@ -228,151 +239,116 @@ if __name__ == "__main__":
         description="Benchmark CLSim performance.",
         formatter_class=ArgumentDefaultsHelpFormatter
     )
+
     # Particle parameters
     parser.add_argument(
-        "--particle-type",
-        choices=('EMinus', 'EPlus', 'MuMinus', 'MuPlus', 'TauMinus', 'TauPlus'),
-        type=str,
-        default='MuMinus',
+        "--particle-type", required=True,
+        choices=(
+            'EMinus', 'EPlus', 'MuMinus', 'MuPlus', 'TauMinus', 'TauPlus'
+        ),
         help='Particle type to propagate'
     )
     parser.add_argument(
-        "--energy",
+        "-E", "--energy",
         type=float,
-        default=20.0,
         help="Particle energy (GeV)"
     )
     parser.add_argument(
-        "-x",
-        type=float,
-        default=0.0,
+        "-x", type=float, required=True,
         help="Particle start x-coord (meters, in IceCube coordinates)"
     )
     parser.add_argument(
-        "-y",
-        type=float,
-        default=0.0,
+        "-y", type=float, required=True,
         help="Particle start y-coord (meters, in IceCube coordinates)"
     )
     parser.add_argument(
-        "-z",
-        type=float,
-        default=-400.0,
-        help="Particle start z-coord (meters, in IceCube coordinates)")
+        "-z", type=float, required=True,
+        help="Particle start z-coord (meters, in IceCube coordinates)"
+    )
     parser.add_argument(
-        "--coszen",
-        type=float,
-        default=-1.0,
+        "--coszen", type=float, required=True,
         help="""Particle cos-zenith angle (dir *from which* it came, in IceCube
         coordinates)"""
     )
     parser.add_argument(
-        "--azimuth",
-        type=float,
-        default=0.0,
-        help="""Particle azimuth angle (rad; dir *from which* it came, in IceCube
-        coordinates)"""
+        "--azimuth", type=float, required=True,
+        help="""Particle azimuth angle (rad; dir *from which* it came, in
+        IceCube coordinates)"""
     )
+
     # Ice parameters
     parser.add_argument(
-        "--ice-model",
-        type=str,
-        default=expandvars("$I3_SRC/clsim/resources/ice/spice_lea"),
+        "--ice-model", required=True,
         help="""A clsim ice model file/directory (ice models *will* affect
         performance metrics, always compare using the same model!)"""
     )
     parser.add_argument(
-        "--no-tilt",
-        action="store_true",
+        "--no-tilt", action="store_true",
         help="Do NOT use ice layer tilt."
     )
     parser.add_argument(
-        "--no-hole-ice",
-        action="store_true",
-        help="Do NOT use hole ice parameterization."
+        "--hole-ice-model", required=True,
+        help="Specify a hole ice parameterization."
     )
     parser.add_argument(
-        "--use-geant4",
-        action="store_true",
+        "--use-geant4", action="store_true",
         help="Use Geant4"
     )
     parser.add_argument(
-        "--dom-oversize",
-        type=float,
-        default=1.0,
+        "--dom-oversize", type=float, default=1.0,
         help="DOM oversize factor"
     )
     parser.add_argument(
-        "--outbase",
-        type=str,
-        default="benchmark",
-        help="""Base file name for output files; ".xml" and ".i3.bz2"
-        extensions are appended to `OUTBASE` to generate the benchmark summary
-        and data file names, respectively."""
+        "--outfile", type=str, required=True,
+        help="""Name of the file to generate (excluding suffix, which will be
+        ".i3.bz2"""
     )
-    parser.add_argument("-g", "--gcdfile", default=os.getenv('GCDfile'),
-		  dest="GCDFILE", help="Read in GCD file")
     parser.add_argument(
-        "--num-events",
-        type=int,
-        default=1,
+        "-g", "--gcdfile", required=True,
+        help="Read in GCD file"
+    )
+    parser.add_argument(
+        "--num-events", type=int, required=True,
         help="The number of events per run"
     )
     parser.add_argument(
         "--max-parallel-events",
-        type=int,
-        default=100,
+        type=int, default=100,
         help="""maximum number of events(==frames) that will be processed in
         parallel"""
     )
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=12345,
-        help="Initial seed for the random number generator"
+        "--run-num", type=int,
+        help=""""The run number for this simulation; unique run numbers get
+        unique random numbers, so use different run numbers for different
+        simulations! (1 <= run num < 1e9)"""
     )
     parser.add_argument(
-        "--run-num",
-        type=int,
-        default=1,
-        help="The run number for this simulation"
-    )
-    parser.add_argument(
-        "--no-parallel",
-        action="store_true",
+        "--no-parallel", action="store_true",
         help="Do NOT parallelize"
     )
     parser.add_argument(
-        "--single-buffer",
-        action="store_true",
+        "--single-buffer", action="store_true",
         help="Use singlue buffer (i.e., turn off double buffering)."
     )
     parser.add_argument(
-        "--use-cpu",
-        action="store_true",
+        "--use-cpu", action="store_true",
         help="Simulate using CPU instead of GPU"
     )
     parser.add_argument(
-        "--double-precision",
-        action="store_true",
+        "--double-precision", action="store_true",
         help="Compute using double precision"
     )
     parser.add_argument(
-        "--device",
-        type=int,
-        default=None,
-        help="(GPU) device number"
+        "--device", type=int, default=None,
+        help="(GPU) device number; only used if --use-cpu is NOT specified"
     )
     parser.add_argument(
-        "--photon-history",
-        action="store_true",
+        "--photon-history", action="store_true",
         help="Store photon history"
     )
     parser.add_argument(
-        "-v",
-        action="count",
-        dest="verbosity",
-        default=0,
+        "-v", action="count", default=0,
         help="""Logging verbosity; repeat v for increased verbosity. Levels are
         Default: warn, -v: info, -vv: debug, and -vvv: trace. Note that debug
         and trace are unavailable if the IceCube software was built in release
@@ -385,24 +361,15 @@ if __name__ == "__main__":
 
     if args.device is not None:
         print(" ")
-        print(" ** DEVICE selected using the --device command line"
-              " option. Only do this if you know what you are doing!")
-        print(" ** You should be using the CUDA_VISIBLE_DEVICES and/or"
-              " GPU_DEVICE_ORDINAL environment variables instead.")
+        print(
+            " ** DEVICE selected using the --device command line"
+            " option. Only do this if you know what you are doing!"
+        )
+        print(
+            " ** You should be using the CUDA_VISIBLE_DEVICES and/or"
+            " GPU_DEVICE_ORDINAL environment variables instead."
+        )
 
-    #fname = '%s_E=%s_x=%s_y=%s_z=%s_coszen=%s_azimuth=%s'%(args.particle_type,args.energy,args.x,args.y,args.z,args.coszen,args.azimuth)
-    #args.xml_file = args.outbase + fname + ".xml"
-    #args.i3_file = args.outbase + fname + ".i3.bz2"
-    args.xml_file = args.outbase + ".xml"
-    args.i3_file = args.outbase + ".i3.bz2"
+    args.i3_file = args.outfile + ".i3.bz2"
 
     run_test(args)
-
-    # Print benchmark info out if companion module is available
-    try:
-        from extract_info import extract_info
-    except ImportError:
-        print("Could not import extract_info companion script for printing"
-              " results.")
-    else:
-        extract_info(args.xml_file)
