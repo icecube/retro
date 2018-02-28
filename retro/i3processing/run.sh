@@ -1,5 +1,7 @@
 #!/bin/bash
 
+MYDIR=`dirname $0`
+
 #==============================================================================
 # User-defined simulation parameters
 #==============================================================================
@@ -16,11 +18,11 @@ USE_GEANT4=false
 
 PARTICLE="MuMinus"
 E=20
-X=0
+X=75
 Y=0
-Z=-300
-CZ=+1
-AZ=0
+Z=-400
+CZ=-0.75
+AZ=2.35619
 
 NUM_EVENTS=1000000
 
@@ -50,15 +52,14 @@ echo "NAME: ${NAME}"
 if [ ! -e "${NAME}_step1.i3.bz2" ]
 then
     echo "Running Step 1..."
-    time ./sim.py \
+    time ${MYDIR}/simulate_particle.py \
         --particle-type=$PARTICLE \
         -x=$X -y=$Y -z=$Z --energy=$E --coszen=$CZ --azimuth=$AZ \
         --ice-model $ICE_MODEL \
         --hole-ice-model $HOLE_ICE_MODEL \
         --num-events=$NUM_EVENTS \
-        -g $GCD \
+        --gcd $GCD \
         $GEANT4 \
-        --device 2 \
         --run-num 1 \
         --outfile=${NAME}_step1
 	echo ""
@@ -67,7 +68,7 @@ fi
 # Step 2: DAQ (needs simulation-V05)
 [ -e "${NAME}_step1.i3.bz2" -a ! -e "${NAME}_step2.i3.bz2" ] && \
     echo "Running Step 2..." && \
-    time ./photons_to_pe.py \
+    time ${MYDIR}/photons_to_pe.py \
         --holeice "$HOLE_ICE_PARAM" \
         -i "${NAME}_step1.i3.bz2" \
         -g "$GCD" \
@@ -87,13 +88,13 @@ echo ""
 # Step 4: SRT hit cleaning
 [ -e "${NAME}_step3.i3.bz2" -a ! -e "${NAME}_step4.i3.bz2" ] && \
     echo "Running Step 4..." && \
-    time ./hit_cleaning.py \
+    time ${MYDIR}/hit_cleaning.py \
         -i "${NAME}_step3.i3.bz2" \
         -g "$GCD" \
         -o "${NAME}_step4.i3.bz2"
 echo ""
 
 # shit that didn't work
-#./deepcoreL2example.py -s -i ${NAME}_step2.i3.bz2 -g $I3_TESTDATA/sim/GeoCalibDetectorStatus_IC86.55697_corrected_V2.i3.gz -o ${NAME}_step3.i3.bz2
-#./dc_fit.py -i ${NAME}_step3.i3.bz2 -o ${NAME}_step4.i3.bz2 -g $I3_DATA/GCD/GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.gz
+#${MYDIR}/deepcoreL2example.py -s -i ${NAME}_step2.i3.bz2 -g $I3_TESTDATA/sim/GeoCalibDetectorStatus_IC86.55697_corrected_V2.i3.gz -o ${NAME}_step3.i3.bz2
+#${MYDIR}/dc_fit.py -i ${NAME}_step3.i3.bz2 -o ${NAME}_step4.i3.bz2 -g $I3_DATA/GCD/GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.gz
 #$I3_BUILD/filterscripts/resources/scripts//offlineL2/process.py -i ${NAME}_step3.i3.bz2 -g $I3_DATA/GCD/GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.gz -o ${NAME}_step4.i3.bz2

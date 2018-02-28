@@ -37,7 +37,7 @@ import numpy as np
 from icecube import dataclasses, simclasses, dataio # pylint: disable=import-error, unused-import
 
 
-def extract_photon_info(i3file, outfile=None, photons_key='photons'):
+def extract_photons(i3file, outfile=None, photons_key='photons'):
     """Extract photon info (and metadata about the run) from an I3 file, and
     store the info to a simple pickle file.
 
@@ -187,4 +187,4 @@ def parse_args(description=__doc__):
 
 
 if __name__ == '__main__':
-    photon_info = extract_photon_info(**vars(parse_args()))
+    photon_info = extract_photons(**vars(parse_args()))
