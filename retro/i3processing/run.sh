@@ -18,11 +18,11 @@ PARTICLE="MuMinus"
 E=20
 X=0
 Y=0
-Z=-400
-CZ=-1
+Z=-300
+CZ=+1
 AZ=0
 
-NUM_EVENTS=10
+NUM_EVENTS=1000000
 
 #==============================================================================
 # Derive things from above
@@ -40,15 +40,17 @@ fi
 
 NAME="${PARTICLE}_energy${E}_x${X}_y${Y}_z${Z}_cz${CZ}_az${AZ}_ice_${ICE}_holeice_${HOLEICE}_gcd_md5_${GCD_MD5:0:8}_geant_${USE_GEANT4}_nsims${NUM_EVENTS}"
 
-echo "NAME=${NAME}"
+echo "NAME: ${NAME}"
 
 #==============================================================================
 # Scripty bits
 #==============================================================================
 
 # Step 1: SIMULATE
-[ ! -e "${NAME}_step1.i3.bz2" ] && \
-    ./sim.py \
+if [ ! -e "${NAME}_step1.i3.bz2" ]
+then
+    echo "Running Step 1..."
+    time ./sim.py \
         --particle-type=$PARTICLE \
         -x=$X -y=$Y -z=$Z --energy=$E --coszen=$CZ --azimuth=$AZ \
         --ice-model $ICE_MODEL \
@@ -59,29 +61,37 @@ echo "NAME=${NAME}"
         --device 2 \
         --run-num 1 \
         --outfile=${NAME}_step1
+	echo ""
+fi
 
 # Step 2: DAQ (needs simulation-V05)
 [ -e "${NAME}_step1.i3.bz2" -a ! -e "${NAME}_step2.i3.bz2" ] && \
-    ./photons_to_pe.py \
+    echo "Running Step 2..." && \
+    time ./photons_to_pe.py \
         --holeice "$HOLE_ICE_PARAM" \
         -i "${NAME}_step1.i3.bz2" \
         -g "$GCD" \
         -o "${NAME}_step2.i3.bz2"
+echo ""
 
 # Step 3: Processing and Filtering
 [ -e "${NAME}_step2.i3.bz2" -a ! -e "${NAME}_step3.i3.bz2" ] && \
-    $I3_BUILD/filterscripts/resources/scripts/SimulationFiltering.py \
+    echo "Running Step 3..." && \
+    time $I3_BUILD/filterscripts/resources/scripts/SimulationFiltering.py \
         --disable-gfu \
         -i "${NAME}_step2.i3.bz2" \
         -g "$GCD" \
         -o "${NAME}_step3.i3.bz2"
+echo ""
 
 # Step 4: SRT hit cleaning
 [ -e "${NAME}_step3.i3.bz2" -a ! -e "${NAME}_step4.i3.bz2" ] && \
-    ./hit_cleaning.py \
+    echo "Running Step 4..." && \
+    time ./hit_cleaning.py \
         -i "${NAME}_step3.i3.bz2" \
         -g "$GCD" \
         -o "${NAME}_step4.i3.bz2"
+echo ""
 
 # shit that didn't work
 #./deepcoreL2example.py -s -i ${NAME}_step2.i3.bz2 -g $I3_TESTDATA/sim/GeoCalibDetectorStatus_IC86.55697_corrected_V2.i3.gz -o ${NAME}_step3.i3.bz2

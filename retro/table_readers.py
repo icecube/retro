@@ -10,6 +10,7 @@ from __future__ import absolute_import, division, print_function
 
 
 __all__ = '''
+    MACHINE_EPS
     MY_CLSIM_TABLE_KEYS
     TABLE_NORM_KEYS
     survival_prob_from_smeared_cone
@@ -69,6 +70,8 @@ import retro
 from retro import PI, TWO_PI
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
+
+MACHINE_EPS = 1e-16
 
 MY_CLSIM_TABLE_KEYS = [
     'table_shape', 'n_photons', 'phase_refractive_index', 'r_bin_edges',
@@ -150,7 +153,7 @@ def survival_prob_from_smeared_cone(
         costheta = math.cos(offset_theta)
         sintheta = math.sin(offset_theta)
 
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi + 1)
+        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
         sin_p_phi = math.sin(p_phi)
         cos_p_phi = math.cos(p_phi)
         q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
@@ -253,7 +256,7 @@ def survival_prob_from_cone(
     last_deltaphi_bin = num_deltaphi_bins - 1
 
     for phi_idx in range(num_phi):
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi + 1)
+        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
         sin_p_phi = np.sin(p_phi)
         cos_p_phi = np.cos(p_phi)
         q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
@@ -900,6 +903,7 @@ def generate_pexp_5d_function(
     t_max = np.max(table['t_bin_edges'])
     n_t_bins = len(table['t_bin_edges']) - 1
     table_dt = (t_max - t_min) / n_t_bins
+    print(table['t_bin_edges'])
 
     n_costhetadir_bins = len(table['costhetadir_bin_edges']) - 1
     table_dcosthetadir = 2 / n_costhetadir_bins
@@ -931,10 +935,10 @@ def generate_pexp_5d_function(
         size=num_phi_samples
     )
 
-    #@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
+    @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d(
-            pinfo_gen, hit_time, time_window, dom_coord, noise_rate_hz, table,
-            table_norm, t_indep_table, t_indep_table_norm
+            pinfo_gen, hit_time, time_window, dom_coord, quantum_efficiency,
+            noise_rate_hz, table, table_norm, t_indep_table, t_indep_table_norm
         ):
         """For a set of generated photons `pinfo_gen`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
@@ -964,6 +968,10 @@ def generate_pexp_5d_function(
         dom_coord : shape (3,) ndarray
             DOM (x, y, z) coordinate in meters (in terms of the IceCube
             coordinate system).
+
+        quantum_efficiency : float in (0, 1]
+            Scale factor that reduces detected photons due to average quantum
+            efficiency of the DOM.
 
         noise_rate_hz : float
             Noise rate for the DOM, in Hz.
@@ -1101,25 +1109,43 @@ def generate_pexp_5d_function(
                 pdir_costheta = pdir_z / pdir_r
                 pdir_sintheta = pdir_rho / pdir_r
 
-                # \Delta\phi depends on photon position relative to the DOM
                 rho = math.sqrt(rhosquared)
-                pdir_cosdeltaphi = min(
-                    1.0,
-                    (pdir_x / pdir_rho) * (dx / rho) + (pdir_y / pdir_rho) * (dy / rho)
-                )
-                pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi * pdir_cosdeltaphi)
+
+                # \Delta\phi depends on photon position relative to the DOM...
+
+                # Below is the projection of pdir into the (x, y) plane and the
+                # projection of that onto the vector in that plane connecting
+                # the photon source to the DOM. We get the cosine of the angle
+                # between these vectors by solving the identity
+                #   `a dot b = |a| |b| cos(deltaphi)`
+                # for cos(deltaphi).
+                #
+                if pdir_rho <= MACHINE_EPS or rho <= MACHINE_EPS:
+                    pdir_cosdeltaphi = 1.0
+                    pdir_sindeltaphi = 0.0
+                else:
+                    pdir_cosdeltaphi = (
+                        pdir_x/pdir_rho * dx/rho + pdir_y/pdir_rho * dy/rho
+                    )
+                    # Note that the max and min here here in case numerical
+                    # precision issues cause the dot product to blow up.
+                    pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
+                    pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi * pdir_cosdeltaphi)
 
                 #print('pdir_cosdeltaphi={}, pdir_sindeltaphi={}'
                 #      .format(pdir_cosdeltaphi, pdir_sindeltaphi))
 
-                # Cherenkov angle is encoded in the length of the pdir vector
+                # Cherenkov angle is encoded as the projection of a length-1
+                # vector going in the Ckv direction onto the charged particle's
+                # direction. Ergo, in the length of the pdir vector is the
+                # cosine of the ckv angle.
                 ckv_costheta = pdir_r
                 #ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
                 ckv_theta = math.acos(ckv_costheta)
 
                 #print('ckv_theta={}'.format(ckv_theta*180/PI))
 
-                this_photons_at_all_times, bleh, blah = survival_prob_from_smeared_cone(
+                this_photons_at_all_times, _a, _b = survival_prob_from_smeared_cone(
                     #costheta=ckv_costheta,
                     #sintheta=ckv_sintheta,
                     theta=ckv_theta,
@@ -1173,7 +1199,7 @@ def generate_pexp_5d_function(
                         table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
                     )
             elif pdir_r < 1.0: # Cherenkov emitter
-                this_photons_at_hit_time, bleh, blah = survival_prob_from_smeared_cone(
+                this_photons_at_hit_time, _c, _d = survival_prob_from_smeared_cone(
                     #costheta=ckv_costheta,
                     #sintheta=ckv_sintheta,
                     theta=ckv_theta,
@@ -1199,10 +1225,14 @@ def generate_pexp_5d_function(
             #print('photons_at_hit_time={}'.format(photons_at_hit_time))
             #print('XX FINISHED LOOP')
 
-        # NOTE: bug in numba whereby += might fail here!
-        photons_at_all_times = photons_at_all_times + noise_rate_hz * time_window * 1e-9
-        photons_at_hit_time = photons_at_hit_time + noise_rate_hz * table_dt * 1e-9
-
+        photons_at_all_times = (
+            quantum_efficiency * photons_at_all_times
+            + noise_rate_hz * time_window * 1e-9
+        )
+        photons_at_hit_time = (
+            quantum_efficiency * photons_at_hit_time
+            + ((noise_rate_hz * 1e-9) * table_dt)
+        )
         return photons_at_all_times, photons_at_hit_time
 
     return pexp_5d, binning_info
@@ -1522,26 +1552,6 @@ class CLSimTables(object):
             )
             return
 
-        if subdet == 'all':
-            qe_subvals = self.quantum_efficiency
-            noise_subvals = self.noise_rate_hz
-        elif subdet == 'ic':
-            qe_subvals = self.quantum_efficiency[:79, :]
-            noise_subvals = self.noise_rate_hz
-        elif subdet == 'dc':
-            qe_subvals = self.quantum_efficiency[79:, :]
-            noise_subvals = self.noise_rate_hz[79:, :]
-        else:
-            qe_subvals = self.quantum_efficiency[string - 1, :]
-            noise_subvals = self.noise_rate_hz[string - 1, :]
-
-        if dom == 'all':
-            quantum_efficiency = qe_subvals.mean()
-            noise_rate_hz = noise_subvals.mean()
-        else:
-            quantum_efficiency = qe_subvals[:, dom - 1].mean()
-            noise_rate_hz = noise_subvals[:, dom - 1].mean()
-
         table = load_clsim_table_minimal(
             fpath=fpath,
             step_length=step_length,
@@ -1552,11 +1562,11 @@ class CLSimTables(object):
         table['step_length'] = step_length
         table['table_norm'] = get_table_norm(
             angular_acceptance_fract=angular_acceptance_fract,
-            quantum_efficiency=quantum_efficiency,
+            quantum_efficiency=1,
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
-        table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
+        table['t_indep_table_norm'] = angular_acceptance_fract
 
         pexp_5d, _ = generate_pexp_5d_function(
             table=table,
@@ -1573,7 +1583,6 @@ class CLSimTables(object):
             table['t_indep_table_norm'],
             table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
             table['table_norm'],
-            noise_rate_hz
         )
 
     def get_photon_expectation(
@@ -1602,6 +1611,8 @@ class CLSimTables(object):
             return 0, 0
 
         dom_coord = self.geom[string_idx, dom_idx]
+        dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
+        dom_noise_rate_hz = self.noise_rate_hz[string_idx, dom_idx]
 
         if self.string_aggregation == 'all':
             string = 'all'
@@ -1620,15 +1631,15 @@ class CLSimTables(object):
          t_indep_table,
          t_indep_table_norm,
          table,
-         table_norm,
-         noise_rate_hz) = self.tables[(string, dom)]
+         table_norm) = self.tables[(string, dom)]
 
         return pexp_5d(
             pinfo_gen=pinfo_gen,
             hit_time=hit_time,
             time_window=time_window,
             dom_coord=dom_coord,
-            noise_rate_hz=noise_rate_hz,
+            noise_rate_hz=dom_noise_rate_hz,
+            quantum_efficiency=dom_quantum_efficiency,
             table=table,
             table_norm=table_norm,
             t_indep_table=t_indep_table,

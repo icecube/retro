@@ -80,6 +80,18 @@ def plot_run_info(
     if fwd_hists is not None:
         with open(expanduser(expandvars(fwd_hists)), 'rb') as fobj:
             fwd_hists = pickle.load(fobj)
+            if 'binning' in fwd_hists:
+                t_min = fwd_hists['binning']['t_min']
+                t_max = fwd_hists['binning']['t_max']
+                num_bins = fwd_hists['binning']['num_bins']
+                spacing = fwd_hists['binning']['spacing']
+                assert spacing == 'linear', spacing
+                fwd_hists_binning = np.linspace(t_min, t_max, num_bins + 1)
+            else:
+                fwd_hists_binning = HIT_TIMES
+
+            if 'results' in fwd_hists:
+                fwd_hists = fwd_hists['results']
 
     if not isdir(outdir):
         makedirs(outdir)
@@ -158,15 +170,15 @@ def plot_run_info(
                     all_zeros = False
                     ref_y_all_zeros = False
                     min_mask = y >= 0.01 * y.max()
-                    xmin = min(xmin, HIT_TIMES[min_mask].min())
-                    xmax = max(xmax, HIT_TIMES[min_mask].max())
+                    xmin = min(xmin, fwd_hists_binning[min_mask].min())
+                    xmax = max(xmax, fwd_hists_binning[min_mask].max())
             else:
-                y = np.zeros_like(HIT_TIMES)
+                y = np.zeros_like(fwd_hists_binning)
 
             ref_y = y
 
             ax.step(
-                HIT_TIMES, y,
+                fwd_hists_binning, y,
                 lw=1,
                 #label='Forward sim',
                 clip_on=True,
