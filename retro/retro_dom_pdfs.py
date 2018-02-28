@@ -86,7 +86,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='/icecube/data/retro/sims/track_step4_SplitUncleanedInIcePulses.pkl'
+        fwd_sim_histo_file='/data/icecube/retro/sims/track_step4_SplitUncleanedInIcePulses.pkl'
     ),
     cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -94,7 +94,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=0,
             track_energy=0, cascade_energy=20
         ),
-        fwd_sim_histo_file='/icecube/data/retro/sims/cascade_step4_SplitUncleanedInIcePulses.pkl'
+        fwd_sim_histo_file='/data/icecube/retro/sims/cascade_step4_SplitUncleanedInIcePulses.pkl'
     ),
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -102,19 +102,30 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=-retro.PI,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file=None, #'/icecube/data/retro/sims/'
-        #fwd_sim_histo_file='/icecube/data/retro/sims/'
+        fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl',
     )
 )
 
 
 sim = SIMULATIONS[SIM_TO_TEST]
 
+fwd_sim_histo_file_md5 = None
+if sim['fwd_sim_histo_file'] is not None:
+    print('Loading and hashing forward simulation histograms from "%s"...'
+          % sim['fwd_sim_histo_file'])
+    t0 = time.time()
+    contents = open(retro.expand(sim['fwd_sim_histo_file']), 'rb').read()
+    fwd_sim_histo_file_md5 = hashlib.md5(contents).hexdigest()
+    fwd_sim_histos = pickle.loads(contents)
+    bin_edges = fwd_sim_histos['bin_edges']
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    print(' ', np.round(time.time() - t0, 3), 'sec\n')
+
 
 run_info['sim'] = OrderedDict([
     ('mc_true_params', sim['mc_true_params']._asdict()),
     ('fwd_sim_histo_file', sim['fwd_sim_histo_file']),
-    ('fwd_sim_histo_file_md5', hashlib.md5(open(retro.expand(sim['fwd_sim_histo_file']), 'rb').read()).hexdigest())
+    ('fwd_sim_histo_file_md5', fwd_sim_histo_file_md5)
 ])
 
 
@@ -281,11 +292,6 @@ else:
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
 
-print('Loading forward simulation histograms from "%s"...' % sim['fwd_sim_histo_file'])
-t0 = time.time()
-fwd_sim_histos = pickle.load(open(retro.expand(sim['fwd_sim_histo_file']), 'rb'))
-print(' ', np.round(time.time() - t0, 3), 'sec\n')
-
 if 'dedx' in CODE_TO_TEST:
     muon_kernel = table_energy_loss_muon
     muon_kernel_label = 'table_energy_loss_muon'
@@ -377,7 +383,7 @@ for string, dom in product(strings, doms):
     plt.plot(sample_hit_times, pexp_at_hit_times, label='Retro')
     tot_clsim = 0.0
     try:
-        fwd_sim_histo = np.nan_to_num(fwd_sim_histos[string][dom])
+        fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][string][dom])
         tot_clsim = np.sum(fwd_sim_histo)
         plt.plot(sample_hit_times, fwd_sim_histo, label='CLSim fwd sim')
     except KeyError:
