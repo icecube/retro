@@ -151,7 +151,7 @@ def generate_histos(
     mask = (rde == 0) | np.isnan(rde) | np.isinf(rde)
     operational_doms = ~mask
     rde = np.ma.masked_where(mask, rde)
-    quantum_effieincy = 0.25 * rde
+    quantum_effieincy = rde
 
     histos = OrderedDict()
     keep_gcd_keys = ['source_gcd_name', 'source_gcd_md5', 'source_gcd_i3_md5']
@@ -191,7 +191,7 @@ def generate_histos(
     # We want coszen = -1 to correspond to upgoing particles, but angular
     # sensitivity is given w.r.t. the DOM axis (which points "down" towards earth,
     # and therefore is rotated 180-deg). So rotate the coszen polynomial about cz=0
-    # by negating the odd coefficients.
+    # by negating the odd coefficients (coeffs are in ascending powers of "x".
     flipped_coeffs = np.empty_like(poly_coeffs)
     flipped_coeffs[0::2] = poly_coeffs[0::2]
     flipped_coeffs[1::2] = -poly_coeffs[1::2]
@@ -227,7 +227,8 @@ def generate_histos(
             weights=data['weight'],
             normed=False
         )
-        hist *= quantum_effieincy[string_idx, dom_idx]
+        if include_rde:
+            hist *= quantum_effieincy[string_idx, dom_idx]
         if include_noise:
             hist += noise_rate_hz[string_idx, dom_idx] * bin_widths / 1e9
         results[(string, dom)] = hist
