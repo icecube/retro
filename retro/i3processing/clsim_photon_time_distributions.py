@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# pylint: disable=redefined-outer-name
 
 """
 Generate time histograms for each DOM from a photon raw data pickle file (as
@@ -22,18 +23,21 @@ if not RETRO_DIR:
 
 
 def generate_histos(
-        raw_data, gcd, t_max, num_bins, include_rde=True, include_noise=True,
-        outfile=None
+        raw_data, hole_ice_model, t_max, num_bins, gcd=None, include_rde=True,
+        include_noise=True, outfile=None
     ):
-    """
+    """Generate time histograms from photons extracted from CLSim (repated)
+    forward event simulations.
+
     Parameters
     ----------
     raw_data : string or mapping
 
-    gcd : str
-        Path to GCD i3 or pkl file to get DOM coordinates, rde, and noise
-        (where the latter two only have an effect if `include_rde` and/or
-        `include_noise` are True).
+    hole_ice_model : string
+        Raw CLSim does not (currently) incorproate hole ice model; this is a
+        modification to the angular acceptance of the phtons that CLSim
+        returns, so must be specified (and applied) post-hoc (e.g., in this
+        function).
 
     t_max : float
         Last edge in time binning (first edge is at 0), in units of ns.
@@ -41,28 +45,65 @@ def generate_histos(
     num_bins : int
         Number of time bins, which span from 0 to t_max.
 
+    gcd : str, optional
+        Path to GCD i3 or pkl file to get DOM coordinates, rde, and noise
+        (where the latter two only have an effect if `include_rde` and/or
+        `include_noise` are True). Regardless if this is specified, the code
+        will attempt to automatically figure out the GCD file used to produce
+        the table. If this succeeds and `gcd` is specified by the user, the
+        user's value is checked against that found in the data. If the user
+        does not specify `gcd`, the value found in the data is used. If neither
+        `gcd` is provided nor one can be found in the data, an error is raised.
+
     include_rde : bool, optional
-        RDE is included by default.
+        Whether to use relative DOM efficiencies (RDE) to scale the results per
+        DOM. RDE is included by default.
 
     include_noise : bool, optiional
-        Noise is included by default.
+        Whether to add the noise floor for each DOM to the results. Noise is
+        included by default.
 
     outfile : str, optiional
         If a string is specified, save the histos to a pickle file by the name
         `outfile`. If not specified (or `None`), `histos` will not be written
         to a file.
 
+
     Returns
     -------
     histos : OrderedDict
+
+
+    Raises
+    ------
+    ValueError
+        If `gcd` is specified but does not match a GCD file found in the data
+
+    ValueError
+        If `gcd` is not specified and no GCD can be found in the data
+
+
+    See also
+    --------
+    retro.i3processing.sim.py
+        Perform the repeated simulation to get photons at DOMs. Generates an i3
+        file.
+
+    retro.i3processing.extract_photon_info
+        Extract photon info (and pertinent metadata) from the i3 file produced
+        from the above.
+
+    retro.retro_dom_pdfs
+        Produce distributions corresponding to the histograms made here, but
+        using Retro reco.
 
     """
     if isinstance(raw_data, basestring):
         raw_data = pickle.load(open(raw_data, 'rb'))
     dom_info = raw_data['doms']
 
-    bins = np.linspace(0, t_max, num_bins + 1)
-    bin_widths = np.diff(bins)
+    bin_edges = np.linspace(0, t_max, num_bins + 1)
+    bin_widths = np.diff(bin_edges)
 
     if isinstance(gcd, basestring):
         gcd = expanduser(expandvars(gcd))
@@ -88,12 +129,47 @@ def generate_histos(
     histos['gcd_info'] = [gcd_info[k] for k in keep_gcd_keys]
     histos['include_rde'] = include_rde
     histos['include_noise'] = include_noise
-    histos['binning'] = OrderedDict([
-        ('t_min', 0),
-        ('t_max', t_max),
+    histos['bin_edges'] = bin_edges
+    histos['binning_spec'] = OrderedDict([
+        ('domain', (0, t_max)),
         ('num_bins', num_bins),
         ('spacing', 'linear')
     ])
+
+    # Note the first number in the file is a number approximately equal (but
+    # greater than) the peak in the distribution, so is useless for us.
+    poly_coeffs = np.loadtxt(expandvars(
+        '$I3_SRC/ice-models/resources/models/angsens/' + hole_ice_model
+    ))[1:]
+
+    # We want coszen = -1 to correspond to upgoing particles, but angular
+    # sensitivity is given w.r.t. the DOM axis (which points "down" towards earth,
+    # and therefore is rotated 180-deg). So mirror the coszen polynomial about cz=0
+    # by negating the odd coefficients.
+    flipped_coeffs = np.empty_like(poly_coeffs)
+    flipped_coeffs[0::2] = poly_coeffs[0::2]
+    flipped_coeffs[1::2] = -poly_coeffs[1::2]
+
+    angsens_poly = np.polynomial.Polynomial(flipped_coeffs, domain=(-1, 1))
+
+    # Attach the weights to the data
+    num_sims = raw_data['num_sims']
+    for data_dict in raw_data['doms'].values():
+        cz = data_dict['coszen']
+        try:
+            # Note that angular sensitivity will modify the total number of
+            # photons detected, and the poly is normalized as such already, so no
+            # normalization should be applied here.
+            angsens_wt = angsens_poly(cz)
+        except:
+            print(np.min(cz), np.max(cz))
+            raise
+
+        data_dict['weight'] = angsens_wt / num_sims
+
+        for k, array in data_dict.items():
+            data_dict[k] = array.astype(np.float32)
+
     histos['results'] = results = OrderedDict()
     for (string, dom), data in dom_info.items():
         string_idx, dom_idx = string - 1, dom - 1
@@ -102,7 +178,7 @@ def generate_histos(
 
         hist, _ = np.histogram(
             data['time'],
-            bins=bins,
+            bins=bin_edges,
             weights=data['weight'],
             normed=False
         )
@@ -130,21 +206,23 @@ def parse_args(description=__doc__):
         help='''Raw data pickle file'''
     )
     parser.add_argument(
-        '--gcd', required=True,
-        help='''GCD pickle file used to obtaining relative DOM efficiencies
-        (RDE) and noise (if --include-noise flag is specified).'''
+        '--hole-ice-model', required=True,
+        help='''Filepath to hole ice model to apply to the photons.'''
     )
     parser.add_argument(
-        '--outfile', required=True,
-        help='''Filepath to which histogram data is stored.'''
+        '--t-max', type=float, required=True,
+        help='''Bin up to this maximum time'''
     )
     parser.add_argument(
         '--num-bins', type=int, required=True,
         help='''Number of bins to use for time histograms.'''
     )
     parser.add_argument(
-        '--t-max', type=float, required=True,
-        help='''Bin up to this maximum time'''
+        '--gcd', default=None,
+        help='''GCD file used to obtaining relative DOM efficiencies
+        (RDE) and noise (if --include-noise flag is specified). This is only
+        necessary if one of those flags is set and if the GCD file cannot be
+        determined from the input file.'''
     )
     parser.add_argument(
         '--include-rde', action='store_true',
@@ -156,8 +234,13 @@ def parse_args(description=__doc__):
         help='''Include noise offsets in histograms (as obtained from GCD
         file).'''
     )
+    parser.add_argument(
+        '--outfile', default=None,
+        help='''Filepath for storing histograms. If not specified, a default
+        name is derived from the --raw-data filename.'''
+    )
     return parser.parse_args()
 
 
 if __name__ == '__main__':
-    _ = generate_histos(**vars(parse_args()))
+    histos = generate_histos(**vars(parse_args())) # pylint: disable=invalid-name
