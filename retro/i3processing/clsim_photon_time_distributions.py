@@ -24,7 +24,7 @@ if RETRO_DIR not in sys.path:
 
 
 def generate_histos(
-        photons_file, hole_ice_model, t_max, num_bins, gcd=None, include_rde=True,
+        photons, hole_ice_model, t_max, num_bins, gcd=None, include_rde=True,
         include_noise=True, outfile=None
     ):
     """Generate time histograms from photons extracted from CLSim (repated)
@@ -32,7 +32,7 @@ def generate_histos(
 
     Parameters
     ----------
-    photons_file : string or mapping
+    photons : string or mapping
 
     hole_ice_model : string
         Raw CLSim does not (currently) incorproate hole ice model; this is a
@@ -99,27 +99,29 @@ def generate_histos(
         using Retro reco.
 
     """
-    if isinstance(photons_file, basestring):
-        photons_file = pickle.load(open(photons_file, 'rb'))
-    dom_info = photons_file['doms']
+    photons_file_name = None
+    if isinstance(photons, basestring):
+        photons_file_name = photons
+        photons = pickle.load(open(photons_file_name, 'rb'))
+    dom_info = photons['doms']
 
     bin_edges = np.linspace(0, t_max, num_bins + 1)
     bin_widths = np.diff(bin_edges)
 
     gcd_info = None
     if isinstance(gcd, basestring):
-        gcd = expanduser(expandvars(gcd))
-        if gcd.endswith('.pkl'):
-            gcd_info = pickle.load(open(gcd, 'rb'))
-        elif '.i3' in gcd:
+        exp_gcd = expanduser(expandvars(gcd))
+        if exp_gcd.endswith('.pkl'):
+            gcd_info = pickle.load(open(exp_gcd, 'rb'))
+        elif '.i3' in exp_gcd:
             from retro.i3info.extract_gcd import extract_gcd
-            gcd_info = extract_gcd(gcd)
+            gcd_info = extract_gcd(exp_gcd)
         else:
             raise ValueError('No idea how to handle GCD file "{}"'.format(gcd))
 
-    if photons_file['gcd']:
+    if photons['gcd']:
         try:
-            gcd_from_data = expanduser(expandvars(photons_file['gcd']))
+            gcd_from_data = expanduser(expandvars(photons['gcd']))
             if gcd_from_data.endswith('.pkl'):
                 gcd_info_from_data = pickle.load(open(gcd_from_data, 'rb'))
             else:
@@ -135,6 +137,14 @@ def generate_histos(
                 if gcd_info != gcd_info_from_data:
                     print('WARNING: Using different GCD from the one used'
                           ' during simulation!')
+
+    if gcd_info is None:
+        if photons_file_name is not None:
+            photons_err = ' filename "{}"'.format(photons_file_name)
+        raise ValueError(
+            'No GCD info could be found from arg `gcd`={} or in `photons`'
+            '{}'.format(gcd, photons_err)
+        )
 
     rde = gcd_info['rde']
     noise_rate_hz = gcd_info['noise']
@@ -188,8 +198,8 @@ def generate_histos(
     angsens_poly = np.polynomial.Polynomial(flipped_coeffs, domain=(-1, 1))
 
     # Attach the weights to the data
-    num_sims = photons_file['num_sims']
-    for data_dict in photons_file['doms'].values():
+    num_sims = photons['num_sims']
+    for data_dict in photons['doms'].values():
         cz = data_dict['coszen']
         try:
             # Note that angular sensitivity will modify the total number of
@@ -238,8 +248,8 @@ def parse_args(description=__doc__):
     """Parse command line arguments"""
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '--photons-file', required=True,
-        help='''Raw data pickle file'''
+        '--photons', required=True,
+        help='''Raw data pickle file containing photons'''
     )
     parser.add_argument(
         '--hole-ice-model', required=True,
@@ -280,7 +290,7 @@ def parse_args(description=__doc__):
 
     # Construct the output filename if none is provided
     if args.outfile is None:
-        args.outfile = re.sub(r'_photons.pkl', '_photon_histos.pkl', args.photons_file)
+        args.outfile = re.sub(r'_photons.pkl', '_photon_histos.pkl', args.photons)
 
     return args
 
