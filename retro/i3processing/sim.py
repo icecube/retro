@@ -7,6 +7,9 @@
 Simulate a charged lepton (muons, electrons, taus, and their antiparticles)
 """
 
+# TODO: *ONLY* do the phton sim here, make hits in another step to keep this as
+#       fast as possible
+# TODO: get Geant4 propagation to work (or at least test if it works now...)
 
 from __future__ import absolute_import, division, print_function
 
