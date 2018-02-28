@@ -11,19 +11,20 @@ from __future__ import absolute_import, division, print_function
 from argparse import ArgumentParser
 from collections import OrderedDict
 import cPickle as pickle
-from os.path import dirname, expanduser, expandvars
+from os.path import dirname, expanduser, expandvars, isfile, realpath
+import re
 import sys
 
 import numpy as np
 
 
-RETRO_DIR = dirname(dirname(__file__))
-if not RETRO_DIR:
-    RETRO_DIR = '../..'
+RETRO_DIR = dirname(dirname(dirname(realpath(__file__))))
+if RETRO_DIR not in sys.path:
+    sys.path.append(RETRO_DIR)
 
 
 def generate_histos(
-        raw_data, hole_ice_model, t_max, num_bins, gcd=None, include_rde=True,
+        photons_file, hole_ice_model, t_max, num_bins, gcd=None, include_rde=True,
         include_noise=True, outfile=None
     ):
     """Generate time histograms from photons extracted from CLSim (repated)
@@ -31,7 +32,7 @@ def generate_histos(
 
     Parameters
     ----------
-    raw_data : string or mapping
+    photons_file : string or mapping
 
     hole_ice_model : string
         Raw CLSim does not (currently) incorproate hole ice model; this is a
@@ -45,7 +46,7 @@ def generate_histos(
     num_bins : int
         Number of time bins, which span from 0 to t_max.
 
-    gcd : str, optional
+    gcd : str or None, optional
         Path to GCD i3 or pkl file to get DOM coordinates, rde, and noise
         (where the latter two only have an effect if `include_rde` and/or
         `include_noise` are True). Regardless if this is specified, the code
@@ -63,7 +64,7 @@ def generate_histos(
         Whether to add the noise floor for each DOM to the results. Noise is
         included by default.
 
-    outfile : str, optiional
+    outfile : str or None, optiional
         If a string is specified, save the histos to a pickle file by the name
         `outfile`. If not specified (or `None`), `histos` will not be written
         to a file.
@@ -98,24 +99,42 @@ def generate_histos(
         using Retro reco.
 
     """
-    if isinstance(raw_data, basestring):
-        raw_data = pickle.load(open(raw_data, 'rb'))
-    dom_info = raw_data['doms']
+    if isinstance(photons_file, basestring):
+        photons_file = pickle.load(open(photons_file, 'rb'))
+    dom_info = photons_file['doms']
 
     bin_edges = np.linspace(0, t_max, num_bins + 1)
     bin_widths = np.diff(bin_edges)
 
+    gcd_info = None
     if isinstance(gcd, basestring):
         gcd = expanduser(expandvars(gcd))
         if gcd.endswith('.pkl'):
             gcd_info = pickle.load(open(gcd, 'rb'))
         elif '.i3' in gcd:
-            if RETRO_DIR not in sys.path:
-                sys.path.append(RETRO_DIR)
             from retro.i3info.extract_gcd import extract_gcd
             gcd_info = extract_gcd(gcd)
         else:
             raise ValueError('No idea how to handle GCD file "{}"'.format(gcd))
+
+    if photons_file['gcd']:
+        try:
+            gcd_from_data = expanduser(expandvars(photons_file['gcd']))
+            if gcd_from_data.endswith('.pkl'):
+                gcd_info_from_data = pickle.load(open(gcd_from_data, 'rb'))
+            else:
+                from retro.i3info.extract_gcd import extract_gcd
+                gcd_info_from_data = extract_gcd(gcd_from_data)
+        except (AttributeError, KeyError, ValueError):
+            raise
+            #assert gcd_info is not None
+        else:
+            if gcd_info is None:
+                gcd_info = gcd_info_from_data
+            else:
+                if gcd_info != gcd_info_from_data:
+                    print('WARNING: Using different GCD from the one used'
+                          ' during simulation!')
 
     rde = gcd_info['rde']
     noise_rate_hz = gcd_info['noise']
@@ -138,23 +157,39 @@ def generate_histos(
 
     # Note the first number in the file is a number approximately equal (but
     # greater than) the peak in the distribution, so is useless for us.
-    poly_coeffs = np.loadtxt(expandvars(
+    possible_paths = [
+        hole_ice_model,
         '$I3_SRC/ice-models/resources/models/angsens/' + hole_ice_model
-    ))[1:]
+    ]
+    coeffs_loaded = False
+    for path in possible_paths:
+        path = expanduser(expandvars(path))
+        if not isfile(path):
+            continue
+        try:
+            poly_coeffs = np.loadtxt(path)[1:]
+        except:
+            pass
+        else:
+            coeffs_loaded = True
+            break
+
+    if not coeffs_loaded:
+        raise ValueError('Could not load hole ice model at any of\n{}'
+                         .format(possible_paths))
 
     # We want coszen = -1 to correspond to upgoing particles, but angular
     # sensitivity is given w.r.t. the DOM axis (which points "down" towards earth,
-    # and therefore is rotated 180-deg). So mirror the coszen polynomial about cz=0
+    # and therefore is rotated 180-deg). So rotate the coszen polynomial about cz=0
     # by negating the odd coefficients.
     flipped_coeffs = np.empty_like(poly_coeffs)
     flipped_coeffs[0::2] = poly_coeffs[0::2]
     flipped_coeffs[1::2] = -poly_coeffs[1::2]
-
     angsens_poly = np.polynomial.Polynomial(flipped_coeffs, domain=(-1, 1))
 
     # Attach the weights to the data
-    num_sims = raw_data['num_sims']
-    for data_dict in raw_data['doms'].values():
+    num_sims = photons_file['num_sims']
+    for data_dict in photons_file['doms'].values():
         cz = data_dict['coszen']
         try:
             # Note that angular sensitivity will modify the total number of
@@ -189,20 +224,21 @@ def generate_histos(
 
     if outfile is not None:
         outfile = expanduser(expandvars(outfile))
+        print('Writing histos to\n"{}"'.format(outfile))
         pickle.dump(
             histos,
             open(outfile, 'wb'),
             protocol=pickle.HIGHEST_PROTOCOL
         )
 
-    return histos
+    return histos, dom_info
 
 
 def parse_args(description=__doc__):
     """Parse command line arguments"""
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '--raw-data', required=True,
+        '--photons-file', required=True,
         help='''Raw data pickle file'''
     )
     parser.add_argument(
@@ -239,8 +275,15 @@ def parse_args(description=__doc__):
         help='''Filepath for storing histograms. If not specified, a default
         name is derived from the --raw-data filename.'''
     )
-    return parser.parse_args()
+
+    args = parser.parse_args()
+
+    # Construct the output filename if none is provided
+    if args.outfile is None:
+        args.outfile = re.sub(r'_photons.pkl', '_photon_histos.pkl', args.photons_file)
+
+    return args
 
 
 if __name__ == '__main__':
-    histos = generate_histos(**vars(parse_args())) # pylint: disable=invalid-name
+    histos, dom_info = generate_histos(**vars(parse_args())) # pylint: disable=invalid-name
