@@ -58,10 +58,12 @@ run_info = OrderedDict([
 
 
 retro.DEBUG = 0
-SIM_TO_TEST = 'downgoing_muon'
+#SIM_TO_TEST = 'downgoing_muon'
+#SIM_TO_TEST = 'horizontal_muon'
+SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi_CKVangle'
+CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi_CKVangle_r2_x_dr'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
@@ -86,7 +88,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='/icecube/data/retro/sims/track_step4_SplitUncleanedInIcePulses.pkl'
+        fwd_sim_histo_file='/home/peller/retro/icetray_processing/track_step4_SplitUncleanedInIcePulses.pkl'
     ),
     cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -106,11 +108,11 @@ SIMULATIONS = dict(
     ),
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
-            t=0, x=0, y=0, z=-400,
+            t=0, x=0, y=0, z=-300,
             track_azimuth=0, track_zenith=0,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-400_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl'
+        fwd_sim_histo_file='/home/peller/retro/icetray_processing/downgoing_track_step4_SplitUncleanedInIcePulses.pkl'
     ),
 )
 
@@ -125,11 +127,11 @@ run_info['sim'] = OrderedDict([
 ])
 
 
-strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46] + [54, 62]
+strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46] #+ [54, 62]
 #strings = [86]
 
-doms = list(range(40, 60+1))
-#doms = list(range(25, 60+1))
+#doms = list(range(40, 60+1))
+doms = list(range(25, 60+1))
 #doms = [40, 45, 50]
 
 hit_times = np.linspace(0, 2000, 201)
@@ -387,8 +389,8 @@ for string, dom in product(strings, doms):
     plt.plot(sample_hit_times, pexp_at_hit_times, label='Retro')
     tot_clsim = 0.0
     try:
-        fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][(string,dom)])
-        print(fwd_sim_histos['binning'])
+        fwd_sim_histo = np.nan_to_num(fwd_sim_histos[string][dom])
+        #fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][(string,dom)])
         tot_clsim = np.sum(fwd_sim_histo)
         plt.plot(sample_hit_times, fwd_sim_histo, label='CLSim fwd sim')
     except KeyError:

@@ -440,13 +440,16 @@ def get_table_norm(
     inner_radius = np.where(inner_edges == 0, 0.01* radial_midpoints, inner_edges)
     avg_radius = 3/4 * (outer_edges**4 - inner_edges**4) / (outer_edges**3 - inner_edges**3)
 
-    volumes = (outer_edges**3 - inner_edges**3)
-    volumes *= costheta_bin_width
-
 
     surf_area_at_avg_radius = avg_radius**2 * TWO_PI * costheta_bin_width
     surf_area_at_inner_radius = inner_radius**2 * TWO_PI * costheta_bin_width
     surf_area_at_midpoints = radial_midpoints**2 * TWO_PI * costheta_bin_width
+
+    #volumes = (outer_edges**3 - inner_edges**3)
+
+    # ok, i think this is the norm we want
+    volumes = surf_area_at_midpoints * (outer_edges - inner_edges)
+    volumes *= costheta_bin_width
 
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = constant_part * np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
@@ -464,7 +467,8 @@ def get_table_norm(
         table_norm = np.outer(
             # NOTE: pi factor needed to get agreement with old code (why?);
             # 4 is needed for new clsim tables (why?)
-            8 * PI / volumes,
+            4 / volumes,
+            #4 * PI / surf_area_at_midpoints,
             np.full(
                 shape=(len(t_bin_edges) - 1,),
                 fill_value=(
@@ -903,7 +907,6 @@ def generate_pexp_5d_function(
     t_max = np.max(table['t_bin_edges'])
     n_t_bins = len(table['t_bin_edges']) - 1
     table_dt = (t_max - t_min) / n_t_bins
-    print(table['t_bin_edges'])
 
     n_costhetadir_bins = len(table['costhetadir_bin_edges']) - 1
     table_dcosthetadir = 2 / n_costhetadir_bins
