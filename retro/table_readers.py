@@ -13,8 +13,6 @@ __all__ = '''
     MACHINE_EPS
     MY_CLSIM_TABLE_KEYS
     TABLE_NORM_KEYS
-    survival_prob_from_smeared_cone
-    survival_prob_from_cone
     open_table_file
     get_table_norm
     generate_time_indep_table
@@ -76,7 +74,7 @@ MACHINE_EPS = 1e-16
 MY_CLSIM_TABLE_KEYS = [
     'table_shape', 'n_photons', 'phase_refractive_index', 'r_bin_edges',
     'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
-    'deltaphidir_bin_edges', 'table', 't_indep_table'
+    'deltaphidir_bin_edges', 'table', #'t_indep_table'
 ]
 
 TABLE_NORM_KEYS = [

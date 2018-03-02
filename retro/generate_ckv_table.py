@@ -1,12 +1,13 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, redefined-outer-name
 
 """
-Convert raw Retro 5D tables (which represent survival probabilities for light
-traveling in a particular direction) to tables for Cherenkov emitters with a
+Convert raw Retro 5D table (which represent survival probabilities for light
+traveling in a particular direction) to table for Cherenkov emitters with a
 particular direction.
 
-Output tables will be in .npy-files-in-a-directory format for easy memory
+Output table will be in .npy-files-in-a-directory format for easy memory
 mapping.
 """
 
@@ -30,9 +31,7 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from os import remove
 from os.path import abspath, dirname, expanduser, expandvars, isdir, isfile, join
-import re
 import sys
-import math
 
 import numpy as np
 
@@ -41,24 +40,23 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 import retro
+from retro.table_readers import load_clsim_table_minimal
+from retro.ckv import convolve_table
 
 
-__all__ = [
-    'generate_ckv_table'
-]
+__all__ = ['generate_ckv_table']
 
 
 # TODO: allow different directional binning in output table
 
 def generate_ckv_table(
-        table, beta, samples_per_bin, num_cone_samples, outdir=None,
-        mmap=True
+        table, beta, oversample, num_cone_samples, outdir=None, mmap=True
     ):
     """
     Parameters
     ----------
     table : string or mapping
-        If string, path to table file (or directory in the case of npy tables).
+        If string, path to table file (or directory in the case of npy table).
         A mapping is assumed to be a table loaded as by
         `retro.table_readers.load_clsim_table_minimal`.
 
@@ -66,14 +64,14 @@ def generate_ckv_table(
         Beta factor, i.e. velocity of the charged particle divided by the speed
         of light in vacuum: `v/c`.
 
-    samples_per_bin : int > 0
+    oversample : int > 0
         Sample from each directional bin (costhetadir and deltaphidir) this
         many times. Increase to obtain a more accurate average over the range
         of directions that the resulting ckv-emitter-direction can take within
         the same output (directional) bin. Note that there is no unique
         information given by sampling (more than once) in the spatial
-        dimensions, so these dimensions ignore `samples_per_bin`. Therefore,
-        the computational cost is `samples_per_bin**2`.
+        dimensions, so these dimensions ignore `oversample`. Therefore,
+        the computational cost is `oversample**2`.
 
     num_cone_samples : int > 0
         Number of samples around the circumference of the Cherenkov cone.
@@ -96,7 +94,7 @@ def generate_ckv_table(
     input_filename = None
     if isinstance(table, basestring):
         input_filename = expanduser(expandvars(table))
-        table = retro.table_readers.load_clsim_table_minimal(input_filename, mmap=mmap)
+        table = load_clsim_table_minimal(input_filename, mmap=mmap)
 
     if input_filename is None and outdir is None:
         raise ValueError('You must provide an `outdir` if `table` is a python'
@@ -118,14 +116,15 @@ def generate_ckv_table(
     # NOTE: we are making output binning same as input binning.
 
     n_phase = table['phase_refractive_index']
-    cos_theta_ckv = 1 / (n_phase * beta)
-    if cos_theta_ckv > 1:
+    cos_ckv = 1 / (n_phase * beta)
+    if cos_ckv > 1:
         raise ValueError(
             'Particle moving at beta={} in medium with n_phase={} does not'
             ' produce Cherenkov light!'.format(beta, n_phase)
         )
-    theta_ckv = np.arccos(cos_theta_ckv)
-    sin_theta_ckv = np.sin(theta_ckv)
+
+    theta_ckv = np.arccos(cos_ckv)
+    sin_ckv = np.sin(theta_ckv)
 
     # Extract just the "useful" part of the table, i.e., exclude under/overflow
     # bins.
@@ -153,18 +152,18 @@ def generate_ckv_table(
         shape=table.shape
     )
     try:
-        convolve_table_w_ckv_cone(
+        convolve_table(
             src=table,
-            dst=ckv_table,
-            cos_ckv=cos_theta_ckv,
-            sin_ckv=sin_theta_ckv,
+            dst=np.float32(ckv_table),
+            cos_ckv=np.float32(cos_ckv),
+            sin_ckv=np.float32(sin_ckv),
             n_r=n_r_bins,
             n_ct=n_costheta_bins,
             n_t=n_t_bins,
-            ctdir_bin_edges=costhetadir_bin_edges,
-            dpdir_bin_edges=deltaphidir_bin_edges,
+            ctdir_bin_edges=costhetadir_bin_edges.astype(np.float32),
+            dpdir_bin_edges=deltaphidir_bin_edges.astype(np.float32),
             num_cone_samples=num_cone_samples,
-            samples_per_bin=samples_per_bin
+            oversample=oversample
         )
     except:
         del ckv_table
@@ -174,76 +173,11 @@ def generate_ckv_table(
     return ckv_table
 
 
-@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
-def convolve_table_w_ckv_cone(
-        src, dst, cos_ckv, sin_ckv, n_r, n_ct, n_t, ctdir_bin_edges,
-        dpdir_bin_edges, num_cone_samples, samples_per_bin
-    ):
-    n_ctdir = len(ctdir_bin_edges) - 1
-    n_dpdir = len(dpdir_bin_edges) - 1
-
-    ctdir_bw = (ctdir_bin_edges[-1] - ctdir_bin_edges[0]) / n_ctdir
-    dpdir_bw = (dpdir_bin_edges[-1] - dpdir_bin_edges[0]) / n_dpdir
-
-    ctdir_samp_step = ctdir_bw / samples_per_bin
-    dpdir_samp_step = dpdir_bw / samples_per_bin
-
-    samples_shape = (samples_per_bin, samples_per_bin)
-
-    # Cosine and sine of thetadir
-    ctd_samples = np.empty(shape=samples_shape, dtype=np.float64)
-    std_samples = np.empty(shape=samples_shape, dtype=np.float64)
-
-    # Cosine and sine of deltaphidir
-    cdpd_samples = np.empty(shape=samples_shape, dtype=np.float64)
-    sdpd_samples = np.empty(shape=samples_shape, dtype=np.float64)
-
-    for ctdir_idx in range(n_ctdir):
-        ctd0 = ctdir_idx*ctdir_bw + ctdir_bw / 2
-
-        for dpdir_idx in range(n_dpdir):
-            dpd0 = dpdir_idx*dpdir_bw + dpdir_samp_step / 2
-
-            for ctdir_subidx in range(samples_per_bin):
-                ctd_samp = ctd0 + ctdir_subidx * ctdir_samp_step
-                std_samp = math.sqrt(1 - ctd_samp*ctd_samp)
-
-                for dpdir_subidx in range(samples_per_bin):
-                    dpd_samp = dpd0 + dpdir_subidx * dpdir_samp_step
-                    sdpd_samp = math.sin(dpd_samp)
-                    cdpd_samp = math.cos(dpd_samp)
-
-                    ctd_samples[ctdir_subidx, dpdir_subidx] = ctd_samp
-                    std_samples[ctdir_subidx, dpdir_subidx] = std_samp
-                    cdpd_samples[ctdir_subidx, dpdir_subidx] = cdpd_samp
-                    cdpd_samples[ctdir_subidx, dpdir_subidx] = sdpd_samp
-
-            src_dir_indices, weights = retro.ckv.get_cone_map(
-                costheta=cos_ckv,
-                sintheta=sin_ckv,
-                num_phi=num_cone_samples,
-                axis_costheta=ctd_samples,
-                axis_sintheta=std_samples,
-                axis_cosphi=cdpd_samples,
-                axis_sinphi=sdpd_samples,
-                num_costheta_bins=n_ctdir,
-                num_deltaphi_bins=n_dpdir
-            )
-
-            for r_idx in range(n_r):
-                for ct_idx in range(n_ct):
-                    for t_idx in range(n_t):
-                        avg = 0.0
-                        for src_dir_idx, weight in zip(src_dir_indices, weights):
-                            avg += weight * src[(r_idx, ct_idx, t_idx) + src_dir_idx]
-                        dst[r_idx, ct_idx, t_idx, ctdir_idx, dpdir_idx] = avg
-
-
 def parse_args(description=__doc__):
     """Parse command line arguments"""
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '--tables', required=True, nargs='+',
+        '--table', required=True,
         help='''npy-table directories and/or .fits table files'''
     )
     parser.add_argument(
@@ -251,22 +185,20 @@ def parse_args(description=__doc__):
         help='''Cherenkov emitter beta factor (v / c).'''
     )
     parser.add_argument(
-        '--n_phase', type=float, default=1.33,
-        help='''Phase velocity of light in the medium.'''
+        '--oversample', type=int, required=True,
+        help='''Sample each output (costhetadir, deltaphidir) bin oversample^2
+        times.'''
+    )
+    parser.add_argument(
+        '--num-cone-samples', type=int, required=True,
+        help='''Number of samples around the cone.'''
     )
     parser.add_argument(
         '--outdir', default=None,
         help='''Directory in which to store the resulting table
         directory(ies).'''
     )
-
-    args = parser.parse_args()
-
-    # Construct the output filename if none is provided
-    if args.outfile is None:
-        args.outfile = re.sub(r'_photons.pkl', '_photon_histos.pkl', args.photons)
-
-    return args
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
