@@ -50,7 +50,7 @@ limitations under the License.'''
 from collections import OrderedDict
 from copy import deepcopy
 from glob import glob
-from os import makedirs, remove
+from os import remove
 from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
 from StringIO import StringIO
 from subprocess import Popen, PIPE
@@ -63,9 +63,9 @@ import numpy as np
 from pisa.utils.format import hrlist2list
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 import retro
 from retro import PI, TWO_PI
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
@@ -84,219 +84,6 @@ TABLE_NORM_KEYS = [
     'costheta_bin_edges', 't_bin_edges'
 ]
 """All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
-
-
-@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
-def survival_prob_from_smeared_cone(
-        theta, num_phi, rot_costheta, rot_sintheta, rot_cosphi, rot_sinphi,
-        directional_survival_prob, num_costheta_bins, num_deltaphi_bins,
-        random_delta_thetas
-    ):
-    """Get a numerical approximation of the expected survival probability for
-    photons directed on a cone (as for Cherenkov emission) from Retro table's
-    photon-directionality slice.
-
-    Parameters
-    ----------
-    theta : scalar float
-        Cherenkov angle (half the cone's opening angle)
-
-    num_phi : scalar int
-        Number of azimuth samples of the circle where the cone intersects the
-        unit sphere. Increase `num_phi` for for higher accuracy.
-
-    rot_costheta, rot_sintheta, rot_cosphi, rot_sinphi : scalar float
-        Rotate the cone to have axis of symmetry defined by (rot_theta, rot_phi)
-
-    directional_survival_prob : ndarray of shape (N_costhetadir x N_deltaphidir)
-        Note that the binning of the `directional_survival_prob` table slice is
-        expected to be (costhetadir, deltaphidir), and both are assumed to be
-        uniformly gridded in those coordinate spaces.
-
-    num_costheta_bins, num_deltaphi_bins : int
-        Number of bins in costheta and deltaphi dimensions. cosetheta is
-        assumed to be binned from -1 to 1, inclusive, and deltaphi is assumed
-        to be binned from 0 to pi, inclusive.
-
-    random_delta_thetas : sequence of length >= num_phi
-        Offsets to apply to theta to achieve smearing.
-
-    Returns
-    -------
-    survival_prob : scalar float
-        Numerically-approximated survival probability averaged over the entire
-        cone of photons.
-
-    bin_indices
-
-    counts
-
-    """
-    # TODO: we can approximate the effects of "large" (space-time width of a
-    # bin) by spreading points out off of the circle to simulate the amount of
-    # spread expected for photons within the bin. Probably a high-order effect,
-    # so no need to do this now, just something to note for later.
-
-    bin_indices = []
-    counts = []
-    counts_total = 0
-    num_indices = 0
-
-    costheta_bin_width = 2 / float(num_costheta_bins)
-    deltaphi_bin_width = PI / float(num_deltaphi_bins)
-
-    last_costheta_bin = num_costheta_bins - 1
-    last_deltaphi_bin = num_deltaphi_bins - 1
-
-    for phi_idx in range(num_phi):
-        offset_theta = theta + random_delta_thetas[phi_idx]
-        costheta = math.cos(offset_theta)
-        sintheta = math.sin(offset_theta)
-
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
-        sin_p_phi = math.sin(p_phi)
-        cos_p_phi = math.cos(p_phi)
-        q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
-                      + (costheta * rot_costheta))
-        abs_q_phi = math.fabs(math.atan2(
-            (sin_p_phi * sintheta * rot_cosphi)
-            + (sintheta * rot_sinphi * cos_p_phi * rot_costheta)
-            + (rot_sinphi * rot_sintheta * costheta),
-
-            (-sin_p_phi * sintheta * rot_sinphi)
-            + (sintheta * cos_p_phi * rot_cosphi * rot_costheta)
-            + (rot_sintheta * costheta * rot_cosphi)
-        ))
-
-        costheta_bin = int((q_costheta + 1) // costheta_bin_width)
-        if costheta_bin > last_costheta_bin:
-            costheta_bin = last_costheta_bin
-
-        deltaphi_bin = int(abs_q_phi // deltaphi_bin_width)
-        if deltaphi_bin > last_deltaphi_bin:
-            deltaphi_bin = last_deltaphi_bin
-
-        coord = (costheta_bin, deltaphi_bin)
-        if coord in bin_indices:
-            counts[bin_indices.index(coord)] += 1
-        else:
-            bin_indices.append(coord)
-            counts.append(1)
-            num_indices += 1
-        counts_total += 1
-
-    survival_prob = 0.0
-    for i in range(num_indices):
-        survival_prob += directional_survival_prob[bin_indices[i]] * counts[i]
-
-    # NOTE: Don't use e.g. /= before return until the following is resolved:
-    #   https://github.com/numba/numba/issues/2746
-    survival_prob = survival_prob / float(counts_total)
-
-    return survival_prob, bin_indices, counts
-
-
-@retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
-def survival_prob_from_cone(
-        costheta, sintheta, num_phi, rot_costheta, rot_sintheta, rot_cosphi,
-        rot_sinphi, directional_survival_prob, num_costheta_bins,
-        num_deltaphi_bins
-    ):
-    """Get a numerical approximation of the expected survival probability for
-    photons directed on a cone (as for Cherenkov emission) from Retro table's
-    photon-directionality slice.
-
-    Parameters
-    ----------
-    costheta, sintheta : scalar float
-        Cherenkov angle (half the cone's opening angle)
-
-    num_phi : scalar int
-        Number of azimuth samples of the circle where the cone intersects the
-        unit sphere. Increase `num_phi` for for higher accuracy.
-
-    rot_costheta, rot_sintheta, rot_cosphi, rot_sinphi : scalar float
-        Rotate the cone to have axis of symmetry defined by (rot_theta, rot_phi)
-
-    directional_survival_prob : ndarray of shape (N_costhetadir x N_deltaphidir)
-        Note that the binning of the `directional_survival_prob` table slice is
-        expected to be (costhetadir, deltaphidir), and both are assumed to be
-        uniformly gridded in those coordinate spaces.
-
-    num_costheta_bins, num_deltaphi_bins : int
-        Number of bins in costheta and deltaphi dimensions. cosetheta is
-        assumed to be binned from -1 to 1, inclusive, and deltaphi is assumed
-        to be binned from 0 to pi, inclusive.
-
-    Returns
-    -------
-    survival_prob : scalar float
-        Numerically-approximated survival probability averaged over the entire
-        cone of photons.
-
-    bin_indices
-
-    counts
-
-    """
-    # TODO: we can approximate the effects of "large" (space-time width of a
-    # bin) by spreading points out off of the circle to simulate the amount of
-    # spread expected for photons within the bin. Probably a high-order effect,
-    # so no need to do this now, just something to note for later.
-
-    bin_indices = []
-    counts = []
-    counts_total = 0
-    num_indices = 0
-
-    costheta_bin_width = 2 / float(num_costheta_bins)
-    deltaphi_bin_width = PI / float(num_deltaphi_bins)
-
-    last_costheta_bin = num_costheta_bins - 1
-    last_deltaphi_bin = num_deltaphi_bins - 1
-
-    for phi_idx in range(num_phi):
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
-        sin_p_phi = np.sin(p_phi)
-        cos_p_phi = np.cos(p_phi)
-        q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
-                      + (costheta * rot_costheta))
-        abs_q_phi = np.abs(math.atan2(
-            (sin_p_phi * sintheta * rot_cosphi)
-            + (sintheta * rot_sinphi * cos_p_phi * rot_costheta)
-            + (rot_sinphi * rot_sintheta * costheta),
-
-            (-sin_p_phi * sintheta * rot_sinphi)
-            + (sintheta * cos_p_phi * rot_cosphi * rot_costheta)
-            + (rot_sintheta * costheta * rot_cosphi)
-        ))
-
-        costheta_bin = int((q_costheta + 1) // costheta_bin_width)
-        if costheta_bin > last_costheta_bin:
-            costheta_bin = last_costheta_bin
-
-        deltaphi_bin = int(abs_q_phi // deltaphi_bin_width)
-        if deltaphi_bin > last_deltaphi_bin:
-            deltaphi_bin = last_deltaphi_bin
-
-        coord = (costheta_bin, deltaphi_bin)
-        if coord in bin_indices:
-            counts[bin_indices.index(coord)] += 1
-        else:
-            bin_indices.append(coord)
-            counts.append(1)
-            num_indices += 1
-        counts_total += 1
-
-    survival_prob = 0.0
-    for i in range(num_indices):
-        survival_prob += directional_survival_prob[bin_indices[i]] * counts[i]
-
-    # NOTE: Don't use e.g. /= before return until the following is resolved:
-    #   https://github.com/numba/numba/issues/2746
-    survival_prob = survival_prob / float(counts_total)
-
-    return survival_prob, bin_indices, counts
 
 
 def open_table_file(fpath):
@@ -517,11 +304,11 @@ def generate_time_indep_table(table, quantum_efficiency,
 
     # Indices in the Einstein sum are
     #   table:
-    #     r=radius, c=costheta, t=time, q=costheta_dir, p=deltaphi_dir
+    #     r=radius, c=costheta, t=time, q=costhetadir, p=deltaphidir
     #   norm:
     #     r=radius, t=time
     #   output:
-    #     r=radius, c=costheta, q=costhetadir, p=deltaphi_dir
+    #     r=radius, c=costheta, q=costhetadir, p=deltaphidir
     t_indep_table = np.einsum(
         'rctqp,rt->rcqp',
         table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
@@ -1139,7 +926,7 @@ def generate_pexp_5d_function(
 
                 #print('ckv_theta={}'.format(ckv_theta*180/PI))
 
-                this_photons_at_all_times, _a, _b = survival_prob_from_smeared_cone(
+                this_photons_at_all_times, _a, _b = retro.ckv.survival_prob_from_smeared_cone(
                     #costheta=ckv_costheta,
                     #sintheta=ckv_sintheta,
                     theta=ckv_theta,
@@ -1193,7 +980,7 @@ def generate_pexp_5d_function(
                         table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
                     )
             elif pdir_r < 1.0: # Cherenkov emitter
-                this_photons_at_hit_time, _c, _d = survival_prob_from_smeared_cone(
+                this_photons_at_hit_time, _c, _d = retro.ckv.survival_prob_from_smeared_cone(
                     #costheta=ckv_costheta,
                     #sintheta=ckv_sintheta,
                     theta=ckv_theta,
@@ -1415,7 +1202,7 @@ class CLSimTables(object):
 
     num_phi_samples : int > 0
         If using directionality, set how many samples around the Cherenkov cone
-        are used to find which (costheta_dir, deltaphi_dir) bins to use to
+        are used to find which (costhetadir, deltaphidir) bins to use to
         compute expected photon survival probability.
 
     ckv_sigma_deg : float >= 0
@@ -1827,7 +1614,7 @@ class CLSimTable(object):
         new_fpath = join(outdir, new_fname)
 
         if not isdir(outdir):
-            makedirs(outdir)
+            retro.mkdir(outdir)
 
         if isfile(new_fpath):
             if overwrite:

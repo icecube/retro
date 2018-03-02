@@ -58,6 +58,7 @@ __all__ = [
     # Binning / geometry
     'linbin', 'test_linbin', 'powerbin', 'test_powerbin',
     'powerspace', 'inv_power_2nd_diff', 'infer_power', 'test_infer_power',
+    'sample_powerlaw_binning',
     'bin_edges_to_binspec', 'linear_bin_centers', 'spherical_volume',
     'sph2cart', 'pol2cart', 'cart2pol', 'cart2sph', 'spacetime_separation',
 
@@ -406,7 +407,7 @@ FTYPE = np.float64
 UITYPE = np.int64
 """Datatype to use for explicitly-typed unsigned integers"""
 
-HYPO_PARAMS_T = HypoParams8D
+HYPO_PARAMS_T = HypoParams8D # pylint: disable=invalid-name
 """Global selection of which hypothesis to use throughout the code."""
 
 
@@ -555,7 +556,7 @@ def expand(p):
     return abspath(expanduser(expandvars(p)))
 
 
-def mkdir(d, mode=0o0750):
+def mkdir(d, mode=0o0770):
     """Simple wrapper around os.makedirs to create a directory but not raise an
     exception if the dir already exists
 
@@ -1309,6 +1310,38 @@ def test_infer_power():
     print('Average time to infer power: {} s'
           .format(total_time/len(ref_powers)))
     print('<< PASS : test_infer_power >>')
+
+
+def sample_powerlaw_binning(edges, samples_per_bin):
+    """Draw samples evenly distributed in bins which are spaced evenly with
+    respect to the (inverse) power of the dimension.
+
+    Parameters
+    ----------
+    edges : array
+        Edges of bins to sample within.
+
+    samples_per_bin : int > 0
+        Number of samples per bin.
+
+    Returns
+    -------
+    samples : array
+
+    """
+    num_bins = len(edges) - 1
+    pwr = infer_power(edges)
+    edges_to_inv_pwr = edges**(1/pwr)
+    delta_eip = (edges_to_inv_pwr[-1] - edges_to_inv_pwr[0]) / num_bins
+    half_delta_eip_s = delta_eip / samples_per_bin / 2
+
+    samples = np.linspace(
+        start=edges_to_inv_pwr[0] + half_delta_eip_s,
+        stop=edges_to_inv_pwr[-1] - half_delta_eip_s,
+        num=samples_per_bin * num_bins
+    ) ** pwr
+
+    return samples
 
 
 def bin_edges_to_binspec(edges):
