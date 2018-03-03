@@ -66,6 +66,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 import retro
 from retro import PI, TWO_PI
+from retro.ckv import survival_prob_from_cone, survival_prob_from_smeared_cone
 from retro.generate_t_r_theta_table import generate_t_r_theta_table
 
 
@@ -376,12 +377,18 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
             mmap_mode = 'r'
         else:
             mmap_mode = None
-        for key in MY_CLSIM_TABLE_KEYS:
+        for key in MY_CLSIM_TABLE_KEYS + ['t_indep_table']:
             fpath = join(indir, key + '.npy')
             if retro.DEBUG:
                 retro.wstderr('    loading {} from "{}" ...'.format(key, fpath))
             t1 = time()
-            table[key] = np.load(fpath, mmap_mode=mmap_mode)
+            if isfile(fpath):
+                table[key] = np.load(fpath, mmap_mode=mmap_mode)
+            elif key != 't_indep_table':
+                raise ValueError(
+                    'Could not find file "{}" for loading table key "{}"'
+                    .format(fpath, key)
+                )
             if retro.DEBUG:
                 retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
         if step_length is not None and 'step_length' in table:
@@ -707,12 +714,14 @@ def generate_pexp_5d_function(
         deltaphidir_one_sided=deltaphidir_one_sided
     )
 
-    rand = np.random.RandomState(0)
-    random_delta_thetas = rand.normal(
-        loc=0,
-        scale=np.deg2rad(ckv_sigma_deg),
-        size=num_phi_samples
-    )
+    random_delta_thetas = np.array([])
+    if ckv_sigma_deg > 0:
+        rand = np.random.RandomState(0)
+        random_delta_thetas = rand.normal(
+            loc=0,
+            scale=np.deg2rad(ckv_sigma_deg),
+            size=num_phi_samples
+        )
 
     @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d(
@@ -919,27 +928,43 @@ def generate_pexp_5d_function(
                 # direction. Ergo, in the length of the pdir vector is the
                 # cosine of the ckv angle.
                 ckv_costheta = pdir_r
-                #ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
                 ckv_theta = math.acos(ckv_costheta)
 
                 #print('ckv_theta={}'.format(ckv_theta*180/PI))
 
-                this_photons_at_all_times, _a, _b = retro.ckv.survival_prob_from_smeared_cone(
-                    #costheta=ckv_costheta,
-                    #sintheta=ckv_sintheta,
-                    theta=ckv_theta,
-                    num_phi=num_phi_samples,
-                    rot_costheta=pdir_costheta,
-                    rot_sintheta=pdir_sintheta,
-                    rot_cosphi=pdir_cosdeltaphi,
-                    rot_sinphi=pdir_sindeltaphi,
-                    directional_survival_prob=(
-                        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                    ),
-                    num_costheta_bins=n_costhetadir_bins,
-                    num_deltaphi_bins=n_deltaphidir_bins,
-                    random_delta_thetas=random_delta_thetas
-                )
+                if ckv_sigma_deg > 0:
+                    this_photons_at_all_times, _a, _b = survival_prob_from_smeared_cone(
+                        #costheta=ckv_costheta,
+                        #sintheta=ckv_sintheta,
+                        theta=ckv_theta,
+                        num_phi=num_phi_samples,
+                        rot_costheta=pdir_costheta,
+                        rot_sintheta=pdir_sintheta,
+                        rot_cosphi=pdir_cosdeltaphi,
+                        rot_sinphi=pdir_sindeltaphi,
+                        directional_survival_prob=(
+                            t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                        ),
+                        num_costheta_bins=n_costhetadir_bins,
+                        num_deltaphi_bins=n_deltaphidir_bins,
+                        random_delta_thetas=random_delta_thetas
+                    )
+                else:
+                    ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
+                    this_photons_at_all_times, _a, _b = survival_prob_from_cone(
+                        costheta=ckv_costheta,
+                        sintheta=ckv_sintheta,
+                        num_phi=num_phi_samples,
+                        rot_costheta=pdir_costheta,
+                        rot_sintheta=pdir_sintheta,
+                        rot_cosphi=pdir_cosdeltaphi,
+                        rot_sinphi=pdir_sindeltaphi,
+                        directional_survival_prob=(
+                            t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                        ),
+                        num_costheta_bins=n_costhetadir_bins,
+                        num_deltaphi_bins=n_deltaphidir_bins,
+                    )
             elif pdir_r == 1.0: # line emitter
                 raise NotImplementedError('Line emitter not handled.')
             else: # Gaussian emitter
@@ -978,22 +1003,36 @@ def generate_pexp_5d_function(
                         table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
                     )
             elif pdir_r < 1.0: # Cherenkov emitter
-                this_photons_at_hit_time, _c, _d = retro.ckv.survival_prob_from_smeared_cone(
-                    #costheta=ckv_costheta,
-                    #sintheta=ckv_sintheta,
-                    theta=ckv_theta,
-                    num_phi=num_phi_samples,
-                    rot_costheta=pdir_costheta,
-                    rot_sintheta=pdir_sintheta,
-                    rot_cosphi=pdir_cosdeltaphi,
-                    rot_sinphi=pdir_sindeltaphi,
-                    directional_survival_prob=(
-                        table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                    ),
-                    num_costheta_bins=n_costhetadir_bins,
-                    num_deltaphi_bins=n_deltaphidir_bins,
-                    random_delta_thetas=random_delta_thetas
-                )
+                if ckv_sigma_deg > 0:
+                    this_photons_at_hit_time, _c, _d = survival_prob_from_smeared_cone(
+                        theta=ckv_theta,
+                        num_phi=num_phi_samples,
+                        rot_costheta=pdir_costheta,
+                        rot_sintheta=pdir_sintheta,
+                        rot_cosphi=pdir_cosdeltaphi,
+                        rot_sinphi=pdir_sindeltaphi,
+                        directional_survival_prob=(
+                            table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                        ),
+                        num_costheta_bins=n_costhetadir_bins,
+                        num_deltaphi_bins=n_deltaphidir_bins,
+                        random_delta_thetas=random_delta_thetas
+                    )
+                else:
+                    this_photons_at_hit_time, _c, _d = survival_prob_from_cone(
+                        costheta=ckv_costheta,
+                        sintheta=ckv_sintheta,
+                        num_phi=num_phi_samples,
+                        rot_costheta=pdir_costheta,
+                        rot_sintheta=pdir_sintheta,
+                        rot_cosphi=pdir_cosdeltaphi,
+                        rot_sinphi=pdir_sindeltaphi,
+                        directional_survival_prob=(
+                            table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                        ),
+                        num_costheta_bins=n_costhetadir_bins,
+                        num_deltaphi_bins=n_deltaphidir_bins,
+                    )
                 #print('this_photons_at_hit_time={}'.format(this_photons_at_hit_time))
             elif pdir_r == 1.0: # line emitter
                 raise NotImplementedError('Line emitter not handled.')
