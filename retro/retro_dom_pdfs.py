@@ -58,10 +58,10 @@ run_info = OrderedDict([
 
 
 retro.DEBUG = 0
-SIM_TO_TEST = 'downgoing_muon'
+SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi'
+CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma0deg_1000phi'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
@@ -86,7 +86,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='/data/icecube/retro/sims/track_step4_SplitUncleanedInIcePulses.pkl'
+        fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl'
     ),
     cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -103,6 +103,14 @@ SIMULATIONS = dict(
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl',
+    ),
+    horizontal_muon=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-350,
+            track_azimuth=0, track_zenith=0,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims100000_step1_photon_histos.pkl',
     )
 )
 
