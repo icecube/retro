@@ -109,10 +109,6 @@ def generate_ckv_table(
     costhetadir_bin_edges = full_table['costhetadir_bin_edges']
     deltaphidir_bin_edges = full_table['deltaphidir_bin_edges']
 
-    n_r_bins = len(r_bin_edges) - 1
-    n_costheta_bins = len(costheta_bin_edges) - 1
-    n_t_bins = len(t_bin_edges) - 1
-
     # NOTE: we are making output binning same as input binning.
 
     n_phase = table['phase_refractive_index']
@@ -157,13 +153,14 @@ def generate_ckv_table(
             dst=np.float32(ckv_table),
             cos_ckv=np.float32(cos_ckv),
             sin_ckv=np.float32(sin_ckv),
-            n_r=n_r_bins,
-            n_ct=n_costheta_bins,
-            n_t=n_t_bins,
+            r_bin_edges=r_bin_edges.astype(np.float32),
+            ct_bin_edges=costheta_bin_edges.astype(np.float32),
+            t_bin_edges=t_bin_edges.astype(np.float32),
             ctdir_bin_edges=costhetadir_bin_edges.astype(np.float32),
             dpdir_bin_edges=deltaphidir_bin_edges.astype(np.float32),
             num_cone_samples=num_cone_samples,
-            oversample=oversample
+            oversample=oversample,
+            n_phase=n_phase
         )
     except:
         del ckv_table

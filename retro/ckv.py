@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name
+# pylint: disable=wrong-import-position, redefined-outer-name, too-many-nested-blocks, line-too-long, too-many-locals
 
 """
 Convert raw Retro 5D tables (which represent survival probabilities for light
@@ -37,7 +37,9 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import PI, TWO_PI, numba_jit, DFLT_NUMBA_JIT_KWARGS
+from retro import (
+    PI, TWO_PI, SPEED_OF_LIGHT_M_PER_NS, numba_jit, DFLT_NUMBA_JIT_KWARGS
+)
 
 
 __all__ = [
@@ -235,22 +237,45 @@ def get_cone_map(
 
 @numba_jit(parallel=False, nogil=True, cache=True) #**DFLT_NUMBA_JIT_KWARGS)
 def convolve_table(
-        src, dst, cos_ckv, sin_ckv, n_r, n_ct, n_t, ctdir_bin_edges,
-        dpdir_bin_edges, num_cone_samples, oversample
+        src, dst, cos_ckv, sin_ckv, r_bin_edges, ct_bin_edges, t_bin_edges,
+        ctdir_bin_edges, dpdir_bin_edges, num_cone_samples, oversample, n_phase
     ):
     """
     Parameters
     ----------
-    src
-    dst
-    cos_ckv, sin_ckv
-    n_r, n_ct, n_t : int > 0
+    src : (n_r, n_ct, n_t, n_ctdir, n_dpdir) array
+
+    dst : (n_r, n_ct, n_t, n_ctdir, n_dpdir) array
+
+    cos_ckv, sin_ckv : float
+
+    r_bin_edges
+        Radial bin edges, in units of meters.
+
+    ct_bin_edges
+        Cosine of theta (zenith angle) bin edges.
+
+    t_bin_edges
+        Time bin edges, units of nanoseconds.
+
     ctdir_bin_edges : array
+        Cosine-of-direction-theta (zenith angle) bin edges.
+
     dpdir_bin_edges : array
+        Delta-phi (azimuth angle) bin edges, in units of radians.
+
     num_cone_samples : int > 0
+
     oversample : int > 0
 
+    n_phase : float > 0
+        Phase refractive index in the medium (use lowest value used for all ice
+        simulated).
+
     """
+    #n_r = len(r_bin_edges) - 1
+    #n_t = len(t_bin_edges) - 1
+    n_ct = len(ct_bin_edges) - 1
     n_ctdir = len(ctdir_bin_edges) - 1
     n_dpdir = len(dpdir_bin_edges) - 1
 
@@ -272,12 +297,19 @@ def convolve_table(
     samples_shape = (oversample, oversample)
 
     # Cosine and sine of thetadir
-    ctd_samples = np.empty(shape=samples_shape, dtype=np.float64)
-    std_samples = np.empty(shape=samples_shape, dtype=np.float64)
+    ctd_samples = np.empty(shape=samples_shape, dtype=np.float32)
+    std_samples = np.empty(shape=samples_shape, dtype=np.float32)
 
     # Cosine and sine of deltaphidir
-    cdpd_samples = np.empty(shape=samples_shape, dtype=np.float64)
-    sdpd_samples = np.empty(shape=samples_shape, dtype=np.float64)
+    cdpd_samples = np.empty(shape=samples_shape, dtype=np.float32)
+    sdpd_samples = np.empty(shape=samples_shape, dtype=np.float32)
+
+    src_t_subtbl = np.empty(shape=(n_ctdir, n_dpdir), dtype=np.float32)
+
+    # Max distance from the DOM light could be, for each time bin
+    tbin_max_dist = [t*SPEED_OF_LIGHT_M_PER_NS/n_phase for t in np.nditer(t_bin_edges[1:])]
+
+    noncausal_bins = 0
 
     for ctdir_idx in range(n_ctdir):
         ctd0 = ctdir_min_samp + ctdir_idx*ctdir_bw
@@ -311,13 +343,30 @@ def convolve_table(
                 num_deltaphi_bins=n_dpdir
             )
 
-            for r_idx in range(n_r):
-                for ct_idx in range(n_ct):
-                    for t_idx in range(n_t):
-                        avg = 0.0
-                        for src_dir_idx, weight in zip(src_dir_indices, weights):
-                            avg += weight * src[r_idx, ct_idx, t_idx, src_dir_idx[0], src_dir_idx[1]]
+            #for r_idx in range(n_r):
+            for r_idx, r_lower in enumerate(np.nditer(r_bin_edges[:-1])):
+                #for t_idx in range(n_t):
+                for t_idx, max_dist in enumerate(tbin_max_dist):
+                    if r_lower > max_dist:
+                        causal = True
+                        noncausal_bins += 1
+                        #print('r_lower ({}) < max_dist {})'.format(r_lower, max_dist))
+                    else:
+                        causal = True
+
+                    for ct_idx in range(n_ct):
+                        if causal:
+                            # Apply the mask and weights
+                            src_t_subtbl[:] = src[r_idx, ct_idx, t_idx, :, :]
+                            avg = 0.0
+                            for src_dir_idx, weight in zip(src_dir_indices, weights):
+                                avg += weight * src_t_subtbl[src_dir_idx]
+                        else:
+                            avg = 0.0
+
                         dst[r_idx, ct_idx, t_idx, ctdir_idx, dpdir_idx] = avg
+
+    print('Non-causal bins:', noncausal_bins)
 
 
 @numba_jit(parallel=False, nogil=False, cache=True) #**DFLT_NUMBA_JIT_KWARGS)
