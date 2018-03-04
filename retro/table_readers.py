@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, too-many-instance-attributes, too-many-locals
+# pylint: disable=wrong-import-position, too-many-instance-attributes, too-many-locals, line-too-long
 
 """
 Classes for reading and getting info from Retro tables.
@@ -83,6 +83,15 @@ TABLE_NORM_KEYS = [
     'costheta_bin_edges', 't_bin_edges'
 ]
 """All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
+
+CKV_TABLE_KEYS = [
+    'n_photons', 'phase_refractive_index', 'r_bin_edges',
+    'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
+    'deltaphidir_bin_edges', 'ckv_table', #'t_indep_ckv_table'
+]
+
+TBL_KIND_CLSIM = 0
+TBL_KIND_CKV = 1
 
 
 def open_table_file(fpath):
@@ -318,6 +327,77 @@ def generate_time_indep_table(table, quantum_efficiency,
     t_indep_table_norm = quantum_efficiency * angular_acceptance_fract
 
     return t_indep_table, t_indep_table_norm
+
+
+def load_ckv_table(fpath, mmap, step_length=None):
+    """Load a Cherenkov table from disk.
+
+    Parameters
+    ----------
+    fpath : string
+        Path to directory containing the table's .npy files.
+
+    mmap : bool
+        Whether to memory map the table (if it's stored in a directory
+        containing .npy files).
+
+    step_length : float > 0 in units of meters, optional
+        Required if computing the `t_indep_table` (if `gen_t_indep` is True).
+
+    Returns
+    -------
+    table : OrderedDict
+        Items are
+        - 'n_photons' :
+        - 'phase_refractive_index' :
+        - 'r_bin_edges' :
+        - 'costheta_bin_edges' :
+        - 't_bin_edges' :
+        - 'costhetadir_bin_edges' :
+        - 'deltaphidir_bin_edges' :
+        - 'ckv_table' : np.ndarray
+        - 't_indep_ckv_table' : np.ndarray
+
+    """
+    fpath = retro.expand(fpath)
+    table = OrderedDict()
+
+    if retro.DEBUG:
+        retro.wstderr('Loading table from {} ...\n'.format(fpath))
+
+    assert isdir(fpath)
+    t0 = time()
+    indir = fpath
+
+    if mmap:
+        mmap_mode = 'r'
+    else:
+        mmap_mode = None
+
+    for key in CKV_TABLE_KEYS: # TODO: + ['t_indep_ckv_table']:
+        fpath = join(indir, key + '.npy')
+        if retro.DEBUG:
+            retro.wstderr('    loading {} from "{}" ...'.format(key, fpath))
+
+        t1 = time()
+        if isfile(fpath):
+            table[key] = np.load(fpath, mmap_mode=mmap_mode)
+        elif key != 't_indep_ckv_table':
+            raise ValueError(
+                'Could not find file "{}" for loading table key "{}"'
+                .format(fpath, key)
+            )
+
+        if retro.DEBUG:
+            retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
+
+    if step_length is not None and 'step_length' in table:
+        assert step_length == table['step_length']
+
+    if retro.DEBUG:
+        retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
+
+    return table
 
 
 def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
@@ -644,7 +724,7 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
 
 def generate_pexp_5d_function(
-        table, use_directionality, num_phi_samples, ckv_sigma_deg
+        table, table_kind, use_directionality, num_phi_samples, ckv_sigma_deg
     ):
     """Generate a numba-compiled function for computing expected photon counts
     at a DOM, where the table's binning info is used to pre-compute various
@@ -654,6 +734,8 @@ def generate_pexp_5d_function(
     ----------
     table : mapping
         As returned by `load_clsim_table_minimal`
+
+    table_kind
 
     use_directionality : bool, optional
         If the source photons have directionality, use it in computing photon
@@ -675,6 +757,9 @@ def generate_pexp_5d_function(
 
     """
     r_min = np.min(table['r_bin_edges'])
+    # Ensure r_min is zero; this removes need for lower-bound checks and a
+    # subtraction
+    assert r_min == 0
     r_max = np.max(table['r_bin_edges'])
     rsquared_min = r_min*r_min
     rsquared_max = r_max*r_max
@@ -687,23 +772,26 @@ def generate_pexp_5d_function(
     table_dcostheta = 2 / n_costheta_bins
 
     t_min = np.min(table['t_bin_edges'])
+    # Ensure t_min is zero; this removes need for lower-bound checks and a
+    # subtraction
+    assert t_min == 0
     t_max = np.max(table['t_bin_edges'])
     n_t_bins = len(table['t_bin_edges']) - 1
     table_dt = (t_max - t_min) / n_t_bins
 
+    assert table['costhetadir_bin_edges'][0] == -1
+    assert table['costhetadir_bin_edges'][-1] == 1
     n_costhetadir_bins = len(table['costhetadir_bin_edges']) - 1
     table_dcosthetadir = 2 / n_costhetadir_bins
+    assert np.allclose(np.diff(table['costhetadir_bin_edges']), table_dcosthetadir)
+    last_costhetadir_bin_idx = n_costhetadir_bins - 1
 
+    assert table['deltaphidir_bin_edges'][0] == 0
+    assert np.isclose(table['deltaphidir_bin_edges'][-1], PI)
     n_deltaphidir_bins = len(table['deltaphidir_bin_edges']) - 1
-    table_dphidir = TWO_PI / n_deltaphidir_bins
-    deltaphidir_one_sided = np.all(
-        (table['deltaphidir_bin_edges'] >= 0)
-        &
-        (table['deltaphidir_bin_edges'] <= PI)
-    )
-
-    if not deltaphidir_one_sided:
-        raise NotImplementedError('Only one-sided deltaphidir binning supported.')
+    table_dphidir = PI / n_deltaphidir_bins
+    assert np.allclose(np.diff(table['deltaphidir_bin_edges']), table_dphidir)
+    last_deltaphidir_bin_idx = n_deltaphidir_bins - 1
 
     binning_info = dict(
         r_min=r_min, r_max=r_max, n_r_bins=n_r_bins, r_power=r_power,
@@ -711,7 +799,7 @@ def generate_pexp_5d_function(
         t_min=t_min, t_max=t_max, n_t_bins=n_t_bins,
         n_costhetadir_bins=n_costhetadir_bins,
         n_deltaphidir_bins=n_deltaphidir_bins,
-        deltaphidir_one_sided=deltaphidir_one_sided
+        deltaphidir_one_sided=True
     )
 
     random_delta_thetas = np.array([])
@@ -723,10 +811,11 @@ def generate_pexp_5d_function(
             size=num_phi_samples
         )
 
+    #@profile
     @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d(
             pinfo_gen, hit_time, time_window, dom_coord, quantum_efficiency,
-            noise_rate_hz, table, table_norm, t_indep_table, t_indep_table_norm
+            noise_rate_hz, table, table_norm#, t_indep_table, t_indep_table_norm
         ):
         """For a set of generated photons `pinfo_gen`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
@@ -791,6 +880,9 @@ def generate_pexp_5d_function(
             specified DOM at the time the DOM recorded the hit.
 
         """
+        # NOTE: on optimization:
+        # * np.square(x) is slower than x*x by a few percent (maybe within tolerance, though)
+
         # Initialize accumulators (using double precision)
 
         photons_at_all_times = np.float64(0.0)
@@ -801,6 +893,8 @@ def generate_pexp_5d_function(
         prev_r_bin_idx = -1
         prev_costheta_bin_idx = -1
         prev_t_bin_idx = -1
+        prev_costhetadir_bin_idx = -1
+        prev_deltaphidir_bin_idx = -1
         if use_directionality:
             prev_pdir_r = np.nan
         else:
@@ -842,18 +936,20 @@ def generate_pexp_5d_function(
                 continue
 
             r = math.sqrt(rsquared)
-            r_bin_idx = int((r - r_min)**inv_r_power // table_dr_pwr)
+            r_bin_idx = int(r**inv_r_power // table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) // table_dcostheta)
 
             #print('r={}, r_bin_idx={}, costheta_bin_idx={}'.format(r, r_bin_idx, costheta_bin_idx))
 
-            new_r_bin = False
-            if r_bin_idx != prev_r_bin_idx:
+            if r_bin_idx == prev_r_bin_idx:
+                new_r_bin = False
+            else:
                 new_r_bin = True
                 prev_r_bin_idx = r_bin_idx
 
-            new_costheta_bin = False
-            if costheta_bin_idx != prev_costheta_bin_idx:
+            if costheta_bin_idx == prev_costheta_bin_idx:
+                new_costheta_bin = False
+            else:
                 new_costheta_bin = True
                 prev_costheta_bin_idx = costheta_bin_idx
 
@@ -863,10 +959,11 @@ def generate_pexp_5d_function(
 
                 #print('pdir_rhosquared={}, pdir_r={}'.format(pdir_rhosquared, pdir_r))
 
-                new_pdir_r = False
                 if pdir_r != prev_pdir_r:
                     new_pdir_r = True
                     prev_pdir_r = pdir_r
+                else:
+                    new_pdir_r = False
 
             # TODO: handle special cases for pdir_r:
             #
@@ -880,10 +977,12 @@ def generate_pexp_5d_function(
             # separately.
 
             if pdir_r == 0.0: # isotropic emitter
-                if new_pdir_r or new_r_bin or new_costheta_bin:
-                    this_photons_at_all_times = np.mean(
-                        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                    )
+                pass
+                #if new_pdir_r or new_r_bin or new_costheta_bin:
+                #    this_photons_at_all_times = np.mean(
+                #        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                #    )
+
             elif pdir_r < 1.0: # Cherenkov emitter
                 # Note that for these tables, we have to invert the photon
                 # direction relative to the vector from the DOM to the photon's
@@ -932,65 +1031,100 @@ def generate_pexp_5d_function(
 
                 #print('ckv_theta={}'.format(ckv_theta*180/PI))
 
-                if ckv_sigma_deg > 0:
-                    this_photons_at_all_times, _a, _b = survival_prob_from_smeared_cone(
-                        #costheta=ckv_costheta,
-                        #sintheta=ckv_sintheta,
-                        theta=ckv_theta,
-                        num_phi=num_phi_samples,
-                        rot_costheta=pdir_costheta,
-                        rot_sintheta=pdir_sintheta,
-                        rot_cosphi=pdir_cosdeltaphi,
-                        rot_sinphi=pdir_sindeltaphi,
-                        directional_survival_prob=(
-                            t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                        ),
-                        num_costheta_bins=n_costhetadir_bins,
-                        num_deltaphi_bins=n_deltaphidir_bins,
-                        random_delta_thetas=random_delta_thetas
-                    )
+                if table_kind == TBL_KIND_CLSIM:
+                    if ckv_sigma_deg > 0:
+                        pass
+                        #this_photons_at_all_times, _a, _b = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
+                        #    theta=ckv_theta,
+                        #    num_phi=num_phi_samples,
+                        #    rot_costheta=pdir_costheta,
+                        #    rot_sintheta=pdir_sintheta,
+                        #    rot_cosphi=pdir_cosdeltaphi,
+                        #    rot_sinphi=pdir_sindeltaphi,
+                        #    directional_survival_prob=(
+                        #        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                        #    ),
+                        #    num_costheta_bins=n_costhetadir_bins,
+                        #    num_deltaphi_bins=n_deltaphidir_bins,
+                        #    random_delta_thetas=random_delta_thetas
+                        #)
+                    else:
+                        ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
+                        #this_photons_at_all_times, _a, _b = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
+                        #    costheta=ckv_costheta,
+                        #    sintheta=ckv_sintheta,
+                        #    num_phi=num_phi_samples,
+                        #    rot_costheta=pdir_costheta,
+                        #    rot_sintheta=pdir_sintheta,
+                        #    rot_cosphi=pdir_cosdeltaphi,
+                        #    rot_sinphi=pdir_sindeltaphi,
+                        #    directional_survival_prob=(
+                        #        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                        #    ),
+                        #    num_costheta_bins=n_costhetadir_bins,
+                        #    num_deltaphi_bins=n_deltaphidir_bins,
+                        #)
+
+                elif table_kind == TBL_KIND_CKV:
+                    costhetadir_bin_idx = int((pdir_costheta + 1) // table_dcosthetadir)
+                    # Make upper edge inclusive
+                    if costhetadir_bin_idx > last_costhetadir_bin_idx:
+                        costhetadir_bin_idx = last_costhetadir_bin_idx
+
+                    if costhetadir_bin_idx == prev_costhetadir_bin_idx:
+                        new_costhetadir_bin = False
+                    else:
+                        new_costhetadir_bin = True
+                        prev_costhetadir_bin_idx = costhetadir_bin_idx
+
+                    pdir_deltaphi = math.acos(pdir_cosdeltaphi)
+                    deltaphidir_bin_idx = int(pdir_deltaphi // table_dphidir)
+                    # Make upper edge inclusive
+                    if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
+                        deltaphidir_bin_idx = last_deltaphidir_bin_idx
+
+                    if deltaphidir_bin_idx == prev_deltaphidir_bin_idx:
+                        new_deltaphidir_bin = False
+                    else:
+                        new_deltaphidir_bin = True
+                        prev_deltaphidir_bin_idx = deltaphidir_bin_idx
+
+                    if new_r_bin or new_costheta_bin or new_costhetadir_bin or new_deltaphidir_bin:
+                        new_r_ct_ctd_or_dpd_bin = True
+                        #this_photons_at_all_times = t_indep_table[r_bin_idx, costheta_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+                    else:
+                        new_r_ct_ctd_or_dpd_bin = False
                 else:
-                    ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
-                    this_photons_at_all_times, _a, _b = survival_prob_from_cone(
-                        costheta=ckv_costheta,
-                        sintheta=ckv_sintheta,
-                        num_phi=num_phi_samples,
-                        rot_costheta=pdir_costheta,
-                        rot_sintheta=pdir_sintheta,
-                        rot_cosphi=pdir_cosdeltaphi,
-                        rot_sinphi=pdir_sindeltaphi,
-                        directional_survival_prob=(
-                            t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                        ),
-                        num_costheta_bins=n_costhetadir_bins,
-                        num_deltaphi_bins=n_deltaphidir_bins,
-                    )
-            elif pdir_r == 1.0: # line emitter
+                    raise ValueError('Unknown table kind.')
+
+            elif pdir_r == 1.0: # line emitter; can't do this with Ckv table!
                 raise NotImplementedError('Line emitter not handled.')
-            else: # Gaussian emitter
+
+            else: # Gaussian emitter; can't do this with Ckv table!
                 raise NotImplementedError('Gaussian emitter not handled.')
 
-            photons_at_all_times += p_count * t_indep_table_norm * this_photons_at_all_times
+            #photons_at_all_times += p_count * t_indep_table_norm * this_photons_at_all_times
 
             #print('photons_at_all_times={}'.format(photons_at_all_times))
 
             # Causally impossible? (Note the comparison is written such that it
-            # will evaluate to True if hit_time is nan.)
+            # will evaluate to True if hit_time is NaN.)
             if not t <= hit_time:
                 #print('XX CONTINUE: noncausal')
                 continue
 
             # Is relative time outside binning?
-            if dt < t_min or dt >= t_max:
+            if dt >= t_max:
                 #print('XX CONTINUE: outside t binning')
                 continue
 
-            t_bin_idx = int((dt - t_min) // table_dt)
+            t_bin_idx = int(dt // table_dt)
 
             #print('t_bin_idx={}'.format(t_bin_idx))
 
-            new_t_bin = False
-            if t_bin_idx != prev_t_bin_idx:
+            if t_bin_idx == prev_t_bin_idx:
+                new_t_bin = False
+            else:
                 new_t_bin = True
                 prev_t_bin_idx = t_bin_idx
 
@@ -1003,37 +1137,42 @@ def generate_pexp_5d_function(
                         table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
                     )
             elif pdir_r < 1.0: # Cherenkov emitter
-                if ckv_sigma_deg > 0:
-                    this_photons_at_hit_time, _c, _d = survival_prob_from_smeared_cone(
-                        theta=ckv_theta,
-                        num_phi=num_phi_samples,
-                        rot_costheta=pdir_costheta,
-                        rot_sintheta=pdir_sintheta,
-                        rot_cosphi=pdir_cosdeltaphi,
-                        rot_sinphi=pdir_sindeltaphi,
-                        directional_survival_prob=(
-                            table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                        ),
-                        num_costheta_bins=n_costhetadir_bins,
-                        num_deltaphi_bins=n_deltaphidir_bins,
-                        random_delta_thetas=random_delta_thetas
-                    )
-                else:
-                    this_photons_at_hit_time, _c, _d = survival_prob_from_cone(
-                        costheta=ckv_costheta,
-                        sintheta=ckv_sintheta,
-                        num_phi=num_phi_samples,
-                        rot_costheta=pdir_costheta,
-                        rot_sintheta=pdir_sintheta,
-                        rot_cosphi=pdir_cosdeltaphi,
-                        rot_sinphi=pdir_sindeltaphi,
-                        directional_survival_prob=(
-                            table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                        ),
-                        num_costheta_bins=n_costhetadir_bins,
-                        num_deltaphi_bins=n_deltaphidir_bins,
-                    )
-                #print('this_photons_at_hit_time={}'.format(this_photons_at_hit_time))
+                if table_kind == TBL_KIND_CLSIM:
+                    if ckv_sigma_deg > 0:
+                        this_photons_at_hit_time, _c, _d = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
+                            theta=ckv_theta,
+                            num_phi=num_phi_samples,
+                            rot_costheta=pdir_costheta,
+                            rot_sintheta=pdir_sintheta,
+                            rot_cosphi=pdir_cosdeltaphi,
+                            rot_sinphi=pdir_sindeltaphi,
+                            directional_survival_prob=(
+                                table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                            ),
+                            num_costheta_bins=n_costhetadir_bins,
+                            num_deltaphi_bins=n_deltaphidir_bins,
+                            random_delta_thetas=random_delta_thetas
+                        )
+                    else:
+                        this_photons_at_hit_time, _c, _d = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
+                            costheta=ckv_costheta,
+                            sintheta=ckv_sintheta,
+                            num_phi=num_phi_samples,
+                            rot_costheta=pdir_costheta,
+                            rot_sintheta=pdir_sintheta,
+                            rot_cosphi=pdir_cosdeltaphi,
+                            rot_sinphi=pdir_sindeltaphi,
+                            directional_survival_prob=(
+                                table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                            ),
+                            num_costheta_bins=n_costhetadir_bins,
+                            num_deltaphi_bins=n_deltaphidir_bins,
+                        )
+                    #print('this_photons_at_hit_time={}'.format(this_photons_at_hit_time))
+                elif table_kind == TBL_KIND_CKV:
+                    if new_r_ct_ctd_or_dpd_bin or new_t_bin:
+                        this_photons_at_hit_time = table[r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+
             elif pdir_r == 1.0: # line emitter
                 raise NotImplementedError('Line emitter not handled.')
             else: # Gaussian emitter
@@ -1043,14 +1182,8 @@ def generate_pexp_5d_function(
             #print('photons_at_hit_time={}'.format(photons_at_hit_time))
             #print('XX FINISHED LOOP')
 
-        photons_at_all_times = (
-            quantum_efficiency * photons_at_all_times
-            + noise_rate_hz * time_window * 1e-9
-        )
-        photons_at_hit_time = (
-            quantum_efficiency * photons_at_hit_time
-            + noise_rate_hz * table_dt * 1e-9
-        )
+        photons_at_all_times = quantum_efficiency * photons_at_all_times + noise_rate_hz * time_window * 1e-9
+        photons_at_hit_time = quantum_efficiency * photons_at_hit_time + noise_rate_hz * table_dt * 1e-9
 
         return photons_at_all_times, photons_at_hit_time
 
@@ -1214,6 +1347,237 @@ def pexp_xyz(pinfo_gen, x_min, y_min, z_min, nx, ny, nz, binwidth,
     return expected_photon_count
 
 
+class CKVTables(object):
+    """
+    Class to interact with and obtain photon survival probabilities from a set
+    of Retro 5D Cherenkov tables.
+
+    Parameters
+    ----------
+    geom : shape-(n_strings, n_doms, 3) array
+        x, y, z coordinates of all DOMs, in meters relative to the IceCube
+        coordinate system
+
+    rde : shape-(n_strings, n_doms) array
+        Relative DOM efficiencies (this accounts for quantum efficiency). Any
+        DOMs with either 0 or NaN rde will be disabled and return 0's for
+        expected photon counts.
+
+    noise_rate_hz : shape-(n_strings, n_doms) array
+        Noise rate for each DOM, in Hz.
+
+    use_directionality : bool
+        Enable or disable directionality when computing expected photons at
+        the DOMs
+
+    norm_version : string
+        (Temporary) Which version of the norm to use. Only for experimenting,
+        and will be removed once we figure the norm out.
+
+    """
+    def __init__(
+            self, geom, rde, noise_rate_hz, use_directionality, norm_version
+        ):
+        assert len(geom.shape) == 3
+        self.geom = geom
+        self.use_directionality = use_directionality
+        self.norm_version = norm_version
+
+        zero_mask = rde == 0
+        nan_mask = np.isnan(rde)
+        inf_mask = np.isinf(rde)
+        num_zero = np.count_nonzero(zero_mask)
+        num_nan = np.count_nonzero(nan_mask)
+        num_inf = np.count_nonzero(inf_mask)
+
+        if num_nan or num_inf or num_zero:
+            print(
+                "WARNING: RDE is zero for {} DOMs, NaN for {} DOMs and +/-inf"
+                " for {} DOMs.\n"
+                "These DOMs will be disabled and return 0's forexpected photon"
+                " computations."
+                .format(num_zero, num_nan, num_inf)
+            )
+        mask = zero_mask | nan_mask | inf_mask
+
+        self.operational_doms = ~mask
+        self.rde = np.ma.masked_where(mask, rde)
+        self.quantum_efficiency = 0.25 * self.rde
+        self.noise_rate_hz = np.ma.masked_where(mask, noise_rate_hz)
+
+        self.tables = {}
+        self.string_aggregation = None
+        self.depth_aggregation = None
+        self.pexp_func = None
+        self.binning_info = None
+
+    def load_table(
+            self, fpath, string, dom, step_length, angular_acceptance_fract,
+            mmap
+        ):
+        """Load a table into the set of tables.
+
+        Parameters
+        ----------
+        fpath : string
+            Path to the directory containing the table's .npy files.
+
+        string : int in [1, 86] or str in {'ic', 'dc', or 'all'}
+
+        dom : int in [1, 60] or str == 'all'
+
+        step_length : float > 0
+            The stepLength parameter (in meters) used in CLSim tabulator code
+            for tabulating a single photon as it travels. This is a hard-coded
+            paramter set to 1 meter in the trunk version of the code, but it's
+            something we might play with to optimize table generation speed, so
+            just be warned that this _can_ change.
+
+        angular_acceptance_fract : float in (0, 1]
+            Constant normalization factor to apply to correct for the integral
+            of the angular acceptance curve used in the simulation that
+            produced this table.
+
+        mmap : bool
+            Whether to attempt to memory map the table.
+
+        """
+        single_dom_spec = True
+        if isinstance(string, basestring):
+            string = string.strip().lower()
+            assert string in ['ic', 'dc', 'all']
+            agg_mode = 'all' if string == 'all' else 'subdetector'
+            if self.string_aggregation is None:
+                self.string_aggregation = agg_mode
+            assert agg_mode == self.string_aggregation
+            single_dom_spec = False
+        else:
+            if self.string_aggregation is None:
+                self.string_aggregation = False
+            # `False` is ok but `None` is not ok
+            assert self.string_aggregation == False # pylint: disable=singleton-comparison
+            assert 1 <= string <= 86
+
+        if isinstance(dom, basestring):
+            dom = dom.strip().lower()
+            assert dom == 'all'
+            if self.depth_aggregation is None:
+                self.depth_aggregation = True
+            assert self.depth_aggregation
+            single_dom_spec = False
+        else:
+            if self.depth_aggregation is None:
+                self.depth_aggregation = False
+            # `False` is ok but `None` is not ok
+            assert self.depth_aggregation == False # pylint: disable=singleton-comparison
+            assert 1 <= dom <= 60
+
+        assert step_length > 0
+        assert 0 < angular_acceptance_fract <= 1
+
+        if single_dom_spec and not self.operational_doms[string - 1, dom - 1]:
+            print(
+                'WARNING: String {}, DOM {} is not operational, skipping'
+                ' loading the corresponding table'.format(string, dom)
+            )
+            return
+
+        table = load_ckv_table(
+            fpath=fpath,
+            step_length=step_length,
+            mmap=mmap
+        )
+
+        table['step_length'] = step_length
+        table['table_norm'] = get_table_norm(
+            angular_acceptance_fract=angular_acceptance_fract,
+            quantum_efficiency=1,
+            norm_version=self.norm_version,
+            **{k: table[k] for k in TABLE_NORM_KEYS}
+        )
+        #table['t_indep_table_norm'] = angular_acceptance_fract
+
+        pexp_5d, _ = generate_pexp_5d_function(
+            table=table,
+            table_kind=TBL_KIND_CKV,
+            use_directionality=self.use_directionality,
+            num_phi_samples=0,
+            ckv_sigma_deg=0
+        )
+
+        # NOTE: original tables have underflow (bin 0) and overflow (bin -1)
+        # bins, so whole-axis slices must exclude the first and last bins.
+        self.tables[(string, dom)] = (
+            pexp_5d,
+            #table['t_indep_ckv_table'],
+            #table['t_indep_table_norm'],
+            table['ckv_table'],
+            table['table_norm'],
+        )
+
+    #@profile
+    def get_photon_expectation(
+            self, pinfo_gen, hit_time, time_window, string, dom
+        ):
+        """
+        Parameters
+        ----------
+        pinfo_gen : shape (N, 8) numpy.ndarray
+            Info about photons generated photons by the event hypothesis.
+
+        hit_time : float, units of ns
+        time_window : float, units of ns
+        string : int in [1, 86]
+        dom : int in [1, 60]
+
+        Returns
+        -------
+        total_photon_count, expected_photon_count : float
+            See pexp_t_r_theta
+
+        """
+        # `string` and `dom` are 1-indexed but array indices are 0-indexed
+        string_idx, dom_idx = string - 1, dom - 1
+        if not self.operational_doms[string_idx, dom_idx]:
+            return 0, 0
+
+        dom_coord = self.geom[string_idx, dom_idx]
+        dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
+        dom_noise_rate_hz = self.noise_rate_hz[string_idx, dom_idx]
+
+        if self.string_aggregation == 'all':
+            string = 'all'
+        elif self.string_aggregation == 'subdetector':
+            if string < 79:
+                string = 'ic'
+            else:
+                string = 'dc'
+
+        if self.depth_aggregation:
+            dom = 'all'
+
+        #print('string =', string, 'dom =', dom)
+
+        (pexp_5d,
+         #t_indep_ckv_table,
+         #t_indep_table_norm,
+         ckv_table,
+         table_norm) = self.tables[(string, dom)]
+
+        return pexp_5d(
+            pinfo_gen=pinfo_gen,
+            hit_time=hit_time,
+            time_window=time_window,
+            dom_coord=dom_coord,
+            noise_rate_hz=dom_noise_rate_hz,
+            quantum_efficiency=dom_quantum_efficiency,
+            table=ckv_table,
+            table_norm=table_norm,
+            #t_indep_table=t_indep_ckv_table,
+            #t_indep_table_norm=t_indep_table_norm,
+        )
+
+
 class CLSimTables(object):
     """
     Class to interact with and obtain photon survival probabilities from a set
@@ -1234,7 +1598,7 @@ class CLSimTables(object):
         Noise rate for each DOM, in Hz.
 
     use_directionality : bool
-        Enable or disable direcationality when computing expected photons at
+        Enable or disable directionality when computing expected photons at
         the DOMs
 
     num_phi_samples : int > 0
@@ -1325,7 +1689,6 @@ class CLSimTables(object):
             Retro npy-files-in-a-dir tables).
 
         """
-        subdet = None
         single_dom_spec = True
         if isinstance(string, basestring):
             string = string.strip().lower()
@@ -1334,7 +1697,6 @@ class CLSimTables(object):
             if self.string_aggregation is None:
                 self.string_aggregation = agg_mode
             assert agg_mode == self.string_aggregation
-            subdet = string
             single_dom_spec = False
         else:
             if self.string_aggregation is None:
@@ -1342,10 +1704,6 @@ class CLSimTables(object):
             # `False` is ok but `None` is not ok
             assert self.string_aggregation == False # pylint: disable=singleton-comparison
             assert 1 <= string <= 86
-            if string <= 79:
-                subdet = 'ic'
-            else:
-                subdet = 'dc'
 
         if isinstance(dom, basestring):
             dom = dom.strip().lower()
@@ -1389,6 +1747,7 @@ class CLSimTables(object):
 
         pexp_5d, _ = generate_pexp_5d_function(
             table=table,
+            table_kind=TBL_KIND_CLSIM,
             use_directionality=self.use_directionality,
             num_phi_samples=self.num_phi_samples,
             ckv_sigma_deg=self.ckv_sigma_deg
