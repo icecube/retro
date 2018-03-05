@@ -238,6 +238,8 @@ def get_table_norm(
     surf_area_at_inner_radius = inner_radius**2 * TWO_PI * costheta_bin_width
     surf_area_at_midpoints = radial_midpoints**2 * TWO_PI * costheta_bin_width
 
+    bin_vols = np.abs(retro.spherical_volume(rmin=inner_edges, rmax=outer_edges, dcostheta=-costheta_bin_width, dphi=TWO_PI))
+
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = constant_part * np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
     assert table_step_length_norm.shape == (counts_per_r.size, counts_per_t.size)
@@ -247,6 +249,10 @@ def get_table_norm(
         #radial_norm = 1 / surf_area_at_inner_radius
 
         # Shape of the radial norm is 1D: (n_r_bins,)
+        table_norm = table_step_length_norm * radial_norm[:, np.newaxis]
+
+    elif norm_version == 'binvol':
+        radial_norm = 1 / bin_vols
         table_norm = table_step_length_norm * radial_norm[:, np.newaxis]
 
     # copied norm from Philipp / generate_t_r_theta_table :
@@ -268,6 +274,29 @@ def get_table_norm(
                 )
             )
         )
+
+    elif norm_version == 'wtf':
+        not_really_volumes = surf_area_at_midpoints * (outer_edges - inner_edges)
+        not_really_volumes *= costheta_bin_width
+
+        table_norm = np.outer(
+            # NOTE: pi factor needed to get agreement with old code (why?);
+            # 4 is needed for new clsim tables (why?)
+            4 / not_really_volumes,
+            np.full(
+                shape=(len(t_bin_edges) - 1,),
+                fill_value=(
+                    1
+                    / n_photons
+                    / (retro.SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+                    / np.mean(t_bin_widths)
+                    * angular_acceptance_fract
+                    * quantum_efficiency
+                    * n_costheta_bins
+                )
+            )
+        )
+
     else:
         raise ValueError('unhandled `norm_version` "{}"'.format(norm_version))
 
@@ -365,7 +394,7 @@ def load_ckv_table(fpath, mmap, step_length=None):
     if retro.DEBUG:
         retro.wstderr('Loading table from {} ...\n'.format(fpath))
 
-    assert isdir(fpath)
+    assert isdir(fpath), fpath
     t0 = time()
     indir = fpath
 

@@ -53,9 +53,10 @@ from retro.table_readers import ( # pylint: disable=unused-import
 )
 
 
+hostname = socket.gethostname()
 run_info = OrderedDict([
     ('datetime', time.strftime('%Y-%m-%d %H:%M:%S')),
-    ('hostname', socket.gethostname())
+    ('hostname', hostname)
 ])
 
 
@@ -63,7 +64,7 @@ retro.DEBUG = 0
 SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-CODE_TO_TEST = 'ckv_tables_pdenorm_dt1.0'
+CODE_TO_TEST = 'ckv_tables_avgsurfareanorm_dt1.0'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
@@ -141,8 +142,7 @@ run_info['sim'] = OrderedDict([
 
 
 strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46]
-
-doms = list(range(25, 60+1))
+doms = list(range(1, 60+1))
 loaded_strings_doms = list(product(strings, doms))
 
 hit_times = np.linspace(0, 2000, 201)
@@ -194,10 +194,9 @@ elif 'clsim_tables' in CODE_TO_TEST:
     use_directionality = False
     num_phi_samples = 1
     ckv_sigma_deg = 0
-    norm_version = 'pde'
 
     try:
-        norm_version = re.findall(r'(pde|avgsurfarea)norm', CODE_TO_TEST)[0]
+        norm_version = re.findall(r'_([a-zA-Z0-9-]+)norm', CODE_TO_TEST)[0]
     except (ValueError, IndexError):
         pass
 
@@ -233,13 +232,11 @@ elif 'clsim_tables' in CODE_TO_TEST:
         norm_version=norm_version
     )
 
-
     run_info['tables_class'] = 'CLSimTables'
     run_info['use_directionality'] = use_directionality
     run_info['num_phi_samples'] = num_phi_samples
     run_info['ckv_sigma_deg'] = ckv_sigma_deg
     run_info['norm_version'] = norm_version
-
 
     if 'single_table' in CODE_TO_TEST:
         print('Loading single table for all DOMs...')
@@ -299,9 +296,8 @@ elif 'clsim_tables' in CODE_TO_TEST:
         run_info['tables'] = tables
 
 elif 'ckv_tables' in CODE_TO_TEST:
-    norm_version = 'pde'
     try:
-        norm_version = re.findall(r'(pde|avgsurfarea)norm', CODE_TO_TEST)[0]
+        norm_version = re.findall(r'_([a-zA-Z0-9-]+)norm', CODE_TO_TEST)[0]
     except (ValueError, IndexError):
         pass
 
@@ -328,13 +324,17 @@ elif 'ckv_tables' in CODE_TO_TEST:
     loaded_strings_doms = []
     for string, dom in product(('dc', 'ic'), doms):
         if string == 'ic':
-            subdet_strings = list(range(79))
+            subdet_strings = list(range(1, 79))
         elif string == 'dc':
             subdet_strings = list(range(79, 86 + 1))
 
         depth_idx = dom - 1
+        if hostname == 'luzern':
+            base = '/fastio2/icecube/retro/tables'
+        elif hostname in ['schwyz', 'uri', 'unterwalden']:
+            base = '/data/icecube/retro_tables/large_5d_notilt_combined'
         table_path = join(
-            '/data/icecube/retro_tables/large_5d_notilt_combined',
+            base,
             'large_5d_notilt_string_{:s}_depth_{:d}'.format(string, depth_idx)
         )
 
@@ -347,7 +347,7 @@ elif 'ckv_tables' in CODE_TO_TEST:
                 angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
                 mmap=MMAP
             )
-        except ValueError as e:
+        except (AssertionError, ValueError) as e:
             #print('Could not load table for ({}, {}), skipping.'
             #      .format(string, dom))
             print(e)
@@ -366,6 +366,10 @@ elif 'ckv_tables' in CODE_TO_TEST:
 
 else:
     raise ValueError(CODE_TO_TEST)
+
+# Sort loaded_strings_doms first by subdet (dc then ic); then by depth index
+# (descending index); then by string (ascending index)
+loaded_strings_doms.sort(key=lambda sd: (sd[0] < 79, -sd[1], sd[0]))
 
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
@@ -411,12 +415,8 @@ print(msg)
 print('='*len(msg) + '\n')
 
 
-#unique_strings = sorted(set(sd[0] for sd in loaded_strings_doms))
-#unique_doms = sorted(set(sd[1] for sd in loaded_strings_doms))
-#print('Getting expectations for {} strings: {}'.format(len(unique_strings), unique_strings))
-#print('  ... and {} DOMs: {}'.format(len(unique_doms), unique_doms))
+print('Getting expectations for {} loaded DOMs: {}'.format(len(loaded_strings_doms), loaded_strings_doms))
 t0 = time.time()
-
 
 
 results = OrderedDict()
@@ -428,7 +428,7 @@ hypo_count = 0
 total_p = 0
 prev_string = -1
 n_source_points = pinfo_gen.shape[0]
-loaded_strings_doms.sort(key=lambda sd: (sd[1], sd[0]))
+
 #for string, dom in product(unique_strings, unique_doms):
 for string, dom in loaded_strings_doms:
     #if string != prev_string:
@@ -473,7 +473,7 @@ for string, dom in loaded_strings_doms:
         plt.plot(sample_hit_times, pexp_at_hit_times, label='Retro')
     tot_clsim = 0.0
     try:
-        fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][string][dom])
+        fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][(string, dom)])
         tot_clsim = np.sum(fwd_sim_histo)
         if MAKE_PLOTS:
             plt.plot(sample_hit_times, fwd_sim_histo, label='CLSim fwd sim')

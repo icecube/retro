@@ -92,6 +92,8 @@ def plot_run_info(
 
             if 'results' in fwd_hists:
                 fwd_hists = fwd_hists['results']
+            else:
+                raise ValueError('Could not find key "results" in fwd hists!')
 
     if not isdir(outdir):
         makedirs(outdir)
@@ -162,8 +164,8 @@ def plot_run_info(
         xmax = -np.inf
         ref_y = None
         if fwd_hists:
-            if string in fwd_hists and dom in fwd_hists[string]:
-                y = fwd_hists[string][dom]
+            if (string, dom) in fwd_hists:
+                y = fwd_hists[(string, dom)]
                 y = np.array([y[0]] + y.tolist())
                 nonzero_mask = y != 0 #~np.isclose(y, 0)
                 if np.any(nonzero_mask):
@@ -180,13 +182,14 @@ def plot_run_info(
             ax.step(
                 fwd_hists_binning, y,
                 lw=1,
-                #label='Forward sim',
+                label='Forward sim',
                 clip_on=True,
-                color='C0'
+                #color='C0'
             )
 
         colors = ['C%d' % i for i in range(1, 10)]
         linestyles = ['-', '--']
+        linewidths = [5, 3, 2, 1]
 
         for plt_i, (label, run_info) in enumerate(zip(labels, run_infos)):
             results = run_info['results']
@@ -227,10 +230,11 @@ def plot_run_info(
                 linestyle = None
 
             ax.plot(
-                SAMPLE_HIT_TIMES, y,
+                SAMPLE_HIT_TIMES, y/1.2,
                 label=custom_label,
                 color=color,
                 linestyle=linestyle,
+                linewidth=linewidths[plt_i],
                 clip_on=True
             )
 
