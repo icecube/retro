@@ -193,13 +193,15 @@ def get_cone_map(
 
     phi_step = TWO_PI / float(num_phi)
 
+    assert axis_costheta.shape == axis_sintheta.shape == axis_cosphi.shape == axis_sinphi.shape
+
     for phi_idx in range(num_phi):
         p_phi = phi_idx * phi_step
         sin_p_phi = math.sin(p_phi)
         cos_p_phi = math.cos(p_phi)
 
-        for ax_ct, ax_st, ax_cp, ax_sp in zip(axis_costheta.flat, axis_sintheta.flat,
-                                              axis_cosphi.flat, axis_sinphi.flat):
+        for ax_ct, ax_st, ax_cp, ax_sp in zip(np.nditer(axis_costheta), np.nditer(axis_sintheta),
+                                              np.nditer(axis_cosphi), np.nditer(axis_sinphi)):
             counts_total += 1
 
             q_costheta = (-sintheta * ax_st * cos_p_phi) + (costheta * ax_ct)
@@ -231,8 +233,10 @@ def get_cone_map(
 
     cnt_tot = np.float64(counts_total)
     weights = np.array([np.float64(c) / cnt_tot for c in counts], dtype=np.float32)
+    costheta_indices = np.array([i[0] for i in bin_indices], dtype=np.uint32)
+    deltaphi_indices = np.array([i[1] for i in bin_indices], dtype=np.uint32)
 
-    return bin_indices, weights
+    return costheta_indices, deltaphi_indices, weights
 
 
 @numba_jit(parallel=False, nogil=True, cache=True) #**DFLT_NUMBA_JIT_KWARGS)
@@ -273,8 +277,6 @@ def convolve_table(
         simulated).
 
     """
-    #n_r = len(r_bin_edges) - 1
-    #n_t = len(t_bin_edges) - 1
     n_ct = len(ct_bin_edges) - 1
     n_ctdir = len(ctdir_bin_edges) - 1
     n_dpdir = len(dpdir_bin_edges) - 1
@@ -304,12 +306,8 @@ def convolve_table(
     cdpd_samples = np.empty(shape=samples_shape, dtype=np.float32)
     sdpd_samples = np.empty(shape=samples_shape, dtype=np.float32)
 
-    src_t_subtbl = np.empty(shape=(n_ctdir, n_dpdir), dtype=np.float32)
-
     # Max distance from the DOM light could be, for each time bin
     tbin_max_dist = [t*SPEED_OF_LIGHT_M_PER_NS/n_phase for t in np.nditer(t_bin_edges[1:])]
-
-    noncausal_bins = 0
 
     for ctdir_idx in range(n_ctdir):
         ctd0 = ctdir_min_samp + ctdir_idx*ctdir_bw
@@ -331,7 +329,7 @@ def convolve_table(
                     cdpd_samples[ctdir_subidx, dpdir_subidx] = cdpd_samp
                     sdpd_samples[ctdir_subidx, dpdir_subidx] = sdpd_samp
 
-            src_dir_indices, weights = get_cone_map(
+            ctd_idxs, dpd_idxs, weights = get_cone_map(
                 costheta=cos_ckv,
                 sintheta=sin_ckv,
                 num_phi=num_cone_samples,
@@ -342,31 +340,23 @@ def convolve_table(
                 num_costheta_bins=n_ctdir,
                 num_deltaphi_bins=n_dpdir
             )
+            assert len(ctd_idxs) == len(dpd_idxs) == len(weights)
 
-            #for r_idx in range(n_r):
             for r_idx, r_lower in enumerate(np.nditer(r_bin_edges[:-1])):
-                #for t_idx in range(n_t):
                 for t_idx, max_dist in enumerate(tbin_max_dist):
-                    if r_lower > max_dist:
-                        causal = True
-                        noncausal_bins += 1
-                        #print('r_lower ({}) < max_dist {})'.format(r_lower, max_dist))
-                    else:
-                        causal = True
-
+                    causal = r_lower <= max_dist
                     for ct_idx in range(n_ct):
+                        avg = 0.0
                         if causal:
-                            # Apply the mask and weights
-                            src_t_subtbl[:] = src[r_idx, ct_idx, t_idx, :, :]
-                            avg = 0.0
-                            for src_dir_idx, weight in zip(src_dir_indices, weights):
-                                avg += weight * src_t_subtbl[src_dir_idx]
-                        else:
-                            avg = 0.0
+                            # Apply the weights to the corresponding entries
+                            for ctd_idx, dpd_idx, weight in zip(ctd_idxs, dpd_idxs, weights):
+                                avg += weight * src[r_idx, ct_idx, t_idx, ctd_idx, dpd_idx]
+                            #avg = np.sum(
+                            #    weights *
+                            #    src[r_idx, ct_idx, t_idx, ctd_idxs, dpd_idxs]
+                            #)
 
                         dst[r_idx, ct_idx, t_idx, ctdir_idx, dpdir_idx] = avg
-
-    print('Non-causal bins:', noncausal_bins)
 
 
 @numba_jit(parallel=False, nogil=False, cache=True) #**DFLT_NUMBA_JIT_KWARGS)

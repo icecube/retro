@@ -50,7 +50,8 @@ __all__ = ['generate_ckv_table']
 # TODO: allow different directional binning in output table
 
 def generate_ckv_table(
-        table, beta, oversample, num_cone_samples, outdir=None, mmap=True
+        table, beta, oversample, num_cone_samples, outdir=None, mmap_src=True,
+        mmap_dst=False
     ):
     """
     Parameters
@@ -85,16 +86,19 @@ def generate_ckv_table(
         ValueError is raised.
         npy-file-directory will be placed.
 
-    mmap : bool, optional
+    mmap_src : bool, optional
         Whether to (attempt to) memory map the source `table` (if `table` is a
         string pointing to the file/directory). Default is `True`, as tables
         can easily exceed the memory capacity of a machine.
+
+    mmap_dst : bool, optional
+        Whether to memory map the destination `ckv_table`.
 
     """
     input_filename = None
     if isinstance(table, basestring):
         input_filename = expanduser(expandvars(table))
-        table = load_clsim_table_minimal(input_filename, mmap=mmap)
+        table = load_clsim_table_minimal(input_filename, mmap=mmap_src)
 
     if input_filename is None and outdir is None:
         raise ValueError('You must provide an `outdir` if `table` is a python'
@@ -140,17 +144,21 @@ def generate_ckv_table(
     ckv_table_fpath = join(outdir, 'ckv_table.npy')
     retro.mkdir(outdir)
 
-    # Allocate memory-mapped file
-    ckv_table = np.lib.format.open_memmap(
-        filename=ckv_table_fpath,
-        mode='w+',
-        dtype=np.float32,
-        shape=table.shape
-    )
+    if mmap_dst:
+        # Allocate memory-mapped file
+        ckv_table = np.lib.format.open_memmap(
+            filename=ckv_table_fpath,
+            mode='w+',
+            dtype=np.float32,
+            shape=table.shape
+        )
+    else:
+        ckv_table = np.empty(shape=table.shape, dtype=np.float32)
+
     try:
         convolve_table(
             src=table,
-            dst=np.float32(ckv_table),
+            dst=ckv_table,
             cos_ckv=np.float32(cos_ckv),
             sin_ckv=np.float32(sin_ckv),
             r_bin_edges=r_bin_edges.astype(np.float32),
@@ -164,8 +172,12 @@ def generate_ckv_table(
         )
     except:
         del ckv_table
-        remove(ckv_table_fpath)
+        if mmap_dst:
+            remove(ckv_table_fpath)
         raise
+
+    if not mmap_dst:
+        np.save(ckv_table_fpath, ckv_table)
 
     return ckv_table
 
