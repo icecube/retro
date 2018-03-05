@@ -30,7 +30,6 @@ from copy import deepcopy
 import numpy as np
 
 
-# TODO: use or get rid of limits?
 class DiscreteHypo(object):
     """Discretely-sampled event hypothesis.
 
@@ -40,8 +39,8 @@ class DiscreteHypo(object):
     Parameters
     ----------
     hypo_kernels : callable or iterable thereof
-        Each kernel must accept at least arguments `hypo_params` and `limits`.
-        Any further arguments must be keyword arguments stored (in order of the
+        Each kernel must accept at least the argument `hypo_params`. Any
+        further arguments must be keyword arguments stored (in order of the
         kernels) in `kernel_kwargs`, and will be passed via **kwargs to the
         respective kernel function.
 
@@ -50,15 +49,8 @@ class DiscreteHypo(object):
         kernel via **kwargs. An item in the iterable can be None for a kernel
         function that takes no additional kwargs.
 
-    limits : None or TimeCart3DCoord of 2-tuples
-        Rectangular limits in time and space outside of which each hypothesis
-        should produce no samples. This can speed up likelihood calculations by
-        avoiding samples of light sources so far outside the detector that
-        there is negligible probability that the produced light will be
-        detected.
-
     """
-    def __init__(self, hypo_kernels, kernel_kwargs=None, limits=None):
+    def __init__(self, hypo_kernels, kernel_kwargs=None):
         # If a single kernel is passed, make it into a singleton list
         if callable(hypo_kernels):
             hypo_kernels = [hypo_kernels]
@@ -74,15 +66,8 @@ class DiscreteHypo(object):
         # Translate each None into an empty dict
         kernel_kwargs = [{} if kw is None else kw for kw in kernel_kwargs]
 
-        # If provided, put `limits` into each kwarg dict to pass on to kernels
-        if limits is not None:
-            for kw in kernel_kwargs:
-                if 'limits' not in kw:
-                    kw['limits'] = limits
-
         self.hypo_kernels = hypo_kernels
         self.kernel_kwargs = kernel_kwargs
-        self.limits = limits
 
     def get_pinfo_gen(self, hypo_params):
         """Evaluate the discrete hypothesis (all hypo kernels) given particular

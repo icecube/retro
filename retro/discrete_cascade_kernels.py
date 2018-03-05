@@ -36,10 +36,11 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import CASCADE_PHOTONS_PER_GEV
+from retro import CASCADE_PHOTONS_PER_GEV, numba_jit, DFLT_NUMBA_JIT_KWARGS
 
 
-def point_cascade(hypo_params, limits=None):
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def point_cascade(hypo_params):
     """Point-like cascade.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -47,20 +48,23 @@ def point_cascade(hypo_params, limits=None):
     Parameters
     ----------
     hypo_params : HypoParams8D or HypoParams10D
-    limits
 
     Returns
     -------
     pinfo_gen
 
     """
-    pinfo_gen = np.empty((1, 8), dtype=np.float64)
-    pinfo_gen[0, 0] = hypo_params.t
-    pinfo_gen[0, 1] = hypo_params.x
-    pinfo_gen[0, 2] = hypo_params.y
-    pinfo_gen[0, 3] = hypo_params.z
-    pinfo_gen[0, 4] = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy
-    pinfo_gen[0, 5] = 0
-    pinfo_gen[0, 6] = 0
-    pinfo_gen[0, 7] = 0
+    pinfo_gen = np.array(
+        [
+            hypo_params.t,
+            hypo_params.x,
+            hypo_params.y,
+            hypo_params.z,
+            CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy,
+            0.0,
+            0.0,
+            0.0
+        ],
+        dtype=np.float32
+    ).reshape((1, 8))
     return pinfo_gen

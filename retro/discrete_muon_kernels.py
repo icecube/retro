@@ -40,7 +40,7 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-                   TRACK_PHOTONS_PER_M)
+                   TRACK_PHOTONS_PER_M, numba_jit, DFLT_NUMBA_JIT_KWARGS)
 
 
 ALL_REALS = (-np.inf, np.inf)
@@ -50,6 +50,7 @@ COS_CKV = 0.764540803152
 
 # Create spline (for table_energy_loss_muon)
 with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
+    # pylint: disable=invalid-name
     reader = csv.reader(csvfile)
     rows = []
     for row in reader:
@@ -67,8 +68,8 @@ with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'),
 SPLINE = interpolate.splrep(energies, stopping_power, s=0)
 
 
-# TODO: use / check limits...?
-def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def const_energy_loss_muon(hypo_params, dt=1.0):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -79,9 +80,6 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
         Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
         `.track_azimuth`, and `.track_zenith` attributes.
 
-    limits
-        NOT IMPLEMENTED
-
     dt : float
         Time step in nanoseconds
 
@@ -90,32 +88,25 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     pinfo_gen : shape (N, 8) numpy.ndarray, dtype float32
 
     """
-    #if limits is None:
-	#    limits = TimeCart3DCoord(t=ALL_REALS, x=ALL_REALS, y=ALL_REALS,
-    #                             z=ALL_REALS)
-
     track_energy = hypo_params.track_energy
 
     if track_energy == 0:
-        pinfo_gen = np.array(
-            [[hypo_params.t,
-              hypo_params.x,
-              hypo_params.y,
-              hypo_params.z,
-              0,
-              0,
-              0,
-              0]],
-            dtype=np.float32
-        )
+        pinfo_gen = np.array([
+            hypo_params.t,
+            hypo_params.x,
+            hypo_params.y,
+            hypo_params.z,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ], dtype=np.float32).reshape((1, 8))
         return pinfo_gen
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
     n_samples = int(np.floor(duration / dt))
-    first_sample_t = dt/2
-    final_sample_t = first_sample_t + (n_samples - 1) * dt
-    segment_length = 0.
+    segment_length = 0.0
     if n_samples > 0:
         segment_length = length / n_samples
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
@@ -128,15 +119,9 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
     sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
     pinfo_gen[:, 0] = hypo_params.t + sampled_dt
-    pinfo_gen[:, 1] = (
-        hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
-    )
-    pinfo_gen[:, 2] = (
-        hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
-    )
-    pinfo_gen[:, 3] = (
-        hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
-    )
+    pinfo_gen[:, 1] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 2] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    pinfo_gen[:, 3] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     pinfo_gen[:, 4] = photons_per_segment
     pinfo_gen[:, 5] = dir_x * COS_CKV
     pinfo_gen[:, 6] = dir_y * COS_CKV
@@ -145,7 +130,7 @@ def const_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     return pinfo_gen
 
 
-def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
+def table_energy_loss_muon(hypo_params, dt=1.0):
     """Discrete-time track hypothesis that calculates dE/dx as the muon travels
     using splined tabulated data.
 
@@ -156,9 +141,6 @@ def table_energy_loss_muon(hypo_params, limits=None, dt=1.0):
     hypo_params : HypoParams*
         Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
         `.track_azimuth`, and `.track_zenith` attributes.
-
-    limits
-        NOT IMPLEMENTED
 
     dt : float
         Time step in nanoseconds
