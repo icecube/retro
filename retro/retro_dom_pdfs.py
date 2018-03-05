@@ -70,7 +70,7 @@ ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
 STEP_LENGTH = 1.0
 MMAP = True
 TIME_WINDOW = 2e3 # ns
-MAKE_PLOTS = True
+MAKE_PLOTS = False
 
 outdir = retro.expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 retro.mkdir(outdir)
@@ -347,9 +347,11 @@ elif 'ckv_tables' in CODE_TO_TEST:
                 angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
                 mmap=MMAP
             )
-        except ValueError:
-            print('Could not load table for ({}, {}), skipping.'
-                  .format(string, dom))
+        except ValueError as e:
+            #print('Could not load table for ({}, {}), skipping.'
+            #      .format(string, dom))
+            print(e)
+            #print('')
         else:
             loaded_strings_doms.extend([(s, dom) for s in subdet_strings if s in strings])
 
@@ -408,10 +410,11 @@ print('\n' + '='*len(msg))
 print(msg)
 print('='*len(msg) + '\n')
 
-unique_strings = sorted(set(sd[0] for sd in loaded_strings_doms))
-unique_doms = sorted(set(sd[1] for sd in loaded_strings_doms))
-print('Getting expectations for {} strings: {}'.format(len(unique_strings), unique_strings))
-print('  ... and {} DOMs: {}'.format(len(unique_doms), unique_doms))
+
+#unique_strings = sorted(set(sd[0] for sd in loaded_strings_doms))
+#unique_doms = sorted(set(sd[1] for sd in loaded_strings_doms))
+#print('Getting expectations for {} strings: {}'.format(len(unique_strings), unique_strings))
+#print('  ... and {} DOMs: {}'.format(len(unique_doms), unique_doms))
 t0 = time.time()
 
 
@@ -425,8 +428,9 @@ hypo_count = 0
 total_p = 0
 prev_string = -1
 n_source_points = pinfo_gen.shape[0]
+loaded_strings_doms.sort(key=lambda sd: (sd[1], sd[0]))
 #for string, dom in product(unique_strings, unique_doms):
-for dom, string in product(unique_doms, unique_strings):
+for string, dom in loaded_strings_doms:
     #if string != prev_string:
     #    prev_string = string
     #    print('String {} ({} DOMs)'.format(string, len(doms)))
@@ -519,10 +523,7 @@ for dom, string in product(unique_doms, unique_strings):
         print('Saving "{}"'.format(fpath))
         plt.savefig(fpath)
 
-print(
-    'total of {} unique DOMs'
-    .format(len(list(product(unique_doms, unique_strings))))
-)
+print('total of {} unique DOMs'.format(len(loaded_strings_doms)))
 
 run_info['results'] = results
 
