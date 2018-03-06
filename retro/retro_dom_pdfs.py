@@ -97,11 +97,9 @@ MAKE_PLOTS = False
 outdir = retro.expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 retro.mkdir(outdir)
 
-
 run_info['sim_to_test'] = SIM_TO_TEST
 run_info['gcd_file'] = GCD_FILE
 run_info['gcd_file_md5'] = hashlib.md5(open(GCD_FILE, 'rb').read()).hexdigest()
-
 
 # pylint: disable=line-too-long
 SIMULATIONS = dict(
@@ -139,7 +137,6 @@ SIMULATIONS = dict(
     )
 )
 
-
 sim = SIMULATIONS[SIM_TO_TEST]
 
 sim['fwd_sim_histo_file'] = join(fwd_sim_dir, sim['fwd_sim_histo_file'])
@@ -170,13 +167,11 @@ hit_times = np.linspace(0, 2000, 201)
 
 sample_hit_times = 0.5 * (hit_times[:-1] + hit_times[1:])
 
-
 run_info['strings'] = strings
 run_info['doms'] = doms
 run_info['hit_times'] = hit_times
 run_info['sample_hit_times'] = sample_hit_times
 run_info['time_window'] = TIME_WINDOW
-
 
 t_start = time.time()
 
@@ -435,27 +430,21 @@ discrete_hypo = DiscreteHypo(
 )
 pinfo_gen = discrete_hypo.get_pinfo_gen(sim['mc_true_params'])
 
-
 run_info['hypo_class'] = 'DiscreteHypo'
 run_info['hypo_kernels'] = ['point_cascade', muon_kernel_label]
 run_info['kernel_kwargs'] = kernel_kwargs
 
-
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
-
 
 msg = 'Running test "{}" on "{}" sim'.format(CODE_TO_TEST, SIM_TO_TEST)
 print('\n' + '='*len(msg))
 print(msg)
 print('='*len(msg) + '\n')
 
-
 print('Getting expectations for {} loaded DOMs: {}'.format(len(loaded_strings_doms), loaded_strings_doms))
 t0 = time.time()
 
-
 results = OrderedDict()
-
 
 pexp_timings = []
 pgen_count = 0
@@ -562,10 +551,8 @@ print('total of {} unique DOMs'.format(len(loaded_strings_doms)))
 
 run_info['results'] = results
 
-
 run_info_fpath = retro.expand(join(outdir, 'run_info.pkl'))
 pickle.dump(run_info, open(run_info_fpath, 'wb'), pickle.HIGHEST_PROTOCOL)
-
 
 sys.stdout.write('\n\n')
 print(' ', 'Time to compute and plot:')

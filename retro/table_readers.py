@@ -1853,8 +1853,8 @@ class CLSimTables(object):
             quantum_efficiency=dom_quantum_efficiency,
             table=table,
             table_norm=table_norm,
-            t_indep_table=t_indep_table,
-            t_indep_table_norm=t_indep_table_norm,
+            #t_indep_table=t_indep_table,
+            #t_indep_table_norm=t_indep_table_norm,
         )
 
 
