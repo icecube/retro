@@ -108,7 +108,8 @@ def open_table_file(fpath):
 
     """
     fpath = abspath(retro.expand(fpath))
-    assert isfile(fpath)
+    if not isfile(fpath):
+        raise ValueError('Not a file: `fpath`="{}"'.format(fpath))
     _, ext = splitext(fpath)
     ext = ext.lstrip('.').lower()
     if ext in retro.ZSTD_EXTENSIONS:
@@ -505,6 +506,9 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
         if retro.DEBUG:
             retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
         return table
+
+    if not isfile(fpath):
+        raise ValueError('Table does not exist at path "{}"'.format(fpath))
 
     if mmap:
         print('WARNING: Cannot memory map a fits or compressed fits file;'

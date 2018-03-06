@@ -28,7 +28,7 @@ from collections import OrderedDict
 import cPickle as pickle
 import hashlib
 from itertools import product
-from os.path import abspath, dirname, join
+from os.path import abspath, dirname, isdir, isfile, join
 import re
 import socket
 import sys
@@ -59,12 +59,33 @@ run_info = OrderedDict([
     ('hostname', hostname)
 ])
 
+if hostname in ['schwyz', 'uri', 'unterwalden', 'luzern']:
+    fwd_sim_dir = '/data/icecube/retro/sims/'
+    dom_time_polar_tables_basedir = '/data/icecube/retro_tables/full1000'
+    single_table_path = '/data/icecube/retro_tables/large_5d_notilt_string_dc_depth_0-59'
+    orig_table_basedir = None
+    combined_tables_basedir = '/data/icecube/retro_tables/large_5d_notilt_combined'
+    if hostname == 'luzern':
+        ckv_tables_basedir = '/fastio2/icecube/retro/tables'
+    elif hostname in ['schwyz', 'uri', 'unterwalden']:
+        ckv_tables_basedir = '/data/icecube/retro_tables/large_5d_notilt_combined'
+elif 'aci.ics.psu.edu' in hostname:
+    fwd_sim_dir = '/gpfs/group/dfc13/default/sim/retro'
+    dom_time_polar_tables_basedir = None
+    single_table_path = None
+    orig_table_basedir = None
+    combined_tables_basedir = '/gpfs/scratch/jll1062/retro_tables'
+    ckv_tables_basedir = None
+else:
+    raise ValueError('Unhandled HOSTNAME="{}" for using CLSimTables'
+                     .format(hostname))
+
 
 retro.DEBUG = 0
 SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
-#CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-CODE_TO_TEST = 'ckv_tables_avgsurfareanorm_dt1.0'
+CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0'
+#CODE_TO_TEST = 'ckv_tables_avgsurfareanorm_dt1.0'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
@@ -90,7 +111,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl'
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl'
     ),
     cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -98,7 +119,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=0,
             track_energy=0, cascade_energy=20
         ),
-        fwd_sim_histo_file='/data/icecube/retro/sims/cascade_step4_SplitUncleanedInIcePulses.pkl'
+        fwd_sim_histo_file='cascade_step4_SplitUncleanedInIcePulses.pkl'
     ),
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -106,7 +127,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=-retro.PI,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl',
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl',
     ),
     horizontal_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -114,12 +135,14 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=0,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims100000_step1_photon_histos.pkl',
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims100000_step1_photon_histos.pkl',
     )
 )
 
 
 sim = SIMULATIONS[SIM_TO_TEST]
+
+sim['fwd_sim_histo_file'] = join(fwd_sim_dir, sim['fwd_sim_histo_file'])
 
 fwd_sim_histo_file_md5 = None
 if sim['fwd_sim_histo_file'] is not None:
@@ -133,13 +156,11 @@ if sim['fwd_sim_histo_file'] is not None:
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
     print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
-
 run_info['sim'] = OrderedDict([
     ('mc_true_params', sim['mc_true_params']._asdict()),
     ('fwd_sim_histo_file', sim['fwd_sim_histo_file']),
     ('fwd_sim_histo_file_md5', fwd_sim_histo_file_md5)
 ])
-
 
 strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46]
 doms = list(range(1, 60+1))
@@ -172,10 +193,11 @@ print(' ', np.round(time.time() - t0, 3), 'sec\n')
 t0 = time.time()
 if CODE_TO_TEST == 'dom_time_polar_tables':
     print('Instantiating DOMTimePolarTables...')
+    assert isdir(dom_time_polar_tables_basedir), str(dom_time_polar_tables_basedir)
+
     norm_version = 'pde'
-    tables_dir = '/data/icecube/retro_tables/full1000'
     retro_tables = DOMTimePolarTables(
-        tables_dir=tables_dir,
+        tables_dir=dom_time_polar_tables_basedir,
         hash_val=None,
         geom=geom,
         use_directionality=False,
@@ -184,11 +206,9 @@ if CODE_TO_TEST == 'dom_time_polar_tables':
     print('Loading tables...')
     retro_tables.load_tables()
 
-
     run_info['tables_class'] = 'DOMTimePolarTables'
-    run_info['tables_dir'] = tables_dir
+    run_info['tables_dir'] = dom_time_polar_tables_basedir
     run_info['norm_version'] = norm_version
-
 
 elif 'clsim_tables' in CODE_TO_TEST:
     use_directionality = False
@@ -240,9 +260,9 @@ elif 'clsim_tables' in CODE_TO_TEST:
 
     if 'single_table' in CODE_TO_TEST:
         print('Loading single table for all DOMs...')
-        table_path = '/fastio/justin/retro_tables/large_5d_notilt_string_dc_depth_0-59'
+        assert (isfile(single_table_path) or isdir(single_table_path)), str(single_table_path)
         retro_tables.load_table(
-            fpath=table_path,
+            fpath=single_table_path,
             string='all',
             dom='all',
             step_length=STEP_LENGTH,
@@ -253,7 +273,7 @@ elif 'clsim_tables' in CODE_TO_TEST:
         run_info['tables'] = OrderedDict([
             (('all', 'all'),
              OrderedDict([
-                 ('fpath', table_path),
+                 ('fpath', single_table_path),
                  ('step_length', STEP_LENGTH),
                  ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
                  ('mmap', MMAP)
@@ -264,38 +284,55 @@ elif 'clsim_tables' in CODE_TO_TEST:
     else:
         print('Loading {} tables...'.format(2 * len(doms)))
         tables = OrderedDict()
+        loaded_strings_doms = []
         for string, dom in product(('dc', 'ic'), doms):
             depth_idx = dom - 1
+
+            if string == 'ic':
+                subdet_strings = list(range(1, 79))
+            elif string == 'dc':
+                subdet_strings = list(range(79, 86 + 1))
+
             if 'orig' in CODE_TO_TEST:
+                assert isdir(orig_table_basedir), str(orig_table_basedir)
                 table_path = join(
-                    '/fastio/justin/retro_tables/full1000_npy',
+                    orig_table_basedir,
                     'full1000_{}{}'.format(string, depth_idx)
                 )
             else:
+                assert isdir(combined_tables_basedir), str(combined_tables_basedir)
                 table_path = join(
-                    '/data/icecube/retro_tables/large_5d_notilt_combined',
+                    combined_tables_basedir,
                     'large_5d_notilt_string_{:s}_depth_{:d}'.format(string, depth_idx)
                 )
 
-            retro_tables.load_table(
-                fpath=table_path,
-                string=string,
-                dom=dom,
-                step_length=STEP_LENGTH,
-                angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
-                mmap=MMAP
-            )
-
-            tables[(string, dom)] = OrderedDict([
-                ('fpath', table_path),
-                ('step_length', STEP_LENGTH),
-                ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
-                ('mmap', MMAP)
-            ])
+            try:
+                retro_tables.load_table(
+                    fpath=table_path,
+                    string=string,
+                    dom=dom,
+                    step_length=STEP_LENGTH,
+                    angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
+                    mmap=MMAP
+                )
+            except (AssertionError, ValueError) as err:
+                print(err)
+                tables[(string, dom)] = None
+            else:
+                loaded_strings_doms.extend(
+                    [(s, dom) for s in subdet_strings if s in strings]
+                )
+                tables[(string, dom)] = OrderedDict([
+                    ('fpath', table_path),
+                    ('step_length', STEP_LENGTH),
+                    ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
+                    ('mmap', MMAP)
+                ])
 
         run_info['tables'] = tables
 
 elif 'ckv_tables' in CODE_TO_TEST:
+    assert isdir(ckv_tables_basedir), str(ckv_tables_basedir)
     try:
         norm_version = re.findall(r'_([a-zA-Z0-9-]+)norm', CODE_TO_TEST)[0]
     except (ValueError, IndexError):
@@ -329,12 +366,8 @@ elif 'ckv_tables' in CODE_TO_TEST:
             subdet_strings = list(range(79, 86 + 1))
 
         depth_idx = dom - 1
-        if hostname == 'luzern':
-            base = '/fastio2/icecube/retro/tables'
-        elif hostname in ['schwyz', 'uri', 'unterwalden']:
-            base = '/data/icecube/retro_tables/large_5d_notilt_combined'
         table_path = join(
-            base,
+            ckv_tables_basedir,
             'large_5d_notilt_string_{:s}_depth_{:d}'.format(string, depth_idx)
         )
 
@@ -347,20 +380,22 @@ elif 'ckv_tables' in CODE_TO_TEST:
                 angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
                 mmap=MMAP
             )
-        except (AssertionError, ValueError) as e:
+        except (AssertionError, ValueError) as err:
             #print('Could not load table for ({}, {}), skipping.'
             #      .format(string, dom))
-            print(e)
+            print(err)
             #print('')
+            tables[(string, dom)] = None
         else:
-            loaded_strings_doms.extend([(s, dom) for s in subdet_strings if s in strings])
-
-        tables[(string, dom)] = OrderedDict([
-            ('fpath', table_path),
-            ('step_length', STEP_LENGTH),
-            ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
-            ('mmap', MMAP)
-        ])
+            loaded_strings_doms.extend(
+                [(s, dom) for s in subdet_strings if s in strings]
+            )
+            tables[(string, dom)] = OrderedDict([
+                ('fpath', table_path),
+                ('step_length', STEP_LENGTH),
+                ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
+                ('mmap', MMAP)
+            ])
 
     run_info['tables'] = tables
 
