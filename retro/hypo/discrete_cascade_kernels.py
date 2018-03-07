@@ -33,10 +33,11 @@ import sys
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
-from retro import CASCADE_PHOTONS_PER_GEV, numba_jit, DFLT_NUMBA_JIT_KWARGS
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
+from retro.const import CASCADE_PHOTONS_PER_GEV
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)

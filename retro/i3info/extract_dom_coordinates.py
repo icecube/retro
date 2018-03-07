@@ -6,11 +6,15 @@ Print average Z position of each layer of IceCube and, separately, DeepCore
 DOMs.
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['N_STRINGS', 'N_OMS', 'extract_dom_coordinates', 'parse_args',
-           'main']
+__all__ = '''
+    N_STRINGS
+    N_OMS
+    extract_dom_coordinates
+    parse_args
+    main
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -30,9 +34,7 @@ limitations under the License.'''
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import json
-from os import makedirs
-from os.path import (abspath, dirname, expanduser, expandvars, isdir, isfile,
-                     join)
+from os.path import abspath, dirname, expanduser, expandvars, isfile, join
 import sys
 
 import numpy as np
@@ -42,11 +44,13 @@ from icecube import dataclasses # pylint: disable=import-error, unused-import
 from icecube import dataio # pylint: disable=import-error
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
-from retro import GEOM_FILE_PROTO, GEOM_META_PROTO
-from retro import generate_geom_meta, get_file_md5
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.utils.misc import get_file_md5, mkdir
+from retro.utils.geom import (
+    GEOM_FILE_PROTO, GEOM_META_PROTO, generate_geom_meta
+)
 
 
 N_STRINGS = 86
@@ -99,10 +103,9 @@ def extract_dom_coordinates(gcd, outdir):
     if not isfile(gcd):
         raise IOError('`gcd` file does not exist at "{}"'.format(gcd))
 
-    if not isdir(outdir):
-        makedirs(outdir)
+    mkdir(outdir)
 
-    geofile = dataio.I3File(gcd)
+    geofile = dataio.I3File(gcd) # pylint: disable=no-member
     geometry = None
     while geofile.more():
         frame = geofile.pop_frame()

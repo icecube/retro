@@ -23,6 +23,22 @@ HIT_TIMES = np.linspace(0, 2000, 201)
 SAMPLE_HIT_TIMES = 0.5 * (HIT_TIMES[:-1] + HIT_TIMES[1:])
 
 
+def ks_test(a, b):
+    acs = np.cumsum(a)
+    macs = np.max(acs)
+    if macs == 0:
+        return np.nan
+    else:
+        acs /= np.max(acs)
+    bcs = np.cumsum(b)
+    mbcs = np.max(bcs)
+    if mbcs == 0:
+        return np.nan
+    else:
+        bcs /= np.max(bcs)
+    return np.max(np.abs(bcs - acs))
+
+
 def parse_args(description=__doc__):
     """Parse command line arguments"""
     parser = ArgumentParser(description=description)
@@ -52,12 +68,16 @@ def parse_args(description=__doc__):
         help='''Display style for visually showing a progression from line to
         line via a color gradient.'''
     )
+    parser.add_argument(
+        '--no-plot', action='store_true',
+        help='''Do _not_ make plots, just print summary statistics.'''
+    )
     return parser.parse_args()
 
 
 def plot_run_info(
         files, labels, outdir, fwd_hists=None, data_or_sim_label=None,
-        paired=False, gradient=False
+        paired=False, gradient=False, plot=True
     ):
     """Plot `files` using `labels` (one for each file).
 
@@ -155,9 +175,15 @@ def plot_run_info(
         params_label = '$' + r',\;'.join(params_label) + '$'
 
     maxlabellen = max(len(label) for label in labels)
-    fig, ax = plt.subplots(1, 1, figsize=(10, 8), dpi=72)
+    if plot:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8), dpi=72)
+    tots = []
+    kss = []
+    ref_tots = []
+    ref_tot = 0
     for string, dom in sorted(all_string_dom_pairs):
-        ax.clear()
+        if plot:
+            ax.clear()
         all_zeros = True
         ref_y_all_zeros = True
         xmin = np.inf
@@ -177,25 +203,30 @@ def plot_run_info(
             else:
                 y = np.zeros_like(fwd_hists_binning)
 
-            ref_y = y
+            ref_y = y - np.min(y)
+            ref_tots.append(np.ma.masked_invalid(ref_y).sum())
 
-            ax.step(
-                fwd_hists_binning, y,
-                lw=1,
-                label='Forward sim',
-                clip_on=True,
-                #color='C0'
-            )
+            if plot:
+                ax.step(
+                    fwd_hists_binning, ref_y,
+                    lw=1,
+                    label='Forward sim',
+                    clip_on=True,
+                    #color='C0'
+                )
 
         colors = ['C%d' % i for i in range(1, 10)]
         linestyles = ['-', '--']
-        linewidths = [5, 3, 2, 1]
+        linewidths = [5, 3, 2, 2, 2, 2, 2]
 
         for plt_i, (label, run_info) in enumerate(zip(labels, run_infos)):
+            if len(tots) <= plt_i:
+                tots.append([])
+                kss.append([])
             results = run_info['results']
             if (string, dom) in results:
                 y = results[(string, dom)]['pexp_at_hit_times']
-                nonzero_mask = y != 0 #~np.isclose(y, 0)
+                nonzero_mask = y != y[0] #~np.isclose(y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
                     min_mask = y >= 0.01 * y.max()
@@ -203,6 +234,15 @@ def plot_run_info(
                     xmax = max(xmax, SAMPLE_HIT_TIMES[min_mask].max())
             else:
                 y = np.zeros_like(SAMPLE_HIT_TIMES)
+
+            y -= np.min(y)
+
+            tot = np.ma.masked_invalid(y).sum() #np.sum(y) # / np.sum(ref_y[1:])
+            if tot != 0 and not np.isinf(tot) and not np.isnan(tot):
+                tots[plt_i].append(tot)
+            else:
+                tots[plt_i].append(0)
+            kss[plt_i].append(ks_test(y, ref_y[1:]))
 
             kl_div = None
             custom_label = label
@@ -229,14 +269,15 @@ def plot_run_info(
                 color = None
                 linestyle = None
 
-            ax.plot(
-                SAMPLE_HIT_TIMES, y/1.2,
-                label=custom_label,
-                color=color,
-                linestyle=linestyle,
-                linewidth=linewidths[plt_i],
-                clip_on=True
-            )
+            if plot:
+                ax.plot(
+                    SAMPLE_HIT_TIMES, y,
+                    label=custom_label,
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=linewidths[plt_i],
+                    clip_on=True
+                )
 
         if all_zeros:
             continue
@@ -245,69 +286,88 @@ def plot_run_info(
             xmin = 0
             xmax = 2000
 
-        ax.set_xlim(xmin, xmax)
-        ax.set_ylim(0, ax.get_ylim()[1])
+        if plot:
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(0, ax.get_ylim()[1])
 
-        for pos in 'bottom left top right'.split():
-            ax.spines[pos].set_visible(False)
+            for pos in 'bottom left top right'.split():
+                ax.spines[pos].set_visible(False)
 
-        ax.xaxis.set_ticks_position('none')
-        ax.yaxis.set_ticks_position('none')
+            ax.xaxis.set_ticks_position('none')
+            ax.yaxis.set_ticks_position('none')
 
-        ax.xaxis.tick_bottom()
-        ax.yaxis.tick_left()
+            ax.xaxis.tick_bottom()
+            ax.yaxis.tick_left()
 
-        #if kl_div is not None:
-        #title = ' '*6 + 'Abs diff'.ljust(8) + '  ' + 'Simulation'
-        #else:
-        title = 'Code'
+            #if kl_div is not None:
+            #title = ' '*6 + 'Abs diff'.ljust(8) + '  ' + 'Simulation'
+            #else:
+            title = 'Code'
 
-        leg = ax.legend(
-            title=title,
-            #loc='best',
-            loc='upper right',
-            #frameon=False,
-            framealpha=0.7,
-            prop=dict(family='monospace', size=12)
-        )
-        plt.setp(leg.get_title(), family='monospace', fontsize=12)
-        #if kl_div is not None:
-        #leg._legend_box.align = "left"
-        leg.get_frame().set_linewidth(0)
-        ax.set_xlabel('Time from event vertex (ns)', fontsize=14)
+            leg = ax.legend(
+                title=title,
+                #loc='best',
+                loc='upper right',
+                #frameon=False,
+                framealpha=0.7,
+                prop=dict(family='monospace', size=12)
+            )
+            plt.setp(leg.get_title(), family='monospace', fontsize=12)
+            #if kl_div is not None:
+            #leg._legend_box.align = "left"
+            leg.get_frame().set_linewidth(0)
+            ax.set_xlabel('Time from event vertex (ns)', fontsize=14)
 
-        if data_or_sim_label is not None:
-            plt.text(
-                0.5, 1.1,
-                data_or_sim_label,
+            if data_or_sim_label is not None:
+                plt.text(
+                    0.5, 1.1,
+                    data_or_sim_label,
+                    ha='center', va='bottom',
+                    transform=ax.transAxes,
+                    fontsize=16
+                )
+            if params_label is not None:
+                plt.text(
+                    0.5, 1.05,
+                    params_label,
+                    ha='center', va='bottom',
+                    transform=ax.transAxes,
+                    fontsize=12
+                )
+
+            ax.text(
+                0.5, 1.0,
+                'String {}, DOM {}'.format(string, dom),
                 ha='center', va='bottom',
                 transform=ax.transAxes,
-                fontsize=16
-            )
-        if params_label is not None:
-            plt.text(
-                0.5, 1.05,
-                params_label,
-                ha='center', va='bottom',
-                transform=ax.transAxes,
-                fontsize=12
+                fontsize=14
             )
 
-        ax.text(
-            0.5, 1.0,
-            'String {}, DOM {}'.format(string, dom),
-            ha='center', va='bottom',
-            transform=ax.transAxes,
-            fontsize=14
-        )
-
-        fbasename = 'string_{}_dom_{}'.format(string, dom)
-        fig.savefig(join(outdir, fbasename + '.png'))
-        sys.stdout.write('({}, {}) '.format(string, dom))
-        sys.stdout.flush()
+            fbasename = 'string_{}_dom_{}'.format(string, dom)
+            fig.savefig(join(outdir, fbasename + '.png'))
+            sys.stdout.write('({}, {}) '.format(string, dom))
+            sys.stdout.flush()
     sys.stdout.write('\n\n')
     sys.stdout.flush()
 
+    ref_tots = np.array(ref_tots)
+    ref_tot = np.sum(ref_tots)
+    print('{:7s} {:7s} {}'.format('KS'.ljust(7), 'Ratio'.ljust(7), 'Label'))
+    for label, ks, tot in zip(labels, kss, tots):
+        ks = np.array(ks)
+        mask = ~np.isnan(ks)
+        ks_wtd_avg = np.sum(ks[mask] * ref_tots[mask]) / np.sum(ref_tots[mask])
+        print(
+            '{:7.5f} {:7.5f} {}'
+            .format(
+                ks_wtd_avg,
+                np.sum(tot) / ref_tot,
+                label
+            )
+        )
+
 
 if __name__ == '__main__':
-    plot_run_info(**vars(parse_args()))
+    kwargs = vars(parse_args())
+    kwargs['plot'] = not kwargs.pop('no_plot')
+    plot_run_info(**kwargs)

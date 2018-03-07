@@ -84,8 +84,8 @@ else:
 retro.DEBUG = 0
 SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
-CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0'
-#CODE_TO_TEST = 'ckv_tables_avgsurfareanorm_dt1.0'
+#CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0'
+CODE_TO_TEST = 'ckv_tables_avgsurfareanorm_dt0.1'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
@@ -486,7 +486,7 @@ for string, dom in loaded_strings_doms:
     ])
 
     msg = (
-        '{:12.3f} ns ({:.2e} hypos computed, w/ total of {:.2e} source points)'
+        '{:12.0f} ns ({:.2e} hypos computed, w/ total of {:.2e} source points)'
         .format(np.round(np.sum(pexp_timings)/pgen_count * 1e9, 3), hypo_count, pgen_count)
     )
     sys.stdout.write('  (running avg time per source point per hit DOM: {})\n'.format(msg))
@@ -552,6 +552,7 @@ print('total of {} unique DOMs'.format(len(loaded_strings_doms)))
 run_info['results'] = results
 
 run_info_fpath = retro.expand(join(outdir, 'run_info.pkl'))
+print('Writing run info to "{}"'.format(run_info_fpath))
 pickle.dump(run_info, open(run_info_fpath, 'wb'), pickle.HIGHEST_PROTOCOL)
 
 sys.stdout.write('\n\n')
