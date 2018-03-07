@@ -1,48 +1,46 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, redefined-outer-name, invalid-name
 
 """
 Load retro tables into RAM, then for a given hypothesis calculate llh for an event
 """
+
 from __future__ import absolute_import, division, print_function
 
-import cPickle as pickle
-from os.path import abspath, dirname, isdir, join
-import sys
-import time
-import itertools
-from copy import deepcopy
-from collections import OrderedDict
-from scipy import optimize
 from argparse import ArgumentParser
+from copy import deepcopy
+import cPickle as pickle
+import itertools
+from os.path import abspath, dirname
 import socket
+import sys
 
-import numba
 import numpy as np
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.offsetbox import AnchoredText
 from matplotlib.patches import Rectangle
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
-from retro import PI 
-from retro import HYPO_PARAMS_T
-from retro import DETECTOR_GEOM_FILE
-from retro import expand
-from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_kernels import const_energy_loss_muon
-from retro.discrete_cascade_kernels import point_cascade
-from retro.table_readers import DOMTimePolarTables
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.const import PI
+from retro import DETECTOR_GEOM_FILE, HYPO_PARAMS_T
+from retro.utils.misc import expand
+from retro.hypo.discrete_hypo import DiscreteHypo
+from retro.hypo.discrete_muon_kernels import const_energy_loss_muon
+from retro.hypo.discrete_cascade_kernels import point_cascade
+from retro.tables.dom_time_polar_tables import DOMTimePolarTables
+
 
 SMALL_P = 1e-8
 NOISE_Q = 0.1
 
-"""Parse command line arguments"""
+
+# Parse command line arguments
 parser = ArgumentParser()
 parser.add_argument(
     '-f', '--file', type=str, default='benchmark_events.pkl',
@@ -77,12 +75,8 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
 
     """
     neg_llh = 0
-    small_p_counts = 0
-    small_n_counts = 0
-
     for string_idx in range(86):
         for dom_idx in range(60):
-            start_t = time.time()
             total_observed_ps = 0.
             total_expected_ps = 0.
             try:
@@ -118,7 +112,7 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
                                               string=string_idx+1,
                                               depth_idx=dom_idx,
                                               )
-            
+
 
             # add a noise floor
             N = total_expected_ps + NOISE_Q
@@ -126,7 +120,6 @@ def get_neg_llh(pinfo_gen, event, dom_tables):
             if not (total_observed_ps == 0. and total_expected_ps == 0.):
                 # add only non-constant part
                 neg_llh -= (total_observed_ps * np.log(N) - N)
-            stop_t = time.time()
 
     return neg_llh
 
@@ -360,7 +353,7 @@ if False:
                 }
 
         llhs.append([])
-        for point in scan_dims[scan_dim]['scan_points']: 
+        for point in scan_dims[scan_dim]['scan_points']:
             hypo[scan_dim] = point
             hypo_params = HYPO_PARAMS_T(**hypo)
             pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
@@ -401,15 +394,15 @@ if False:
         hypo = deepcopy(truth)
 
         llhs = []
-        for point_x in scan_dims[scan_dim_x]['scan_points']: 
+        for point_x in scan_dims[scan_dim_x]['scan_points']:
             llhs.append([])
-            for point_y in scan_dims[scan_dim_y]['scan_points']: 
+            for point_y in scan_dims[scan_dim_y]['scan_points']:
                 hypo[scan_dim_x] = point_x
                 hypo[scan_dim_y] = point_y
                 hypo_params = HYPO_PARAMS_T(**hypo)
                 pinfo_gen = discrete_hypo.get_pinfo_gen(hypo_params)
                 llhs[-1].append(get_neg_llh(pinfo_gen, event, dom_tables))
-                
+
         llhs = np.array(llhs)
         x = edges(scan_dims[scan_dim_x]['scan_points'])
         y = edges(scan_dims[scan_dim_y]['scan_points'])
@@ -422,11 +415,11 @@ if False:
         ax.set_xlabel(scan_dim_x)
         ax.set_ylabel(scan_dim_y)
         ax.plot(truth[scan_dim_x], truth[scan_dim_y], c='g', marker='*')
-        
+
         #truth
         #ax.axvline(theta_true, color='r')
         #ax.axhline(z_v_true, color='r')
-        #ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true)) 
+        #ax.set_title('Event %i, E_cscd = %.2f GeV, E_trck = %.2f GeV'%(evt, cscd_energy_true, trck_energy_true))
 
         # plot minimum:
         m_x, m_y = np.unravel_index(llhs.argmin(), llhs.shape)

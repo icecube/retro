@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 
@@ -33,9 +34,9 @@ import sys
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    _parent_dir = dirname(dirname(abspath(__file__)))
-    if _parent_dir not in sys.path:
-        sys.path.append(_parent_dir)
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 import retro
 
 

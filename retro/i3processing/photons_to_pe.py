@@ -1,8 +1,13 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, invalid-name, import-error
+
+from __future__ import absolute_import, division, print_function
 
 from optparse import OptionParser
-from os.path import expandvars
-import os, sys, random
+from os.path import abspath, dirname
+import os
+import sys
 
 usage = "usage: %prog [options]"
 parser = OptionParser(usage)
@@ -83,44 +88,42 @@ if len(args) != 0:
     parser.error(crap)
 
 from I3Tray import *
-import random
 
-from icecube import icetray, dataclasses, dataio, simclasses
-from icecube import phys_services, sim_services, DOMLauncher, DomTools, genie_icetray, clsim, trigger_sim
+from icecube import icetray, dataclasses, dataio, simclasses # pylint: disable=unused-import
+from icecube import ( # pylint: disable=unused-import
+    phys_services, sim_services, DOMLauncher, DomTools, genie_icetray, clsim,
+    trigger_sim
+)
 
-#sys.path.append(expandvars('$JP_tools'))
-from RemoveLatePhotons import RemoveLatePhotons
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.i3processing.RemoveLatePhotons import RemoveLatePhotons
 
 
 def BasicHitFilter(frame):
     hits = 0
     if frame.Has("MCPESeriesMap_new"):
         hits = len(frame.Get("MCPESeriesMap_new"))
-    if hits > 0:
-        return True
-    else:
-        return False
+    return hits > 0
 
 
 def BasicDOMFilter(frame):
     if frame.Has("InIceRawData"):
-        if len(frame['InIceRawData']) > 0:
-            return True
-        else:
-            return False
-    else:
-        return False
+        return len(frame['InIceRawData']) > 0
+    return False
 
 
 tray = I3Tray()
 
-print 'Using RUNNR: ', options.RUNNUMBER
+print('Using RUNNR: ', options.RUNNUMBER)
 try:
     holeice = int(options.HOLEICE)
 except:
-    print "Selecting hole ice with string: ",
+    print("Selecting hole ice with string: ")
     holeice = options.HOLEICE
-print holeice, type(holeice)
+print(holeice, type(holeice))
 
 # Random service
 tray.AddService("I3SPRNGRandomServiceFactory", "sprngrandom")(
@@ -158,7 +161,7 @@ tray.AddModule(
 #tray.AddModule("I3GeometryDecomposer", "I3ModuleGeoMap")
 #from ReduceHadronicLightyield import HadLightyield
 
-#print "Scaling hadrons with: ", options.SCALEHAD
+#print("Scaling hadrons with: ", options.SCALEHAD)
 #tray.AddModule(HadLightyield , "scalecascade",
 #                Lightyield = options.SCALEHAD)
 
@@ -178,7 +181,7 @@ tray.AddSegment(
 #txtfile = os.path.expandvars('$I3_SRC') + '/BadDomList/resources/scripts/bad_data_producing_doms_list.txt'
 #BadDoms = bad_dom_list_static.IC86_bad_data_producing_dom_list(118175, txtfile)
 #tray.AddModule(BasicHitFilter, 'FilterNullMCPE', Streams = [icetray.I3Frame.DAQ, icetray.I3Frame.Physics])
-#print BadDoms
+#print(BadDoms)
 mcpe_to_pmt = "MCPESeriesMap_new"
 if options.NOISE == 'poisson':
     load("libnoise-generator")
@@ -209,11 +212,11 @@ elif options.NOISE == 'vuvuzela':
     )
     mcpeout = mcpe_to_pmt + '_withNoise'
 elif options.NOISE == 'none':
-    print '\n*******WARNING: Noiseless simulation!!********\n'
+    print('\n*******WARNING: Noiseless simulation!!********\n')
     mcpeout = mcpe_to_pmt
 
 else:
-    print 'Pick a valid noise model!'
+    print('Pick a valid noise model!')
     exit()
 
 tray.AddModule(

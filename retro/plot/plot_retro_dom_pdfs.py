@@ -1,10 +1,19 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
-"""Plot one or more results from running retro_dom_pdfs.py script"""
-
+"""
+Plot one or more results from running retro_dom_pdfs.py script
+"""
 
 from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    ks_test
+    plot_run_info
+    parse_args
+    main
+'''.split()
 
 from argparse import ArgumentParser
 import cPickle as pickle
@@ -24,6 +33,7 @@ SAMPLE_HIT_TIMES = 0.5 * (HIT_TIMES[:-1] + HIT_TIMES[1:])
 
 
 def ks_test(a, b):
+    """https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test"""
     acs = np.cumsum(a)
     macs = np.max(acs)
     if macs == 0:
@@ -37,42 +47,6 @@ def ks_test(a, b):
     else:
         bcs /= np.max(bcs)
     return np.max(np.abs(bcs - acs))
-
-
-def parse_args(description=__doc__):
-    """Parse command line arguments"""
-    parser = ArgumentParser(description=description)
-    parser.add_argument(
-        '--files', nargs='+', required=True,
-        help='''One or more *run_info.pkl files to plot'''
-    )
-    parser.add_argument(
-        '--labels', nargs='+', required=True,
-        help='''One (legend) label per file'''
-    )
-    parser.add_argument(
-        '--fwd-hists', required=False,
-        help='''Path to the forward-simulation pickle file'''
-    )
-    parser.add_argument(
-        '--outdir', required=True,
-        help='''Directory into which to place the plots.'''
-    )
-    parser.add_argument(
-        '--paired', action='store_true',
-        help='''Display style for visually grouping pairs of lines with
-        same-colors but different line styles.'''
-    )
-    parser.add_argument(
-        '--gradient', action='store_true',
-        help='''Display style for visually showing a progression from line to
-        line via a color gradient.'''
-    )
-    parser.add_argument(
-        '--no-plot', action='store_true',
-        help='''Do _not_ make plots, just print summary statistics.'''
-    )
-    return parser.parse_args()
 
 
 def plot_run_info(
@@ -367,7 +341,48 @@ def plot_run_info(
         )
 
 
-if __name__ == '__main__':
+def parse_args(description=__doc__):
+    """Parse command line arguments"""
+    parser = ArgumentParser(description=description)
+    parser.add_argument(
+        '--files', nargs='+', required=True,
+        help='''One or more *run_info.pkl files to plot'''
+    )
+    parser.add_argument(
+        '--labels', nargs='+', required=True,
+        help='''One (legend) label per file'''
+    )
+    parser.add_argument(
+        '--fwd-hists', required=False,
+        help='''Path to the forward-simulation pickle file'''
+    )
+    parser.add_argument(
+        '--outdir', required=True,
+        help='''Directory into which to place the plots.'''
+    )
+    parser.add_argument(
+        '--paired', action='store_true',
+        help='''Display style for visually grouping pairs of lines with
+        same-colors but different line styles.'''
+    )
+    parser.add_argument(
+        '--gradient', action='store_true',
+        help='''Display style for visually showing a progression from line to
+        line via a color gradient.'''
+    )
+    parser.add_argument(
+        '--no-plot', action='store_true',
+        help='''Do _not_ make plots, just print summary statistics.'''
+    )
+    return parser.parse_args()
+
+
+def main():
+    """Get command line args, translate, and run plot function"""
     kwargs = vars(parse_args())
     kwargs['plot'] = not kwargs.pop('no_plot')
     plot_run_info(**kwargs)
+
+
+if __name__ == '__main__':
+    main()

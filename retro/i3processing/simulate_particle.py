@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #!/cvmfs/i3.opensciencegrid.org/py2-v3/icetray-start
-# pylint: disable=unused-import, invalid-name
-
+# -*- coding: utf-8 -*-
+# pylint: disable=unused-import, invalid-name, import-error, attribute-defined-outside-init
 
 """
 Use CLSim to simulate a particle; for now, just charged leptons (muons,
@@ -14,16 +14,17 @@ electrons, taus, and their antiparticles)
 
 from __future__ import absolute_import, division, print_function
 
+__all__ = '''
+    MAX_RUN_NUM
+    simulate_particle
+    parse_args
+'''.split()
+
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import os
 from os.path import expandvars
 
 import numpy as np
-
-
-__all__ = [
-    'MAX_RUN_NUM', 'simulate_particle', 'parse_args'
-]
 
 
 MAX_RUN_NUM = int(1e9)

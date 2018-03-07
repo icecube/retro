@@ -1,6 +1,7 @@
 #!/bin/bash
 
 MYDIR=`dirname $0`
+PROCDIR="${MYDIR}/../retro/retro/i3processing"
 
 #==============================================================================
 # User-defined simulation parameters
@@ -52,7 +53,7 @@ echo "NAME: ${NAME}"
 if [ ! -e "${NAME}_step1.i3.bz2" ]
 then
     echo "Running Step 1..."
-    time ${MYDIR}/simulate_particle.py \
+    time ${PROCDIR}/simulate_particle.py \
         --particle-type=$PARTICLE \
         -x=$X -y=$Y -z=$Z --energy=$E --coszen=$CZ --azimuth=$AZ \
         --ice-model $ICE_MODEL \
@@ -68,7 +69,7 @@ fi
 # Step 2: DAQ (needs simulation-V05)
 [ -e "${NAME}_step1.i3.bz2" -a ! -e "${NAME}_step2.i3.bz2" ] && \
     echo "Running Step 2..." && \
-    time ${MYDIR}/photons_to_pe.py \
+    time ${PROCDIR}/photons_to_pe.py \
         --holeice "$HOLE_ICE_PARAM" \
         -i "${NAME}_step1.i3.bz2" \
         -g "$GCD" \
@@ -88,13 +89,13 @@ echo ""
 # Step 4: SRT hit cleaning
 [ -e "${NAME}_step3.i3.bz2" -a ! -e "${NAME}_step4.i3.bz2" ] && \
     echo "Running Step 4..." && \
-    time ${MYDIR}/hit_cleaning.py \
+    time ${PROCDIR}/hit_cleaning.py \
         -i "${NAME}_step3.i3.bz2" \
         -g "$GCD" \
         -o "${NAME}_step4.i3.bz2"
 echo ""
 
 # shit that didn't work
-#${MYDIR}/deepcoreL2example.py -s -i ${NAME}_step2.i3.bz2 -g $I3_TESTDATA/sim/GeoCalibDetectorStatus_IC86.55697_corrected_V2.i3.gz -o ${NAME}_step3.i3.bz2
-#${MYDIR}/dc_fit.py -i ${NAME}_step3.i3.bz2 -o ${NAME}_step4.i3.bz2 -g $I3_DATA/GCD/GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.gz
+#${PROCDIR}/deepcoreL2example.py -s -i ${NAME}_step2.i3.bz2 -g $I3_TESTDATA/sim/GeoCalibDetectorStatus_IC86.55697_corrected_V2.i3.gz -o ${NAME}_step3.i3.bz2
+#${PROCDIR}/dc_fit.py -i ${NAME}_step3.i3.bz2 -o ${NAME}_step4.i3.bz2 -g $I3_DATA/GCD/GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.gz
 #$I3_BUILD/filterscripts/resources/scripts//offlineL2/process.py -i ${NAME}_step3.i3.bz2 -g $I3_DATA/GCD/GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.gz -o ${NAME}_step4.i3.bz2

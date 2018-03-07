@@ -1,15 +1,16 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
 Functions for mapping spherical bins to Cartesian bins.
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-
-__all__ = ['generate_binmap_meta', 'generate_binmap']
+__all__ = '''
+    generate_binmap_meta
+    generate_binmap
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -26,7 +27,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from collections import OrderedDict
 from os.path import abspath, dirname, isdir, isfile, join
 import cPickle as pickle
@@ -36,12 +36,12 @@ import time
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
-from retro import hash_obj
-from retro import powerspace, spherical_volume
-from retro.sphbin2cartbin import sphbin2cartbin
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.utils.geom import powerspace, spherical_volume
+from retro.utils.misc import hash_obj
+from retro.tables.sphbin2cartbin import sphbin2cartbin
 
 
 # TODO: does anisotropy need to be considered in the functions defined here?

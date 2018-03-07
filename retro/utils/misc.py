@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
 
 """
@@ -7,8 +8,11 @@ Miscellaneous utilites: file I/O, hashing, etc.
 from __future__ import absolute_import, division, print_function
 
 __all__ = '''
+    ZSTD_EXTENSIONS
+    COMPR_EXTENSIONS
     expand
     mkdir
+    get_decompressd_fobj
     wstdout
     wstderr
     force_little_endian
@@ -16,6 +20,12 @@ __all__ = '''
     test_hash_obj
     get_file_md5
     convert_to_namedtuple
+    event_to_hypo_params
+    hypo_to_track_params
+    generate_anisotropy_str
+    generate_unique_ids
+    get_primary_interaction_str
+    get_primary_interaction_tex
 '''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -33,7 +43,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 import base64
 from collections import Iterable, Mapping, Sequence
 import cPickle as pickle
@@ -41,8 +50,10 @@ import errno
 import hashlib
 from numbers import Number
 from os import makedirs
-from os.path import abspath, dirname, expanduser, expandvars
+from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
+from StringIO import StringIO
 import struct
+from subprocess import Popen, PIPE
 import sys
 
 import numpy as np
@@ -51,7 +62,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T, const, types
+from retro import HYPO_PARAMS_T, const, retro_types
 
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
@@ -113,12 +124,12 @@ def get_decompressd_fobj(fpath):
     fobj : file-like object
 
     """
-    fpath = abspath(retro.expand(fpath))
+    fpath = abspath(expand(fpath))
     if not isfile(fpath):
         raise ValueError('Not a file: `fpath`="{}"'.format(fpath))
     _, ext = splitext(fpath)
     ext = ext.lstrip('.').lower()
-    if ext in retro.ZSTD_EXTENSIONS:
+    if ext in ZSTD_EXTENSIONS:
         # -c sends decompressed output to stdout
         proc = Popen(['zstd', '-d', '-c', fpath], stdout=PIPE)
         # Read from stdout
@@ -331,14 +342,14 @@ def event_to_hypo_params(event, hypo_params_t=HYPO_PARAMS_T):
     ----------
     event : likelihood.Event namedtuple
 
-    hypo_params_t : retro.types.HypoParams8D or retro.types.HypoParams8D
+    hypo_params_t : retro_types.HypoParams8D or retro_types.HypoParams8D
 
     Returns
     -------
     params : hypo_params_t namedtuple
 
     """
-    assert hypo_params_t is types.HypoParams8D
+    assert hypo_params_t is retro_types.HypoParams8D
 
     track_energy = event.track.energy
     cascade_energy = event.cascade.energy
@@ -375,7 +386,7 @@ def hypo_to_track_params(hypo_params):
     track_params : retro.types.TrackParams namedtuple
 
     """
-    track_params = types.TrackParams(
+    track_params = retro_types.TrackParams(
         t=hypo_params.t,
         x=hypo_params.x,
         y=hypo_params.y,

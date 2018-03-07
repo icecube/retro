@@ -1,13 +1,13 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
 
 """
-Load retro tables into RAM, then for a given hypothesis generate the photon pdfs at a DOM
+Load retro tables into RAM, then for a given hypothesis generate the photon
+pdfs at a DOM
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -22,7 +22,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 from collections import OrderedDict
 import cPickle as pickle
@@ -41,16 +40,19 @@ import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 import retro
-from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon
-from retro.discrete_cascade_kernels import point_cascade
-from retro.table_readers import ( # pylint: disable=unused-import
-    DOMTimePolarTables, TDICartTable, CLSimTables, CKVTables
-)
+from retro.const import PI
+from retro.utils.misc import expand, mkdir
+from retro.hypo.discrete_hypo import DiscreteHypo
+from retro.hypo.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon
+from retro.hypo.discrete_cascade_kernels import point_cascade
+from retro.tables.dom_time_polar_tables import DOMTimePolarTables
+from retro.tables.tdi_cart_tables import TDICartTable
+from retro.tables.clsim_tables import CLSimTables
+from retro.tables.ckv_tables import CKVTables
 
 
 hostname = socket.gethostname()
@@ -87,15 +89,15 @@ SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0'
 CODE_TO_TEST = 'ckv_tables_avgsurfareanorm_dt0.1'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
-GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
+GCD_FILE = expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
 STEP_LENGTH = 1.0
 MMAP = True
 TIME_WINDOW = 2e3 # ns
 MAKE_PLOTS = False
 
-outdir = retro.expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
-retro.mkdir(outdir)
+outdir = expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
+mkdir(outdir)
 
 run_info['sim_to_test'] = SIM_TO_TEST
 run_info['gcd_file'] = GCD_FILE
@@ -122,7 +124,7 @@ SIMULATIONS = dict(
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-300,
-            track_azimuth=0, track_zenith=-retro.PI,
+            track_azimuth=0, track_zenith=-PI,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl',
@@ -146,7 +148,7 @@ if sim['fwd_sim_histo_file'] is not None:
     print('Loading and hashing forward simulation histograms from "%s"...'
           % sim['fwd_sim_histo_file'])
     t0 = time.time()
-    contents = open(retro.expand(sim['fwd_sim_histo_file']), 'rb').read()
+    contents = open(expand(sim['fwd_sim_histo_file']), 'rb').read()
     fwd_sim_histo_file_md5 = hashlib.md5(contents).hexdigest()
     fwd_sim_histos = pickle.loads(contents)
     bin_edges = fwd_sim_histos['bin_edges']
@@ -178,10 +180,10 @@ t_start = time.time()
 # Load detector GCD
 print(
     'Loading detector geometry, calibration, and RDE from "%s"...'
-    % retro.expand(GCD_FILE)
+    % expand(GCD_FILE)
 )
 t0 = time.time()
-gcd = np.load(retro.expand(GCD_FILE))
+gcd = np.load(expand(GCD_FILE))
 geom, rde, noise_rate_hz = gcd['geo'], gcd['rde'], gcd['noise']
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
@@ -551,7 +553,7 @@ print('total of {} unique DOMs'.format(len(loaded_strings_doms)))
 
 run_info['results'] = results
 
-run_info_fpath = retro.expand(join(outdir, 'run_info.pkl'))
+run_info_fpath = expand(join(outdir, 'run_info.pkl'))
 print('Writing run info to "{}"'.format(run_info_fpath))
 pickle.dump(run_info, open(run_info_fpath, 'wb'), pickle.HIGHEST_PROTOCOL)
 

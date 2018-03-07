@@ -1,5 +1,5 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
-
 
 from __future__ import absolute_import, division, print_function
 
@@ -32,7 +32,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
 import cPickle as pickle
 from itertools import product
@@ -64,11 +63,11 @@ except Exception:
 else:
     NUMBA_AVAIL = True
 
-RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.types import HypoParams8D
+from retro.retro_types import HypoParams8D
 
 
 # -- Datatype choices for consistency throughout code -- #

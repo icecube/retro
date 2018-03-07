@@ -1,4 +1,52 @@
-__all__ = ['TDI_TABLE_FNAME_PROTO', 'TDI_TABLE_FNAME_RE']
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
+
+"""
+Class for time- and DOM-independent table.
+"""
+
+from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    TDI_TABLE_FNAME_PROTO
+    TDI_TABLE_FNAME_RE
+    TDICartTable
+'''.split()
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+from copy import deepcopy
+from glob import glob
+from os.path import abspath, basename, dirname, isdir, join
+import re
+import sys
+from time import time
+
+import numpy as np
+
+from pisa.utils.format import hrlist2list
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.tables.pexp_xyz import pexp_xyz
+from retro.utils.misc import (
+    expand, force_little_endian, generate_anisotropy_str
+)
 
 
 TDI_TABLE_FNAME_PROTO = [
@@ -88,7 +136,7 @@ class TDICartTable(object):
     def __init__(self, tables_dir, proto_tile_hash, subvol=None, scale=1,
                  use_directionality=True):
         # Translation and validation of args
-        tables_dir = retro.expand(tables_dir)
+        tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
         assert isinstance(use_directionality, bool)
         assert isinstance(proto_tile_hash, basestring)
@@ -113,7 +161,7 @@ class TDICartTable(object):
         self.tables_meta = None
 
         proto_table_fpath = glob(join(
-            retro.expand(self.tables_dir),
+            expand(self.tables_dir),
             'retro_tdi_table_%s_*survival_prob.fits' % self.proto_tile_hash
         ))
         if not proto_table_fpath:
@@ -180,7 +228,7 @@ class TDICartTable(object):
 
         """
         fname = basename(fpath)
-        match = retro.TDI_TABLE_FNAME_RE[-1].match(fname)
+        match = TDI_TABLE_FNAME_RE[-1].match(fname)
         if match is None:
             return None
         meta = match.groupdict()
@@ -233,7 +281,7 @@ class TDICartTable(object):
         # Work with "survival_prob" table filepaths, which generalizes to all
         # table filepaths (so long as they exist)
         fpaths = glob(join(
-            retro.expand(self.tables_dir),
+            expand(self.tables_dir),
             'retro_tdi_table_*survival_prob.fits'
         ))
 
@@ -328,7 +376,7 @@ class TDICartTable(object):
         else:
             avg_photon_x, avg_photon_y, avg_photon_z = None, None, None
 
-        anisotropy_str = retro.generate_anisotropy_str(self.anisotropy)
+        anisotropy_str = generate_anisotropy_str(self.anisotropy)
 
         tables_meta = {} #[[[None]*nz_tiles]*ny_tiles]*nx_tiles
         for meta in to_load_meta.values():
@@ -364,14 +412,14 @@ class TDICartTable(object):
             for table_name, table in to_fill:
                 fpath = join(
                     self.tables_dir,
-                    retro.TDI_TABLE_FNAME_PROTO[-1].format(
+                    TDI_TABLE_FNAME_PROTO[-1].format(
                         table_name=table_name, anisotropy_str=anisotropy_str,
                         **kwargs
                     ).lower()
                 )
 
                 with pyfits.open(fpath) as fits_table:
-                    data = retro.force_little_endian(fits_table[0].data) # pylint: disable=no-member
+                    data = force_little_endian(fits_table[0].data) # pylint: disable=no-member
 
                 if self.scale != 1 and table_name == 'survival_prob':
                     data = 1 - (1 - data)**self.scale

@@ -5,9 +5,7 @@
 Classes for reading and getting info from Retro tables.
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __all__ = '''
     MACHINE_EPS
@@ -28,7 +26,6 @@ __all__ = '''
     TDICartTable
 '''.split()
 
-
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
 
@@ -43,7 +40,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 from collections import OrderedDict
 from copy import deepcopy

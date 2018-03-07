@@ -1,16 +1,16 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
-
 
 """
 Utils for binning and geometry
 """
-
 
 from __future__ import absolute_import, division, print_function
 
 __all__ = '''
     GEOM_FILE_PROTO
     GEOM_META_PROTO
+    generate_geom_meta
     linbin
     test_linbin
     powerbin
@@ -45,7 +45,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from collections import OrderedDict
 import math
 from os.path import abspath, dirname
@@ -59,8 +58,9 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit, types
+from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import SPEED_OF_LIGHT_M_PER_NS
+from retro.retro_types import TimeSphCoord
 from retro.utils.misc import hash_obj
 
 
@@ -456,10 +456,10 @@ def bin_edges_to_binspec(edges):
     num_bins : TimeSphCoord containing ints
 
     """
-    dims = types.TimeSphCoord._fields
-    start = types.TimeSphCoord(*(np.min(getattr(edges, d)) for d in dims))
-    stop = types.TimeSphCoord(*(np.max(getattr(edges, d)) for d in dims))
-    num_bins = types.TimeSphCoord(*(len(getattr(edges, d)) - 1 for d in dims))
+    dims = TimeSphCoord._fields
+    start = TimeSphCoord(*(np.min(getattr(edges, d)) for d in dims))
+    stop = TimeSphCoord(*(np.max(getattr(edges, d)) for d in dims))
+    num_bins = TimeSphCoord(*(len(getattr(edges, d)) - 1 for d in dims))
 
     return start, stop, num_bins
 

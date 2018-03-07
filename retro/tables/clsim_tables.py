@@ -1,3 +1,64 @@
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
+
+"""
+Class for using a set of "raw" 5D (r, costheta, t, costhetadir, deltaphidir)
+CLSim-produced Retro tables
+"""
+
+from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    MY_CLSIM_TABLE_KEYS
+    TABLE_NORM_KEYS
+    CLSIM_TABLE_FNAME_PROTO
+    CLSIM_TABLE_FNAME_RE
+    CLSIM_TABLE_METANAME_PROTO
+    CLSIM_TABLE_METANAME_RE
+    interpret_clsim_table_fname
+    generate_time_indep_table
+    get_table_norm
+    load_clsim_table_minimal
+    load_clsim_table
+    CLSimTables
+'''.split()
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+from collections import OrderedDict
+from os.path import abspath, basename, dirname, isdir, isfile, join
+import re
+import sys
+from time import time
+
+import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro import DEBUG
+from retro.const import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
+from retro.tables.pexp_5d import TBL_KIND_CLSIM, generate_pexp_5d_function
+from retro.utils.geom import spherical_volume
+from retro.utils.misc import (
+    expand, force_little_endian, get_decompressd_fobj, wstderr
+)
+
+
 MY_CLSIM_TABLE_KEYS = [
     'table_shape', 'n_photons', 'phase_refractive_index', 'r_bin_edges',
     'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
@@ -9,6 +70,26 @@ TABLE_NORM_KEYS = [
     'costheta_bin_edges', 't_bin_edges'
 ]
 """All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
+
+CLSIM_TABLE_FNAME_PROTO = [
+    (
+        'retro_nevts1000_{string}_DOM{depth_idx:d}.fits.*'
+    ),
+    (
+        'clsim_table'
+        '_set_{hash_val:s}'
+        '_string_{string}'
+        '_depth_{depth_idx:d}'
+        '_seed_{seed}'
+        '.fits'
+    )
+]
+"""String templates for CLSim ("raw") retro tables. Note that `string` can
+either be a specific string number OR either "ic" or "dc" indicating a generic
+DOM of one of these two types located at the center of the detector, where z
+location is averaged over all DOMs. `seed` can either be an integer or a
+human-readable range (e.g. "0-9" for a table that combines toegether seeds, 0,
+1, ..., 9)"""
 
 CLSIM_TABLE_FNAME_RE = [
     re.compile(
@@ -31,26 +112,6 @@ CLSIM_TABLE_FNAME_RE = [
         ''', re.IGNORECASE | re.VERBOSE
     )
 ]
-
-CLSIM_TABLE_FNAME_PROTO = [
-    (
-        'retro_nevts1000_{string}_DOM{depth_idx:d}.fits.*'
-    ),
-    (
-        'clsim_table'
-        '_set_{hash_val:s}'
-        '_string_{string}'
-        '_depth_{depth_idx:d}'
-        '_seed_{seed}'
-        '.fits'
-    )
-]
-"""String templates for CLSim ("raw") retro tables. Note that `string` can
-either be a specific string number OR either "ic" or "dc" indicating a generic
-DOM of one of these two types located at the center of the detector, where z
-location is averaged over all DOMs. `seed` can either be an integer or a
-human-readable range (e.g. "0-9" for a table that combines toegether seeds, 0,
-1, ..., 9)"""
 
 CLSIM_TABLE_METANAME_PROTO = [
     'clsim_table_set_{hash_val:s}_meta.json'
@@ -278,7 +339,7 @@ def get_table_norm(
     # divided by the number of photons in the bin times the number of
     # times each photon is counted.
     speed_of_light_in_medum = ( # units = m/ns
-        retro.SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index
+        SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index
     )
 
     # t bin edges are in ns and speed_of_light_in_medum is m/ns
@@ -308,7 +369,7 @@ def get_table_norm(
     surf_area_at_inner_radius = inner_radius**2 * TWO_PI * costheta_bin_width
     surf_area_at_midpoints = radial_midpoints**2 * TWO_PI * costheta_bin_width
 
-    bin_vols = np.abs(retro.spherical_volume(rmin=inner_edges, rmax=outer_edges, dcostheta=-costheta_bin_width, dphi=TWO_PI))
+    bin_vols = np.abs(spherical_volume(rmin=inner_edges, rmax=outer_edges, dcostheta=-costheta_bin_width, dphi=TWO_PI))
 
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
@@ -336,7 +397,7 @@ def get_table_norm(
                 fill_value=(
                     1
                     / n_photons
-                    / (retro.SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+                    / (SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
                     / np.mean(t_bin_widths)
                     * angular_acceptance_fract
                     * quantum_efficiency
@@ -358,7 +419,7 @@ def get_table_norm(
                 fill_value=(
                     1
                     / n_photons
-                    / (retro.SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+                    / (SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
                     / np.mean(t_bin_widths)
                     * angular_acceptance_fract
                     * quantum_efficiency
@@ -429,10 +490,10 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
     """
     table = OrderedDict()
 
-    fpath = retro.expand(fpath)
+    fpath = expand(fpath)
 
-    if retro.DEBUG:
-        retro.wstderr('Loading table from {} ...\n'.format(fpath))
+    if DEBUG:
+        wstderr('Loading table from {} ...\n'.format(fpath))
 
     if isdir(fpath):
         t0 = time()
@@ -443,8 +504,8 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
             mmap_mode = None
         for key in MY_CLSIM_TABLE_KEYS + ['t_indep_table']:
             fpath = join(indir, key + '.npy')
-            if retro.DEBUG:
-                retro.wstderr('    loading {} from "{}" ...'.format(key, fpath))
+            if DEBUG:
+                wstderr('    loading {} from "{}" ...'.format(key, fpath))
             t1 = time()
             if isfile(fpath):
                 table[key] = np.load(fpath, mmap_mode=mmap_mode)
@@ -453,12 +514,12 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
                     'Could not find file "{}" for loading table key "{}"'
                     .format(fpath, key)
                 )
-            if retro.DEBUG:
-                retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
+            if DEBUG:
+                wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
         if step_length is not None and 'step_length' in table:
             assert step_length == table['step_length']
-        if retro.DEBUG:
-            retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
+        if DEBUG:
+            wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
         return table
 
     if not isfile(fpath):
@@ -470,15 +531,15 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
 
     import pyfits
     t0 = time()
-    fobj = open_table_file(fpath)
+    fobj = get_decompressd_fobj(fpath)
     try:
         pf_table = pyfits.open(fobj)
 
         table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
-        table['n_photons'] = retro.force_little_endian(
+        table['n_photons'] = force_little_endian(
             pf_table[0].header['_i3_n_photons'] # pylint: disable=no-member
         )
-        table['phase_refractive_index'] = retro.force_little_endian(
+        table['phase_refractive_index'] = force_little_endian(
             pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
         )
         if step_length is not None:
@@ -487,21 +548,21 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
         n_dims = len(table['table_shape'])
         if n_dims == 5:
             # Space-time dimensions
-            table['r_bin_edges'] = retro.force_little_endian(
+            table['r_bin_edges'] = force_little_endian(
                 pf_table[1].data # meters # pylint: disable=no-member
             )
-            table['costheta_bin_edges'] = retro.force_little_endian(
+            table['costheta_bin_edges'] = force_little_endian(
                 pf_table[2].data # pylint: disable=no-member
             )
-            table['t_bin_edges'] = retro.force_little_endian(
+            table['t_bin_edges'] = force_little_endian(
                 pf_table[3].data # nanoseconds # pylint: disable=no-member
             )
 
             # Photon directionality
-            table['costhetadir_bin_edges'] = retro.force_little_endian(
+            table['costhetadir_bin_edges'] = force_little_endian(
                 pf_table[4].data # pylint: disable=no-member
             )
-            table['deltaphidir_bin_edges'] = retro.force_little_endian(
+            table['deltaphidir_bin_edges'] = force_little_endian(
                 pf_table[5].data # pylint: disable=no-member
             )
 
@@ -510,7 +571,7 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
                 '{}-dimensional table not handled'.format(n_dims)
             )
 
-        table['table'] = retro.force_little_endian(pf_table[0].data) # pylint: disable=no-member
+        table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
 
         if gen_t_indep and 't_indep_table' not in table:
             table['t_indep_table'] = generate_time_indep_table(
@@ -519,7 +580,7 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
                 angular_acceptance_fract=1
             )
 
-        retro.wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
+        wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
 
     finally:
         del pf_table
@@ -571,19 +632,19 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract,
     )
     table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
 
-    retro.wstderr('Interpreting table...\n')
+    wstderr('Interpreting table...\n')
     t0 = time()
     n_dims = len(table['table_shape'])
 
     # Cut off first and last bin in each dimension (underflow and
     # overflow bins)
     slice_wo_overflow = (slice(1, -1),) * n_dims
-    retro.wstderr('    slicing to remove underflow/overflow bins...')
+    wstderr('    slicing to remove underflow/overflow bins...')
     t0 = time()
     table_wo_overflow = table['table'][slice_wo_overflow]
-    retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
+    wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
 
-    retro.wstderr('    slicing and summarizing underflow and overflow...')
+    wstderr('    slicing and summarizing underflow and overflow...')
     t0 = time()
     underflow, overflow = [], []
     for n in range(n_dims):
@@ -592,7 +653,7 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract,
 
         sl = tuple([slice(1, -1)]*n + [-1] + [slice(1, -1)]*(n_dims - 1 - n))
         overflow.append(table['table'][sl].sum())
-    retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
+    wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
 
     table['table'] = table_wo_overflow
     table['underflow'] = np.array(underflow)

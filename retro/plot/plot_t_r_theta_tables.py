@@ -1,15 +1,15 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, invalid-name
 
 """
 Make plots from the (t,r,theta)-binnned Retro tables. The output are 2D maps
 and the time dimension is represented as frames in the video.
 """
 
-
 # TODO: use class from table_readers.py instead of copy-pasted code here
 
 from __future__ import absolute_import, division
-
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -25,7 +25,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 import sys
 
@@ -61,10 +60,8 @@ theta = 0.5 * (theta_bin_edges[:-1] + theta_bin_edges[1:])
 #print r
 #print theta
 
-fig = plt.figure(figsize=(14,15))
+fig = plt.figure(figsize=(14, 15))
 ax = fig.add_subplot(111, polar=True)
-
-
 
 rr, thetatheta = np.meshgrid(r, theta)
 # first time bin
@@ -90,7 +87,7 @@ cmaps = ['BuPu', 'nipy_spectral', 'nipy_spectral', 'afmhot_r']
 
 for data, name, cmap in zip(datas, names, cmaps):
     plt.clf()
-    fig = plt.figure(figsize=(10,10))
+    fig = plt.figure(figsize=(10, 10))
     ax1 = fig.add_subplot(111)
     ims = []
     #data = lengths
@@ -100,15 +97,15 @@ for data, name, cmap in zip(datas, names, cmaps):
     #vmax = np.log(data.max())
     vmin = data.min()
     vmax = data.max()
-    for tidx in range(data.shape[0])[::-1]:
+    for tidx in list(range(data.shape[0]))[::-1]:
         #im = plot_2d(data[tidx], [r_bin_edges, theta_bin_edges], ['r','theta'], ax1, 1, 0, log=True, vmax=vmax, vmin=vmin, cb=False)
         xx, yy = np.meshgrid(r_bin_edges, theta_bin_edges)
         im = ax1.pcolormesh(xx, yy, data[tidx].T, cmap=cmap, vmax=vmax, vmin=vmin)
-        ax1.set_xlim([r_bin_edges[0],r_bin_edges[-1]])
-        ax1.set_ylim([theta_bin_edges[0],theta_bin_edges[-1]])
+        ax1.set_xlim([r_bin_edges[0], r_bin_edges[-1]])
+        ax1.set_ylim([theta_bin_edges[0], theta_bin_edges[-1]])
         ax1.set_xlabel('r')
         ax1.set_ylabel('theta')
         ims.append([im])
-        
+
     im_ani = animation.ArtistAnimation(fig, ims, interval=200, repeat_delay=3000, blit=True)
     im_ani.save(sys.argv[1].split('.')[0]+'_'+name+'.mp4', writer=writer)

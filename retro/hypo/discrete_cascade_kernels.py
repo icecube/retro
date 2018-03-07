@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
@@ -5,9 +6,7 @@ Discrete-time kernels for cascades generating photons, to be used as
 hypo_kernels in discrete_hypo/DiscreteHypo class.
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __all__ = ['point_cascade']
 
@@ -25,7 +24,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 from os.path import abspath, dirname
 import sys

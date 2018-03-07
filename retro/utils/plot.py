@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+
+"""
+Plotting tools and utilities.
+"""
+
 COLOR_CYCLE_ORTHOG = (
     '#000000', #  0  Black
     '#803E75', #  2  Strong Purple
@@ -28,5 +34,3 @@ COLOR_CYCLE_ORTHOG = (
 """Use via: ``mpl.rc('axes', color_cycle=colorCycleOrthog)``
 Modified from
 http://stackoverflow.com/questions/470690/how-to-automatically-generate-n-distinct-colors"""
-
-

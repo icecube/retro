@@ -13,6 +13,11 @@ mapping.
 
 from __future__ import absolute_import, division, print_function
 
+__all__ = '''
+    generate_ckv_table
+    parse_args
+'''.split()
+
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
 
@@ -30,24 +35,22 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from os import remove
-from os.path import abspath, dirname, expanduser, expandvars, isdir, isfile, join
+from os.path import abspath, dirname, isdir, isfile, join
 import sys
 
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-import retro
-from retro.table_readers import load_clsim_table_minimal
-from retro.ckv import convolve_table
-
-
-__all__ = ['generate_ckv_table']
+from retro.tables.clsim_tables import load_clsim_table_minimal
+from retro.utils.ckv import convolve_table
+from retro.utils.misc import expand, mkdir
 
 
 # TODO: allow different directional binning in output table
+
 
 def generate_ckv_table(
         table, beta, oversample, num_cone_samples, outdir=None, mmap_src=True,
@@ -97,7 +100,7 @@ def generate_ckv_table(
     """
     input_filename = None
     if isinstance(table, basestring):
-        input_filename = expanduser(expandvars(table))
+        input_filename = expand(table)
         table = load_clsim_table_minimal(input_filename, mmap=mmap_src)
 
     if input_filename is None and outdir is None:
@@ -137,12 +140,12 @@ def generate_ckv_table(
             outdir = input_filename.rstrip('.fits')
             assert outdir != input_filename, str(input_filename)
     else:
-        outdir = expanduser(expandvars(outdir))
+        outdir = expand(outdir)
         if not isdir(outdir):
-            retro.mkdir(outdir)
-    outdir = expanduser(expandvars(outdir))
+            mkdir(outdir)
+    outdir = expand(outdir)
     ckv_table_fpath = join(outdir, 'ckv_table.npy')
-    retro.mkdir(outdir)
+    mkdir(outdir)
 
     if mmap_dst:
         # Allocate memory-mapped file

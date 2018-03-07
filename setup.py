@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
+
 """
 Installation script for the Retro project
 """
-
 
 from __future__ import absolute_import
 
@@ -13,17 +14,17 @@ import numpy as np
 
 EXT_MODULES = [
     Extension(
-        'retro.sphbin2cartbin',
-        ['retro/sphbin2cartbin.pyx'],
+        'retro.tables.sphbin2cartbin',
+        ['retro/tables/sphbin2cartbin.pyx'],
     ),
     Extension(
-        'retro.shift_and_bin',
-        ['retro/shift_and_bin.pyx'],
+        'retro.tables.shift_and_bin',
+        ['retro/tables/shift_and_bin.pyx'],
     )
 ]
 
 setup(
     name='retro',
     include_dirs=[np.get_include()],
-    ext_modules=cythonize(EXT_MODULES),
+    ext_modules=cythonize(EXT_MODULES)
 )

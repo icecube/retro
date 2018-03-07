@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
+
+"""
+Physical constants and constant-for-us values
+"""
+
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
@@ -33,6 +40,8 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from itertools import product
+from os.path import abspath, dirname
+import sys
 
 import numpy as np
 
@@ -59,6 +68,9 @@ SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 
 
 # -- Pre-calculated values -- #
+
+COS_CKV = 0.764540803152
+"""Cosine of the Cherenkov angle for beta ~1 and IceCube phase index as used"""
 
 TRACK_M_PER_GEV = FTYPE(15 / 3.3)
 """Track length per energy, in units of m/GeV"""

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# coding: utf-8
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, too-many-locals
 
 """
@@ -31,11 +31,13 @@ that generates some number of photons (with an average direction / length) in
 any of the voxel(s) of this table.
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-
-__all__ = ['generate_tdi_table_meta', 'generate_tdi_table', 'parse_args']
+__all__ = '''
+    generate_tdi_table_meta
+    generate_tdi_table
+    parse_args
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -51,7 +53,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 from argparse import ArgumentParser
 from collections import OrderedDict
@@ -70,16 +71,23 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-import retro
-from retro.generate_binmap import generate_binmap
-from retro.shift_and_bin import shift_and_bin
-from retro.table_readers import load_t_r_theta_table
+from retro.const import (
+    DC_DOM_QUANT_EFF, IC_DOM_QUANT_EFF, POL_TABLE_RMAX, POL_TABLE_RPWR,
+    POL_TABLE_NRBINS, POL_TABLE_NTHETABINS, POL_TABLE_NTBINS
+)
+from retro.tables.generate_binmap import generate_binmap
+from retro.tables.shift_and_bin import shift_and_bin
+from retro.tables.dom_time_polar_tables import load_t_r_theta_table
+from retro.tables.tdi_cart_tables import TDI_TABLE_FNAME_PROTO
+from retro.utils.geom import generate_geom_meta
+from retro.utils.misc import generate_anisotropy_str, hash_obj
 
 
-def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
-                            x_min, x_max, y_min, y_max, z_min, z_max, binwidth,
-                            anisotropy, ic_dom_quant_eff, dc_dom_quant_eff,
-                            ic_exponent, dc_exponent):
+def generate_tdi_table_meta(
+        binmap_hash, geom_hash, dom_tables_hash, times_str, x_min, x_max,
+        y_min, y_max, z_min, z_max, binwidth, anisotropy, ic_dom_quant_eff,
+        dc_dom_quant_eff, ic_exponent, dc_exponent
+    ):
     """Generate a metadata dict for a time- and DOM-independent Cartesian
     (x,y,z)-binned table.
 
@@ -139,10 +147,10 @@ def generate_tdi_table_meta(binmap_hash, geom_hash, dom_tables_hash, times_str,
         hash_params[param] = rounded_int
         kwargs[param] = float(rounded_int) / 10000
     hash_params['binwidth'] = int(np.round(hash_params['binwidth'] * 1e10))
-    tdi_hash = retro.hash_obj(hash_params, fmt='hex')
+    tdi_hash = hash_obj(hash_params, fmt='hex')
 
-    anisotropy_str = retro.generate_anisotropy_str(anisotropy)
-    fname = retro.TDI_TABLE_FNAME_PROTO[-1].format(
+    anisotropy_str = generate_anisotropy_str(anisotropy)
+    fname = TDI_TABLE_FNAME_PROTO[-1].format(
         tdi_hash=tdi_hash,
         anisotropy_str=anisotropy_str,
         table_name='',
@@ -232,11 +240,11 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     assert isdir(tables_dir)
     if dom_tables_hash is None:
         dom_tables_hash = 'none'
-        r_max = retro.POL_TABLE_RMAX
-        r_power = retro.POL_TABLE_RPWR
-        n_rbins = retro.POL_TABLE_NRBINS
-        n_costhetabins = retro.POL_TABLE_NTHETABINS
-        n_tbins = retro.POL_TABLE_NTBINS
+        r_max = POL_TABLE_RMAX
+        r_power = POL_TABLE_RPWR
+        n_rbins = POL_TABLE_NRBINS
+        n_costhetabins = POL_TABLE_NTHETABINS
+        n_tbins = POL_TABLE_NTBINS
     else:
         raise ValueError('Cannot handle non-None `dom_tables_hash`')
 
@@ -272,7 +280,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         else:
             subdet_doms[subdet] = np.concatenate(dom_string_list, axis=0)
     geom = geom[string_indices, :, :][:, depth_indices, :]
-    geom_meta = retro.generate_geom_meta(geom)
+    geom_meta = generate_geom_meta(geom)
     print('Geom uses strings %s, depth indices %s for a total of %d DOMs'
           % (list2hrlist([i+1 for i in string_indices]),
              list2hrlist(depth_indices),
@@ -622,11 +630,11 @@ def parse_args(description=__doc__):
         modeled.'''
     )
     parser.add_argument(
-        '--ic-quant-eff', type=float, default=retro.IC_DOM_QUANT_EFF,
+        '--ic-quant-eff', type=float, default=IC_DOM_QUANT_EFF,
         help='''IceCube (non-DeepCore) DOM quantum efficiency'''
     )
     parser.add_argument(
-        '--dc-quant-eff', type=float, default=retro.DC_DOM_QUANT_EFF,
+        '--dc-quant-eff', type=float, default=DC_DOM_QUANT_EFF,
         help='''DeepCore DOM quantum efficiency'''
     )
     parser.add_argument(

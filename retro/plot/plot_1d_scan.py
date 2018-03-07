@@ -1,15 +1,18 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
 Plot likelihood scan results
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-
-__all__ = ['FNAME_TEMPLATE', 'parse_args', 'plot_1d_scan']
+__all__ = '''
+    FNAME_TEMPLATE
+    plot_1d_scan
+    parse_args
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -26,7 +29,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from argparse import ArgumentParser
 import cPickle as pickle
 from os.path import abspath, dirname, join
@@ -42,32 +44,13 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro import HypoParams8D
-from retro import expand, get_primary_interaction_tex
+from retro.utils.misc import expand, get_primary_interaction_tex
 
 
 FNAME_TEMPLATE = 'scan_results_event_{event}_uid_{uid}_dims_{param}.pkl'
 
 
-def parse_args(description=__doc__):
-    """Parse command line arguments"""
-    parser = ArgumentParser(description=description)
-    parser.add_argument(
-        '-d', '--dir', metavar='DIR', type=str, required=True,
-        help='''Directory containing retro tables''',
-    )
-    parser.add_argument(
-        '-e', '--event', type=int, required=True,
-        help='''Event ID from original I3 / HDF5 file'''
-    )
-    parser.add_argument(
-        '-u', '--uid', type=int, required=True,
-        help='''Unique event ID'''
-    )
-    args = parser.parse_args()
-    return args
-
-
-def plot_1d_scan(dir, event, uid):
+def plot_1d_scan(dir, event, uid): # pylint: disable=redefined-builtin
     """main"""
     #scan_files = glob(expand(dirpath) + '/*_uid_%d_*' % uid)
 
@@ -162,6 +145,25 @@ def plot_1d_scan(dir, event, uid):
     #print('saved plot to "%s"' % fpath)
     #plt.draw()
     #plt.show()
+
+
+def parse_args(description=__doc__):
+    """Parse command line arguments"""
+    parser = ArgumentParser(description=description)
+    parser.add_argument(
+        '-d', '--dir', metavar='DIR', type=str, required=True,
+        help='''Directory containing retro tables''',
+    )
+    parser.add_argument(
+        '-e', '--event', type=int, required=True,
+        help='''Event ID from original I3 / HDF5 file'''
+    )
+    parser.add_argument(
+        '-u', '--uid', type=int, required=True,
+        help='''Unique event ID'''
+    )
+    args = parser.parse_args()
+    return args
 
 
 if __name__ == '__main__':

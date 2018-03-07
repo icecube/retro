@@ -1,10 +1,10 @@
+# -*- coding: utf-8 -*-
+
 """
 Simple class DiscreteHypo for evaluating discrete hypotheses.
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __all__ = ['DiscreteHypo']
 
@@ -22,7 +22,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 from collections import Mapping
 from copy import deepcopy

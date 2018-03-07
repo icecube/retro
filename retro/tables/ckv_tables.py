@@ -1,3 +1,52 @@
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
+
+"""
+Class for using a set of 5D (r, costheta, t, costhetadir, deltaphidir)
+Cherenkov Retro tables (5D CLSim tables with directionality map convolved with
+a Cherenkov cone)
+"""
+
+from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    CKV_TABLE_KEYS
+    load_ckv_table
+    CKVTables
+'''.split()
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+from collections import OrderedDict
+from os.path import abspath, dirname, isdir, isfile, join
+import sys
+from time import time
+
+import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro import DEBUG
+from retro.tables.pexp_5d import TBL_KIND_CKV, generate_pexp_5d_function
+from retro.tables.clsim_tables import TABLE_NORM_KEYS, get_table_norm
+from retro.utils.misc import expand, wstderr
+
+
 CKV_TABLE_KEYS = [
     'n_photons', 'phase_refractive_index', 'r_bin_edges',
     'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
@@ -35,11 +84,11 @@ def load_ckv_table(fpath, mmap, step_length=None):
         - 't_indep_ckv_table' : np.ndarray
 
     """
-    fpath = retro.expand(fpath)
+    fpath = expand(fpath)
     table = OrderedDict()
 
-    if retro.DEBUG:
-        retro.wstderr('Loading table from {} ...\n'.format(fpath))
+    if DEBUG:
+        wstderr('Loading table from {} ...\n'.format(fpath))
 
     assert isdir(fpath), fpath
     t0 = time()
@@ -52,8 +101,8 @@ def load_ckv_table(fpath, mmap, step_length=None):
 
     for key in CKV_TABLE_KEYS: # TODO: + ['t_indep_ckv_table']:
         fpath = join(indir, key + '.npy')
-        if retro.DEBUG:
-            retro.wstderr('    loading {} from "{}" ...'.format(key, fpath))
+        if DEBUG:
+            wstderr('    loading {} from "{}" ...'.format(key, fpath))
 
         t1 = time()
         if isfile(fpath):
@@ -64,14 +113,14 @@ def load_ckv_table(fpath, mmap, step_length=None):
                 .format(fpath, key)
             )
 
-        if retro.DEBUG:
-            retro.wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
+        if DEBUG:
+            wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
 
     if step_length is not None and 'step_length' in table:
         assert step_length == table['step_length']
 
-    if retro.DEBUG:
-        retro.wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
+    if DEBUG:
+        wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
 
     return table
 
@@ -305,6 +354,3 @@ class CKVTables(object):
             #t_indep_table=t_indep_ckv_table,
             #t_indep_table_norm=t_indep_table_norm,
         )
-
-
-

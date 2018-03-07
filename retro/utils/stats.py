@@ -1,13 +1,11 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
-
 
 """
 Statistics
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __all__ = '''
     poisson_llh
@@ -30,15 +28,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from os.path import abspath, dirname
+import sys
+
+import numpy as np
+from scipy.special import gammaln
 
 RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 import retro
-
-import numpy as np
-from scipy.special import gammaln
 
 
 def poisson_llh(expected, observed):
@@ -87,9 +87,6 @@ def partial_poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    # TODO: why is there a +1 here? Avoid zero observations? How does this
-    # affect the result, besides avoiding inf? Removed for now until we work
-    # this out...
     llh = observed * np.log(expected) - expected - gammaln(observed)
     return llh
 

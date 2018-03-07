@@ -12,6 +12,13 @@ mapping.
 
 from __future__ import absolute_import, division, print_function
 
+__all__ = '''
+    get_cone_map
+    convolve_table
+    survival_prob_from_smeared_cone
+    survival_prob_from_cone
+'''.split()
+
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
 
@@ -37,15 +44,8 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import (
-    PI, TWO_PI, SPEED_OF_LIGHT_M_PER_NS, numba_jit, DFLT_NUMBA_JIT_KWARGS
-)
-
-
-__all__ = [
-    'get_cone_map', 'convolve_table', 'survival_prob_from_smeared_cone',
-    'survival_prob_from_cone',
-]
+from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
+from retro.const import PI, TWO_PI, SPEED_OF_LIGHT_M_PER_NS
 
 
 # NOTE: dithering the ckv angle appears to do non-representative things to the

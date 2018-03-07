@@ -1,18 +1,28 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
-
 
 """
 namedtuples for interface simplicity and consistency
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    'HypoParams8D', 'HypoParams10D', 'TrackParams', 'Event', 'Pulses',
-    'RetroPhotonInfo', 'HypoPhotonInfo', 'Cart2DCoord', 'Cart3DCoord',
-    'PolCoord', 'SphCoord', 'TimeCart3DCoord', 'TimeSphCoord',
-]
+__all__ = '''
+    HypoParams8D
+    HypoParams10D
+    TrackParams
+    Event
+    Pulses
+    RetroPhotonInfo
+    HypoPhotonInfo
+    Cart2DCoord
+    Cart3DCoord
+    PolCoord
+    SphCoord
+    TimeCart3DCoord
+    TimePolCoord
+    TimeSphCoord
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

@@ -6,11 +6,13 @@
 Generate a json file summarizing a CLSim table
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-
-__all__ = ['summarize_clsim_table', 'parse_args', 'main']
+__all__ = '''
+    summarize_clsim_table
+    parse_args
+    main
+'''.split()
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -27,7 +29,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from argparse import ArgumentParser
 from collections import OrderedDict
 from glob import glob
@@ -42,8 +43,11 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-import retro
-from retro.table_readers import load_clsim_table
+from retro.const import SPEED_OF_LIGHT_M_PER_NS
+from retro.utils.misc import expand, mkdir, wstderr
+from retro.tables.clsim_tables import (
+    CLSIM_TABLE_METANAME_PROTO, interpret_clsim_table_fname, load_clsim_table
+)
 
 
 def summarize_clsim_table(table_fpath, table=None, save_summary=True,
@@ -78,24 +82,24 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
     if save_summary:
         from pisa.utils.jsons import from_json, to_json
 
-    table_fpath = retro.expand(table_fpath)
+    table_fpath = expand(table_fpath)
     srcdir, clsim_fname = dirname(table_fpath), basename(table_fpath)
     invalid_fname = False
     try:
-        fname_info = retro.interpret_clsim_table_fname(clsim_fname)
+        fname_info = interpret_clsim_table_fname(clsim_fname)
     except ValueError:
         invalid_fname = True
         fname_info = {}
 
     if outdir is None:
         outdir = srcdir
-    outdir = retro.expand(outdir)
-    retro.mkdir(outdir)
+    outdir = expand(outdir)
+    mkdir(outdir)
 
     if invalid_fname:
         metapath = None
     else:
-        metaname = (retro.CLSIM_TABLE_METANAME_PROTO[-1]
+        metaname = (CLSIM_TABLE_METANAME_PROTO[-1]
                     .format(hash_val=fname_info['hash_val']))
         metapath = join(outdir, metaname)
     if metapath and isfile(metapath):
@@ -136,7 +140,7 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
     norm = (
         1
         / table['n_photons']
-        / (retro.SPEED_OF_LIGHT_M_PER_NS / table['phase_refractive_index']
+        / (SPEED_OF_LIGHT_M_PER_NS / table['phase_refractive_index']
            * np.mean(np.diff(table['t_bin_edges'])))
         #* table['angular_acceptance_fract']
         * (len(table['costheta_bin_edges']) - 1)
@@ -152,11 +156,11 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
     for flow, idx in product(('underflow', 'overflow'), iter(range(n_dims))):
         summary[flow][idx] = summary[flow][idx] * norm
 
-    retro.wstderr('Finding marginal distributions...\n')
-    retro.wstderr('    masking off zeros in table...')
+    wstderr('Finding marginal distributions...\n')
+    wstderr('    masking off zeros in table...')
     t0 = time()
     nonzero_table = np.ma.masked_equal(table['table'], 0)
-    retro.wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
+    wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
 
     t0_marg = time()
     summary['dimensions'] = OrderedDict()
@@ -166,28 +170,28 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         remove_axes = tuple(remove_axes)
         axis = OrderedDict()
 
-        retro.wstderr('    mean across non-{} axes...'.format(ax_name))
+        wstderr('    mean across non-{} axes...'.format(ax_name))
         t0 = time()
         axis['mean'] = norm * np.asarray(
             np.mean(table['table'], axis=remove_axes)
         )
-        retro.wstderr(' ({} s)\n'.format(np.round(time() - t0, 3)))
+        wstderr(' ({} s)\n'.format(np.round(time() - t0, 3)))
 
-        retro.wstderr('    median across non-{} axes...'.format(ax_name))
+        wstderr('    median across non-{} axes...'.format(ax_name))
         t0 = time()
         axis['median'] = norm * np.asarray(
             np.ma.median(nonzero_table, axis=remove_axes)
         )
-        retro.wstderr(' ({} s)\n'.format(np.round(time() - t0, 3)))
+        wstderr(' ({} s)\n'.format(np.round(time() - t0, 3)))
 
-        retro.wstderr('    max across non-{} axes...'.format(ax_name))
+        wstderr('    max across non-{} axes...'.format(ax_name))
         t0 = time()
         axis['max'] = norm * np.asarray(
             np.max(table['table'], axis=remove_axes)
         )
-        retro.wstderr(' ({} s)\n'.format(np.round(time() - t0, 3)))
+        wstderr(' ({} s)\n'.format(np.round(time() - t0, 3)))
         summary['dimensions'][ax_name] = axis
-    retro.wstderr(
+    wstderr(
         '  Total time to find marginal distributions: {} s\n'
         .format(np.round(time() - t0_marg, 3))
     )
@@ -202,8 +206,8 @@ def summarize_clsim_table(table_fpath, table=None, save_summary=True,
         to_json(summary, outfpath)
         print('saved summary to "{}"'.format(outfpath))
 
-    retro.wstderr('Time to summarize table: {} s\n'
-                  .format(np.round(time() - t_start, 3)))
+    wstderr('Time to summarize table: {} s\n'
+            .format(np.round(time() - t_start, 3)))
 
     return table, summary
 
@@ -237,14 +241,14 @@ def main():
     kwargs = vars(args)
     table_fpaths = []
     for fpath in kwargs.pop('table-fpaths'):
-        table_fpaths.extend(glob(retro.expand(fpath)))
+        table_fpaths.extend(glob(expand(fpath)))
     for fpath in table_fpaths:
         kwargs['table_fpath'] = fpath
         summarize_clsim_table(**kwargs)
     total_time = time() - t0
     if len(table_fpaths) > 1:
         avg = np.round(total_time / len(table_fpaths), 3)
-        retro.wstderr('Average time to summarize tables: {} s/table\n'.format(avg))
+        wstderr('Average time to summarize tables: {} s/table\n'.format(avg))
 
 
 if __name__ == '__main__':

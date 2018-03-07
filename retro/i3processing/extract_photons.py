@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position, wildcard-import, invalid-name, redefined-outer-name
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, redefined-outer-name
 
 """
 Read in an i3 file from CLsim and generate a pickle file containing the run
@@ -9,6 +10,11 @@ weight for each DOM).
 """
 
 from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    extract_photons
+    parse_args
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -187,4 +193,4 @@ def parse_args(description=__doc__):
 
 
 if __name__ == '__main__':
-    photon_info = extract_photons(**vars(parse_args()))
+    photon_info = extract_photons(**vars(parse_args())) # pylint: disable=invalid-name

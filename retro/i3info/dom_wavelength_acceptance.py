@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 """
 Produce data tables containing DOM wavelength acceptance, the number-density

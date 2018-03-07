@@ -1,3 +1,53 @@
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
+
+"""
+Function to generate the funciton for finding expected number of photons to
+survive from a 5D CLSim table.
+"""
+
+from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    MACHINE_EPS
+    TBL_KIND_CLSIM
+    TBL_KIND_CKV
+    generate_pexp_5d_function
+'''.split()
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
+
+import math
+from os.path import abspath, dirname
+import sys
+
+import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
+from retro.const import PI
+from retro.utils.ckv import (
+    survival_prob_from_cone, survival_prob_from_smeared_cone
+)
+from retro.utils.geom import infer_power
+
+
 MACHINE_EPS = 1e-16
 
 TBL_KIND_CLSIM = 0
@@ -44,7 +94,7 @@ def generate_pexp_5d_function(
     r_max = np.max(table['r_bin_edges'])
     rsquared_min = r_min*r_min
     rsquared_max = r_max*r_max
-    r_power = retro.infer_power(table['r_bin_edges'])
+    r_power = infer_power(table['r_bin_edges'])
     inv_r_power = 1 / r_power
     n_r_bins = len(table['r_bin_edges']) - 1
     table_dr_pwr = (r_max - r_min)**inv_r_power / n_r_bins
@@ -93,7 +143,7 @@ def generate_pexp_5d_function(
         )
 
     #@profile
-    @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
+    @numba_jit(*DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d(
             pinfo_gen, hit_time, time_window, dom_coord, quantum_efficiency,
             noise_rate_hz, table, table_norm#, t_indep_table, t_indep_table_norm
@@ -469,6 +519,3 @@ def generate_pexp_5d_function(
         return photons_at_all_times, photons_at_hit_time
 
     return pexp_5d, binning_info
-
-
-

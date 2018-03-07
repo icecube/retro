@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, wildcard-import
 
 """
@@ -8,8 +9,9 @@ and save the resulting dict in a pkl file for later use
 
 from __future__ import absolute_import, division, print_function
 
-
 __all__ = '''
+    N_STRINGS
+    N_DOMS
     extract_gcd
     parse_args
 '''.split()
@@ -28,7 +30,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import bz2
@@ -70,7 +71,7 @@ def extract_gcd(gcd_file, outdir=None):
 
     """
     from I3Tray import I3Units, OMKey # pylint: disable=import-error
-    from icecube import dataclasses, dataio # pylint: disable=import-error, unused-import
+    from icecube import dataclasses, dataio # pylint: disable=import-error, unused-variable
 
     gcd_file = expanduser(expandvars(gcd_file))
     src_gcd_basename = basename(gcd_file)

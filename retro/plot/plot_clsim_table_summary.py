@@ -7,11 +7,14 @@ Plot marginal distributions saved to JSON files by `summarize_clsim_table.py`
 for one or more tables.
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-
-__all__ = ['formatter', 'plot_clsim_table_summary', 'parse_args', 'main']
+__all__ = '''
+    formatter
+    plot_clsim_table_summary
+    parse_args
+    main
+'''.split()
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -27,7 +30,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
-
 
 from argparse import ArgumentParser
 from collections import Mapping, OrderedDict
@@ -46,11 +48,11 @@ from pisa.utils.jsons import from_json
 from pisa.utils.format import format_num
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
-from retro import COLOR_CYCLE_ORTHOG
-from retro import expand, mkdir
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.utils.misc import expand, mkdir
+from retro.utils.plot import COLOR_CYCLE_ORTHOG
 
 
 def formatter(mapping, key_only=False, fname=False):
@@ -164,8 +166,9 @@ def formatter(mapping, key_only=False, fname=False):
     return line_sep.join(label_lines)
 
 
-def plot_clsim_table_summary(summaries, formats=None, outdir=None,
-                             no_legend=False):
+def plot_clsim_table_summary(
+        summaries, formats=None, outdir=None, no_legend=False
+    ):
     """Plot the table summary produced by `summarize_clsim_table`.
 
     Plots are made of marginalized 1D distributions, where mean, median, and/or

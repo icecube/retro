@@ -1,8 +1,18 @@
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
+
+"""
+Class for single-DOM 3D (t, r, costheta) tables (i.e., no directionality).
+"""
+
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-]
-
+__all__ = '''
+    RETRO_DOM_TABLE_FNAME_PROTO
+    RETRO_DOM_TABLE_FNAME_RE
+    load_t_r_theta_table
+    DOMTimePolarTables
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -18,6 +28,21 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
+
+from os.path import abspath, dirname, isdir, join
+import re
+import sys
+
+import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.const import DC_DOM_QUANT_EFF, IC_DOM_QUANT_EFF
+from retro.retro_types import RetroPhotonInfo, TimeSphCoord
+from retro.tables.pexp_t_r_theta import pexp_t_r_theta
+from retro.utils.misc import expand, force_little_endian
 
 
 RETRO_DOM_TABLE_FNAME_PROTO = [
@@ -84,19 +109,19 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
         applied to each DOM's table _after_ `scale`. See `Notes` for more
         info.
 
-    photon_info : None or retro.RetroPhotonInfo namedtuple of dicts
+    photon_info : None or RetroPhotonInfo namedtuple of dicts
         If None, creates a new RetroPhotonInfo namedtuple with empty dicts to
         fill. If one is provided, the existing component dictionaries are
         updated.
 
     Returns
     -------
-    photon_info : retro.RetroPhotonInfo namedtuple of dicts
+    photon_info : RetroPhotonInfo namedtuple of dicts
         Tuple fields are 'survival_prob', 'theta', 'phi', and 'length'. Each
         dict is keyed by `depth_idx` and values are the arrays loaded
         from the FITS file.
 
-    bin_edges : retro.TimeSphCoord namedtuple
+    bin_edges : TimeSphCoord namedtuple
         Each element of the tuple is an array of bin edges.
 
     Notes
@@ -123,12 +148,12 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
     if photon_info is None:
         empty_dicts = []
-        for _ in retro.RetroPhotonInfo._fields:
+        for _ in RetroPhotonInfo._fields:
             empty_dicts.append({})
-        photon_info = retro.RetroPhotonInfo(*empty_dicts)
+        photon_info = RetroPhotonInfo(*empty_dicts)
 
-    with pyfits.open(retro.expand(fpath)) as table:
-        data = retro.force_little_endian(table[0].data)
+    with pyfits.open(expand(fpath)) as table:
+        data = force_little_endian(table[0].data)
 
         if scale == exponent == 1:
             photon_info.survival_prob[depth_idx] = data
@@ -137,18 +162,18 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
                 1 - (1 - data * scale)**exponent
             )
 
-        photon_info.theta[depth_idx] = retro.force_little_endian(table[1].data)
+        photon_info.theta[depth_idx] = force_little_endian(table[1].data)
 
-        photon_info.deltaphi[depth_idx] = retro.force_little_endian(table[2].data)
+        photon_info.deltaphi[depth_idx] = force_little_endian(table[2].data)
 
-        photon_info.length[depth_idx] = retro.force_little_endian(table[3].data)
+        photon_info.length[depth_idx] = force_little_endian(table[3].data)
 
         # Note that we invert (reverse and multiply by -1) time edges; also,
         # no phi edges are defined in these tables.
-        data = retro.force_little_endian(table[4].data)
+        data = force_little_endian(table[4].data)
         t = - data[::-1]
 
-        r = retro.force_little_endian(table[5].data)
+        r = force_little_endian(table[5].data)
 
         # Previously used the following to get "agreement" w/ raw photon sim
         #r_volumes = np.square(0.5 * (r[1:] + r[:-1]))
@@ -161,9 +186,9 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
             photon_info.survival_prob[depth_idx], axis=0
         )
 
-        theta = retro.force_little_endian(table[6].data)
+        theta = force_little_endian(table[6].data)
 
-        bin_edges = retro.TimeSphCoord(
+        bin_edges = TimeSphCoord(
             t=t, r=r, theta=theta, phi=np.array([], dtype=t.dtype)
         )
 
@@ -194,8 +219,8 @@ class DOMTimePolarTables(object):
         `dc_exponent` is applied to DeepCore DOMs. Note that this is applied to
         each DOM's table after the appropriate quantum efficiency scale factor
         has already been applied (quantum efficiency is applied as a simple
-        multiplier; see :attr:`retro.IC_DOM_QUANT_EFF` and
-        :attr:`retro.DC_DOM_QUANT_EFF`).
+        multiplier; see :attr:`IC_DOM_QUANT_EFF` and
+        :attr:`DC_DOM_QUANT_EFF`).
 
     naming_version : int or None
         Version of naming for single-DOM+directionality tables (original is 0).
@@ -206,16 +231,16 @@ class DOMTimePolarTables(object):
     def __init__(self, tables_dir, hash_val, geom, use_directionality,
                  ic_exponent=1, dc_exponent=1, naming_version=None):
         # Translation and validation of args
-        tables_dir = retro.expand(tables_dir)
+        tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
         assert len(geom.shape) == 3
         assert isinstance(use_directionality, bool)
         assert ic_exponent >= 0
         assert dc_exponent >= 0
         if naming_version is None:
-            naming_version = len(retro.RETRO_DOM_TABLE_FNAME_PROTO) - 1
+            naming_version = len(RETRO_DOM_TABLE_FNAME_PROTO) - 1
         self.naming_version = naming_version
-        self.dom_table_fname_proto = retro.RETRO_DOM_TABLE_FNAME_PROTO[naming_version]
+        self.dom_table_fname_proto = RETRO_DOM_TABLE_FNAME_PROTO[naming_version]
 
         self.tables_dir = tables_dir
         self.hash_val = hash_val
@@ -247,11 +272,11 @@ class DOMTimePolarTables(object):
         """
         if string < 79:
             subdet = 'ic'
-            dom_quant_eff = retro.IC_DOM_QUANT_EFF
+            dom_quant_eff = IC_DOM_QUANT_EFF
             exponent = self.ic_exponent
         else:
             subdet = 'dc'
-            dom_quant_eff = retro.DC_DOM_QUANT_EFF
+            dom_quant_eff = DC_DOM_QUANT_EFF
             exponent = self.dc_exponent
 
         if not force_reload and dom in self.tables[subdet]:
@@ -288,7 +313,7 @@ class DOMTimePolarTables(object):
 
         #length = photon_info.length[depth_idx]
         #deltaphi = photon_info.deltaphi[depth_idx]
-        self.tables[subdet][depth_idx] = retro.RetroPhotonInfo(
+        self.tables[subdet][depth_idx] = RetroPhotonInfo(
             survival_prob=photon_info.survival_prob[depth_idx],
             time_indep_survival_prob=photon_info.time_indep_survival_prob[depth_idx],
             theta=photon_info.theta[depth_idx],
@@ -343,19 +368,18 @@ class DOMTimePolarTables(object):
         bin_edges = self.bin_edges[subdet][depth_idx]
         survival_prob = table.survival_prob
         time_indep_survival_prob = table.time_indep_survival_prob
-        return pexp_t_r_theta(pinfo_gen=pinfo_gen,
-                              hit_time=hit_time,
-                              dom_coord=dom_coord,
-                              survival_prob=survival_prob,
-                              time_indep_survival_prob=time_indep_survival_prob,
-                              t_min=bin_edges.t[0],
-                              t_max=bin_edges.t[-1],
-                              n_t_bins=len(bin_edges.t)-1,
-                              r_min=bin_edges.r[0],
-                              r_max=bin_edges.r[-1],
-                              r_power=2,
-                              n_r_bins=len(bin_edges.r)-1,
-                              n_costheta_bins=len(bin_edges.theta)-1)
-
-
-
+        return pexp_t_r_theta(
+            pinfo_gen=pinfo_gen,
+            hit_time=hit_time,
+            dom_coord=dom_coord,
+            survival_prob=survival_prob,
+            time_indep_survival_prob=time_indep_survival_prob,
+            t_min=bin_edges.t[0],
+            t_max=bin_edges.t[-1],
+            n_t_bins=len(bin_edges.t)-1,
+            r_min=bin_edges.r[0],
+            r_max=bin_edges.r[-1],
+            r_power=2,
+            n_r_bins=len(bin_edges.r)-1,
+            n_costheta_bins=len(bin_edges.theta)-1
+        )

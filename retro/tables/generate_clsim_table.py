@@ -1,10 +1,10 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
 
 """
 Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
 """
-
 
 # TODO: add angular sensitivity model to the values used to produce a hash
 #       (currently "as.h2-50cm")
@@ -15,11 +15,15 @@ Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
 # TODO: does x and y coordinate make a difference if we turn ice tilt on? if
 #       so, we should be able to specify (str,om) coordinate for simulation
 
-
 from __future__ import absolute_import, division, print_function
 
-
-__all__ = ['generate_clsim_table_meta', 'generate_clsim_table', 'parse_args']
+__all__ = '''
+    IC_AVG_Z
+    DC_AVG_Z
+    generate_clsim_table_meta
+    generate_clsim_table
+    parse_args
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller, Justin L. Lanfranchi
@@ -36,10 +40,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from argparse import ArgumentParser
-from os import access, environ, makedirs, pathsep, remove, X_OK
-from os.path import abspath, dirname, isdir, isfile, join
+from os import access, environ, pathsep, remove, X_OK
+from os.path import abspath, dirname, isfile, join
 import json
 from numbers import Integral
 from subprocess import check_call
@@ -58,7 +61,10 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-import retro
+from retro.utils.misc import expand, hash_obj, mkdir
+from retro.tables.clsim_tables import (
+    CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_METANAME_PROTO
+)
 
 
 IC_AVG_Z = [
@@ -142,8 +148,8 @@ def generate_clsim_table_meta(r_binning_kw, t_binning_kw, costheta_binning_kw,
         tray_kw_to_hash=tray_kw_to_hash
     )
 
-    hash_val = retro.hash_obj(hashable_params, fmt='hex')[:8]
-    metaname = retro.CLSIM_TABLE_METANAME_PROTO[-1].format(hash_val=hash_val)
+    hash_val = hash_obj(hashable_params, fmt='hex')[:8]
+    metaname = CLSIM_TABLE_METANAME_PROTO[-1].format(hash_val=hash_val)
 
     return hash_val, metaname
 
@@ -255,9 +261,8 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
                             for path in environ['PATH'].split(pathsep)):
         raise ValueError('`zstd` command not found in path')
 
-    outdir = retro.expand(outdir)
-    if not isdir(outdir):
-        makedirs(outdir)
+    outdir = expand(outdir)
+    mkdir(outdir)
 
     # Note: + 2 accounts for under/overflow bins in each dimension
     n_bins = np.product([n_bins + 2 for n_bins in (n_r_bins,
@@ -365,7 +370,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
     hash_val, metaname = generate_clsim_table_meta(**hashable_params)
     metapath = join(outdir, metaname)
 
-    filename = retro.CLSIM_TABLE_FNAME_PROTO[-1].format(
+    filename = CLSIM_TABLE_FNAME_PROTO[-1].format(
         hash_val=hash_val, string=subdet, depth_idx=depth_idx, seed=seed
     )
     filepath = abspath(join(outdir, filename))

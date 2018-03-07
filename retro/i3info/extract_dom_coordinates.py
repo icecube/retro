@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, wildcard-import
 
 """
@@ -31,7 +32,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import json
 from os.path import abspath, dirname, expanduser, expandvars, isfile, join
@@ -55,26 +55,6 @@ from retro.utils.geom import (
 
 N_STRINGS = 86
 N_OMS = 60
-
-
-def parse_args():
-    """Parse command line arguments for `extract_dom_coordinates`"""
-    parser = ArgumentParser(
-        description=__doc__,
-        formatter_class=ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument(
-        '--gcd', metavar='GCD_FILE', type=str,
-        #default='$I3_DATA/GCD/GeoCalibDetectorStatus_2013.56429_V1_Modified.i3.gz',
-        default='$I3_DATA/GCD/GeoCalibDetectorStatus_2013.56429_V1.i3.gz',
-        help='GCD file from which to extract DOM coordinates'
-    )
-    parser.add_argument(
-        '--outdir', type=str, default='./',
-        help='''Directory into which to save the .npy file containing the
-        coordinates.'''
-    )
-    return parser.parse_args()
 
 
 def extract_dom_coordinates(gcd, outdir):
@@ -139,6 +119,26 @@ def extract_dom_coordinates(gcd, outdir):
     print('Saved metadata to\n  "{}"'.format(abspath(metapath)))
     np.save(outpath, geom)
     print('Saved geom to\n  "{}"'.format(abspath(outpath)))
+
+
+def parse_args():
+    """Parse command line arguments for `extract_dom_coordinates`"""
+    parser = ArgumentParser(
+        description=__doc__,
+        formatter_class=ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        '--gcd', metavar='GCD_FILE', type=str,
+        #default='$I3_DATA/GCD/GeoCalibDetectorStatus_2013.56429_V1_Modified.i3.gz',
+        default='$I3_DATA/GCD/GeoCalibDetectorStatus_2013.56429_V1.i3.gz',
+        help='GCD file from which to extract DOM coordinates'
+    )
+    parser.add_argument(
+        '--outdir', type=str, default='./',
+        help='''Directory into which to save the .npy file containing the
+        coordinates.'''
+    )
+    return parser.parse_args()
 
 
 def main():

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
@@ -5,11 +6,13 @@ Discrete-time kernels for muons generating photons, to be used as hypo_kernels
 in discrete_hypo/DiscreteHypo class.
 """
 
-
 from __future__ import absolute_import, division, print_function
 
-
-__all__ = ['ALL_REALS', 'const_energy_loss_muon', 'table_energy_loss_muon']
+__all__ = '''
+    ALL_REALS
+    const_energy_loss_muon
+    table_energy_loss_muon
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi, K. Crust'
 __license__ = '''Copyright 2017 Philipp Eller, Justin L. Lanfranchi, Kevin Crust
@@ -26,26 +29,25 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
+import csv
 import math
 from os.path import abspath, dirname, join
 import sys
-import csv
-from scipy import interpolate
 
 import numpy as np
+from scipy import interpolate
 
 if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import (SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-                   TRACK_PHOTONS_PER_M, numba_jit, DFLT_NUMBA_JIT_KWARGS)
+from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
+from retro.const import (
+    COS_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M
+)
 
 
 ALL_REALS = (-np.inf, np.inf)
-
-COS_CKV = 0.764540803152
 
 
 # Create spline (for table_energy_loss_muon)

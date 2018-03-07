@@ -1,13 +1,12 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position, no-member
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, no-member, redefined-outer-name
 
 """
 2D and 3D visualizations of a time- and DOM-independent (TDI) table
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __all__ = ['parse_args', 'visualize_tables']
 
@@ -26,7 +25,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from argparse import ArgumentParser
 from copy import deepcopy
 from os.path import abspath, basename, dirname, join
@@ -41,10 +39,11 @@ import pyfits
 import yt
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
-from retro import DETECTOR_GEOM_FILE, Cart3DCoord
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro import DETECTOR_GEOM_FILE
+from retro.retro_types import Cart3DCoord
 
 
 DOM_RADIUS_M = 0.3302
