@@ -142,8 +142,7 @@ def generate_pexp_5d_function(
             size=num_phi_samples
         )
 
-    #@profile
-    @numba_jit(*DFLT_NUMBA_JIT_KWARGS)
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d(
             pinfo_gen, hit_time, time_window, dom_coord, quantum_efficiency,
             noise_rate_hz, table, table_norm#, t_indep_table, t_indep_table_norm

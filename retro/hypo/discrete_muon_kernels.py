@@ -37,21 +37,23 @@ import sys
 import numpy as np
 from scipy import interpolate
 
+RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
     COS_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M
 )
 
+print(RETRO_DIR)
 
 ALL_REALS = (-np.inf, np.inf)
 
 
 # Create spline (for table_energy_loss_muon)
-with open(join(dirname(dirname(abspath(__file__))), 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
+with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
     # pylint: disable=invalid-name
     reader = csv.reader(csvfile)
     rows = []
