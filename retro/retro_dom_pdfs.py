@@ -63,7 +63,7 @@ retro.DEBUG = 0
 SIM_TO_TEST = 'upgoing_muon'
 #CODE_TO_TEST = 'dom_time_polar_tables'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm'
-CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi_CKVangle_r2_x_dr'
+CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0_sigma10deg_100phi_CKVangle_r2_x_dr_more_doms'
 #CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
 GCD_FILE = retro.expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
@@ -127,11 +127,11 @@ run_info['sim'] = OrderedDict([
 ])
 
 
-strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46] #+ [54, 62]
+strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46] + [54, 62]
 #strings = [86]
 
 #doms = list(range(40, 60+1))
-doms = list(range(25, 60+1))
+doms = list(range(10, 60+1))
 #doms = [40, 45, 50]
 
 hit_times = np.linspace(0, 2000, 201)
