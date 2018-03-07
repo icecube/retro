@@ -23,7 +23,7 @@ EXT_MODULES = [
 ]
 
 setup(
-    name='retro_reco',
+    name='retro-reco',
     description=(
         'Reverse table reconstruction for of neutrino events in ice/water'
         ' Cherenkov detectors'
@@ -31,6 +31,7 @@ setup(
     author='Philipp Eller and Justin Lanfranchi',
     author_email='pde3@psu.edu',
     url='https://github.com/philippeller/retro',
+    license='Apache 2.0',
     python_requires='>=2.7, <3.0',
     setup_requires=[
         'pip>=1.8',

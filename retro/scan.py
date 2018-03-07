@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
-
 """
 Perform 1D and 2D parameter scans of the likelihood space.
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -25,7 +22,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from collections import Sequence
 from itertools import izip, product
 from os.path import abspath, dirname
@@ -37,11 +33,13 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-import retro
+from retro import FTYPE, HYPO_PARAMS_T
 
 
-def scan(hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
-         neg_llh_func_kwargs=None):
+def scan(
+        hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
+        neg_llh_func_kwargs=None
+    ):
     """Scan likelihoods for hypotheses changing one parameter dimension.
 
     Parameters
@@ -82,7 +80,7 @@ def scan(hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
     if neg_llh_func_kwargs is None:
         neg_llh_func_kwargs = {}
 
-    all_params = retro.HYPO_PARAMS_T._fields
+    all_params = HYPO_PARAMS_T._fields
 
     # Need list of strings (dim names). If we just have a string, make it the
     # first element of a single-element tuple.
@@ -105,7 +103,7 @@ def scan(hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
 
     if nominal_params is None:
         #assert len(dims) == len(all_params)
-        nominal_params = retro.HYPO_PARAMS_T(*([np.nan]*len(all_params)))
+        nominal_params = HYPO_PARAMS_T(*([np.nan]*len(all_params)))
 
     # Make nominal into a list so we can mutate its values as we scan
     params = list(nominal_params)
@@ -121,13 +119,13 @@ def scan(hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
         for pidx, pval in izip(param_indices, param_values):
             params[pidx] = pval
 
-        hypo_params = retro.HYPO_PARAMS_T(*params)
+        hypo_params = HYPO_PARAMS_T(*params)
 
         pinfo_gen = hypo_obj.get_pinfo_gen(hypo_params=hypo_params)
         neg_llh = neg_llh_func(pinfo_gen, event, **neg_llh_func_kwargs)
         all_neg_llh.append(neg_llh)
 
-    all_neg_llh = np.array(all_neg_llh, dtype=retro.FTYPE)
+    all_neg_llh = np.array(all_neg_llh, dtype=FTYPE)
     all_neg_llh.reshape(shape)
 
     return all_neg_llh
