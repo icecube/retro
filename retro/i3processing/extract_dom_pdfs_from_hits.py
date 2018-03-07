@@ -1,8 +1,10 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position, wildcard-import
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, invalid-name
+
 """
-read in an i3 file contain SRT hit series and generate 'oversampled' hit
-distributions per DOM
+Read in an i3 file contain SRT hit series and generate 'oversampled' hit
+distributions per DOM.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -22,15 +24,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
-import sys
-import numpy as np
 import pickle
+import sys
+
+import numpy as np
 
 from icecube import dataclasses # pylint: disable=import-error, unused-import
 from icecube import dataio # pylint: disable=import-error
-
-import matplotlib.pyplot as plt
 
 
 # dict to store the photons
@@ -57,7 +57,7 @@ while i3_file.more():
     #if counter > 100:
     #    break
     counter += 1
-    if counter%100==0:
+    if counter % 100 == 0:
         print(counter)
     hits = dataclasses.I3RecoPulseSeriesMap.from_frame(frame, pulse_series)
     timeshift = frame['TimeShift'].value
@@ -86,10 +86,3 @@ for key, d in raw_data.items():
 outfile = open(fname.rstrip('.i3.bz2') + '_%s.pkl'%pulse_series, 'wb')
 pickle.dump(histos, outfile)
 outfile.close()
-
-    # plotting
-    #if len(weight) > counter/4:
-    #    plt.hist(time, bins=200, weights=weight, range=(0,2000))
-    #    #plt.hist(time, bins=40, range=(0,2000))
-    #    plt.savefig('dom_pdfs/%s_%s.png'%(fname.rstrip('.i3.bz2'),key))
-    #    plt.clf()

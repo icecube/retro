@@ -1,17 +1,19 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# pylint: disable=invalid-name
 
 """
 Display photon production info for tracks and cascades, as parameterized in
 IceCube software
 """
 
-
 from __future__ import absolute_import, division, print_function
+
+from os.path import expandvars
 
 from icecube.clsim.traysegments.common import parseIceModel
 from icecube.clsim import NumberOfPhotonsPerMeter
 from icecube import clsim
-from os.path import expandvars
 from icecube.icetray import I3Units
 
 
@@ -48,7 +50,7 @@ if __name__ == '__main__':
     print('  %10.3f m per GeV' % m_per_gev_trck)
     print('')
     print('Electromagnetic cascade:')
-    print('  %10.3f photons per GeV' % photons_per_gev_em_cscd )
+    print('  %10.3f photons per GeV' % photons_per_gev_em_cscd)
     print('')
     #print('Hadronic cascade:')
     #print('  %10.3f photons per GeV' % photons_per_gev_had_cscd)

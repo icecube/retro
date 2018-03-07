@@ -1,6 +1,26 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, invalid-name
+
+from __future__ import absolute_import, division, print_function
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
 
 import os
+
 import numpy as np
 
 import matplotlib
@@ -8,13 +28,13 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 
-
 import pandas as pd
 import seaborn as sns
 sns.set(style="ticks", color_codes=True)
 from scipy import stats
 
 from pymultinest.analyse import Analyzer
+
 
 llhs = []
 bestfits = []
@@ -25,9 +45,9 @@ for i in range(1000):
     #if os.path.exists('/gpfs/scratch/pde3/retro/test_event%i/log/run_%04d.log'%(event,i)):
     if os.path.exists('/gpfs/scratch/pde3/retro/log_cscd/run_%04d.log'%(i)):
         try:
-            #a = Analyzer(8, outputfiles_basename = "/gpfs/scratch/pde3/retro/test_event%i/out/tol0.1_evt%i-"%(event,i))
-            a = Analyzer(8, outputfiles_basename = "/gpfs/scratch/pde3/retro/out_cscd/tol0.1_evt%i-"%(i))
-            bestfit_params = a.get_best_fit()
+            #a = Analyzer(8, outputfiles_basename="/gpfs/scratch/pde3/retro/test_event%i/out/tol0.1_evt%i-"%(event,i))
+            a=Analyzer(8, outputfiles_basename="/gpfs/scratch/pde3/retro/out_cscd/tol0.1_evt%i-"%(i))
+            bestfit_params=a.get_best_fit()
             llhs.append(bestfit_params['log_likelihood'])
             bestfits.append(bestfit_params['parameters'])
         except IOError:
@@ -65,13 +85,13 @@ df = pd.DataFrame(data)
 # exclude outliers that are 5 or more sigmas away
 df = df[(np.abs(stats.zscore(df)) < 5).all(axis=1)]
 
-dot_size = max(min(7,int(1000/len(df.index))),1)
+dot_size = max(min(7, int(1000/len(df.index))), 1)
 
 def corrfunc(x, y, **kws):
     r, p = stats.pearsonr(x, y)
     ax = plt.gca()
-    ax.annotate("r = %.2f\np0 = %.1e"%(r,p),
-        xy=(.1, .8), xycoords=ax.transAxes)
+    ax.annotate("r = %.2f\np0 = %.1e"%(r, p),
+                xy=(.1, .8), xycoords=ax.transAxes)
 
 
 def add_text(x, **kwargs):
