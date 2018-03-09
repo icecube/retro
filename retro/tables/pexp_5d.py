@@ -52,6 +52,7 @@ MACHINE_EPS = 1e-16
 
 TBL_KIND_CLSIM = 0
 TBL_KIND_CKV = 1
+TBL_KIND_CKV_COMPR = 2
 
 
 def generate_pexp_5d_function(
@@ -211,7 +212,8 @@ def generate_pexp_5d_function(
 
         """
         # NOTE: on optimization:
-        # * np.square(x) is slower than x*x by a few percent (maybe within tolerance, though)
+        # * np.square(x) is slower than x*x by a few percent (maybe within
+        #   tolerance, though)
 
         # Initialize accumulators (using double precision)
 
@@ -235,7 +237,11 @@ def generate_pexp_5d_function(
         # computed at least the first time through and this will help ensure
         # that such a bug shows itself
 
-        this_table_norm = np.nan
+        r_t_bin_norm = np.nan
+
+        # Extract the components of the DOM coordinate
+
+        dom_x, dom_y, dom_z = dom_coord
 
         # Loop over the entries (one per row)
 
@@ -251,9 +257,9 @@ def generate_pexp_5d_function(
             # further in the past the photon started, the higher the time bin
             # index.
             dt = hit_time - t
-            dx = dom_coord[0] - x
-            dy = dom_coord[1] - y
-            dz = dom_coord[2] - z
+            dx = dom_x - x
+            dy = dom_y - y
+            dz = dom_z - z
 
             #print('dt={}, dx={}, dy={}, dz={}'.format(dt, dx, dy, dz))
 
@@ -307,11 +313,15 @@ def generate_pexp_5d_function(
             # separately.
 
             if pdir_r == 0.0: # isotropic emitter
-                pass
-                #if new_pdir_r or new_r_bin or new_costheta_bin:
-                #    this_photons_at_all_times = np.mean(
-                #        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                #    )
+                if get_t_indep and (new_pdir_r or new_r_bin or new_costheta_bin):
+                    if table_kind == TBL_KIND_CKV_COMPR:
+                        _idx, t_indep_surv_prob = (
+                            t_indep_table[r_bin_idx, costheta_bin_idx]
+                        )
+                    else:
+                        t_indep_surv_prob = np.mean(
+                            t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                        )
 
             elif pdir_r < 1.0: # Cherenkov emitter
                 # Note that for these tables, we have to invert the photon
@@ -363,39 +373,40 @@ def generate_pexp_5d_function(
 
                 if table_kind == TBL_KIND_CLSIM:
                     if ckv_sigma_deg > 0:
-                        pass
-                        #this_photons_at_all_times, _a, _b = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
-                        #    theta=ckv_theta,
-                        #    num_phi=num_phi_samples,
-                        #    rot_costheta=pdir_costheta,
-                        #    rot_sintheta=pdir_sintheta,
-                        #    rot_cosphi=pdir_cosdeltaphi,
-                        #    rot_sinphi=pdir_sindeltaphi,
-                        #    directional_survival_prob=(
-                        #        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                        #    ),
-                        #    num_costheta_bins=n_costhetadir_bins,
-                        #    num_deltaphi_bins=n_deltaphidir_bins,
-                        #    random_delta_thetas=random_delta_thetas
-                        #)
+                        if get_t_indep:
+                            t_indep_surv_prob, _a, _b = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
+                                theta=ckv_theta,
+                                num_phi=num_phi_samples,
+                                rot_costheta=pdir_costheta,
+                                rot_sintheta=pdir_sintheta,
+                                rot_cosphi=pdir_cosdeltaphi,
+                                rot_sinphi=pdir_sindeltaphi,
+                                directional_survival_prob=(
+                                    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                                ),
+                                num_costheta_bins=n_costhetadir_bins,
+                                num_deltaphi_bins=n_deltaphidir_bins,
+                                random_delta_thetas=random_delta_thetas
+                            )
                     else:
                         ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
-                        #this_photons_at_all_times, _a, _b = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
-                        #    costheta=ckv_costheta,
-                        #    sintheta=ckv_sintheta,
-                        #    num_phi=num_phi_samples,
-                        #    rot_costheta=pdir_costheta,
-                        #    rot_sintheta=pdir_sintheta,
-                        #    rot_cosphi=pdir_cosdeltaphi,
-                        #    rot_sinphi=pdir_sindeltaphi,
-                        #    directional_survival_prob=(
-                        #        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                        #    ),
-                        #    num_costheta_bins=n_costhetadir_bins,
-                        #    num_deltaphi_bins=n_deltaphidir_bins,
-                        #)
+                        if get_t_indep:
+                            t_indep_surv_prob, _a, _b = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
+                                costheta=ckv_costheta,
+                                sintheta=ckv_sintheta,
+                                num_phi=num_phi_samples,
+                                rot_costheta=pdir_costheta,
+                                rot_sintheta=pdir_sintheta,
+                                rot_cosphi=pdir_cosdeltaphi,
+                                rot_sinphi=pdir_sindeltaphi,
+                                directional_survival_prob=(
+                                    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                                ),
+                                num_costheta_bins=n_costhetadir_bins,
+                                num_deltaphi_bins=n_deltaphidir_bins,
+                            )
 
-                elif table_kind == TBL_KIND_CKV:
+                else: # table_kind TBL_KIND_CKV or TBL_KIND_CKV_COMPR
                     costhetadir_bin_idx = int((pdir_costheta + 1) // table_dcosthetadir)
                     # Make upper edge inclusive
                     if costhetadir_bin_idx > last_costhetadir_bin_idx:
@@ -421,19 +432,30 @@ def generate_pexp_5d_function(
 
                     if new_r_bin or new_costheta_bin or new_costhetadir_bin or new_deltaphidir_bin:
                         new_r_ct_ctd_or_dpd_bin = True
-                        #this_photons_at_all_times = t_indep_table[r_bin_idx, costheta_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+                        if table_kind == TBL_KIND_CKV:
+                            t_indep_surv_prob = t_indep_table[r_bin_idx, costheta_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+                        else:
+                            ti_idx, ti_wt = t_indep_table_map[r_bin_idx, costheta_bin_idx]
+                            t_indep_surv_prob = ti_wt * t_indep_table[ti_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
                     else:
                         new_r_ct_ctd_or_dpd_bin = False
-                else:
-                    raise ValueError('Unknown table kind.')
 
-            elif pdir_r == 1.0: # line emitter; can't do this with Ckv table!
-                raise NotImplementedError('Line emitter not handled.')
+            elif pdir_r == 1.0:
+                if table_kind == TBL_KIND_CLSIM:
+                    raise NotImplementedError('Line emitter not yet implmented.')
+                else: # TBL_KIND_CKV or TBL_KIND_CKV_COMPR
+                    raise ValueError('Line emitter cannot be computed with ckv table')
 
             else: # Gaussian emitter; can't do this with Ckv table!
-                raise NotImplementedError('Gaussian emitter not handled.')
+                if table_kind == TBL_KIND_CLSIM:
+                    raise NotImplementedError('Gaussian emitter not yet implemented.')
+                else: # TBL_KIND_CKV or TBL_KIND_CKV_COMPR
+                    raise ValueError('Gaussian emitter cannot be computed with ckv table')
 
-            #photons_at_all_times += p_count * t_indep_table_norm * this_photons_at_all_times
+            if get_t_indep:
+                photons_at_all_times += (
+                    p_count * t_indep_table_norm * t_indep_surv_prob
+                )
 
             #print('photons_at_all_times={}'.format(photons_at_all_times))
 
@@ -459,17 +481,17 @@ def generate_pexp_5d_function(
                 prev_t_bin_idx = t_bin_idx
 
             if new_r_bin or new_t_bin:
-                this_table_norm = table_norm[r_bin_idx, t_bin_idx]
+                r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
 
             if pdir_r == 0.0: # isotropic emitter
                 if new_pdir_r or new_r_bin or new_costheta_bin or new_t_bin:
-                    this_photons_at_hit_time = np.mean(
+                    surv_prob_at_hit_t = np.mean(
                         table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
                     )
             elif pdir_r < 1.0: # Cherenkov emitter
                 if table_kind == TBL_KIND_CLSIM:
                     if ckv_sigma_deg > 0:
-                        this_photons_at_hit_time, _c, _d = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
+                        surv_prob_at_hit_t, _c, _d = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
                             theta=ckv_theta,
                             num_phi=num_phi_samples,
                             rot_costheta=pdir_costheta,
@@ -484,7 +506,7 @@ def generate_pexp_5d_function(
                             random_delta_thetas=random_delta_thetas
                         )
                     else:
-                        this_photons_at_hit_time, _c, _d = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
+                        surv_prob_at_hit_t, _c, _d = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
                             costheta=ckv_costheta,
                             sintheta=ckv_sintheta,
                             num_phi=num_phi_samples,
@@ -498,17 +520,30 @@ def generate_pexp_5d_function(
                             num_costheta_bins=n_costhetadir_bins,
                             num_deltaphi_bins=n_deltaphidir_bins,
                         )
-                    #print('this_photons_at_hit_time={}'.format(this_photons_at_hit_time))
-                elif table_kind == TBL_KIND_CKV:
-                    if new_r_ct_ctd_or_dpd_bin or new_t_bin:
-                        this_photons_at_hit_time = table[r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+                    #print('surv_prob_at_hit_t={}'.format(surv_prob_at_hit_t))
 
-            elif pdir_r == 1.0: # line emitter
-                raise NotImplementedError('Line emitter not handled.')
-            else: # Gaussian emitter
-                raise NotImplementedError('Gaussian emitter not handled.')
+                # table_kind == TBL_KIND_CKV or TBL_KIND_CKV_COMPR
+                elif new_r_ct_ctd_or_dpd_bin or new_t_bin:
+                    if table_kind == TBL_KIND_CKV:
+                        surv_prob_at_hit_t = table[r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+                    else: # TBL_KIND_CKV_COMPR
+                        tbl_idx, tbl_wt = table_map[r_bin_idx, costhetadir_bin_idx, t_bin_idx]
+                        surv_prob_at_hit_t = tbl_wt * table[tbl_idx]
 
-            photons_at_hit_time += p_count * this_table_norm * this_photons_at_hit_time
+            elif pdir_r == 1.0:
+                if table_kind == TBL_KIND_CLSIM:
+                    raise NotImplementedError('Line emitter not yet implmented.')
+                else: # TBL_KIND_CKV or TBL_KIND_CKV_COMPR
+                    raise ValueError('Line emitter cannot be computed with ckv table')
+
+            else:
+                if table_kind == TBL_KIND_CLSIM:
+                    raise NotImplementedError('Gaussian emitter not yet implemented.')
+                else: # TBL_KIND_CKV or TBL_KIND_CKV_COMPR
+                    raise ValueError('Gaussian emitter cannot be computed with ckv table')
+
+            photons_at_hit_time += p_count * r_t_bin_norm * surv_prob_at_hit_t
+
             #print('photons_at_hit_time={}'.format(photons_at_hit_time))
             #print('XX FINISHED LOOP')
 
