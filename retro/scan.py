@@ -23,6 +23,7 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import Sequence
+from copy import deepcopy
 from itertools import izip, product
 from os.path import abspath, dirname
 import sys
@@ -36,13 +37,14 @@ if __name__ == '__main__' and __package__ is None:
 from retro import FTYPE, HYPO_PARAMS_T
 
 
-def scan(hypo_obj, event, metric, dims, scan_values, nominal_params=None,
+def scan(hypo_generator, event, metric, dims, scan_values, nominal_params=None,
          metric_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
 
     Parameters
     ----------
-    hypo_obj
+    hypo_generator
+        Object e.g. retro.hypo.discrete_hypo.DiscreteHypo
 
     event : Event
         Event for which to get likelihoods
@@ -104,7 +106,7 @@ def scan(hypo_obj, event, metric, dims, scan_values, nominal_params=None,
         nominal_params = HYPO_PARAMS_T(*([np.nan]*len(all_params)))
 
     # Make nominal into a list so we can mutate its values as we scan
-    params = list(nominal_params)
+    nominal_params = list(nominal_params)
 
     # Get indices for each param that we'll be changing, in the order they will
     # be specified
@@ -114,12 +116,13 @@ def scan(hypo_obj, event, metric, dims, scan_values, nominal_params=None,
 
     metric_vals = []
     for param_values in product(*scan_sequences):
+        params = deepcopy(nominal_params)
         for pidx, pval in izip(param_indices, param_values):
             params[pidx] = pval
 
         hypo_params = HYPO_PARAMS_T(*params)
 
-        sources = hypo_obj.get_sources(hypo_params=hypo_params)
+        sources = hypo_generator.get_sources(hypo_params=hypo_params)
         metric_val = metric(sources, event, **metric_kwargs)
         metric_vals.append(metric_val)
 
