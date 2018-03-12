@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
@@ -5,9 +6,9 @@ Define likelihood functions used in Retro with the various kinds of tables we
 have generated.
 """
 
-
 from __future__ import absolute_import, division, print_function
 
+__all__ = ['get_neg_llh']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -24,16 +25,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from itertools import izip
 from os.path import abspath, dirname
 import sys
 
 if __name__ == '__main__' and __package__ is None:
-    _parent_dir = dirname(dirname(abspath(__file__)))
-    if _parent_dir not in sys.path:
-        sys.path.append(_parent_dir)
-import retro
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.utils.stats import poisson_llh
 
 
 #@profile
@@ -91,8 +91,8 @@ def get_neg_llh(pinfo_gen, event, dom_tables, noise_charge=0, tdi_table=None,
             expected_charge = noise_charge
 
         # Poisson log likelihood (take negative to interface w/ minimizers)
-        pulse_neg_llh = -retro.poisson_llh(expected=expected_charge,
-                                           observed=pulse_charge)
+        pulse_neg_llh = -poisson_llh(expected=expected_charge,
+                                     observed=pulse_charge)
 
         neg_llh += pulse_neg_llh
         expected_q_accounted_for += expected_charge

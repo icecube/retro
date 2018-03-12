@@ -1,6 +1,6 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
-
 
 """
 Load retro tables into RAM, take icecube hdf5 files with events (hits
@@ -9,9 +9,7 @@ series) in them as inputs, and calculate lilkelihoods.
 At the moment, these likelihoods can be single points, 1d scan, or 2d scan.
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -28,7 +26,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
@@ -42,18 +39,21 @@ import numpy as np
 from pyswarm import pso
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 import retro
-from retro.discrete_cascade_kernels import point_cascade # pylint: disable=unused-import
-from retro.discrete_hypo import DiscreteHypo
-from retro.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon # pylint: disable=unused-import
+from retro.retro_types import HypoParams10D
+from retro.utils.misc import expand
+from retro.hypo.discrete_cascade_kernels import point_cascade # pylint: disable=unused-import
+from retro.hypo.discrete_hypo import DiscreteHypo
+from retro.hypo.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon # pylint: disable=unused-import
 from retro.events import Events
 from retro.likelihood import get_neg_llh
-from retro.plot_1d_scan import plot_1d_scan
+from retro.plot.plot_1d_scan import plot_1d_scan
 from retro.scan import scan
-from retro.table_readers import DOMTimePolarTables, TDICartTable # pylint: disable=unused-import
+from retro.tables.dom_time_polar_tables import DOMTimePolarTables # pylint: disable=unused-import
+from retro.tables.tdi_cart_tables import TDICartTable # pylint: disable=unused-import
 
 
 DFLT_EVENTS_FPATH = (
@@ -79,9 +79,9 @@ RESULTS_DIR = (
        NOISE_CHARGE)
 )
 if not isdir(RESULTS_DIR):
-    makedirs(retro.expand(RESULTS_DIR), mode=0o2777)
+    makedirs(expand(RESULTS_DIR), mode=0o2777)
 
-ABS_BOUNDS = retro.HypoParams10D(
+ABS_BOUNDS = HypoParams10D(
     t=(-1000, 1e6),
     x=(-700, 700),
     y=(-700, 700),
@@ -95,7 +95,7 @@ ABS_BOUNDS = retro.HypoParams10D(
 )
 """Absolute bounds for scanning / minimizer to work within"""
 
-REL_BOUNDS = retro.HypoParams10D(
+REL_BOUNDS = HypoParams10D(
     t=(-300, 300),
     #t=(-1000, 1000),
     x=(-100, 100),
@@ -366,7 +366,7 @@ def parse_args(description=__doc__):
 
 
 if __name__ == '__main__':
-    _args = parse_args()
-    main(events_fpath=_args.file, geom_file=_args.geom_file,
-         start_index=_args.start_index, stop_index=_args.stop_index,
-         tables_dir=_args.tables_dir)
+    ARGS = parse_args()
+    main(events_fpath=ARGS.file, geom_file=ARGS.geom_file,
+         start_index=ARGS.start_index, stop_index=ARGS.stop_index,
+         tables_dir=ARGS.tables_dir)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
@@ -5,9 +6,7 @@ Particle and ParticleArray classes for storing and accessing info for
 neutrinos, tracks, cascades, etc.
 """
 
-
 from __future__ import absolute_import, division
-
 
 __all__ = ['Particle', 'ParticleArray']
 
@@ -26,17 +25,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from os.path import abspath, dirname
 import sys
 
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
-from retro import SPEED_OF_LIGHT_M_PER_NS
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.const import SPEED_OF_LIGHT_M_PER_NS
 
 
 class Particle(object):
