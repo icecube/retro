@@ -29,6 +29,7 @@ from os.path import abspath, dirname
 import sys
 
 import numpy as np
+from scipy.stats import gamma
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -68,7 +69,7 @@ def point_cascade(hypo_params):
     ).reshape((1, 8))
     return pinfo_gen
 
-def long_cascade(hypo_params, limits=None, samples=1000):
+def long_cascade(hypo_params, limits=None, n_samples=1000):
     """
     Cascade with both longitudinal and angular distributions
 
@@ -78,7 +79,7 @@ def long_cascade(hypo_params, limits=None, samples=1000):
     ----------
     hypo_params : MUST BE HypoParams10D
     limits : NOT IMPLEMENTED
-    samples : integer, number of times to sample the distributions
+    n_samples : integer, number of times to sample the distributions
 
     Returns
     -------
@@ -91,8 +92,30 @@ def long_cascade(hypo_params, limits=None, samples=1000):
     y = hypo_params.y
     z = hypo_params.z
 
-    #define photons per sample
-    photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / samples
+    #assign cascade axis direction
+    dir_x = -sin_zen * math.cos(hypo_params.cascade_azimuth)
+    dir_y = -sin_zen * math.sin(hypo_params.cascade_azimuth)
+    dir_z = -math.cos(hypo_params.cascade_zenith)
 
+    #define photons per sample
+    photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / n_samples
+
+    #create longitudinal distribution (from arXiv:1210.5140v2)
+    alpha = 2.01849
+    beta = 1.45469
+    a = alpha + beta * np.log10(hypo_params.cascade_energy)
+    b = 0.63207
+    rad_length = 0.3975
+
+    long_dist = gamma(a, scale=x/b)
+    long_samples = l_dist.rvs(size=n_samples)
+
+    #create photon matrix
+    pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
+
+    for i in range(n_samples):
+        pinfo_gen[i, 0] = 
+
+    
 
 

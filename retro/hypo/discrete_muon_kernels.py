@@ -33,12 +33,6 @@ import csv
 import math
 from os.path import abspath, dirname, join
 import sys
-<<<<<<< HEAD:retro/discrete_muon_kernels.py
-import csv
-from scipy import interpolate
-=======
-
->>>>>>> origin:retro/hypo/discrete_muon_kernels.py
 import numpy as np
 from scipy import interpolate
 
