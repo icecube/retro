@@ -28,7 +28,6 @@ import cPickle as pickle
 import hashlib
 from itertools import product
 from os.path import abspath, dirname, isdir, isfile, join
-import re
 import socket
 import sys
 import time
@@ -51,8 +50,7 @@ from retro.hypo.discrete_muon_kernels import const_energy_loss_muon, table_energ
 from retro.hypo.discrete_cascade_kernels import point_cascade
 from retro.tables.dom_time_polar_tables import DOMTimePolarTables
 from retro.tables.tdi_cart_tables import TDICartTable
-from retro.tables.clsim_tables import CLSimTables
-from retro.tables.ckv_tables import CKVTables
+from retro.tables.retro_5d_tables import Retro5DTables
 
 
 hostname = socket.gethostname()
@@ -83,12 +81,28 @@ else:
                      .format(hostname))
 
 
-retro.DEBUG = 0
+# One of the keys from SIMULATIONS dict, below
 SIM_TO_TEST = 'upgoing_muon'
-#CODE_TO_TEST = 'dom_time_polar_tables'
-#CODE_TO_TEST = 'clsim_tables_pdenorm_dt1.0'
-CODE_TO_TEST = 'ckv_tables_avgsurfareanorm_dt0.1'
-#CODE_TO_TEST = 'clsim_tables_no_dir_pdenorm_dedx_dt0.1'
+
+# One of {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr', 'dom_time_polar'}
+TABLE_KIND = 'ckv_uncompr'
+
+# One of {'pde', 'avgsurfarea', 'wtf', 'wtf2', ...}
+NORM_VERSION = 'avgsurfarea'
+
+# Whether to use directionality from tables
+USE_DIRECTIONALITY = True
+
+# Use CKV_SIGMA_DEG and NUM_PHI_SAMPLES if USE_DIRECTIONALITY and TABLE_KIND is raw
+CKV_SIGMA_DEG = None
+NUM_PHI_SAMPLES = None
+
+# Use dE/dX discrete muon kernel?
+MUON_DEDX = False
+
+# Time step (ns) for discrete muon kernel (whether or not dEdX)
+MUON_DT = 0.1
+
 GCD_FILE = expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
 STEP_LENGTH = 1.0
@@ -96,8 +110,25 @@ MMAP = True
 TIME_WINDOW = 2e3 # ns
 MAKE_PLOTS = False
 
-outdir = expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
-mkdir(outdir)
+retro.DEBUG = 0
+
+CODE_TO_TEST = (
+    '{tables}_tables_{norm}norm_{no_dir_str}{cone_str}{dedx_str}dt{muon_dt:.1f}'
+    .format(
+        tables=TABLE_KIND,
+        norm=NORM_VERSION,
+        no_dir_str='no_dir_' if not USE_DIRECTIONALITY else '',
+        cone_str=(
+            'sigma{}deg_{}phi_'.format(CKV_SIGMA_DEG, NUM_PHI_SAMPLES)
+            if USE_DIRECTIONALITY and TABLE_KIND in ['raw_uncompr', 'raw_templ_compr']
+            else ''
+        ),
+        dedx_str='dedx_' if MUON_DEDX else '',
+        muon_dt=MUON_DT
+    )
+)
+
+OUTDIR = expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 
 run_info['sim_to_test'] = SIM_TO_TEST
 run_info['gcd_file'] = GCD_FILE
@@ -113,7 +144,7 @@ SIMULATIONS = dict(
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl'
     ),
-    cascade=dict(
+    em_cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=0,
@@ -178,26 +209,24 @@ run_info['time_window'] = TIME_WINDOW
 t_start = time.time()
 
 # Load detector GCD
-print(
-    'Loading detector geometry, calibration, and RDE from "%s"...'
-    % expand(GCD_FILE)
-)
+print('Loading detector geometry, calibration, and noise from "{}"...'
+      .format(expand(GCD_FILE)))
 t0 = time.time()
 gcd = np.load(expand(GCD_FILE))
 geom, rde, noise_rate_hz = gcd['geo'], gcd['rde'], gcd['noise']
-print(' ', np.round(time.time() - t0, 3), 'sec\n')
+print(' {:.3f} sec\n'.format(np.round(time.time() - t0, 3)))
 
 t0 = time.time()
-if CODE_TO_TEST == 'dom_time_polar_tables':
+if TABLE_KIND == 'dom_time_polar':
     print('Instantiating DOMTimePolarTables...')
     assert isdir(dom_time_polar_tables_basedir), str(dom_time_polar_tables_basedir)
 
-    norm_version = 'pde'
+    assert NORM_VERSION == 'pde'
     retro_tables = DOMTimePolarTables(
         tables_dir=dom_time_polar_tables_basedir,
         hash_val=None,
         geom=geom,
-        use_directionality=False,
+        use_directionality=USE_DIRECTIONALITY,
         naming_version=0,
     )
     print('Loading tables...')
@@ -205,55 +234,39 @@ if CODE_TO_TEST == 'dom_time_polar_tables':
 
     run_info['tables_class'] = 'DOMTimePolarTables'
     run_info['tables_dir'] = dom_time_polar_tables_basedir
-    run_info['norm_version'] = norm_version
+    run_info['norm_version'] = NORM_VERSION
 
-elif 'clsim_tables' in CODE_TO_TEST:
-    use_directionality = False
-    num_phi_samples = 1
-    ckv_sigma_deg = 0
-
-    try:
-        norm_version = re.findall(r'_([a-zA-Z0-9-]+)norm', CODE_TO_TEST)[0]
-    except (ValueError, IndexError):
-        pass
-
-    if 'no_dir' in CODE_TO_TEST:
+elif TABLE_KIND == 'raw_uncompr':
+    if not USE_DIRECTIONALITY:
         print('Instantiating CLSimTables (NOT using directionality), norm={}...'
-              .format(norm_version))
+              .format(NORM_VERSION))
+        assert CKV_SIGMA_DEG is None
+        assert NUM_PHI_SAMPLES is None
     else:
-        use_directionality = True
-
-        try:
-            ckv_sigma_deg = float(re.findall(r'sigma([0-9.]+)deg', CODE_TO_TEST)[0])
-        except (ValueError, IndexError):
-            pass
-
-        try:
-            num_phi_samples = int(re.findall(r'([0-9]+)phi', CODE_TO_TEST)[0])
-        except (ValueError, IndexError):
-            pass
-
         print(
             'Instantiating CLSimTables using directionality;'
-            ' ckv_sigma_deg={} deg'
+            ' CKV_SIGMA_DEG={} deg'
             ' and {} phi_dir samples; norm={}...'
-            .format(ckv_sigma_deg, num_phi_samples, norm_version))
+            .format(CKV_SIGMA_DEG, NUM_PHI_SAMPLES, NORM_VERSION))
 
-    retro_tables = CLSimTables(
+    retro_tables = Retro5DTables(
+        table_kind=TABLE_KIND,
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
-        use_directionality=use_directionality,
-        num_phi_samples=num_phi_samples,
-        ckv_sigma_deg=ckv_sigma_deg,
-        norm_version=norm_version
+        compute_t_indep_exp=True,
+        use_directionality=USE_DIRECTIONALITY,
+        norm_version=NORM_VERSION,
+        num_phi_samples=NUM_PHI_SAMPLES,
+        ckv_sigma_deg=CKV_SIGMA_DEG
     )
 
-    run_info['tables_class'] = 'CLSimTables'
-    run_info['use_directionality'] = use_directionality
-    run_info['num_phi_samples'] = num_phi_samples
-    run_info['ckv_sigma_deg'] = ckv_sigma_deg
-    run_info['norm_version'] = norm_version
+    run_info['tables_class'] = 'Retro5DTables'
+    run_info['table_kind'] = TABLE_KIND
+    run_info['use_directionality'] = USE_DIRECTIONALITY
+    run_info['num_phi_samples'] = NUM_PHI_SAMPLES
+    run_info['ckv_sigma_deg'] = CKV_SIGMA_DEG
+    run_info['norm_version'] = NORM_VERSION
 
     if 'single_table' in CODE_TO_TEST:
         print('Loading single table for all DOMs...')
@@ -328,30 +341,23 @@ elif 'clsim_tables' in CODE_TO_TEST:
 
         run_info['tables'] = tables
 
-elif 'ckv_tables' in CODE_TO_TEST:
+elif TABLE_KIND in ['ckv_uncompr', 'ckv_templ_compr']:
     assert isdir(ckv_tables_basedir), str(ckv_tables_basedir)
-    try:
-        norm_version = re.findall(r'_([a-zA-Z0-9-]+)norm', CODE_TO_TEST)[0]
-    except (ValueError, IndexError):
-        pass
 
-    use_directionality = True
-    if 'no_dir' in CODE_TO_TEST:
-        use_directionality = False
-        print('Instantiating CLSimTables (NOT using directionality), norm={}...'
-              .format(norm_version))
-
-    retro_tables = CKVTables(
+    retro_tables = Retro5DTables(
+        table_kind=TABLE_KIND,
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
-        use_directionality=use_directionality,
-        norm_version=norm_version
+        compute_t_indep_exp=True,
+        use_directionality=USE_DIRECTIONALITY,
+        norm_version=NORM_VERSION
     )
 
-    run_info['tables_class'] = 'CKVTables'
-    run_info['use_directionality'] = use_directionality
-    run_info['norm_version'] = norm_version
+    run_info['tables_class'] = 'Retro5DTables'
+    run_info['table_kind'] = TABLE_KIND
+    run_info['use_directionality'] = USE_DIRECTIONALITY
+    run_info['norm_version'] = NORM_VERSION
 
     print('Loading {} tables...'.format(2 * len(doms)))
     tables = OrderedDict()
@@ -397,7 +403,7 @@ elif 'ckv_tables' in CODE_TO_TEST:
     run_info['tables'] = tables
 
 else:
-    raise ValueError(CODE_TO_TEST)
+    raise ValueError(TABLE_KIND)
 
 # Sort loaded_strings_doms first by subdet (dc then ic); then by depth index
 # (descending index); then by string (ascending index)
@@ -406,7 +412,7 @@ loaded_strings_doms.sort(key=lambda sd: (sd[0] < 79, -sd[1], sd[0]))
 print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
 
-if 'dedx' in CODE_TO_TEST:
+if MUON_DEDX:
     muon_kernel = table_energy_loss_muon
     muon_kernel_label = 'table_energy_loss_muon'
 else:
@@ -417,20 +423,15 @@ print('Generating source photons from "point_cascade" + "{}" kernels'.format(muo
 print('  fed with MC-true parameters:\n ', sim['mc_true_params'])
 t0 = time.time()
 
-dt = 1.0
-try:
-    dt = float(re.findall(r'dt([0-9.]+)', CODE_TO_TEST)[0])
-except (ValueError, IndexError):
-    pass
-print('Generating track hypo (if present) with dt={}'.format(dt))
+print('Generating track hypo (if present) with dt={}'.format(MUON_DT))
 
-kernel_kwargs = [dict(), dict(dt=dt)]
+kernel_kwargs = [dict(), dict(dt=MUON_DT)]
 
 discrete_hypo = DiscreteHypo(
     hypo_kernels=[point_cascade, muon_kernel],
     kernel_kwargs=kernel_kwargs
 )
-pinfo_gen = discrete_hypo.get_pinfo_gen(sim['mc_true_params'])
+sources = discrete_hypo.get_sources(sim['mc_true_params'])
 
 run_info['hypo_class'] = 'DiscreteHypo'
 run_info['hypo_kernels'] = ['point_cascade', muon_kernel_label]
@@ -453,38 +454,31 @@ pgen_count = 0
 hypo_count = 0
 total_p = 0
 prev_string = -1
-n_source_points = pinfo_gen.shape[0]
+n_source_points = sources.shape[0]
+
+mkdir(OUTDIR)
 
 #for string, dom in product(unique_strings, unique_doms):
 for string, dom in loaded_strings_doms:
-    #if string != prev_string:
-    #    prev_string = string
-    #    print('String {} ({} DOMs)'.format(string, len(doms)))
     sys.stdout.write('OMKey: ({:2s}, {:2s})'.format(str(string), str(dom)))
-    #sys.stdout.write('  DOM {}'.format(dom))
     t00 = time.time()
-
-    pexp_at_hit_times = []
-    for hit_time in np.nditer(sample_hit_times):
-        exp_p_at_all_t, exp_p_at_hit_t = retro_tables.get_photon_expectation(
-            pinfo_gen=pinfo_gen,
-            hit_time=hit_time,
-            time_window=TIME_WINDOW,
-            string=string,
-            dom=dom,
-        )
-        pexp_at_hit_times.append(exp_p_at_hit_t)
+    exp_p_at_all_times, exp_p_at_hit_times = retro_tables.get_expected_det(
+        sources=sources,
+        hit_times=sample_hit_times,
+        time_window=TIME_WINDOW,
+        string=string,
+        dom=dom,
+    )
     t11 = time.time() - t00
     pexp_timings.append(t11)
     hypo_count += sample_hit_times.size
     pgen_count += sample_hit_times.size * n_source_points
 
-    pexp_at_hit_times = np.array(pexp_at_hit_times)
-    tot_retro = np.sum(pexp_at_hit_times)
+    tot_retro = np.sum(exp_p_at_hit_times)
 
     results[(string, dom)] = OrderedDict([
-        ('exp_p_at_all_t', exp_p_at_all_t),
-        ('pexp_at_hit_times', pexp_at_hit_times)
+        ('exp_p_at_all_times', exp_p_at_all_times),
+        ('exp_p_at_hit_times', exp_p_at_hit_times)
     ])
 
     msg = (
@@ -496,7 +490,7 @@ for string, dom in loaded_strings_doms:
 
     if MAKE_PLOTS:
         plt.clf()
-        plt.plot(sample_hit_times, pexp_at_hit_times, label='Retro')
+        plt.plot(sample_hit_times, exp_p_at_hit_times, label='Retro')
     tot_clsim = 0.0
     try:
         fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][(string, dom)])
@@ -513,13 +507,13 @@ for string, dom in loaded_strings_doms:
     a_text = AnchoredText(
         '{sum} Retro t-dep = {retro:.5f}      {sum} Retro / {sum} CLSim = {ratio:.5f}\n'
         '{sum} CLSim       = {clsim:.5f}\n'
-        'Retro t-indep = {exp_p_at_all_t:.5f}\n'
+        'Retro t-indep = {exp_p_at_all_times:.5f}\n'
         .format(
             sum=r'$\Sigma$',
             retro=tot_retro,
             clsim=tot_clsim,
             ratio=tot_retro/tot_clsim if tot_clsim != 0 else np.nan,
-            exp_p_at_all_t=exp_p_at_all_t
+            exp_p_at_all_times=exp_p_at_all_times
         ),
         loc=2,
         prop=dict(family='monospace', size=10),
@@ -545,7 +539,7 @@ for string, dom in loaded_strings_doms:
                 retro_code=retro_code, clsim_code=clsim_code
             )
         )
-        fpath = join(outdir, fname + '.png')
+        fpath = join(OUTDIR, fname + '.png')
         print('Saving "{}"'.format(fpath))
         plt.savefig(fpath)
 
@@ -553,7 +547,7 @@ print('total of {} unique DOMs'.format(len(loaded_strings_doms)))
 
 run_info['results'] = results
 
-run_info_fpath = expand(join(outdir, 'run_info.pkl'))
+run_info_fpath = expand(join(OUTDIR, 'run_info.pkl'))
 print('Writing run info to "{}"'.format(run_info_fpath))
 pickle.dump(run_info, open(run_info_fpath, 'wb'), pickle.HIGHEST_PROTOCOL)
 

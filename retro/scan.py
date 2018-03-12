@@ -36,10 +36,8 @@ if __name__ == '__main__' and __package__ is None:
 from retro import FTYPE, HYPO_PARAMS_T
 
 
-def scan(
-        hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
-        neg_llh_func_kwargs=None
-    ):
+def scan(hypo_obj, event, metric, dims, scan_values, nominal_params=None,
+         metric_kwargs=None):
     """Scan likelihoods for hypotheses changing one parameter dimension.
 
     Parameters
@@ -49,11 +47,11 @@ def scan(
     event : Event
         Event for which to get likelihoods
 
-    neg_llh_func : callable
-        Function used to compute a likelihood. Must take ``pinfo_gen`` and
-        ``event`` as first two arguments, where ``pinfo_gen`` is (...) and
+    metric : callable
+        Function used to compute e.g. a likelihood. Must take ``sources`` and
+        ``event`` as first two arguments, where ``sources`` is (...) and
         ``event`` is the argument passed here. Function must return just one
-        value (the ``llh``)
+        value (e.g., ``-llh``)
 
     dims : string or iterable thereof
         One of 't', 'x', 'y', 'z', 'azimuth', 'zenith', 'cascade_energy',
@@ -68,17 +66,17 @@ def scan(
         `scan_values`. Therefore this is optional if _all_ parameters are
         subject to the scan.
 
-    neg_llh_func_kwargs : mapping or None
+    metric_kwargs : mapping or None
         Keyword arguments to pass to `get_neg_llh` function
 
     Returns
     -------
-    all_llh : numpy.ndarray (len(scan_values[0]) x len(scan_values[1]) x ...)
+    metric_vals : numpy.ndarray (len(scan_values[0]) x len(scan_values[1]) x ...)
         Likelihoods corresponding to each value in product(*scan_values).
 
     """
-    if neg_llh_func_kwargs is None:
-        neg_llh_func_kwargs = {}
+    if metric_kwargs is None:
+        metric_kwargs = {}
 
     all_params = HYPO_PARAMS_T._fields
 
@@ -114,18 +112,18 @@ def scan(
     for dim in dims:
         param_indices.append(all_params.index(dim))
 
-    all_neg_llh = []
+    metric_vals = []
     for param_values in product(*scan_sequences):
         for pidx, pval in izip(param_indices, param_values):
             params[pidx] = pval
 
         hypo_params = HYPO_PARAMS_T(*params)
 
-        pinfo_gen = hypo_obj.get_pinfo_gen(hypo_params=hypo_params)
-        neg_llh = neg_llh_func(pinfo_gen, event, **neg_llh_func_kwargs)
-        all_neg_llh.append(neg_llh)
+        sources = hypo_obj.get_sources(hypo_params=hypo_params)
+        metric_val = metric(sources, event, **metric_kwargs)
+        metric_vals.append(metric_val)
 
-    all_neg_llh = np.array(all_neg_llh, dtype=FTYPE)
-    all_neg_llh.reshape(shape)
+    metric_vals = np.array(metric_vals, dtype=FTYPE)
+    metric_vals.reshape(shape)
 
-    return all_neg_llh
+    return metric_vals

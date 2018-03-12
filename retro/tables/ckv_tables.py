@@ -12,7 +12,6 @@ from __future__ import absolute_import, division, print_function
 __all__ = '''
     CKV_TABLE_KEYS
     load_ckv_table
-    CKVTables
 '''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -42,8 +41,6 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import DEBUG
-from retro.tables.pexp_5d import TBL_KIND_CKV, generate_pexp_5d_function
-from retro.tables.clsim_tables import TABLE_NORM_KEYS, get_table_norm
 from retro.utils.misc import expand, wstderr
 
 
@@ -125,232 +122,131 @@ def load_ckv_table(fpath, mmap, step_length=None):
     return table
 
 
-class CKVTables(object):
-    """
-    Class to interact with and obtain photon survival probabilities from a set
-    of Retro 5D Cherenkov tables.
+# TODO remove the following; this and CLSimTables should be supplanted by
+# single class, Retro5DTables
 
-    Parameters
-    ----------
-    geom : shape-(n_strings, n_doms, 3) array
-        x, y, z coordinates of all DOMs, in meters relative to the IceCube
-        coordinate system
-
-    rde : shape-(n_strings, n_doms) array
-        Relative DOM efficiencies (this accounts for quantum efficiency). Any
-        DOMs with either 0 or NaN rde will be disabled and return 0's for
-        expected photon counts.
-
-    noise_rate_hz : shape-(n_strings, n_doms) array
-        Noise rate for each DOM, in Hz.
-
-    use_directionality : bool
-        Enable or disable directionality when computing expected photons at
-        the DOMs
-
-    norm_version : string
-        (Temporary) Which version of the norm to use. Only for experimenting,
-        and will be removed once we figure the norm out.
-
-    """
-    def __init__(
-            self, geom, rde, noise_rate_hz, use_directionality, norm_version
-        ):
-        assert len(geom.shape) == 3
-        self.geom = geom
-        self.use_directionality = use_directionality
-        self.norm_version = norm_version
-
-        zero_mask = rde == 0
-        nan_mask = np.isnan(rde)
-        inf_mask = np.isinf(rde)
-        num_zero = np.count_nonzero(zero_mask)
-        num_nan = np.count_nonzero(nan_mask)
-        num_inf = np.count_nonzero(inf_mask)
-
-        if num_nan or num_inf or num_zero:
-            print(
-                "WARNING: RDE is zero for {} DOMs, NaN for {} DOMs and +/-inf"
-                " for {} DOMs.\n"
-                "These DOMs will be disabled and return 0's forexpected photon"
-                " computations."
-                .format(num_zero, num_nan, num_inf)
-            )
-        mask = zero_mask | nan_mask | inf_mask
-
-        self.operational_doms = ~mask
-        self.rde = np.ma.masked_where(mask, rde)
-        self.quantum_efficiency = 0.25 * self.rde
-        self.noise_rate_hz = np.ma.masked_where(mask, noise_rate_hz)
-
-        self.tables = {}
-        self.string_aggregation = None
-        self.depth_aggregation = None
-        self.pexp_func = None
-        self.binning_info = None
-
-    def load_table(
-            self, fpath, string, dom, step_length, angular_acceptance_fract,
-            mmap
-        ):
-        """Load a table into the set of tables.
-
-        Parameters
-        ----------
-        fpath : string
-            Path to the directory containing the table's .npy files.
-
-        string : int in [1, 86] or str in {'ic', 'dc', or 'all'}
-
-        dom : int in [1, 60] or str == 'all'
-
-        step_length : float > 0
-            The stepLength parameter (in meters) used in CLSim tabulator code
-            for tabulating a single photon as it travels. This is a hard-coded
-            paramter set to 1 meter in the trunk version of the code, but it's
-            something we might play with to optimize table generation speed, so
-            just be warned that this _can_ change.
-
-        angular_acceptance_fract : float in (0, 1]
-            Constant normalization factor to apply to correct for the integral
-            of the angular acceptance curve used in the simulation that
-            produced this table.
-
-        mmap : bool
-            Whether to attempt to memory map the table.
-
-        """
-        single_dom_spec = True
-        if isinstance(string, basestring):
-            string = string.strip().lower()
-            assert string in ['ic', 'dc', 'all']
-            agg_mode = 'all' if string == 'all' else 'subdetector'
-            if self.string_aggregation is None:
-                self.string_aggregation = agg_mode
-            assert agg_mode == self.string_aggregation
-            single_dom_spec = False
-        else:
-            if self.string_aggregation is None:
-                self.string_aggregation = False
-            # `False` is ok but `None` is not ok
-            assert self.string_aggregation == False # pylint: disable=singleton-comparison
-            assert 1 <= string <= 86
-
-        if isinstance(dom, basestring):
-            dom = dom.strip().lower()
-            assert dom == 'all'
-            if self.depth_aggregation is None:
-                self.depth_aggregation = True
-            assert self.depth_aggregation
-            single_dom_spec = False
-        else:
-            if self.depth_aggregation is None:
-                self.depth_aggregation = False
-            # `False` is ok but `None` is not ok
-            assert self.depth_aggregation == False # pylint: disable=singleton-comparison
-            assert 1 <= dom <= 60
-
-        assert step_length > 0
-        assert 0 < angular_acceptance_fract <= 1
-
-        if single_dom_spec and not self.operational_doms[string - 1, dom - 1]:
-            print(
-                'WARNING: String {}, DOM {} is not operational, skipping'
-                ' loading the corresponding table'.format(string, dom)
-            )
-            return
-
-        table = load_ckv_table(
-            fpath=fpath,
-            step_length=step_length,
-            mmap=mmap
-        )
-
-        table['step_length'] = step_length
-        table['table_norm'] = get_table_norm(
-            angular_acceptance_fract=angular_acceptance_fract,
-            quantum_efficiency=1,
-            norm_version=self.norm_version,
-            **{k: table[k] for k in TABLE_NORM_KEYS}
-        )
-        #table['t_indep_table_norm'] = angular_acceptance_fract
-
-        pexp_5d, _ = generate_pexp_5d_function(
-            table=table,
-            table_kind=TBL_KIND_CKV,
-            use_directionality=self.use_directionality,
-            num_phi_samples=0,
-            ckv_sigma_deg=0
-        )
-
-        # NOTE: original tables have underflow (bin 0) and overflow (bin -1)
-        # bins, so whole-axis slices must exclude the first and last bins.
-        self.tables[(string, dom)] = (
-            pexp_5d,
-            #table['t_indep_ckv_table'],
-            #table['t_indep_table_norm'],
-            table['ckv_table'],
-            table['table_norm'],
-        )
-
-    #@profile
-    def get_photon_expectation(
-            self, pinfo_gen, hit_time, time_window, string, dom
-        ):
-        """
-        Parameters
-        ----------
-        pinfo_gen : shape (N, 8) numpy.ndarray
-            Info about photons generated photons by the event hypothesis.
-
-        hit_time : float, units of ns
-        time_window : float, units of ns
-        string : int in [1, 86]
-        dom : int in [1, 60]
-
-        Returns
-        -------
-        total_photon_count, expected_photon_count : float
-            See pexp_t_r_theta
-
-        """
-        # `string` and `dom` are 1-indexed but array indices are 0-indexed
-        string_idx, dom_idx = string - 1, dom - 1
-        if not self.operational_doms[string_idx, dom_idx]:
-            return 0, 0
-
-        dom_coord = self.geom[string_idx, dom_idx]
-        dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
-        dom_noise_rate_hz = self.noise_rate_hz[string_idx, dom_idx]
-
-        if self.string_aggregation == 'all':
-            string = 'all'
-        elif self.string_aggregation == 'subdetector':
-            if string < 79:
-                string = 'ic'
-            else:
-                string = 'dc'
-
-        if self.depth_aggregation:
-            dom = 'all'
-
-        #print('string =', string, 'dom =', dom)
-
-        (pexp_5d,
-         #t_indep_ckv_table,
-         #t_indep_table_norm,
-         ckv_table,
-         table_norm) = self.tables[(string, dom)]
-
-        return pexp_5d(
-            pinfo_gen=pinfo_gen,
-            hit_time=hit_time,
-            time_window=time_window,
-            dom_coord=dom_coord,
-            noise_rate_hz=dom_noise_rate_hz,
-            quantum_efficiency=dom_quantum_efficiency,
-            table=ckv_table,
-            table_norm=table_norm,
-            #t_indep_table=t_indep_ckv_table,
-            #t_indep_table_norm=t_indep_table_norm,
-        )
+#class CKVTables(CLSimTables):
+#    """
+#    Class to interact with and obtain photon survival probabilities from a set
+#    of Retro 5D Cherenkov tables.
+#
+#    Parameters
+#    ----------
+#    geom : shape-(n_strings, n_doms, 3) array
+#        x, y, z coordinates of all DOMs, in meters relative to the IceCube
+#        coordinate system
+#
+#    rde : shape-(n_strings, n_doms) array
+#        Relative DOM efficiencies (this accounts for quantum efficiency). Any
+#        DOMs with either 0 or NaN rde will be disabled and return 0's for
+#        expected photon counts.
+#
+#    compute_t_indep_exp : bool
+#
+#    noise_rate_hz : shape-(n_strings, n_doms) array
+#        Noise rate for each DOM, in Hz.
+#
+#    use_directionality : bool
+#        Enable or disable directionality when computing expected photons at
+#        the DOMs
+#
+#    norm_version : string
+#        (Temporary) Which version of the norm to use. Only for experimenting,
+#        and will be removed once we figure the norm out.
+#
+#    """
+#    def __init__(
+#            self, geom, rde, compute_t_indep_exp, noise_rate_hz,
+#            use_directionality, norm_version
+#        ):
+#        super(CKVTables, self).__init__(
+#            geom=geom,
+#            rde=rde,
+#            compute_t_indep_exp=compute_t_indep_exp,
+#            noise_rate_hz=noise_rate_hz,
+#            use_directionality=use_directionality,
+#            num_phi_samples=0,
+#            ckv_sigma_deg=0,
+#            norm_version=norm_version
+#        )
+#        self.table_loader_func = load_ckv_table
+#        self.table_kind = TBL_KIND_CKV
+#        self.usable_table_slice = (slice(None),)*5
+#        self.t_indep_table_name = 't_indep_ckv_table'
+#        self.table_name = 'ckv_table'
+#
+#    #@profile
+#    def get_photon_expectation(
+#            self, sources, hit_times, string, dom, include_noise=False,
+#            time_window=None
+#        ):
+#        """
+#        Parameters
+#        ----------
+#        sources : shape (num_sources,) array of dtype SRC_DTYPE
+#            Info about photons generated photons by the event hypothesis.
+#
+#        hit_times : shape (num_hits,) array of floats, units of ns
+#
+#        string : int in [1, 86]
+#
+#        dom : int in [1, 60]
+#
+#        include_noise : bool
+#            Include noise in the photon expectations (both at hit time and
+#            time-independent). Non-operational DOMs return 0 for both return values
+#
+#        time_window : float in units of ns
+#            Time window for computing the "time-independent" noise expectation.
+#            Used (and required) if `include_noise` is True.
+#
+#        Returns
+#        -------
+#        photons_at_hit_times : shape (num_hits,) array of floats
+#        photons_at_all_times : float
+#
+#        """
+#        # `string` and `dom` are 1-indexed but numpy array indices are
+#        # 0-indexed
+#        string_idx = string - 1
+#        dom_idx = dom - 1
+#        if not self.operational_doms[string_idx, dom_idx]:
+#            return np.zeros_like(hit_times, dtype=np.float64), np.float64(0)
+#
+#        dom_coord = self.geom[string_idx, dom_idx]
+#        dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
+#
+#        if self.string_aggregation == AGG_STR_ALL:
+#            string = STR_ALL
+#        elif self.string_aggregation == AGG_STR_SUBDET:
+#            if string < 79:
+#                string = STR_IC
+#            else:
+#                string = STR_DC
+#
+#        if self.depth_aggregation:
+#            dom = DOM_ALL
+#
+#        (pexp_5d,
+#         t_indep_ckv_table,
+#         t_indep_table_norm,
+#         ckv_table,
+#         table_norm) = self.tables[(string, dom)]
+#
+#        photons_at_hit_times, photons_at_all_times = pexp_5d(
+#            sources=sources,
+#            hit_times=hit_times,
+#            dom_coord=dom_coord,
+#            quantum_efficiency=dom_quantum_efficiency,
+#            table=ckv_table,
+#            table_norm=table_norm,
+#            t_indep_table=t_indep_ckv_table,
+#            t_indep_table_norm=t_indep_table_norm,
+#        )
+#
+#        if include_noise:
+#            dom_noise_rate_per_ns = self.noise_rate_per_ns[string_idx, dom_idx]
+#            photons_at_hit_times += dom_noise_rate_per_ns
+#            photons_at_all_times += dom_noise_rate_per_ns * time_window
+#
+#        return photons_at_hit_times, photons_at_all_times

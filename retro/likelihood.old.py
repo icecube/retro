@@ -37,8 +37,10 @@ from retro.utils.stats import poisson_llh
 
 
 #@profile
-def get_neg_llh(pinfo_gen, event, dom_tables, noise_charge=0, tdi_table=None,
-                detailed_info_list=None):
+def get_neg_llh(
+        pinfo_gen, event, dom_tables, noise_charge=0, tdi_table=None,
+        detailed_info_list=None
+    ):
     """Get log likelihood.
 
     Parameters

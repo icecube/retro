@@ -36,6 +36,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import CASCADE_PHOTONS_PER_GEV
+from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_OMNI
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -50,20 +51,21 @@ def point_cascade(hypo_params):
 
     Returns
     -------
-    pinfo_gen
+    sources
 
     """
-    pinfo_gen = np.array(
+    sources = np.array(
         [
+            SRC_OMNI,
             hypo_params.t,
             hypo_params.x,
             hypo_params.y,
             hypo_params.z,
             CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy,
-            0.0,
-            0.0,
-            0.0
+            0,
+            0,
+            0
         ],
-        dtype=np.float32
-    ).reshape((1, 8))
-    return pinfo_gen
+        dtype=SRC_DTYPE
+    )
+    return sources

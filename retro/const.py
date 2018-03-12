@@ -22,6 +22,10 @@ __all__ = [
     'ABS_FLAV_STR', 'ABS_FLAV_TEX', 'BAR_NOBAR_STR', 'BAR_NOBAR_TEX',
     'INT_TYPE_STR', 'INT_TYPE_TEX', 'PDG_STR', 'PDG_TEX', 'PDG_INTER_STR',
     'PDG_INTER_TEX', 'STR_TO_PDG_INTER',
+
+    # "Enum"-like things
+    'STR_ALL', 'STR_IC', 'STR_DC', 'AGG_STR_NONE', 'AGG_STR_ALL',
+    'AGG_STR_SUBDET', 'DOM_ALL'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -139,3 +143,9 @@ for _pdg, _it in product(PDG_STR.keys(), INT_TYPE_STR.keys()):
     PDG_INTER_TEX[(_pdg, _it)] = '%s %s' % (PDG_TEX[_pdg], INT_TYPE_TEX[_it])
 
 STR_TO_PDG_INTER = {v: k for k, v in PDG_INTER_STR.items()}
+
+
+# -- "enums" -- #
+STR_ALL, STR_IC, STR_DC = -1, -2, -3
+AGG_STR_NONE, AGG_STR_ALL, AGG_STR_SUBDET = 0, 1, 2
+DOM_ALL = -1

@@ -46,8 +46,8 @@ from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
     COS_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M
 )
+from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_CKV_BETA1
 
-print(RETRO_DIR)
 
 ALL_REALS = (-np.inf, np.inf)
 
@@ -89,23 +89,13 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     Returns
     -------
-    pinfo_gen : shape (N, 8) numpy.ndarray, dtype float32
+    sources : shape (N,) numpy.ndarray, dtype SRC_DTYPE
 
     """
     track_energy = hypo_params.track_energy
 
     if track_energy == 0:
-        pinfo_gen = np.array([
-            hypo_params.t,
-            hypo_params.x,
-            hypo_params.y,
-            hypo_params.z,
-            0.0,
-            0.0,
-            0.0,
-            0.0
-        ], dtype=np.float32).reshape((1, 8))
-        return pinfo_gen
+        return np.array([], dtype=SRC_DTYPE)
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
@@ -120,18 +110,20 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
     dir_z = -math.cos(hypo_params.track_zenith)
 
-    pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
+    sources = np.empty((n_samples,), dtype=SRC_DTYPE)
+    src_slc = sources[:]
+    src_slc['kind'] = SRC_CKV_BETA1
     sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
-    pinfo_gen[:, 0] = hypo_params.t + sampled_dt
-    pinfo_gen[:, 1] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
-    pinfo_gen[:, 2] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
-    pinfo_gen[:, 3] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
-    pinfo_gen[:, 4] = photons_per_segment
-    pinfo_gen[:, 5] = dir_x * COS_CKV
-    pinfo_gen[:, 6] = dir_y * COS_CKV
-    pinfo_gen[:, 7] = dir_z * COS_CKV
+    src_slc['t'] = hypo_params.t + sampled_dt
+    src_slc['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    src_slc['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    src_slc['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    src_slc['photons'] = photons_per_segment
+    src_slc['dir_x'] = dir_x * COS_CKV
+    src_slc['dir_y'] = dir_y * COS_CKV
+    src_slc['dir_z'] = dir_z * COS_CKV
 
-    return pinfo_gen
+    return sources
 
 
 def table_energy_loss_muon(hypo_params, dt=1.0):
@@ -151,24 +143,13 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
     Returns
     -------
-    pinfo_gen : shape (N,8) numpy.ndarray, dtype float 32
+    sources : shape (N,) numpy.ndarray, dtype SRC_DTYPE
     """
     track_energy = hypo_params.track_energy
 
     # Check for only cascade
     if track_energy == 0:
-        pinfo_gen = np.array(
-            [[hypo_params.t,
-              hypo_params.x,
-              hypo_params.y,
-              hypo_params.z,
-              0,
-              0,
-              0,
-              0]],
-            dtype=np.float32
-        )
-        return pinfo_gen
+        return np.array([], dtype=SRC_DTYPE)
 
     # Declare constants
     segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
@@ -189,7 +170,15 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
     # Create array at vertex
     photon_array = [
-        (t, x, y, z, photons_per_segment, dir_x * COS_CKV, dir_y * COS_CKV, dir_z * COS_CKV)
+        (SRC_CKV_BETA1,
+         t,
+         x,
+         y,
+         z,
+         photons_per_segment,
+         dir_x * COS_CKV,
+         dir_y * COS_CKV,
+         dir_z * COS_CKV)
     ]
 
     dx = dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
@@ -213,11 +202,19 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
         # Append new row if energy still above rest mass, else break out of
         # loop
-        if track_energy > rest_mass:
-            photon_array.append(
-                (t, x, y, z, photons_per_segment, dir_x * COS_CKV, dir_y * COS_CKV, dir_z * COS_CKV)
-            )
-        else:
+        if track_energy < rest_mass:
             break
 
-    return np.array(photon_array, dtype=np.float32)
+        photon_array.append(
+            (SRC_CKV_BETA1,
+             t,
+             x,
+             y,
+             z,
+             photons_per_segment,
+             dir_x * COS_CKV,
+             dir_y * COS_CKV,
+             dir_z * COS_CKV)
+        )
+
+    return np.array(photon_array, dtype=SRC_DTYPE)
