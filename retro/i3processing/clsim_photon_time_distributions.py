@@ -38,11 +38,6 @@ import sys
 
 import numpy as np
 
-if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(realpath(__file__))))
-    if RETRO_DIR not in sys.path:
-        sys.path.append(RETRO_DIR)
-
 
 def generate_histos(
         photons, hole_ice_model, t_max, num_bins, gcd=None, include_rde=True,
@@ -107,15 +102,15 @@ def generate_histos(
 
     See also
     --------
-    retro.i3processing.sim.py
+    i3processing.sim
         Perform the repeated simulation to get photons at DOMs. Generates an i3
         file.
 
-    retro.i3processing.extract_photon_info
+    i3processing.extract_photon_info
         Extract photon info (and pertinent metadata) from the i3 file produced
         from the above.
 
-    retro.retro_dom_pdfs
+    retro_dom_pdfs
         Produce distributions corresponding to the histograms made here, but
         using Retro reco.
 

@@ -38,10 +38,15 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
-from retro.tables.clsim_tables import TABLE_NORM_KEYS, load_clsim_table_minimal
-from retro.tables.ckv_tables import load_ckv_table
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
+
+
+TABLE_NORM_KEYS = [
+    'n_photons', 'group_refractive_index', 'step_length', 'r_bin_edges',
+    'costheta_bin_edges', 't_bin_edges'
+]
+"""All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
 
 
 class Retro5DTables(object):
@@ -104,6 +109,7 @@ class Retro5DTables(object):
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
 
         if self.tbl_is_raw:
+            from retro.tables.clsim_tables import load_clsim_table_minimal
             self.table_loader_func = load_clsim_table_minimal
             # NOTE: original tables have underflow (bin 0) and overflow
             # (bin -1) bins, so whole-axis slices must exclude the first and
@@ -112,6 +118,7 @@ class Retro5DTables(object):
             self.t_indep_table_name = 't_indep_table'
             self.table_name = 'table'
         elif self.tbl_is_ckv:
+            from retro.tables.ckv_tables import load_ckv_table
             self.table_loader_func = load_ckv_table
             self.usable_table_slice = (slice(None),)*5
             self.t_indep_table_name = 't_indep_ckv_table'
@@ -239,7 +246,8 @@ class Retro5DTables(object):
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
-        table['t_indep_table_norm'] = angular_acceptance_fract
+        if self.compute_t_indep_exp:
+            table['t_indep_table_norm'] = angular_acceptance_fract
 
         pexp_5d, pexp_meta = generate_pexp_5d_function(
             table=table,
@@ -310,7 +318,7 @@ class Retro5DTables(object):
         # `string` and `dom` are 1-indexed but array indices are 0-indexed
         string_idx, dom_idx = string - 1, dom - 1
         if not self.operational_doms[string_idx, dom_idx]:
-            return 0, 0
+            return np.float64(0.0), np.zeros_like(hit_times, dtype=np.float64)
 
         dom_coord = self.geom[string_idx, dom_idx]
         dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
@@ -329,10 +337,10 @@ class Retro5DTables(object):
         table_tup = self.tables[(string, dom)]
 
         exp_p_at_all_times, exp_p_at_hit_times = self.pexp_func(
-            sources=sources,
-            hit_times=hit_times,
-            dom_coord=dom_coord,
-            quantum_efficiency=dom_quantum_efficiency,
+            sources,
+            hit_times,
+            dom_coord,
+            dom_quantum_efficiency,
             *table_tup
         )
 
@@ -345,7 +353,7 @@ class Retro5DTables(object):
 
 
 def get_table_norm(
-        n_photons, phase_refractive_index, step_length, r_bin_edges,
+        n_photons, group_refractive_index, step_length, r_bin_edges,
         costheta_bin_edges, t_bin_edges, quantum_efficiency,
         angular_acceptance_fract, norm_version
     ):
@@ -359,8 +367,8 @@ def get_table_norm(
     n_photons : int > 0
         Number of photons thrown in the simulation.
 
-    phase_refractive_index : float > 0
-        Phase refractive index in the medium.
+    group_refractive_index : float > 0
+        Group refractive index in the medium.
 
     step_length : float > 0
         Step length used in CLSim tabulator, in units of meters. (Hard-coded to
@@ -427,7 +435,7 @@ def get_table_norm(
     # divided by the number of photons in the bin times the number of
     # times each photon is counted.
     speed_of_light_in_medum = ( # units = m/ns
-        SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index
+        SPEED_OF_LIGHT_M_PER_NS / group_refractive_index
     )
 
     # t bin edges are in ns and speed_of_light_in_medum is m/ns
@@ -479,14 +487,21 @@ def get_table_norm(
 
         # Shape of the radial norm is 1D: (n_r_bins,)
         table_norm = (
-            1/(1.01987*0.43741) * 2*constant_part * table_step_length_norm
+            1/0.4536683386535979 * 2*constant_part * table_step_length_norm
             * radial_norm[:, np.newaxis]
         )
 
     elif norm_version == 'binvol':
         radial_norm = 1 / bin_vols
         table_norm = (
-            1/(0.10943*0.78598) * constant_part * table_step_length_norm
+            1/0.087773852221614 * constant_part * table_step_length_norm
+            * radial_norm[:, np.newaxis]
+        )
+
+    elif norm_version == 'binvol2':
+        radial_norm = 1 / bin_vols
+        table_norm = (
+            1/0.11618460651686201 * constant_part * counts_per_t
             * radial_norm[:, np.newaxis]
         )
 
@@ -501,7 +516,7 @@ def get_table_norm(
                 fill_value=(
                     1
                     / n_photons
-                    / (SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+                    / (SPEED_OF_LIGHT_M_PER_NS / group_refractive_index)
                     / np.mean(t_bin_widths)
                     * angular_acceptance_fract
                     * quantum_efficiency
@@ -517,13 +532,13 @@ def get_table_norm(
         table_norm = np.outer(
             # NOTE: pi factor needed to get agreement with old code (why?);
             # 4 is needed for new clsim tables (why?)
-            1/(1.17059*1.03695) * 4 / not_really_volumes,
+            1/0.3156174657795075 / not_really_volumes,
             np.full(
                 shape=(len(t_bin_edges) - 1,),
                 fill_value=(
                     1
                     / n_photons
-                    / (SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+                    / (SPEED_OF_LIGHT_M_PER_NS / group_refractive_index)
                     / np.mean(t_bin_widths)
                     * angular_acceptance_fract
                     * quantum_efficiency
@@ -539,7 +554,7 @@ def get_table_norm(
         table_norm = np.outer(
             # NOTE: pi factor needed to get agreement with old code (why?);
             # 4 is needed for new clsim tables (why?)
-            1/(3.21959*1.03695*1.02678) * 4 / not_really_volumes,
+            1/0.8566215612075752 / not_really_volumes,
             np.full(shape=(len(t_bin_edges) - 1,), fill_value=constant_part)
         )
 

@@ -72,7 +72,7 @@ with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
 SPLINE = interpolate.splrep(energies, stopping_power, s=0)
 
 
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+#@numba_jit #(**DFLT_NUMBA_JIT_KWARGS)
 def const_energy_loss_muon(hypo_params, dt=1.0):
     """Simple discrete-time track hypothesis.
 
@@ -112,6 +112,16 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     sources = np.empty((n_samples,), dtype=SRC_DTYPE)
     src_slc = sources[:]
+    #src_slc.kind = SRC_CKV_BETA1
+    #sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
+    #src_slc.t = hypo_params.t + sampled_dt
+    #src_slc.x = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    #src_slc.y = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    #src_slc.z = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    #src_slc.photons = photons_per_segment
+    #src_slc.dir_x = dir_x * COS_CKV
+    #src_slc.dir_y = dir_y * COS_CKV
+    #src_slc.dir_z = dir_z * COS_CKV
     src_slc['kind'] = SRC_CKV_BETA1
     sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
     src_slc['t'] = hypo_params.t + sampled_dt

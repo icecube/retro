@@ -53,6 +53,7 @@ from retro.tables.clsim_tables import (
 
 VALIDATE_KEYS = [
     'table_shape',
+    'group_refractive_index',
     'phase_refractive_index',
     'r_bin_edges',
     'costheta_bin_edges',

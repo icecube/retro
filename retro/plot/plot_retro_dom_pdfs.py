@@ -25,7 +25,6 @@ import numpy as np
 import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
-from cycler import cycler
 
 
 HIT_TIMES = np.linspace(0, 2000, 201)
@@ -148,37 +147,37 @@ def plot_run_info(
             params_label.append('{}={}{}'.format(plab, pval, units))
         params_label = '$' + r',\;'.join(params_label) + '$'
 
-    maxlabellen = max(len(label) for label in labels)
     if plot:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8), dpi=72)
-    tots = []
+    tots_incl_noise = []
+    tots_excl_noise = []
     kss = []
-    ref_tots = []
-    ref_tot = 0
+    ref_tots_incl_noise = []
+    ref_tots_excl_noise = []
     for string, dom in sorted(all_string_dom_pairs):
         if plot:
             ax.clear()
         all_zeros = True
-        ref_y_all_zeros = True
         xmin = np.inf
         xmax = -np.inf
         ref_y = None
         if fwd_hists:
             if (string, dom) in fwd_hists:
-                y = fwd_hists[(string, dom)]
-                y = np.array([y[0]] + y.tolist())
-                nonzero_mask = y != 0 #~np.isclose(y, 0)
+                ref_y = fwd_hists[(string, dom)]
+                ref_y = np.array([ref_y[0]] + ref_y.tolist())
+                nonzero_mask = ref_y != 0 #~np.isclose(ref_y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
-                    ref_y_all_zeros = False
-                    min_mask = y >= 0.01 * y.max()
+                    #ref_y_all_zeros = False
+                    min_mask = (ref_y - ref_y.min()) >= 0.01 * (ref_y.max() - ref_y.min())
                     xmin = min(xmin, fwd_hists_binning[min_mask].min())
                     xmax = max(xmax, fwd_hists_binning[min_mask].max())
             else:
-                y = np.zeros_like(fwd_hists_binning)
+                ref_y = np.zeros_like(fwd_hists_binning)
 
-            ref_y = y - np.min(y)
-            ref_tots.append(np.ma.masked_invalid(ref_y).sum())
+            valid_ref_y = np.ma.masked_invalid(ref_y)
+            ref_tots_incl_noise.append(np.sum(valid_ref_y))
+            ref_tots_excl_noise.append(np.sum(valid_ref_y - valid_ref_y.min()))
 
             if plot:
                 ax.step(
@@ -194,12 +193,21 @@ def plot_run_info(
         linewidths = [5, 3, 2, 2, 2, 2, 2]
 
         for plt_i, (label, run_info) in enumerate(zip(labels, run_infos)):
-            if len(tots) <= plt_i:
-                tots.append([])
+            if len(tots_incl_noise) <= plt_i:
+                tots_incl_noise.append([])
+                tots_excl_noise.append([])
                 kss.append([])
             results = run_info['results']
-            if (string, dom) in results:
-                y = results[(string, dom)]['pexp_at_hit_times']
+            if (string, dom) in results.keys():
+                rslt = results[(string, dom)]
+                if 'pexp_at_hit_times' in rslt:
+                    y = rslt['pexp_at_hit_times']
+                else:
+                    y = rslt['exp_p_at_hit_times']
+                if isinstance(y, int):
+                    print(y)
+                    print((string, dom))
+                    print(label)
                 nonzero_mask = y != y[0] #~np.isclose(y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
@@ -209,16 +217,18 @@ def plot_run_info(
             else:
                 y = np.zeros_like(SAMPLE_HIT_TIMES)
 
-            y -= np.min(y)
-
-            tot = np.ma.masked_invalid(y).sum() #np.sum(y) # / np.sum(ref_y[1:])
-            if tot != 0 and not np.isinf(tot) and not np.isnan(tot):
-                tots[plt_i].append(tot)
+            masked_y = np.ma.masked_invalid(y)
+            tot_excl_noise = (masked_y - masked_y.min()).sum()
+            tot_incl_noise = masked_y.sum()
+            if tot_excl_noise != 0:
+                tots_excl_noise[plt_i].append(tot_excl_noise)
+                tots_incl_noise[plt_i].append(tot_incl_noise)
             else:
-                tots[plt_i].append(0)
+                tots_excl_noise[plt_i].append(0)
+                tots_incl_noise[plt_i].append(0)
             kss[plt_i].append(ks_test(y, ref_y[1:]))
 
-            kl_div = None
+            #kl_div = None
             custom_label = label
             #if ref_y is not None: # and not ref_y_all_zeros:
             #    abs_mean_diff = np.abs(np.mean(y - ref_y[1:]))
@@ -324,18 +334,35 @@ def plot_run_info(
     sys.stdout.write('\n\n')
     sys.stdout.flush()
 
-    ref_tots = np.array(ref_tots)
-    ref_tot = np.sum(ref_tots)
-    print('{:7s} {:7s} {}'.format('KS'.ljust(7), 'Ratio'.ljust(7), 'Label'))
-    for label, ks, tot in zip(labels, kss, tots):
+    ref_tots_incl_noise = np.array(ref_tots_incl_noise)
+    ref_tots_excl_noise = np.array(ref_tots_excl_noise)
+    ref_tot_incl_noise = np.sum(ref_tots_incl_noise)
+    ref_tot_excl_noise = np.sum(ref_tots_excl_noise)
+    print(
+        '{:9s}  {:16s}  {:16s}  {}'
+        .format(
+            'KS'.ljust(7),
+            'Ratio incl noise'.ljust(16),
+            'Ratio excl noise'.ljust(16),
+            'Label'
+        )
+    )
+    for label, ks, tot_incl_noise, tot_excl_noise in zip(labels,
+                                                         kss,
+                                                         tots_incl_noise,
+                                                         tots_excl_noise):
         ks = np.array(ks)
         mask = ~np.isnan(ks)
-        ks_wtd_avg = np.sum(ks[mask] * ref_tots[mask]) / np.sum(ref_tots[mask])
+        ks_wtd_avg = (
+            np.sum(ks[mask] * ref_tots_excl_noise[mask])
+            / np.sum(ref_tots_excl_noise[mask])
+        )
         print(
-            '{:7.5f} {:7.5f} {}'
+            '{:9s}  {:16s}  {:16s}  {}'
             .format(
-                ks_wtd_avg,
-                np.sum(tot) / ref_tot,
+                format(ks_wtd_avg, '.7f').rjust(9),
+                format(np.sum(tot_incl_noise) / ref_tot_incl_noise, '.7f').rjust(16),
+                format(np.sum(tot_excl_noise) / ref_tot_excl_noise, '.7f').rjust(16),
                 label
             )
         )

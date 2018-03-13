@@ -45,9 +45,10 @@ from retro.utils.misc import expand, wstderr
 
 
 CKV_TABLE_KEYS = [
-    'n_photons', 'phase_refractive_index', 'r_bin_edges',
-    'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
-    'deltaphidir_bin_edges', 'ckv_table', #'t_indep_ckv_table'
+    'n_photons', 'group_refractive_index', 'phase_refractive_index',
+    'r_bin_edges', 'costheta_bin_edges', 't_bin_edges',
+    'costhetadir_bin_edges', 'deltaphidir_bin_edges', 'ckv_table',
+    #'t_indep_ckv_table'
 ]
 
 
@@ -71,6 +72,7 @@ def load_ckv_table(fpath, mmap, step_length=None):
     table : OrderedDict
         Items are
         - 'n_photons' :
+        - 'group_refractive_index' :
         - 'phase_refractive_index' :
         - 'r_bin_edges' :
         - 'costheta_bin_edges' :

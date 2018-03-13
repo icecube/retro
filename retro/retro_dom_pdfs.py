@@ -87,8 +87,8 @@ SIM_TO_TEST = 'upgoing_muon'
 # One of {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr', 'dom_time_polar'}
 TABLE_KIND = 'ckv_uncompr'
 
-# One of {'pde', 'avgsurfarea', 'wtf', 'wtf2', ...}
-NORM_VERSION = 'avgsurfarea'
+# One of {'pde', 'binvol', 'binvol2', 'avgsurfarea', 'wtf', 'wtf2', ...}
+NORM_VERSION = 'binvol2'
 
 # Whether to use directionality from tables
 USE_DIRECTIONALITY = True
@@ -101,7 +101,7 @@ NUM_PHI_SAMPLES = None
 MUON_DEDX = False
 
 # Time step (ns) for discrete muon kernel (whether or not dEdX)
-MUON_DT = 0.1
+MUON_DT = 1.0
 
 GCD_FILE = expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
@@ -155,7 +155,7 @@ SIMULATIONS = dict(
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-300,
-            track_azimuth=0, track_zenith=-PI,
+            track_azimuth=0, track_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl',
@@ -163,7 +163,7 @@ SIMULATIONS = dict(
     horizontal_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-350,
-            track_azimuth=0, track_zenith=0,
+            track_azimuth=0, track_zenith=np.pi/2,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims100000_step1_photon_histos.pkl',
@@ -198,7 +198,7 @@ loaded_strings_doms = list(product(strings, doms))
 
 hit_times = np.linspace(0, 2000, 201)
 
-sample_hit_times = 0.5 * (hit_times[:-1] + hit_times[1:])
+sample_hit_times = (0.5 * (hit_times[:-1] + hit_times[1:])).astype(np.float32)
 
 run_info['strings'] = strings
 run_info['doms'] = doms
@@ -254,7 +254,7 @@ elif TABLE_KIND == 'raw_uncompr':
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
-        compute_t_indep_exp=True,
+        compute_t_indep_exp=False,
         use_directionality=USE_DIRECTIONALITY,
         norm_version=NORM_VERSION,
         num_phi_samples=NUM_PHI_SAMPLES,
@@ -349,7 +349,7 @@ elif TABLE_KIND in ['ckv_uncompr', 'ckv_templ_compr']:
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
-        compute_t_indep_exp=True,
+        compute_t_indep_exp=False,
         use_directionality=USE_DIRECTIONALITY,
         norm_version=NORM_VERSION
     )
@@ -465,9 +465,10 @@ for string, dom in loaded_strings_doms:
     exp_p_at_all_times, exp_p_at_hit_times = retro_tables.get_expected_det(
         sources=sources,
         hit_times=sample_hit_times,
-        time_window=TIME_WINDOW,
         string=string,
         dom=dom,
+        include_noise=True,
+        time_window=TIME_WINDOW
     )
     t11 = time.time() - t00
     pexp_timings.append(t11)

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
 
 """
 Simple class DiscreteHypo for evaluating discrete hypotheses.
@@ -46,7 +47,7 @@ SRC_DTYPE = np.dtype(
         ('dir_y', np.float32),
         ('dir_z', np.float32)
     ],
-    aligned=True
+    align=True
 )
 """Each source point is described by (up to) these 9 fields"""
 

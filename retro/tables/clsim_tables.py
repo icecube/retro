@@ -10,7 +10,6 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = '''
     MY_CLSIM_TABLE_KEYS
-    TABLE_NORM_KEYS
     CLSIM_TABLE_FNAME_PROTO
     CLSIM_TABLE_FNAME_RE
     CLSIM_TABLE_METANAME_PROTO
@@ -49,23 +48,18 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import DEBUG
-from retro.tables.retro_5d_tables import get_table_norm
+from retro.tables.retro_5d_tables import TABLE_NORM_KEYS, get_table_norm
 from retro.utils.misc import (
     expand, force_little_endian, get_decompressd_fobj, wstderr
 )
 
 
 MY_CLSIM_TABLE_KEYS = [
-    'table_shape', 'n_photons', 'phase_refractive_index', 'r_bin_edges',
-    'costheta_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
-    'deltaphidir_bin_edges', 'table', #'t_indep_table'
+    'table_shape', 'n_photons', 'group_refractive_index',
+    'phase_refractive_index', 'r_bin_edges', 'costheta_bin_edges',
+    't_bin_edges', 'costhetadir_bin_edges', 'deltaphidir_bin_edges', 'table',
+    #'t_indep_table'
 ]
-
-TABLE_NORM_KEYS = [
-    'n_photons', 'phase_refractive_index', 'step_length', 'r_bin_edges',
-    'costheta_bin_edges', 't_bin_edges'
-]
-"""All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
 
 CLSIM_TABLE_FNAME_PROTO = [
     (
@@ -346,6 +340,9 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
         table['n_photons'] = force_little_endian(
             pf_table[0].header['_i3_n_photons'] # pylint: disable=no-member
         )
+        table['group_refractive_index'] = force_little_endian(
+            pf_table[0].header['_i3_n_group'] # pylint: disable=no-member
+        )
         table['phase_refractive_index'] = force_little_endian(
             pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
         )
@@ -417,6 +414,7 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract,
         - 'table' : np.ndarray
         - 't_indep_table' : np.ndarray
         - 'n_photons' :
+        - 'group_refractive_index' :
         - 'phase_refractive_index' :
 
         If the table is 5D, items also include
