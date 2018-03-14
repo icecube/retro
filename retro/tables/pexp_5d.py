@@ -173,6 +173,7 @@ def generate_pexp_5d_function(
             size=num_phi_samples
         )
 
+    empty_1d_array = np.array([], dtype=np.float32).reshape((0,))
     empty_2d_array = np.array([], dtype=np.float32).reshape((0,)*2)
     empty_4d_array = np.array([], dtype=np.float32).reshape((0,)*4)
 
@@ -226,11 +227,9 @@ def generate_pexp_5d_function(
                 (n_r, n_costheta, n_costhetadir, n_deltaphidir)
             while if using a
 
-        t_indep_table_norm : float, optional
-            r- and t-dependent normalization is assumed to already have been
-            applied to generate the t_indep_table, leaving only a possible
-            constant normalization that must still be applied (e.g.
-            ``quantum_efficiency*angular_acceptance_fract``).
+        t_indep_table_norm : array, optional
+            r-dependent normalization (any t-dep normalization is assumed to
+            already have been applied to generate the t_indep_table).
 
         t_indep_table_map : array, optional
             Only used if `table_kind` is template-compressed.
@@ -257,7 +256,7 @@ def generate_pexp_5d_function(
             table,
             table_norm,
             t_indep_table=empty_4d_array,
-            t_indep_table_norm=np.float32(0),
+            t_indep_table_norm=empty_1d_array,
         ):
         # Initialize accumulators (using double precision)
         exp_p_at_all_times = np.float64(0.0)
@@ -443,7 +442,7 @@ def generate_pexp_5d_function(
 
             if compute_t_indep_exp:
                 exp_p_at_all_times += (
-                    source_photons * t_indep_table_norm * t_indep_surv_prob
+                    source_photons * t_indep_table_norm[r_bin_idx] * t_indep_surv_prob
                 )
 
             for hit_t_idx, hit_t in enumerate(hit_times):
@@ -553,7 +552,7 @@ def generate_pexp_5d_function(
             table_norm,
             table_map,
             t_indep_table=empty_4d_array,
-            t_indep_table_norm=np.float32(0),
+            t_indep_table_norm=empty_1d_array,
             t_indep_table_map=empty_2d_array
         ):
         # Initialize accumulators (using double precision)
@@ -693,7 +692,7 @@ def generate_pexp_5d_function(
 
             if compute_t_indep_exp:
                 exp_p_at_all_times += (
-                    source_photons * t_indep_table_norm * t_indep_surv_prob
+                    source_photons * t_indep_table_norm[r_bin_idx] * t_indep_surv_prob
                 )
 
             for hit_t_idx, hit_t in enumerate(hit_times):

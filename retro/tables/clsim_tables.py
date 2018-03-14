@@ -191,63 +191,7 @@ def interpret_clsim_table_fname(fname):
     return ordered_info
 
 
-def generate_time_indep_table(table, quantum_efficiency,
-                              angular_acceptance_fract, step_length=None):
-    """
-    Parameters
-    ----------
-    table : mapping
-    quantum_efficiency : float in (0, 1]
-    angular_acceptance_fract : float in (0, 1]
-    step_length : float in (0, 1]
-        Required if 'step_length' is not a key in `table`.
-
-    Returns
-    -------
-    t_indep_table : numpy.ndarray of size (n_r, n_costheta, n_costhetadir, n_deltaphidir)
-    t_indep_table_norm : scalar
-        This norm factor must be applied to the table in order to convert its
-        entries to survival probabilities.
-
-    """
-    if 'step_length' in table:
-        if step_length is not None:
-            assert step_length == table['step_length']
-        else:
-            step_length = table['step_length']
-
-    if step_length is None:
-        raise ValueError('Need either an value for the `step_length` argument'
-                         ' or "step_length"  in `table`.')
-
-    table_norm = get_table_norm(
-        quantum_efficiency=quantum_efficiency,
-        angular_acceptance_fract=angular_acceptance_fract,
-        step_length=step_length,
-        **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
-    )
-
-    # Indices in the Einstein sum are
-    #   table:
-    #     r=radius, c=costheta, t=time, q=costhetadir, p=deltaphidir
-    #   norm:
-    #     r=radius, t=time
-    #   output:
-    #     r=radius, c=costheta, q=costhetadir, p=deltaphidir
-    t_indep_table = np.einsum(
-        'rctqp,rt->rcqp',
-        table['table'][1:-1, 1:-1, 1:-1, 1:-1, 1:-1],
-        table_norm,
-        optimize=False # can change when we know if this helps
-    )
-
-    t_indep_table_norm = quantum_efficiency * angular_acceptance_fract
-
-    return t_indep_table, t_indep_table_norm
-
-
-def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
-                             gen_t_indep=False):
+def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Similar to the `load_clsim_table` function but the full table, including
@@ -261,15 +205,9 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
         'zstandard', the file will be decompressed using the `python-zstandard`
         Python library before passing to `pyfits` for interpreting.
 
-    step_length : float > 0 in units of meters, optional
-        Required if computing the `t_indep_table` (if `gen_t_indep` is True).
-
     mmap : bool, optional
         Whether to memory map the table (if it's stored in a directory
         containing .npy files).
-
-    gen_t_indep : bool, optional
-        Generate the time-independent table if it does not exist.
 
     Returns
     -------
@@ -277,7 +215,7 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
         Items include
         - 'table_shape' : tuple of int
         - 'table' : np.ndarray
-        - 't_indep_table' : np.ndarray
+        - 't_indep_table' : np.ndarray (if available)
         - 'n_photons' :
         - 'phase_refractive_index' :
         - 'r_bin_edges' :
@@ -285,8 +223,6 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
         - 't_bin_edges' :
         - 'costhetadir_bin_edges' :
         - 'deltaphidir_bin_edges' :
-        - 'table' :
-        - 't_indep_table' :
 
     """
     table = OrderedDict()
@@ -376,13 +312,6 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False,
             )
 
         table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
-
-        if gen_t_indep and 't_indep_table' not in table:
-            table['t_indep_table'] = generate_time_indep_table(
-                table=table,
-                quantum_efficiency=1,
-                angular_acceptance_fract=1
-            )
 
         wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
 

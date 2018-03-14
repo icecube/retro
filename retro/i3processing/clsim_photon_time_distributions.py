@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=redefined-outer-name
+# pylint: disable=redefined-outer-name, wrong-import-position
 
 """
 Generate time histograms for each DOM from a photon raw data pickle file (as
@@ -32,11 +32,17 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 import cPickle as pickle
-from os.path import dirname, expanduser, expandvars, isfile, realpath
+from os.path import abspath, dirname, expanduser, expandvars, isfile
 import re
 import sys
 
 import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.i3info.extract_gcd import extract_gcd
 
 
 def generate_histos(
@@ -130,7 +136,6 @@ def generate_histos(
         if exp_gcd.endswith('.pkl'):
             gcd_info = pickle.load(open(exp_gcd, 'rb'))
         elif '.i3' in exp_gcd:
-            from retro.i3info.extract_gcd import extract_gcd
             gcd_info = extract_gcd(exp_gcd)
         else:
             raise ValueError('No idea how to handle GCD file "{}"'.format(gcd))
@@ -141,7 +146,6 @@ def generate_histos(
             if gcd_from_data.endswith('.pkl'):
                 gcd_info_from_data = pickle.load(open(gcd_from_data, 'rb'))
             else:
-                from retro.i3info.extract_gcd import extract_gcd
                 gcd_info_from_data = extract_gcd(gcd_from_data)
         except (AttributeError, KeyError, ValueError):
             raise
@@ -171,14 +175,15 @@ def generate_histos(
 
     histos = OrderedDict()
     keep_gcd_keys = ['source_gcd_name', 'source_gcd_md5', 'source_gcd_i3_md5']
-    histos['gcd_info'] = [gcd_info[k] for k in keep_gcd_keys]
+    histos['gcd_info'] = OrderedDict([(k, gcd_info[k]) for k in keep_gcd_keys])
     histos['include_rde'] = include_rde
     histos['include_noise'] = include_noise
     histos['bin_edges'] = bin_edges
     histos['binning_spec'] = OrderedDict([
         ('domain', (0, t_max)),
         ('num_bins', num_bins),
-        ('spacing', 'linear')
+        ('spacing', 'linear'),
+        ('units', 'ns')
     ])
 
     # Note the first number in the file is a number approximately equal (but

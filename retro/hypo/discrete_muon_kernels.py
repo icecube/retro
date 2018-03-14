@@ -72,7 +72,7 @@ with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
 SPLINE = interpolate.splrep(energies, stopping_power, s=0)
 
 
-#@numba_jit #(**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(nopython=False, cache=True) #(**DFLT_NUMBA_JIT_KWARGS)
 def const_energy_loss_muon(hypo_params, dt=1.0):
     """Simple discrete-time track hypothesis.
 
@@ -95,11 +95,11 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     track_energy = hypo_params.track_energy
 
     if track_energy == 0:
-        return np.array([], dtype=SRC_DTYPE)
+        return np.empty((0,), dtype=SRC_DTYPE)
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
-    n_samples = int(np.floor(duration / dt))
+    n_samples = int(duration // dt)
     segment_length = 0.0
     if n_samples > 0:
         segment_length = length / n_samples
@@ -110,28 +110,34 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
     dir_z = -math.cos(hypo_params.track_zenith)
 
-    sources = np.empty((n_samples,), dtype=SRC_DTYPE)
-    src_slc = sources[:]
-    #src_slc.kind = SRC_CKV_BETA1
-    #sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
-    #src_slc.t = hypo_params.t + sampled_dt
-    #src_slc.x = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
-    #src_slc.y = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
-    #src_slc.z = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
-    #src_slc.photons = photons_per_segment
-    #src_slc.dir_x = dir_x * COS_CKV
-    #src_slc.dir_y = dir_y * COS_CKV
-    #src_slc.dir_z = dir_z * COS_CKV
-    src_slc['kind'] = SRC_CKV_BETA1
     sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
-    src_slc['t'] = hypo_params.t + sampled_dt
-    src_slc['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
-    src_slc['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
-    src_slc['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
-    src_slc['photons'] = photons_per_segment
-    src_slc['dir_x'] = dir_x * COS_CKV
-    src_slc['dir_y'] = dir_y * COS_CKV
-    src_slc['dir_z'] = dir_z * COS_CKV
+
+    sources = np.empty(shape=(n_samples,), dtype=SRC_DTYPE)
+
+    #dt0 = dt * 0.5
+    #dir_x_
+
+    #for samp_n in range(n_samples):
+    #    sources[samp_n]['kind'] = SRC_CKV_BETA1
+    #    step_dt = dt0 + i * dt
+    #    sources[samp_n]['t'] = hypo_params.t + step_dt
+    #    sources[samp_n]['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    #    sources[samp_n]['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    #    sources[samp_n]['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    #    sources[samp_n]['photons'] = photons_per_segment
+    #    sources[samp_n]['dir_x'] = dir_x * COS_CKV
+    #    sources[samp_n]['dir_y'] = dir_y * COS_CKV
+    #    sources[samp_n]['dir_z'] = dir_z * COS_CKV
+
+    sources['kind'] = SRC_CKV_BETA1
+    sources['t'] = hypo_params.t + sampled_dt
+    sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    sources['photons'] = photons_per_segment
+    sources['dir_x'] = dir_x * COS_CKV
+    sources['dir_y'] = dir_y * COS_CKV
+    sources['dir_z'] = dir_z * COS_CKV
 
     return sources
 

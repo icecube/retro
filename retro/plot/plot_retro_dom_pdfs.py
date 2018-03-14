@@ -27,10 +27,6 @@ mpl.use('agg')
 import matplotlib.pyplot as plt
 
 
-HIT_TIMES = np.linspace(0, 2000, 201)
-SAMPLE_HIT_TIMES = 0.5 * (HIT_TIMES[:-1] + HIT_TIMES[1:])
-
-
 def ks_test(a, b):
     """https://en.wikipedia.org/wiki/Kolmogorov%E2%80%93Smirnov_test"""
     acs = np.cumsum(a)
@@ -76,17 +72,26 @@ def plot_run_info(
             if 'binning' in fwd_hists:
                 t_min = fwd_hists['binning']['t_min']
                 t_max = fwd_hists['binning']['t_max']
+                t_window = t_max - t_min
                 num_bins = fwd_hists['binning']['num_bins']
                 spacing = fwd_hists['binning']['spacing']
                 assert spacing == 'linear', spacing
                 fwd_hists_binning = np.linspace(t_min, t_max, num_bins + 1)
+            elif 'bin_edges' in fwd_hists:
+                fwd_hists_binning = fwd_hists['bin_edges']
+                t_window = np.max(fwd_hists_binning) - np.min(fwd_hists_binning)
             else:
-                fwd_hists_binning = HIT_TIMES
-
+                raise ValueError(
+                    'Need "binning" or "bin_edges" in fwd_hists; keys are {}'
+                    .format(fwd_hists.keys())
+                )
+            hist_bin_widths = np.diff(fwd_hists_binning)
             if 'results' in fwd_hists:
                 fwd_hists = fwd_hists['results']
             else:
                 raise ValueError('Could not find key "results" in fwd hists!')
+    else:
+        raise NotImplementedError('Need fwd hists for now.')
 
     if not isdir(outdir):
         makedirs(outdir)
@@ -149,6 +154,8 @@ def plot_run_info(
 
     if plot:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8), dpi=72)
+
+    t_indep_tots = []
     tots_incl_noise = []
     tots_excl_noise = []
     kss = []
@@ -163,7 +170,7 @@ def plot_run_info(
         ref_y = None
         if fwd_hists:
             if (string, dom) in fwd_hists:
-                ref_y = fwd_hists[(string, dom)]
+                ref_y = fwd_hists[(string, dom)] / hist_bin_widths
                 ref_y = np.array([ref_y[0]] + ref_y.tolist())
                 nonzero_mask = ref_y != 0 #~np.isclose(ref_y, 0)
                 if np.any(nonzero_mask):
@@ -175,15 +182,20 @@ def plot_run_info(
             else:
                 ref_y = np.zeros_like(fwd_hists_binning)
 
-            valid_ref_y = np.ma.masked_invalid(ref_y)
-            ref_tots_incl_noise.append(np.sum(valid_ref_y))
-            ref_tots_excl_noise.append(np.sum(valid_ref_y - valid_ref_y.min()))
+            ry_mask = ~np.isnan(ref_y[1:])
+            ref_tots_incl_noise.append(np.sum(ref_y[1:][ry_mask]))
+            ref_tots_excl_noise.append(np.sum((ref_y[1:][ry_mask] - ref_y[1:][ry_mask].min())))
+
+            ref_y_area = np.sum(ref_y[1:] * hist_bin_widths)
 
             if plot:
                 ax.step(
                     fwd_hists_binning, ref_y,
                     lw=1,
-                    label='Forward sim',
+                    label=(
+                        r'Forward sim, $\Sigma q \Delta t$ = {:.3e}'
+                        .format(ref_y_area)
+                    ),
                     clip_on=True,
                     #color='C0'
                 )
@@ -193,6 +205,7 @@ def plot_run_info(
         linewidths = [5, 3, 2, 2, 2, 2, 2]
 
         for plt_i, (label, run_info) in enumerate(zip(labels, run_infos)):
+            sample_hit_times = run_info['hit_times']
             if len(tots_incl_noise) <= plt_i:
                 tots_incl_noise.append([])
                 tots_excl_noise.append([])
@@ -200,22 +213,22 @@ def plot_run_info(
             results = run_info['results']
             if (string, dom) in results.keys():
                 rslt = results[(string, dom)]
-                if 'pexp_at_hit_times' in rslt:
-                    y = rslt['pexp_at_hit_times']
-                else:
+                if 'exp_p_at_hit_times' in rslt:
                     y = rslt['exp_p_at_hit_times']
-                if isinstance(y, int):
-                    print(y)
-                    print((string, dom))
-                    print(label)
+                    y_ti = rslt['exp_p_at_all_times']
+                else:
+                    y = rslt['pexp_at_hit_times']
+
                 nonzero_mask = y != y[0] #~np.isclose(y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
                     min_mask = y >= 0.01 * y.max()
-                    xmin = min(xmin, SAMPLE_HIT_TIMES[min_mask].min())
-                    xmax = max(xmax, SAMPLE_HIT_TIMES[min_mask].max())
+                    xmin = min(xmin, sample_hit_times[min_mask].min())
+                    xmax = max(xmax, sample_hit_times[min_mask].max())
             else:
-                y = np.zeros_like(SAMPLE_HIT_TIMES)
+                y = np.zeros_like(sample_hit_times)
+
+            #y_area = np.sum(
 
             masked_y = np.ma.masked_invalid(y)
             tot_excl_noise = (masked_y - masked_y.min()).sum()
@@ -229,7 +242,9 @@ def plot_run_info(
             kss[plt_i].append(ks_test(y, ref_y[1:]))
 
             #kl_div = None
-            custom_label = label
+            custom_label = r'{}, ti = {:.3e}, $\Sigma$ = {:.3e}'.format(
+                label, y_ti, tots_incl_noise[plt_i][-1]
+            )
             #if ref_y is not None: # and not ref_y_all_zeros:
             #    abs_mean_diff = np.abs(np.mean(y - ref_y[1:]))
             #    #rel_abs_mean_diff = abs_mean_diff / np.sum(ref_y[1:])
@@ -255,7 +270,7 @@ def plot_run_info(
 
             if plot:
                 ax.plot(
-                    SAMPLE_HIT_TIMES, y,
+                    sample_hit_times, y,
                     label=custom_label,
                     color=color,
                     linestyle=linestyle,
@@ -357,12 +372,13 @@ def plot_run_info(
             np.sum(ks[mask] * ref_tots_excl_noise[mask])
             / np.sum(ref_tots_excl_noise[mask])
         )
+        #ks_wtd_avg = np.mean(ks[mask])
         print(
             '{:9s}  {:16s}  {:16s}  {}'
             .format(
                 format(ks_wtd_avg, '.7f').rjust(9),
-                format(np.sum(tot_incl_noise) / ref_tot_incl_noise, '.7f').rjust(16),
-                format(np.sum(tot_excl_noise) / ref_tot_excl_noise, '.7f').rjust(16),
+                format(np.sum(tot_incl_noise) / ref_tot_incl_noise, '.12f').rjust(16),
+                format(np.sum(tot_excl_noise) / ref_tot_excl_noise, '.12f').rjust(16),
                 label
             )
         )

@@ -43,14 +43,14 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 import retro
-from retro.const import PI
-from retro.utils.misc import expand, mkdir
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon
 from retro.hypo.discrete_cascade_kernels import point_cascade
+from retro.i3info.extract_gcd import extract_gcd
 from retro.tables.dom_time_polar_tables import DOMTimePolarTables
 from retro.tables.tdi_cart_tables import TDICartTable
 from retro.tables.retro_5d_tables import Retro5DTables
+from retro.utils.misc import expand, mkdir
 
 
 hostname = socket.gethostname()
@@ -82,7 +82,7 @@ else:
 
 
 # One of the keys from SIMULATIONS dict, below
-SIM_TO_TEST = 'upgoing_muon'
+SIM_TO_TEST = 'horizontal_muon'
 
 # One of {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr', 'dom_time_polar'}
 TABLE_KIND = 'ckv_uncompr'
@@ -131,8 +131,6 @@ CODE_TO_TEST = (
 OUTDIR = expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 
 run_info['sim_to_test'] = SIM_TO_TEST
-run_info['gcd_file'] = GCD_FILE
-run_info['gcd_file_md5'] = hashlib.md5(open(GCD_FILE, 'rb').read()).hexdigest()
 
 # pylint: disable=line-too-long
 SIMULATIONS = dict(
@@ -144,6 +142,22 @@ SIMULATIONS = dict(
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl'
     ),
+    downgoing_muon=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-300,
+            track_azimuth=0, track_zenith=0,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl',
+    ),
+    horizontal_muon=dict(
+        mc_true_params=retro.HYPO_PARAMS_T(
+            t=0, x=0, y=0, z=-350,
+            track_azimuth=0, track_zenith=np.pi/2,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl',
+    ),
     em_cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-400,
@@ -152,22 +166,6 @@ SIMULATIONS = dict(
         ),
         fwd_sim_histo_file='cascade_step4_SplitUncleanedInIcePulses.pkl'
     ),
-    downgoing_muon=dict(
-        mc_true_params=retro.HYPO_PARAMS_T(
-            t=0, x=0, y=0, z=-300,
-            track_azimuth=0, track_zenith=0,
-            track_energy=20, cascade_energy=0
-        ),
-        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos.pkl',
-    ),
-    horizontal_muon=dict(
-        mc_true_params=retro.HYPO_PARAMS_T(
-            t=0, x=0, y=0, z=-350,
-            track_azimuth=0, track_zenith=np.pi/2,
-            track_energy=20, cascade_energy=0
-        ),
-        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims100000_step1_photon_histos.pkl',
-    )
 )
 
 sim = SIMULATIONS[SIM_TO_TEST]
@@ -183,8 +181,12 @@ if sim['fwd_sim_histo_file'] is not None:
     fwd_sim_histo_file_md5 = hashlib.md5(contents).hexdigest()
     fwd_sim_histos = pickle.loads(contents)
     bin_edges = fwd_sim_histos['bin_edges']
+    print('bin_edges:', bin_edges)
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    del contents
     print(' ', np.round(time.time() - t0, 3), 'sec\n')
+else:
+    bin_edges = np.linspace(0, 4000, 401)
 
 run_info['sim'] = OrderedDict([
     ('mc_true_params', sim['mc_true_params']._asdict()),
@@ -196,24 +198,33 @@ strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46]
 doms = list(range(1, 60+1))
 loaded_strings_doms = list(product(strings, doms))
 
-hit_times = np.linspace(0, 2000, 201)
-
-sample_hit_times = (0.5 * (hit_times[:-1] + hit_times[1:])).astype(np.float32)
+hit_times = (0.5 * (bin_edges[:-1] + bin_edges[1:])).astype(np.float32)
 
 run_info['strings'] = strings
 run_info['doms'] = doms
 run_info['hit_times'] = hit_times
-run_info['sample_hit_times'] = sample_hit_times
-run_info['time_window'] = TIME_WINDOW
+run_info['time_window'] = np.max(bin_edges) - np.min(bin_edges)
 
 t_start = time.time()
 
 # Load detector GCD
-print('Loading detector geometry, calibration, and noise from "{}"...'
-      .format(expand(GCD_FILE)))
 t0 = time.time()
-gcd = np.load(expand(GCD_FILE))
-geom, rde, noise_rate_hz = gcd['geo'], gcd['rde'], gcd['noise']
+if sim['fwd_sim_histo_file'] is not None:
+    try:
+        gcd_file = fwd_sim_histos['gcd_info']['source_gcd_name']
+    except (IndexError, TypeError):
+        gcd_file = fwd_sim_histos['gcd_info'][0]
+else:
+    gcd_file = GCD_FILE
+print('Loading detector geometry, calibration, and noise from "{}"...'
+      .format(gcd_file))
+gcd_info = extract_gcd(gcd_file)
+
+copy_keys = ['source_gcd_name', 'source_gcd_md5', 'source_gcd_i3_md5']
+run_info['gcd_info'] = OrderedDict()
+for key in copy_keys:
+    run_info['gcd_info'][key] = gcd_info[key]
+geom, rde, noise_rate_hz = gcd_info['geo'], gcd_info['rde'], gcd_info['noise']
 print(' {:.3f} sec\n'.format(np.round(time.time() - t0, 3)))
 
 t0 = time.time()
@@ -254,7 +265,7 @@ elif TABLE_KIND == 'raw_uncompr':
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
-        compute_t_indep_exp=False,
+        compute_t_indep_exp=True,
         use_directionality=USE_DIRECTIONALITY,
         norm_version=NORM_VERSION,
         num_phi_samples=NUM_PHI_SAMPLES,
@@ -275,7 +286,6 @@ elif TABLE_KIND == 'raw_uncompr':
             fpath=single_table_path,
             string='all',
             dom='all',
-            step_length=STEP_LENGTH,
             angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
             mmap=MMAP
         )
@@ -349,7 +359,7 @@ elif TABLE_KIND in ['ckv_uncompr', 'ckv_templ_compr']:
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
-        compute_t_indep_exp=False,
+        compute_t_indep_exp=True,
         use_directionality=USE_DIRECTIONALITY,
         norm_version=NORM_VERSION
     )
@@ -431,7 +441,11 @@ discrete_hypo = DiscreteHypo(
     hypo_kernels=[point_cascade, muon_kernel],
     kernel_kwargs=kernel_kwargs
 )
-sources = discrete_hypo.get_sources(sim['mc_true_params'])
+mc_true_params = tuple(np.float32(val) for val in sim['mc_true_params'])
+print(mc_true_params)
+mc_true_params = retro.HYPO_PARAMS_T(*mc_true_params)
+print(mc_true_params)
+sources = discrete_hypo.get_sources(mc_true_params)
 
 run_info['hypo_class'] = 'DiscreteHypo'
 run_info['hypo_kernels'] = ['point_cascade', muon_kernel_label]
@@ -464,7 +478,7 @@ for string, dom in loaded_strings_doms:
     t00 = time.time()
     exp_p_at_all_times, exp_p_at_hit_times = retro_tables.get_expected_det(
         sources=sources,
-        hit_times=sample_hit_times,
+        hit_times=hit_times,
         string=string,
         dom=dom,
         include_noise=True,
@@ -472,8 +486,8 @@ for string, dom in loaded_strings_doms:
     )
     t11 = time.time() - t00
     pexp_timings.append(t11)
-    hypo_count += sample_hit_times.size
-    pgen_count += sample_hit_times.size * n_source_points
+    hypo_count += hit_times.size
+    pgen_count += hit_times.size * n_source_points
 
     tot_retro = np.sum(exp_p_at_hit_times)
 
@@ -491,13 +505,13 @@ for string, dom in loaded_strings_doms:
 
     if MAKE_PLOTS:
         plt.clf()
-        plt.plot(sample_hit_times, exp_p_at_hit_times, label='Retro')
+        plt.plot(hit_times, exp_p_at_hit_times, label='Retro')
     tot_clsim = 0.0
     try:
         fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][(string, dom)])
         tot_clsim = np.sum(fwd_sim_histo)
         if MAKE_PLOTS:
-            plt.plot(sample_hit_times, fwd_sim_histo, label='CLSim fwd sim')
+            plt.plot(hit_times, fwd_sim_histo, label='CLSim fwd sim')
     except KeyError:
         pass
 
@@ -524,7 +538,7 @@ for string, dom in loaded_strings_doms:
         ax = plt.gca()
         ax.add_artist(a_text)
 
-        ax.set_xlim(np.min(hit_times), np.max(hit_times))
+        ax.set_xlim(np.min(bin_edges), np.max(bin_edges))
         ax.set_ylim(0, ax.get_ylim()[1])
         ax.set_title('String {}, DOM {}'.format(string, dom))
         ax.set_xlabel('time (ns)')

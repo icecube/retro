@@ -36,12 +36,19 @@ import bz2
 from collections import OrderedDict
 import gzip
 import hashlib
-import os
-from os.path import basename, expanduser, expandvars, isdir, join, splitext
+from os.path import abspath, basename, expanduser, expandvars, dirname, isfile, join, splitext
 import pickle
+from shutil import copyfile
 from StringIO import StringIO
+import sys
 
 import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+import retro
 
 
 N_STRINGS = 86
@@ -70,9 +77,6 @@ def extract_gcd(gcd_file, outdir=None):
         'noise' : (86, 60) array with noise rate, in Hz, for each DOM
 
     """
-    from I3Tray import I3Units, OMKey # pylint: disable=import-error
-    from icecube import dataclasses, dataio # pylint: disable=import-error, unused-variable
-
     gcd_file = expanduser(expandvars(gcd_file))
     src_gcd_basename = basename(gcd_file)
 
@@ -91,6 +95,10 @@ def extract_gcd(gcd_file, outdir=None):
             parsed = True
             src_gcd_stripped = root
             break
+        elif src_gcd_stripped.endswith('.pkl'):
+            gcd_info = pickle.load(open(src_gcd_stripped, 'rb'))
+            return gcd_info
+
     if not parsed:
         raise ValueError(
             'Could not parse compression suffixes for GCD file "{}"'
@@ -98,6 +106,21 @@ def extract_gcd(gcd_file, outdir=None):
         )
 
     outfname = src_gcd_stripped + '.pkl'
+    data_dir_fpath = abspath(join(retro.DATA_DIR, outfname))
+
+    if outdir is not None:
+        outdir = retro.utils.misc.expand(outdir)
+        retro.utils.misc.mkdir(outdir)
+        outfpath = join(outdir, outfname)
+
+        if isfile(data_dir_fpath) and data_dir_fpath != abspath(outfpath):
+            copyfile(data_dir_fpath, outfpath)
+
+    if isfile(data_dir_fpath):
+        return pickle.load(open(data_dir_fpath, 'rb'))
+
+    if isfile(outfpath):
+        return pickle.load(open(outfpath, 'rb'))
 
     decompressed = open(gcd_file, 'rb').read()
     source_gcd_md5 = hashlib.md5(decompressed).hexdigest()
@@ -108,11 +131,8 @@ def extract_gcd(gcd_file, outdir=None):
             decompressed = bz2.decompress(decompressed)
     decompressed_gcd_md5 = hashlib.md5(decompressed).hexdigest()
 
-    if outdir is not None:
-        outdir = expanduser(expandvars(outdir))
-        if not isdir(outdir):
-            os.makedirs(outdir)
-        outfpath = join(outdir, outfname)
+    from I3Tray import I3Units, OMKey # pylint: disable=import-error
+    from icecube import dataclasses, dataio # pylint: disable=import-error, unused-variable
 
     gcd = dataio.I3File(gcd_file) # pylint: disable=no-member
     frame = gcd.pop_frame()

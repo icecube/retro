@@ -9,6 +9,7 @@ Retro tables, 5D Cherenkov tables, or template-compressed versions thereof.
 from __future__ import absolute_import, division, print_function
 
 __all__ = '''
+    TABLE_NORM_KEYS
     Retro5DTables
     get_table_norm
 '''.split()
@@ -161,8 +162,8 @@ class Retro5DTables(object):
         self.pexp_meta = None
 
     def load_table(
-            self, fpath, string, dom, step_length, angular_acceptance_fract,
-            mmap
+            self, fpath, string, dom, mmap, angular_acceptance_fract,
+            step_length=None
         ):
         """Load a table into the set of tables.
 
@@ -176,13 +177,6 @@ class Retro5DTables(object):
 
         dom : int in [1, 60] or str == 'all'
 
-        step_length : float > 0
-            The stepLength parameter (in meters) used in CLSim tabulator code
-            for tabulating a single photon as it travels. This is a hard-coded
-            paramter set to 1 meter in the trunk version of the code, but it's
-            something we might play with to optimize table generation speed, so
-            just be warned that this _can_ change.
-
         angular_acceptance_fract : float in (0, 1]
             Constant normalization factor to apply to correct for the integral
             of the angular acceptance curve used in the simulation that
@@ -191,6 +185,15 @@ class Retro5DTables(object):
         mmap : bool
             Whether to attempt to memory map the table (only applicable for
             Retro npy-files-in-a-dir tables).
+
+        step_length : float > 0, optional
+            The stepLength parameter (in meters) used in CLSim tabulator code
+            for tabulating a single photon as it travels. This is a hard-coded
+            paramter set to 1 meter in the trunk version of the code, but it's
+            something we might play with to optimize table generation speed, so
+            just be warned that this _can_ change. Note that this is only
+            required for CLSim .fits tables, which do not record this
+            parameter.
 
         """
         single_dom_spec = True
@@ -223,7 +226,6 @@ class Retro5DTables(object):
             assert self.depth_aggregation == False # pylint: disable=singleton-comparison
             assert 1 <= dom <= 60
 
-        assert step_length > 0
         assert 0 < angular_acceptance_fract <= 1
 
         if single_dom_spec and not self.operational_doms[string - 1, dom - 1]:
@@ -233,13 +235,16 @@ class Retro5DTables(object):
             )
             return
 
-        table = self.table_loader_func(
-            fpath=fpath,
-            step_length=step_length,
-            mmap=mmap,
-        )
+        table = self.table_loader_func(fpath=fpath, mmap=mmap)
+        if 'step_length' in table:
+            if step_length is None:
+                step_length = table['step_length']
+            else:
+                assert step_length == table['step_length']
+        else:
+            assert step_length is not None
+            table['step_length'] = step_length
 
-        table['step_length'] = step_length
         table['table_norm'] = get_table_norm(
             angular_acceptance_fract=angular_acceptance_fract,
             quantum_efficiency=1,
@@ -423,11 +428,11 @@ def get_table_norm(
         1 / (n_photons / n_costheta_bins)
 
         # Correction for quantum efficiency of the DOM
-        * angular_acceptance_fract
+        * quantum_efficiency
 
         # Correction for additional loss of sensitivity due to angular
         # acceptance model
-        * quantum_efficiency
+        * angular_acceptance_fract
     )
 
     # A photon is tabulated every step_length meters; we want the
@@ -487,21 +492,58 @@ def get_table_norm(
 
         # Shape of the radial norm is 1D: (n_r_bins,)
         table_norm = (
-            1/0.4536683386535979 * 2*constant_part * table_step_length_norm
+            constant_part * table_step_length_norm
             * radial_norm[:, np.newaxis]
         )
 
     elif norm_version == 'binvol':
         radial_norm = 1 / bin_vols
         table_norm = (
-            1/0.087773852221614 * constant_part * table_step_length_norm
+            constant_part * table_step_length_norm
             * radial_norm[:, np.newaxis]
         )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
 
     elif norm_version == 'binvol2':
         radial_norm = 1 / bin_vols
         table_norm = (
-            1/0.11618460651686201 * constant_part * counts_per_t
+            constant_part * counts_per_t
+            * radial_norm[:, np.newaxis]
+        )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
+
+    elif norm_version == 'binvol3':
+        radial_norm = 1 / bin_vols / avg_radius
+        table_norm = (
+            constant_part * counts_per_t
+            * radial_norm[:, np.newaxis]
+        )
+
+    elif norm_version == 'binvol4':
+        radial_norm = 1 / bin_vols / avg_radius**0.5
+        table_norm = (
+            constant_part * counts_per_t
+            * radial_norm[:, np.newaxis]
+        )
+
+    elif norm_version == 'binvol5':
+        radial_norm = 1 / bin_vols / avg_radius**(1/3)
+        table_norm = (
+            constant_part * counts_per_t
+            * radial_norm[:, np.newaxis]
+        )
+
+    elif norm_version == 'binvol6':
+        radial_norm = 1 / bin_vols / avg_radius**(3/4)
+        table_norm = (
+            constant_part * counts_per_t
+            * radial_norm[:, np.newaxis]
+        )
+
+    elif norm_version == 'binvol7':
+        radial_norm = 1 / bin_vols / avg_radius**(2/3)
+        table_norm = (
+            constant_part * counts_per_t
             * radial_norm[:, np.newaxis]
         )
 
@@ -532,7 +574,7 @@ def get_table_norm(
         table_norm = np.outer(
             # NOTE: pi factor needed to get agreement with old code (why?);
             # 4 is needed for new clsim tables (why?)
-            1/0.3156174657795075 / not_really_volumes,
+            1/(7.677775267425*0.3156174657795075) / not_really_volumes,
             np.full(
                 shape=(len(t_bin_edges) - 1,),
                 fill_value=(
@@ -554,7 +596,7 @@ def get_table_norm(
         table_norm = np.outer(
             # NOTE: pi factor needed to get agreement with old code (why?);
             # 4 is needed for new clsim tables (why?)
-            1/0.8566215612075752 / not_really_volumes,
+            1/(7.677767105803*0.8566215612075752) / not_really_volumes,
             np.full(shape=(len(t_bin_edges) - 1,), fill_value=constant_part)
         )
 
