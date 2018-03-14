@@ -245,14 +245,14 @@ class Retro5DTables(object):
             assert step_length is not None
             table['step_length'] = step_length
 
-        table['table_norm'] = get_table_norm(
+        table_norm, t_indep_table_norm = get_table_norm(
             angular_acceptance_fract=angular_acceptance_fract,
             quantum_efficiency=1,
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
-        if self.compute_t_indep_exp:
-            table['t_indep_table_norm'] = angular_acceptance_fract
+        table['table_norm'] = table_norm
+        table['t_indep_table_norm'] = t_indep_table_norm
 
         pexp_5d, pexp_meta = generate_pexp_5d_function(
             table=table,
@@ -412,12 +412,16 @@ def get_table_norm(
         `table_norm` entry. I.e.:
         ``survival_prob = raw_bin_val * table_norm[r_bin_idx, t_bin_idx]``.
 
+    t_indep_table_norm : numpy.ndarray of shape (n_r_bins,)
+
     """
     n_costheta_bins = len(costheta_bin_edges) - 1
 
     r_bin_widths = np.diff(r_bin_edges)
     costheta_bin_widths = np.diff(costheta_bin_edges)
     t_bin_widths = np.diff(t_bin_edges)
+
+    t_bin_range = np.max(t_bin_edges) - np.min(t_bin_edges)
 
     # We need costheta bins to all have same width for the logic below to hold
     costheta_bin_width = np.mean(costheta_bin_widths)
@@ -499,53 +503,51 @@ def get_table_norm(
     elif norm_version == 'binvol':
         radial_norm = 1 / bin_vols
         table_norm = (
-            constant_part * table_step_length_norm
-            * radial_norm[:, np.newaxis]
+            constant_part * table_step_length_norm * radial_norm[:, np.newaxis]
         )
-        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) * t_bin_range
 
     elif norm_version == 'binvol2':
         radial_norm = 1 / bin_vols
         table_norm = (
-            constant_part * counts_per_t
-            * radial_norm[:, np.newaxis]
+            constant_part * counts_per_t * radial_norm[:, np.newaxis]
         )
-        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) * t_bin_range
 
     elif norm_version == 'binvol3':
         radial_norm = 1 / bin_vols / avg_radius
         table_norm = (
-            constant_part * counts_per_t
-            * radial_norm[:, np.newaxis]
+            constant_part * counts_per_t * radial_norm[:, np.newaxis]
         )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
 
     elif norm_version == 'binvol4':
         radial_norm = 1 / bin_vols / avg_radius**0.5
         table_norm = (
-            constant_part * counts_per_t
-            * radial_norm[:, np.newaxis]
+            constant_part * counts_per_t * radial_norm[:, np.newaxis]
         )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
 
     elif norm_version == 'binvol5':
         radial_norm = 1 / bin_vols / avg_radius**(1/3)
         table_norm = (
-            constant_part * counts_per_t
-            * radial_norm[:, np.newaxis]
+            constant_part * counts_per_t * radial_norm[:, np.newaxis]
         )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
 
     elif norm_version == 'binvol6':
         radial_norm = 1 / bin_vols / avg_radius**(3/4)
         table_norm = (
-            constant_part * counts_per_t
-            * radial_norm[:, np.newaxis]
+            constant_part * counts_per_t * radial_norm[:, np.newaxis]
         )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
 
     elif norm_version == 'binvol7':
         radial_norm = 1 / bin_vols / avg_radius**(2/3)
         table_norm = (
-            constant_part * counts_per_t
-            * radial_norm[:, np.newaxis]
+            constant_part * counts_per_t * radial_norm[:, np.newaxis]
         )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t)
 
     # copied norm from Philipp / generate_t_r_theta_table :
     elif norm_version == 'pde':
@@ -571,23 +573,23 @@ def get_table_norm(
         not_really_volumes = surf_area_at_midpoints * (outer_edges - inner_edges)
         not_really_volumes *= costheta_bin_width
 
+        const_bit = (
+            1 / 2.451488118071
+            / n_photons
+            / (SPEED_OF_LIGHT_M_PER_NS / group_refractive_index)
+            / np.mean(t_bin_widths)
+            * angular_acceptance_fract
+            * quantum_efficiency
+            * n_costheta_bins
+        )
+
         table_norm = np.outer(
             # NOTE: pi factor needed to get agreement with old code (why?);
             # 4 is needed for new clsim tables (why?)
-            1/(7.677775267425*0.3156174657795075) / not_really_volumes,
-            np.full(
-                shape=(len(t_bin_edges) - 1,),
-                fill_value=(
-                    1
-                    / n_photons
-                    / (SPEED_OF_LIGHT_M_PER_NS / group_refractive_index)
-                    / np.mean(t_bin_widths)
-                    * angular_acceptance_fract
-                    * quantum_efficiency
-                    * n_costheta_bins
-                )
-            )
+            1 / not_really_volumes,
+            np.full(shape=(len(t_bin_edges) - 1,), fill_value=(const_bit))
         )
+        t_indep_table_norm = const_bit / not_really_volumes / np.sum(1/counts_per_t) * t_bin_range
 
     elif norm_version == 'wtf2':
         not_really_volumes = surf_area_at_midpoints * (outer_edges - inner_edges)
@@ -603,4 +605,4 @@ def get_table_norm(
     else:
         raise ValueError('unhandled `norm_version` "{}"'.format(norm_version))
 
-    return table_norm
+    return table_norm, t_indep_table_norm

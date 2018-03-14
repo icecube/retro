@@ -2,7 +2,7 @@
 # pylint: disable=wrong-import-position
 
 """
-Perform 1D and 2D parameter scans of the likelihood space.
+Perform N-dimensional parameter scans of the likelihood space.
 """
 
 from __future__ import absolute_import, division, print_function

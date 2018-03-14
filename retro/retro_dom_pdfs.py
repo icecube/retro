@@ -82,20 +82,20 @@ else:
 
 
 # One of the keys from SIMULATIONS dict, below
-SIM_TO_TEST = 'horizontal_muon'
+SIM_TO_TEST = 'upgoing_muon'
 
 # One of {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr', 'dom_time_polar'}
 TABLE_KIND = 'ckv_uncompr'
 
 # One of {'pde', 'binvol', 'binvol2', 'avgsurfarea', 'wtf', 'wtf2', ...}
-NORM_VERSION = 'binvol2'
+NORM_VERSION = 'wtf'
 
 # Whether to use directionality from tables
 USE_DIRECTIONALITY = True
 
 # Use CKV_SIGMA_DEG and NUM_PHI_SAMPLES if USE_DIRECTIONALITY and TABLE_KIND is raw
-CKV_SIGMA_DEG = None
-NUM_PHI_SAMPLES = None
+CKV_SIGMA_DEG = 10
+NUM_PHI_SAMPLES = 100
 
 # Use dE/dX discrete muon kernel?
 MUON_DEDX = False
@@ -103,11 +103,9 @@ MUON_DEDX = False
 # Time step (ns) for discrete muon kernel (whether or not dEdX)
 MUON_DT = 1.0
 
-GCD_FILE = expand(retro.DETECTOR_GCD_DICT_FILE)
 ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
 STEP_LENGTH = 1.0
 MMAP = True
-TIME_WINDOW = 2e3 # ns
 MAKE_PLOTS = False
 
 retro.DEBUG = 0
@@ -140,7 +138,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl'
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl'
     ),
     downgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -148,7 +146,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=0,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl',
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
     ),
     horizontal_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -156,7 +154,7 @@ SIMULATIONS = dict(
             track_azimuth=0, track_zenith=np.pi/2,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos.pkl',
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
     ),
     em_cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
@@ -203,7 +201,8 @@ hit_times = (0.5 * (bin_edges[:-1] + bin_edges[1:])).astype(np.float32)
 run_info['strings'] = strings
 run_info['doms'] = doms
 run_info['hit_times'] = hit_times
-run_info['time_window'] = np.max(bin_edges) - np.min(bin_edges)
+time_window = np.max(bin_edges) - np.min(bin_edges)
+run_info['time_window'] = time_window
 
 t_start = time.time()
 
@@ -214,8 +213,6 @@ if sim['fwd_sim_histo_file'] is not None:
         gcd_file = fwd_sim_histos['gcd_info']['source_gcd_name']
     except (IndexError, TypeError):
         gcd_file = fwd_sim_histos['gcd_info'][0]
-else:
-    gcd_file = GCD_FILE
 print('Loading detector geometry, calibration, and noise from "{}"...'
       .format(gcd_file))
 gcd_info = extract_gcd(gcd_file)
@@ -251,8 +248,8 @@ elif TABLE_KIND == 'raw_uncompr':
     if not USE_DIRECTIONALITY:
         print('Instantiating CLSimTables (NOT using directionality), norm={}...'
               .format(NORM_VERSION))
-        assert CKV_SIGMA_DEG is None
-        assert NUM_PHI_SAMPLES is None
+        CKV_SIGMA_DEG = None
+        NUM_PHI_SAMPLES = None
     else:
         print(
             'Instantiating CLSimTables using directionality;'
@@ -482,7 +479,7 @@ for string, dom in loaded_strings_doms:
         string=string,
         dom=dom,
         include_noise=True,
-        time_window=TIME_WINDOW
+        time_window=time_window
     )
     t11 = time.time() - t00
     pexp_timings.append(t11)

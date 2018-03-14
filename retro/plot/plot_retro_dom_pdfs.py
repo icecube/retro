@@ -44,6 +44,10 @@ def ks_test(a, b):
     return np.max(np.abs(bcs - acs))
 
 
+def num_fmt(n):
+    return format(n, '.2e').replace('-0', '-').replace('+0', '')
+
+
 def plot_run_info(
         files, labels, outdir, fwd_hists=None, data_or_sim_label=None,
         paired=False, gradient=False, plot=True
@@ -161,7 +165,8 @@ def plot_run_info(
     kss = []
     ref_tots_incl_noise = []
     ref_tots_excl_noise = []
-    for string, dom in sorted(all_string_dom_pairs):
+    ref_areas_incl_noise = []
+    for string, dom in reversed(sorted(all_string_dom_pairs)):
         if plot:
             ax.clear()
         all_zeros = True
@@ -170,8 +175,13 @@ def plot_run_info(
         ref_y = None
         if fwd_hists:
             if (string, dom) in fwd_hists:
+                # Hit rate per nanosecond in each bin (includes noise hit rate)
                 ref_y = fwd_hists[(string, dom)] / hist_bin_widths
+
+                # Duplicate first element for plotting via `plt.step`
                 ref_y = np.array([ref_y[0]] + ref_y.tolist())
+
+                # Figure out "meaningful" range
                 nonzero_mask = ref_y != 0 #~np.isclose(ref_y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
@@ -182,19 +192,24 @@ def plot_run_info(
             else:
                 ref_y = np.zeros_like(fwd_hists_binning)
 
-            ry_mask = ~np.isnan(ref_y[1:])
-            ref_tots_incl_noise.append(np.sum(ref_y[1:][ry_mask]))
-            ref_tots_excl_noise.append(np.sum((ref_y[1:][ry_mask] - ref_y[1:][ry_mask].min())))
+            ref_y_areas = ref_y[1:] * hist_bin_widths
+            ref_y_area = np.sum(ref_y_areas)
 
-            ref_y_area = np.sum(ref_y[1:] * hist_bin_widths)
+            ref_tots_incl_noise.append(ref_y_area)
+
+            # Following only works if our time window is large enough s.t. exp
+            # hits from event is zero somewhere, and then it'll only be noise
+            # contributing at that time...
+            ref_tots_excl_noise.append(np.sum(ref_y_areas - ref_y_areas.min()))
+            ref_areas_incl_noise.append(ref_y_area)
 
             if plot:
                 ax.step(
                     fwd_hists_binning, ref_y,
                     lw=1,
                     label=(
-                        r'Forward sim, $\Sigma q \Delta t$ = {:.3e}'
-                        .format(ref_y_area)
+                        r'Fwd: $\Sigma \lambda_q \Delta t$={}'
+                        .format(num_fmt(ref_y_area))
                     ),
                     clip_on=True,
                     #color='C0'
@@ -209,13 +224,16 @@ def plot_run_info(
             if len(tots_incl_noise) <= plt_i:
                 tots_incl_noise.append([])
                 tots_excl_noise.append([])
+                t_indep_tots.append([])
                 kss.append([])
+
             results = run_info['results']
             if (string, dom) in results.keys():
                 rslt = results[(string, dom)]
                 if 'exp_p_at_hit_times' in rslt:
                     y = rslt['exp_p_at_hit_times']
                     y_ti = rslt['exp_p_at_all_times']
+                    t_indep_tots[plt_i].append(y_ti)
                 else:
                     y = rslt['pexp_at_hit_times']
 
@@ -230,8 +248,8 @@ def plot_run_info(
 
             #y_area = np.sum(
 
-            masked_y = np.ma.masked_invalid(y)
-            tot_excl_noise = (masked_y - masked_y.min()).sum()
+            masked_y = np.ma.masked_invalid(y * hist_bin_widths)
+            tot_excl_noise = np.sum(masked_y - masked_y.min())
             tot_incl_noise = masked_y.sum()
             if tot_excl_noise != 0:
                 tots_excl_noise[plt_i].append(tot_excl_noise)
@@ -242,8 +260,8 @@ def plot_run_info(
             kss[plt_i].append(ks_test(y, ref_y[1:]))
 
             #kl_div = None
-            custom_label = r'{}, ti = {:.3e}, $\Sigma$ = {:.3e}'.format(
-                label, y_ti, tots_incl_noise[plt_i][-1]
+            custom_label = r'{:3s}: $\Sigma \lambda_q \Delta t$={}, ti={}'.format(
+                label, num_fmt(tots_incl_noise[plt_i][-1]), num_fmt(y_ti)
             )
             #if ref_y is not None: # and not ref_y_all_zeros:
             #    abs_mean_diff = np.abs(np.mean(y - ref_y[1:]))
@@ -281,9 +299,9 @@ def plot_run_info(
         if all_zeros:
             continue
 
-        if xmin == xmax:
-            xmin = 0
-            xmax = 2000
+        #if xmin == xmax:
+        xmin = np.min(fwd_hists_binning)
+        xmax = np.max(fwd_hists_binning)
 
         if plot:
             ax.set_xlim(xmin, xmax)
@@ -304,7 +322,7 @@ def plot_run_info(
             title = 'Code'
 
             leg = ax.legend(
-                title=title,
+                #title=title,
                 #loc='best',
                 loc='upper right',
                 #frameon=False,
@@ -351,34 +369,43 @@ def plot_run_info(
 
     ref_tots_incl_noise = np.array(ref_tots_incl_noise)
     ref_tots_excl_noise = np.array(ref_tots_excl_noise)
+    ref_areas_incl_noise = np.array(ref_areas_incl_noise)
+
     ref_tot_incl_noise = np.sum(ref_tots_incl_noise)
     ref_tot_excl_noise = np.sum(ref_tots_excl_noise)
+    ref_area_incl_noise = np.sum(ref_areas_incl_noise)
+
     print(
-        '{:9s}  {:16s}  {:16s}  {}'
+        '{:9s}  {:9s}  {:16s}  {:16s}  {:16s}  {}'
         .format(
-            'KS'.ljust(7),
-            'Ratio incl noise'.ljust(16),
-            'Ratio excl noise'.ljust(16),
+            'wtd KS'.rjust(9),
+            'avg KS'.rjust(9),
+            'Ratio incl noise'.rjust(16),
+            'Ratio excl noise'.rjust(16),
+            't-indep ratio'.rjust(16),
             'Label'
         )
     )
-    for label, ks, tot_incl_noise, tot_excl_noise in zip(labels,
-                                                         kss,
-                                                         tots_incl_noise,
-                                                         tots_excl_noise):
+    for label, ks, tot_incl_noise, tot_excl_noise, ti_tot in zip(labels,
+                                                                 kss,
+                                                                 tots_incl_noise,
+                                                                 tots_excl_noise,
+                                                                 t_indep_tots):
         ks = np.array(ks)
         mask = ~np.isnan(ks)
+        ks_avg = np.mean(ks[mask])
         ks_wtd_avg = (
             np.sum(ks[mask] * ref_tots_excl_noise[mask])
             / np.sum(ref_tots_excl_noise[mask])
         )
-        #ks_wtd_avg = np.mean(ks[mask])
         print(
-            '{:9s}  {:16s}  {:16s}  {}'
+            '{:9s}  {:9s}  {:16s}  {:16s}  {:16s}  {}'
             .format(
                 format(ks_wtd_avg, '.7f').rjust(9),
-                format(np.sum(tot_incl_noise) / ref_tot_incl_noise, '.12f').rjust(16),
+                format(ks_avg, '.7f').rjust(9),
                 format(np.sum(tot_excl_noise) / ref_tot_excl_noise, '.12f').rjust(16),
+                format(np.sum(tot_incl_noise) / ref_tot_incl_noise, '.12f').rjust(16),
+                format(np.sum(ti_tot) / ref_area_incl_noise, '.12f').rjust(16),
                 label
             )
         )

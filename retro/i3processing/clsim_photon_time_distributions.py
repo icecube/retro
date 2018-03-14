@@ -251,7 +251,7 @@ def generate_histos(
         if include_rde:
             hist *= quantum_effieincy[string_idx, dom_idx]
         if include_noise:
-            hist += noise_rate_hz[string_idx, dom_idx] * bin_widths / 1e9
+            hist += (noise_rate_hz[string_idx, dom_idx] / 1e9) * bin_widths
         results[(string, dom)] = hist
 
     if outfile is not None:
@@ -278,8 +278,8 @@ def parse_args(description=__doc__):
         help='''Filepath to hole ice model to apply to the photons.'''
     )
     parser.add_argument(
-        '--t-max', type=float, required=True,
-        help='''Bin up to this maximum time'''
+        '--t-max', type=int, required=True,
+        help='''Bin up to this maximum time (integer # of nanoseconds)'''
     )
     parser.add_argument(
         '--num-bins', type=int, required=True,
@@ -312,7 +312,13 @@ def parse_args(description=__doc__):
 
     # Construct the output filename if none is provided
     if args.outfile is None:
-        args.outfile = re.sub(r'_photons.pkl', '_photon_histos.pkl', args.photons)
+        args.outfile = re.sub(
+            r'_photons.pkl',
+            '_photon_histos_0-{:d}ns_{:d}bins.pkl'.format(
+                args.t_max, args.num_bins
+            ),
+            args.photons
+        )
 
     return args
 
