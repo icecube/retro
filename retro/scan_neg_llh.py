@@ -31,6 +31,8 @@ from os.path import abspath, dirname
 import pickle
 import sys
 
+import numpy as np
+
 from pisa.utils.format import hrlist2list
 
 if __name__ == '__main__' and __package__ is None:
@@ -169,13 +171,13 @@ def parse_args(description=__doc__):
     )
 
     parser.add_argument(
-        '--cascade-kernel', choices=['point', 'one_dim']
+        '--cascade-kernel', choices=['point', 'one_dim'], required=True,
     )
     parser.add_argument(
         '--cascade-samples', type=int, default=1,
     )
     parser.add_argument(
-        '--track-kernel',
+        '--track-kernel', required=True,
         choices=['const_e_loss', 'nonconst_e_loss'],
     )
     parser.add_argument(
@@ -189,11 +191,11 @@ def parse_args(description=__doc__):
         "my_tables_{subdet}_{depth_idx}"'''
     )
     parser.add_argument(
-        '--angular-acceptance-fract', type=float, required=True,
+        '--angular-acceptance-fract', type=float, default=0.338019664877,
         help='''Comes from the angular acceptance model chosen.'''
     )
     parser.add_argument(
-        '--step-length', type=float, required=True,
+        '--step-length', type=float, default=1.0,
         help='''Step length used in the CLSim table generator.'''
     )
     parser.add_argument(
@@ -238,7 +240,9 @@ def main():
 
     scan_values = []
     for dim in HYPO_PARAMS_T._fields:
-        val_str = kwargs.pop(dim)
+        val_str = ''.join(kwargs.pop(dim))
+        val_str.replace('pi', format(np.pi, '.17e'))
+        val_str.replace('e', format(np.exp(1), '.17e'))
         scan_values.append(hrlist2list(val_str))
 
     hits_file = expand(kwargs['hits'])
