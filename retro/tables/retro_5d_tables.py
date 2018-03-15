@@ -10,6 +10,8 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = '''
     TABLE_NORM_KEYS
+    TABLE_KINDS
+    NORM_VERSIONS
     Retro5DTables
     get_table_norm
 '''.split()
@@ -48,6 +50,15 @@ TABLE_NORM_KEYS = [
     'costheta_bin_edges', 't_bin_edges'
 ]
 """All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
+
+TABLE_KINDS = [
+    'raw_uncompr', 'raw_templ_compr', 'ckv_uncompr', 'ckv_templ_compr'
+]
+
+NORM_VERSIONS = [
+    'avgsurfarea', 'binvol', 'binvol2', 'binvol3', 'binvol4', 'binvol5',
+    'binvol6', 'binvol7', 'pde', 'wtf', 'wtf2'
+]
 
 
 class Retro5DTables(object):

@@ -77,6 +77,11 @@ Pulses = namedtuple( # pylint: disable=invalid-name
     field_names=('strings', 'oms', 'times', 'charges')
 )
 
+Hits = namedtuple(
+    typename='Hits',
+    field_names=('times', 'charges')
+)
+
 RetroPhotonInfo = namedtuple( # pylint: disable=invalid-name
     typename='RetroPhotonInfo',
     field_names=('survival_prob', 'time_indep_survival_prob', 'theta', 'deltaphi', 'length')
