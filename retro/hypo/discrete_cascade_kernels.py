@@ -36,7 +36,9 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
-from retro.const import CASCADE_PHOTONS_PER_GEV
+from retro.const import (
+    COS_CKV, CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS
+    )
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -69,7 +71,7 @@ def point_cascade(hypo_params):
     ).reshape((1, 8))
     return pinfo_gen
 
-def long_cascade(hypo_params, limits=None, n_samples=1000):
+def one_dim_cascade(hypo_params, n_samples=1000):
     """
     Cascade with both longitudinal and angular distributions
 
@@ -78,7 +80,6 @@ def long_cascade(hypo_params, limits=None, n_samples=1000):
     Parameters
     ----------
     hypo_params : MUST BE HypoParams10D
-    limits : NOT IMPLEMENTED
     n_samples : integer, number of times to sample the distributions
 
     Returns
@@ -93,6 +94,7 @@ def long_cascade(hypo_params, limits=None, n_samples=1000):
     z = hypo_params.z
 
     #assign cascade axis direction
+    sin_zen = math.sin(hypo_params.cascade_zenith)
     dir_x = -sin_zen * math.cos(hypo_params.cascade_azimuth)
     dir_y = -sin_zen * math.sin(hypo_params.cascade_azimuth)
     dir_z = -math.cos(hypo_params.cascade_zenith)
@@ -113,9 +115,16 @@ def long_cascade(hypo_params, limits=None, n_samples=1000):
     #create photon matrix
     pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
 
-    for i in range(n_samples):
-        pinfo_gen[i, 0] = 
+    #NOTE: ask justin about COS_CKV
+    pinfo_gen[:, 0] = t + long_samples / SPEED_OF_LIGHT_M_PER_NS
+    pinfo_gen[:, 1] = x + long_samples * dir_x
+    pinfo_gen[:, 2] = y + long_samples * dir_y
+    pinfo_gen[:, 3] = z + long_samples * dir_z
+    pinfo_gen[:, 4] = photons_per_samples
+    pinfo_gen[:, 5] = dir_x * COS_CKV 
+    pinfo_gen[:, 6] = dir_y * COS_CKV
+    pinfo_gen[:, 7] = dir_z * COS_CKV
 
-    
+    return pinfo_gen    
 
 
