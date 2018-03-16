@@ -26,6 +26,7 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from argparse import ArgumentParser
+from collections import OrderedDict
 from itertools import product
 from os.path import abspath, dirname
 import pickle
@@ -49,6 +50,7 @@ from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon
 )
 from retro.i3info.extract_gcd import extract_gcd
+from retro.i3info.angsens_model import load_angsens_model
 from retro.likelihood import get_neg_llh
 from retro.scan import scan
 from retro.tables.retro_5d_tables import (
@@ -61,15 +63,14 @@ def scan_neg_llh(
         scan_values,
 
         # Hit params
-        hits, time_window,
+        hits, hits_kind, angsens_model, time_window,
 
         # Hypo computation params
         hypo_kernels, kernel_kwargs,
 
         # DOM tables' params
-        dom_tables_fname_proto, angular_acceptance_fract, step_length, mmap,
-        dom_table_kind, gcd, norm_version, use_directionality, num_phi_samples,
-        ckv_sigma_deg,
+        dom_tables_fname_proto, step_length, mmap, dom_table_kind, gcd,
+        norm_version, use_directionality, num_phi_samples, ckv_sigma_deg,
 
         # TDI table params
         tdi_table
@@ -79,6 +80,25 @@ def scan_neg_llh(
     """
     if tdi_table is not None:
         raise NotImplementedError('TDI table not handled yet')
+
+    hits = pickle.load(open(expand(hits), 'rb'))
+    if hits_kind == 'photons':
+        angsens_poly, _ = load_angsens_model(angsens_model)
+        # For photons, we assign a "charge" from their weight, which comes
+        # from angsens model.
+        photons = hits
+        hits = []
+        for event_photons in photons:
+            event_hits = OrderedDict()
+            for str_dom, pinfo in event_photons.items():
+                t = pinfo[0, :]
+                coszen = pinfo[4, :]
+                weight = np.float16(angsens_poly(coszen))
+                event_hits[str_dom] = np.concatenate(
+                    [t[np.newaxis, :], weight[np.newaxis, :]],
+                    axis=0
+                )
+            hits.append(event_hits)
 
     compute_t_indep_exp = tdi_table is None
     if isinstance(gcd, basestring):
@@ -90,6 +110,7 @@ def scan_neg_llh(
         geom=gcd['geo'],
         rde=gcd['rde'],
         noise_rate_hz=gcd['noise'],
+        angsens_model=angsens_model,
         compute_t_indep_exp=compute_t_indep_exp,
         use_directionality=use_directionality,
         norm_version=norm_version,
@@ -100,7 +121,6 @@ def scan_neg_llh(
     # Load single-DOM tables
     common_kw = dict(
         step_length=step_length,
-        angular_acceptance_fract=angular_acceptance_fract,
         mmap=mmap
     )
 
@@ -167,6 +187,9 @@ def parse_args(description=__doc__):
         '--hits', required=True,
     )
     parser.add_argument(
+        '--hits-kind', choices=['photons', 'pulses'], required=True,
+    )
+    parser.add_argument(
         '--time-window', type=float, required=True,
     )
 
@@ -189,10 +212,6 @@ def parse_args(description=__doc__):
         help='''Must have one of the brace-enclosed fields "{string}" or
         "{subdet}", and must have one of "{dom}" or "{depth_idx}". E.g.:
         "my_tables_{subdet}_{depth_idx}"'''
-    )
-    parser.add_argument(
-        '--angular-acceptance-fract', type=float, default=0.338019664877,
-        help='''Comes from the angular acceptance model chosen.'''
     )
     parser.add_argument(
         '--step-length', type=float, default=1.0,
@@ -247,7 +266,7 @@ def main():
 
     hits_file = expand(kwargs['hits'])
     with open(hits_file, 'rb') as f:
-        kwargs['hits'] = pickle.load(f)
+        hits = pickle.load(f)
 
     hypo_kernels = []
     kernel_kwargs = []
@@ -278,7 +297,14 @@ def main():
 
     kwargs['use_directionality'] = not kwargs.pop('no_dir')
 
-    return scan_neg_llh(**kwargs)
+    metrics = []
+    for hits_ in hits:
+        kwargs['hits'] = hits_
+        metric = scan_neg_llh(**kwargs)
+        metrics.append(metric)
+        break
+
+    return metrics
 
 
 if __name__ == '__main__':

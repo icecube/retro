@@ -7,22 +7,23 @@ namedtuples for interface simplicity and consistency
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    HypoParams8D
-    HypoParams10D
-    TrackParams
-    Event
-    Pulses
-    RetroPhotonInfo
-    HypoPhotonInfo
-    Cart2DCoord
-    Cart3DCoord
-    PolCoord
-    SphCoord
-    TimeCart3DCoord
-    TimePolCoord
-    TimeSphCoord
-'''.split()
+__all__ = [
+    'HypoParams8D',
+    'HypoParams10D',
+    'TrackParams',
+    'Hit',
+    'Photon',
+    'Event',
+    'RetroPhotonInfo',
+    'HypoPhotonInfo',
+    'Cart2DCoord',
+    'Cart3DCoord',
+    'PolCoord',
+    'SphCoord',
+    'TimeCart3DCoord',
+    'TimePolCoord',
+    'TimeSphCoord'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -72,14 +73,14 @@ Event = namedtuple( # pylint: disable=invalid-name
                  'neutrino', 'track', 'cascade', 'ml_reco', 'spe_reco')
 )
 
-Pulses = namedtuple( # pylint: disable=invalid-name
-    typename='Pulses',
-    field_names=('strings', 'oms', 'times', 'charges')
+Hit = namedtuple(
+    typename='Hit',
+    field_names=('time', 'charge', 'width')
 )
 
-Hits = namedtuple(
-    typename='Hits',
-    field_names=('times', 'charges')
+Photon = namedtuple(
+    typename='Photon',
+    field_names=('x', 'y', 'z', 't', 'wavelength', 'coszen', 'azimuth')
 )
 
 RetroPhotonInfo = namedtuple( # pylint: disable=invalid-name

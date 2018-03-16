@@ -103,7 +103,7 @@ MUON_DEDX = False
 # Time step (ns) for discrete muon kernel (whether or not dEdX)
 MUON_DT = 1.0
 
-ANGULAR_ACCEPTANCE_FRACT = 0.338019664877
+ANGSENS_MODEL = 'h2-50cm' #0.338019664877
 STEP_LENGTH = 1.0
 MMAP = True
 MAKE_PLOTS = False
@@ -126,7 +126,7 @@ CODE_TO_TEST = (
     )
 )
 
-OUTDIR = expand(join('~/', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
+OUTDIR = expand(join('~', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 
 run_info['sim_to_test'] = SIM_TO_TEST
 
@@ -234,6 +234,7 @@ if TABLE_KIND == 'dom_time_polar':
         tables_dir=dom_time_polar_tables_basedir,
         hash_val=None,
         geom=geom,
+        angsens_model=ANGSENS_MODEL,
         use_directionality=USE_DIRECTIONALITY,
         naming_version=0,
     )
@@ -262,6 +263,7 @@ elif TABLE_KIND == 'raw_uncompr':
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
+        angsens_model=ANGSENS_MODEL,
         compute_t_indep_exp=True,
         use_directionality=USE_DIRECTIONALITY,
         norm_version=NORM_VERSION,
@@ -271,6 +273,7 @@ elif TABLE_KIND == 'raw_uncompr':
 
     run_info['tables_class'] = 'Retro5DTables'
     run_info['table_kind'] = TABLE_KIND
+    run_info['angsens_model'] = ANGSENS_MODEL
     run_info['use_directionality'] = USE_DIRECTIONALITY
     run_info['num_phi_samples'] = NUM_PHI_SAMPLES
     run_info['ckv_sigma_deg'] = CKV_SIGMA_DEG
@@ -283,7 +286,6 @@ elif TABLE_KIND == 'raw_uncompr':
             fpath=single_table_path,
             string='all',
             dom='all',
-            angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
             mmap=MMAP
         )
 
@@ -292,7 +294,6 @@ elif TABLE_KIND == 'raw_uncompr':
              OrderedDict([
                  ('fpath', single_table_path),
                  ('step_length', STEP_LENGTH),
-                 ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
                  ('mmap', MMAP)
              ])
             )
@@ -329,7 +330,6 @@ elif TABLE_KIND == 'raw_uncompr':
                     string=string,
                     dom=dom,
                     step_length=STEP_LENGTH,
-                    angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
                     mmap=MMAP
                 )
             except (AssertionError, ValueError) as err:
@@ -342,7 +342,6 @@ elif TABLE_KIND == 'raw_uncompr':
                 tables[(string, dom)] = OrderedDict([
                     ('fpath', table_path),
                     ('step_length', STEP_LENGTH),
-                    ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
                     ('mmap', MMAP)
                 ])
 
@@ -356,6 +355,7 @@ elif TABLE_KIND in ['ckv_uncompr', 'ckv_templ_compr']:
         geom=geom,
         rde=rde,
         noise_rate_hz=noise_rate_hz,
+        angsens_model=ANGSENS_MODEL,
         compute_t_indep_exp=True,
         use_directionality=USE_DIRECTIONALITY,
         norm_version=NORM_VERSION
@@ -387,7 +387,6 @@ elif TABLE_KIND in ['ckv_uncompr', 'ckv_templ_compr']:
                 string=string,
                 dom=dom,
                 step_length=STEP_LENGTH,
-                angular_acceptance_fract=ANGULAR_ACCEPTANCE_FRACT,
                 mmap=MMAP
             )
         except (AssertionError, ValueError) as err:
@@ -403,7 +402,6 @@ elif TABLE_KIND in ['ckv_uncompr', 'ckv_templ_compr']:
             tables[(string, dom)] = OrderedDict([
                 ('fpath', table_path),
                 ('step_length', STEP_LENGTH),
-                ('angular_acceptance_fract', ANGULAR_ACCEPTANCE_FRACT),
                 ('mmap', MMAP)
             ])
 

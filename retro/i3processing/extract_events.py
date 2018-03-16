@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating
 
 """
 Extract information on events from an i3 file needed for running Retro Reco.
@@ -10,7 +12,7 @@ __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
 
 Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this i3_file except in compliance with the License.
+you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
@@ -24,10 +26,19 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
-from os.path import basename
+from os.path import abspath, basename, dirname, join
+import cPickle as pickle
 import re
+import sys
 
 import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.utils.misc import expand, mkdir
+
 
 FILENAME_INFO_RE = re.compile(
     r'''
@@ -88,8 +99,6 @@ def extract_reco(frame, reco):
     #        et['llh_mc_truth'] = fit_params.LLH.MC_truth
     #        break
 
-    return None
-
 
 def extract_pulses(frame, pulse_series_name):
     """Extract pulses from an I3 frame.
@@ -105,68 +114,102 @@ def extract_pulses(frame, pulse_series_name):
 
     Returns
     -------
-    strings : shape (n_hit_doms,) int array
-        IceCube string #, in [1, 86]
-
-    doms :  shape (n_hit_doms,) int array
-        IceCube DOM position on the string, in [1, 60]
-
-    times : length n_hit_doms list of shape (n_hits_dom[i],) float arrays
-        Time of the recorded hit, in nanoseconds.
-
-    charges : length n_hit_doms list of shape (n_hits_dom[i],) float arrays
-        Charge of the recorded hit, in photoelectrons.
-
-    widths : length n_hit_doms list of shape (n_hits_dom[i],) float arrays
-        Width of the recorded hit, in nanoseconds.
+    pulses : OrderedDict
+        Keys are (string, dom) and values OrderedDicts with keys 'time',
+        'charge', and 'width' and values arrays of shape (n_hits_dom[i],) and
+        dtype float16.
 
     """
+    from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
     pulse_series = frame[pulse_series_name]
 
-    if isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMapMask):
+    if isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMapMask): # pylint: disable=no-member
         pulse_series = pulse_series.apply(frame)
 
-    if not isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMap):
+    if not isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMap): # pylint: disable=no-member
         raise TypeError(type(pulse_series))
 
-    strings = []
-    doms = []
-    times = []
-    charges = []
-    widths = []
+    pulses = OrderedDict()
 
-    for omkey, pulses in pulse_series:
-        string = np.uint8(omkey.string)
-        dom = np.uint8(omkey.om)
-        this_times = []
-        this_charges = []
-        this_widths = []
-        for pulse in pulses:
-            this_times.append(pulse.time)
-            this_charges.append(pulse.charge)
-            this_widths.append(pulse.width)
+    for (string, dom, _), pinfo in pulse_series:
+        string = np.uint8(string)
+        dom = np.uint8(dom)
+        str_dom = (np.uint8(string), np.uint8(dom))
 
-        strings.append(string)
-        doms.append(dom)
-        times.append(np.float32(this_times))
-        charges.append(np.float32(this_charges))
-        widths.append(np.float32(this_widths))
+        pls = []
+        for pulse in pinfo:
+            pls.append([
+                pulse.time,
+                pulse.charge,
+                pulse.width
+            ])
+        pls = np.array(pls, dtype=np.float16).T
 
-    pulse_info = OrderedDict()
-    pulse_info['strings'] = np.array(strings, dtype=np.uint8)
-    pulse_info['doms'] = np.array(doms, dtype=np.uint8)
-    pulse_info['times'] = times
-    pulse_info['charges'] = charges
-    pulse_info['widths'] = widths
+        pulses[str_dom] = pls
 
-    return pulse_info
+    return pulses
 
 
 def extract_photons(frame, photon_key):
-    return None
+    from icecube import dataclasses, simclasses # pylint: disable=unused-variable
+
+    photon_series = frame[photon_key]
+    photons = OrderedDict()
+    #photons = []
+    #strs_doms = []
+    for (string, dom), pinfos in photon_series:
+        str_dom = (np.uint8(string), np.uint8(dom))
+
+        phot = [] #Photon(*([] for _ in range(len(Photon._fields))))
+        for pinfo in pinfos:
+            phot.append([
+                pinfo.time,
+                pinfo.pos.x,
+                pinfo.pos.y,
+                pinfo.pos.z,
+                np.cos(pinfo.dir.zenith),
+                pinfo.dir.azimuth,
+                pinfo.wavelength
+            ])
+        phot = np.array(phot, dtype=np.float16).T
+
+        #strs_doms.append(str_dom)
+        #photons.append(phot)
+
+        #phot = Photon(*([] for _ in range(len(Photon._fields))))
+        #for pinfo in pinfos:
+        #    phot.t.append(np.float16(pinfo.time))
+        #    phot.x.append(np.float16(pinfo.pos.x))
+        #    phot.y.append(np.float16(pinfo.pos.y))
+        #    phot.z.append(np.float16(pinfo.pos.z))
+        #    phot.coszen.append(np.float16(np.cos(pinfo.dir.zenith)))
+        #    phot.azimuth.append(np.float16(pinfo.dir.azimuth))
+        #    phot.wavelength.append(np.float16(pinfo.wavelength))
+        #phot = Photon(*(np.array(lst) for lst in phot))
+
+        #phot = OrderedDict(
+        #    (d, [])
+        #    for d in 't x y z coszen azimuth wavelength'.split()
+        #)
+        #for pinfo in pinfos:
+        #    phot['t'].append(np.float16(pinfo.time))
+        #    phot['x'].append(np.float16(pinfo.pos.x))
+        #    phot['y'].append(np.float16(pinfo.pos.y))
+        #    phot['z'].append(np.float16(pinfo.pos.z))
+        #    phot['coszen'].append(np.float32(np.cos(pinfo.dir.zenith)))
+        #    phot['azimuth'].append(np.float16(pinfo.dir.azimuth))
+        #    phot['wavelength'].append(np.float32(pinfo.wavelength))
+        #phot = OrderedDict(
+        #    (k, np.array(v, dtype=np.float32)) for k, v in phot.items()
+        #)
+        photons[str_dom] = phot
+
+    #strs_doms = np.array(strs_doms, dtype=np.uint8)
+
+    return photons
 
 
-def extract_mc_truth(frame, file_info=None):
+def extract_mc_truth(frame, run_id, event_id):
     """Get event truth information from a frame.
 
     Parameters
@@ -178,10 +221,11 @@ def extract_mc_truth(frame, file_info=None):
     event_truth : OrderedDict
 
     """
-    from icecube import icetray
-    from icecube import dataclasses, multinest_icetray # pylint: disable=unused-variable
-
-    event_truth = OrderedDict()
+    from icecube import dataclasses, icetray # pylint: disable=unused-variable
+    try:
+        from icecube import multinest_icetray
+    except ImportError:
+        multinest_icetray = None
 
     event_truth = et = OrderedDict()
 
@@ -193,7 +237,7 @@ def extract_mc_truth(frame, file_info=None):
     pdg = primary.pdg_encoding
     abs_pdg = np.abs(pdg)
 
-    is_nu, is_charged_lepton = False, False
+    is_nu = False
     if abs_pdg in [11, 13, 15]:
         is_charged_lepton = True
     elif abs_pdg in [12, 14, 16]:
@@ -210,11 +254,9 @@ def extract_mc_truth(frame, file_info=None):
 
     # Get event number and generate a unique ID
     unique_id = (
-        int(1e13) * abs_pdg
-        + int(1e7) * int(et['run'])
-        + int(et['event_id'])
+        int(1e13) * abs_pdg + int(1e7) * run_id + event_id
     )
-    et['uid'] = uid
+    et['unique_id'] = unique_id
 
     # If neutrino, get charged lepton daughter particles
     if is_nu:
@@ -316,19 +358,19 @@ def extract_mc_truth(frame, file_info=None):
     return event_truth
 
 
-def extract_metadata_from_frame(frame, event_id_is_unique):
+def extract_metadata_from_frame(frame):
     event_meta = OrderedDict()
     event_header = frame['I3EventHeader']
     event_meta['run'] = event_header.run_id
     event_meta['event_id'] = event_header.event_id
-
     return event_meta
 
 
 def extract_events(
         fpath,
-        photon_series_names=tuple(),
-        pulse_series_names=tuple(),
+        outdir=None,
+        photon_names=tuple(),
+        pulse_names=tuple(),
         reco_names=tuple(),
         mc_truth=False
     ):
@@ -337,10 +379,13 @@ def extract_events(
     Parameters
     ----------
     fpath : str
-    photon_series_names : None, str, or iterable of str
+
+    outdir : str, optional
+
+    photon_names : None, str, or iterable of str
         Names of photons series' to extract from each event
 
-    pulse_series_names : None, str, or iterable of str
+    pulse_names : None, str, or iterable of str
         Names of pulse series' to extract from each event
 
     reco_names : None, str, or iterable of str
@@ -379,80 +424,144 @@ def extract_events(
             }
 
     """
-    file_meta = None
+    from icecube import dataclasses, dataio # pylint: disable=unused-variable
+    from icecube import icetray # pylint: disable=unused-variable
+
+    fpath = expand(fpath)
+    file_info = None
     try:
-        file_meta = extract_metadata_from_filename(fpath)
-    except (KeyError, ValueError):
+        file_info = extract_metadata_from_filename(fpath)
+    except (StopIteration, KeyError, ValueError):
         pass
 
-    runs = []
-    event_ids = []
-    event_uids = []
+    i3file = dataio.I3File(fpath, 'r') # pylint: disable=no-member
+
+    events = []
+    mc_truths = []
 
     photons = OrderedDict()
-    for name in photon_series_names:
+    for name in photon_names:
         photons[name] = []
 
     pulses = OrderedDict()
-    for name in pulse_series_names:
+    for name in pulse_names:
         pulses[name] = []
 
     recos = OrderedDict()
     for name in reco_names:
         recos[name] = []
 
-    while True:
-        try:
-            frame = i3_file.pop_frame()
-        except Exception as err:
-            print(err)
-            break
+    if outdir is None:
+        outdir = fpath.rstrip('.bz2').rstrip('.gz').rstrip('.i3')
+    mkdir(outdir)
 
-        frame_stop = frame.Stop
-        frame_keys = frame.keys()
+    frame_buffer = []
+    finished = False
+    while not finished:
+        if i3file.more():
+            next_frame = i3file.pop_frame()
+        else:
+            finished = True
 
-        if frame_stop == icetray.I3Frame.DAQ:
-            if mc_truth:
-                mc_truth.append(extract_mc_truth(frame, file_info=file_info))
+        if len(frame_buffer) == 0 or next_frame.Stop != icetray.I3Frame.DAQ:
+            if next_frame.Stop in [icetray.I3Frame.DAQ,
+                                   icetray.I3Frame.Physics]:
+                frame_buffer.append(next_frame)
+            if not finished:
+                continue
 
-            for photon_key in photon_series_names:
-                photons[photon_key] = extract_photons(frame, photon_key)
-            continue
+        frame = frame_buffer[-1]
 
-        elif frame_stop != icetray.I3Frame.Physics:
-            continue
+        i3header = frame['I3EventHeader']
 
-        # The remainiing fields are to be gotten from physics frames
+        event = OrderedDict()
+        event['run_id'] = run_id = i3header.run_id
+        event['event_id'] = event_id = i3header.event_id
+        event['start_time'] = i3header.start_time.utc_daq_time
+        event['end_time'] = i3header.end_time.utc_daq_time
 
-        for pulse_series_name in pulse_series_names:
-            pulses[pulse_series_name] = extract_pulses(frame, pulse_series_name)
+        if mc_truth:
+            mc_truths.append(extract_mc_truth(frame, run_id=run_id,
+                                              event_id=event_id))
+            event['unique_id'] = unique_id = mc_truth['unique_id']
+
+        events.append(event)
+
+        for photon_name in photon_names:
+            photons[photon_name].append(extract_photons(frame, photon_name))
+
+        for pulse_series_name in pulse_names:
+            pulses[pulse_series_name].append(extract_pulses(frame, pulse_series_name))
 
         for reco_name in reco_names:
-            recos[reco_name] = extract_reco(frame, reco_name)
+            recos[reco_name].append(extract_reco(frame, reco_name))
 
-    #if run == 1 and file_info is not None:
-    #    run = file_info['run']
-    #else:
-    #    if run != file_info['run']:
-    #        raise ValueError(
-    #            'Run number mismatch: filename => %d'
-    #            ' while file contents => %d' % (file_info['run'], run)
-    #        )
+        # Clear frame buffer and start a new "chain" with the next frame
+        frame_buffer = [next_frame]
+
+    photon_series_dir = join(outdir, 'photon_series')
+    pulse_series_dir = join(outdir, 'pulse_series')
+    recos_dir = join(outdir, 'recos')
+
+    if photon_names:
+        mkdir(photon_series_dir)
+    if pulse_names:
+        mkdir(pulse_series_dir)
+    if reco_names:
+        mkdir(recos_dir)
+
+    pickle.dump(events,
+                open(join(outdir, 'events.pkl'), 'wb'),
+                protocol=pickle.HIGHEST_PROTOCOL)
+
+    if mc_truth:
+        pickle.dump(mc_truths,
+                    open(join(outdir, 'mc_truth.pkl'), 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL)
+
+    for name in photon_names:
+        pickle.dump(photons[name],
+                    open(join(photon_series_dir, name + '.pkl'), 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL)
+
+    for name in pulse_names:
+        pickle.dump(pulses[name],
+                    open(join(pulse_series_dir, name + '.pkl'), 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL)
+
+    for name in reco_names:
+        pickle.dump(recos[name],
+                    open(join(recos_dir, name + '.pkl'), 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def parse_args(description=__doc__):
+    """Parse command line args"""
     parser = ArgumentParser(description=description)
     parser.add_argument(
         '--fpath', required=True,
         help='''Path to i3 file'''
     )
     parser.add_argument(
-        '--photons', default=[], nargs='+',
+        '--outdir'
+    )
+    parser.add_argument(
+        '--photon-names', nargs='+', default=[],
         help='''Photon series names to extract from each event'''
     )
     parser.add_argument(
+        '--pulse-names', nargs='+', default=[],
+        help='''Pulse series names to extract from each event'''
     )
     parser.add_argument(
+        '--reco-names', nargs='+', default=[],
+        help='''Pulse series names to extract from each event'''
     )
     parser.add_argument(
+        '--mc-truth', action='store_true',
     )
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    extract_events(**vars(parse_args()))

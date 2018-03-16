@@ -41,6 +41,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
+from retro.i3info.angsens_model import load_angsens_model
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
 
@@ -49,7 +50,7 @@ TABLE_NORM_KEYS = [
     'n_photons', 'group_refractive_index', 'step_length', 'r_bin_edges',
     'costheta_bin_edges', 't_bin_edges'
 ]
-"""All besides 'quantum_efficiency' and 'angular_acceptance_fract'"""
+"""All besides 'quantum_efficiency' and 'avg_angsens'"""
 
 TABLE_KINDS = [
     'raw_uncompr', 'raw_templ_compr', 'ckv_uncompr', 'ckv_templ_compr'
@@ -86,6 +87,8 @@ class Retro5DTables(object):
     noise_rate_hz : shape-(n_strings, n_doms) array
         Noise rate for each DOM, in Hz.
 
+    angsens_model : string
+
     compute_t_indep_exp : bool
 
     use_directionality : bool
@@ -109,10 +112,12 @@ class Retro5DTables(object):
 
     """
     def __init__(
-            self, table_kind, geom, rde, noise_rate_hz, compute_t_indep_exp,
-            use_directionality, norm_version, num_phi_samples=None,
-            ckv_sigma_deg=None
+            self, table_kind, geom, rde, noise_rate_hz, angsens_model,
+            compute_t_indep_exp, use_directionality, norm_version,
+            num_phi_samples=None, ckv_sigma_deg=None
         ):
+        self.angsens_poly, self.avg_angsens = load_angsens_model(angsens_model)
+        self.angsens_model = angsens_model
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
 
@@ -172,10 +177,7 @@ class Retro5DTables(object):
         self.pexp_func = None
         self.pexp_meta = None
 
-    def load_table(
-            self, fpath, string, dom, mmap, angular_acceptance_fract,
-            step_length=None
-        ):
+    def load_table(self, fpath, string, dom, mmap, step_length=None):
         """Load a table into the set of tables.
 
         Parameters
@@ -187,11 +189,6 @@ class Retro5DTables(object):
         string : int in [1, 86] or str in {'ic', 'dc', or 'all'}
 
         dom : int in [1, 60] or str == 'all'
-
-        angular_acceptance_fract : float in (0, 1]
-            Constant normalization factor to apply to correct for the integral
-            of the angular acceptance curve used in the simulation that
-            produced this table.
 
         mmap : bool
             Whether to attempt to memory map the table (only applicable for
@@ -237,8 +234,6 @@ class Retro5DTables(object):
             assert self.depth_aggregation == False # pylint: disable=singleton-comparison
             assert 1 <= dom <= 60
 
-        assert 0 < angular_acceptance_fract <= 1
-
         if single_dom_spec and not self.operational_doms[string - 1, dom - 1]:
             print(
                 'WARNING: String {}, DOM {} is not operational, skipping'
@@ -257,7 +252,7 @@ class Retro5DTables(object):
             table['step_length'] = step_length
 
         table_norm, t_indep_table_norm = get_table_norm(
-            angular_acceptance_fract=angular_acceptance_fract,
+            avg_angsens=self.avg_angsens,
             quantum_efficiency=1,
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
@@ -371,7 +366,7 @@ class Retro5DTables(object):
 def get_table_norm(
         n_photons, group_refractive_index, step_length, r_bin_edges,
         costheta_bin_edges, t_bin_edges, quantum_efficiency,
-        angular_acceptance_fract, norm_version
+        avg_angsens, norm_version
     ):
     """Get the normalization array to use a raw CLSim table with Retro reco.
 
@@ -405,12 +400,12 @@ def get_table_norm(
         already be accounted for by simulating photons according to the
         shape of that distribution. If not specific, defaults to 1.
 
-    angular_acceptance_fract : float in (0, 1], optional
-        Average DOM angular acceptance fraction, which modifies the
-        "efficiency" beyond that accounted for by `quantum_efficiency`.
-        Note that any shape to the angular accptance should already be
-        accounted for by simulating photons according to the
-        shape of that distribution. If not specified, defaults to 1.
+    avg_angsens : float in (0, 1], optional
+        Average DOM angular acceptance sensitivity, which modifies the
+        "efficiency" beyond that accounted for by `quantum_efficiency`. Note
+        that any shape to the angular accptance sensitivity should already be
+        accounted for by simulating photons according to the shape of that
+        distribution.
 
     norm_version : string
 
@@ -447,7 +442,7 @@ def get_table_norm(
 
         # Correction for additional loss of sensitivity due to angular
         # acceptance model
-        * angular_acceptance_fract
+        * avg_angsens
     )
 
     # A photon is tabulated every step_length meters; we want the
@@ -573,7 +568,7 @@ def get_table_norm(
                     / n_photons
                     / (SPEED_OF_LIGHT_M_PER_NS / group_refractive_index)
                     / np.mean(t_bin_widths)
-                    * angular_acceptance_fract
+                    * avg_angsens
                     * quantum_efficiency
                     * n_costheta_bins
                 )
@@ -589,7 +584,7 @@ def get_table_norm(
             / n_photons
             / (SPEED_OF_LIGHT_M_PER_NS / group_refractive_index)
             / np.mean(t_bin_widths)
-            * angular_acceptance_fract
+            * avg_angsens
             * quantum_efficiency
             * n_costheta_bins
         )
