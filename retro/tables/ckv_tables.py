@@ -102,9 +102,14 @@ def load_ckv_table(fpath, mmap):
         if DEBUG:
             wstderr('    loading {} from "{}" ...'.format(key, fpath))
 
+        if key in ['table', 'ckv_table']:
+            this_mmap_mode = mmap_mode
+        else:
+            this_mmap_mode = None
+
         t1 = time()
         if isfile(fpath):
-            table[key] = np.load(fpath, mmap_mode=mmap_mode)
+            table[key] = np.load(fpath, mmap_mode=this_mmap_mode)
         elif key != 't_indep_ckv_table':
             raise ValueError(
                 'Could not find file "{}" for loading table key "{}"'

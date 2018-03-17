@@ -29,6 +29,7 @@ from collections import Sequence
 from itertools import product
 from os.path import abspath, dirname
 import sys
+import time
 
 import numpy as np
 
@@ -102,11 +103,19 @@ def scan(scan_values, metric, metric_kw=None):
         scan_sequences.append(sv)
         shape.append(len(sv))
 
+    #msg_len = 0
     metric_vals = []
     for param_values in product(*scan_sequences):
-        metric_val = metric(HYPO_PARAMS_T(*param_values), **metric_kw)
+        #sys.stdout.write('\b' * msg_len)
+        param_values = HYPO_PARAMS_T(*param_values)
+        #msg = repr(param_values)
+        #msg_len = len(msg)
+        #sys.stdout.write(msg)
+        sys.stdout.write('.')
+        sys.stdout.flush()
+        metric_val = metric(param_values, **metric_kw)
         metric_vals.append(metric_val)
-
+    sys.stdout.write('\n')
     metric_vals = np.array(metric_vals, dtype=FTYPE).reshape(shape)
 
     return metric_vals

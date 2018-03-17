@@ -8,9 +8,7 @@ model can include the effects of hole ice.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    load_angsens_model
-'''.split()
+__all__ = ['load_angsens_model']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -33,8 +31,8 @@ import sys
 
 import numpy as np
 
+RETRO_DIR = dirname(dirname(dirname(realpath(__file__))))
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(realpath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.utils.misc import expand
@@ -55,20 +53,18 @@ def load_angsens_model(model):
     """
     models = [model]
     if not basename(model).startswith('as.'):
-        models += join(dirname(model) + 'as.' + basename(model))
+        models += [join(dirname(model), 'as.' + basename(model))]
 
     possible_dirs = [
         '.',
         join(RETRO_DIR, 'data'),
     ]
     if 'I3_SRC' in os.environ:
-        possible_dirs.append(
-            join('$I3_SRC/ice-models/resources/models/angsens/'.split('/'))
-        )
+        possible_dirs.append('$I3_SRC/ice-models/resources/models/angsens')
 
     possible_paths = []
     for model_name in models:
-        possible_paths.extend(join(d, model_name) for d in possible_dirs)
+        possible_paths += [join(d, model_name) for d in possible_dirs]
 
     coeffs_loaded = False
     for path in possible_paths:

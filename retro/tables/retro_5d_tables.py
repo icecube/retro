@@ -159,8 +159,8 @@ class Retro5DTables(object):
             print(
                 "WARNING: RDE is zero for {} DOMs, NaN for {} DOMs and +/-inf"
                 " for {} DOMs.\n"
-                "These DOMs will be disabled and return 0's forexpected photon"
-                " computations."
+                "These DOMs will be disabled and return 0's for expected"
+                " photon computations."
                 .format(num_zero, num_nan, num_inf)
             )
         mask = zero_mask | nan_mask | inf_mask

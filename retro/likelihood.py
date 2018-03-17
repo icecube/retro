@@ -35,22 +35,28 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.retro_types import Hits
 
 
 DC_STRS = [79, 80, 81, 82, 83, 84, 85, 86]
 DC_IC_STRS = [26, 27, 35, 36, 37, 45, 46]
+
 DC_SUBDUST_DOMS = list(range(11, 60+1))
-#IC_SUBDUST_DOMS =
-DC_SUBDUST_STRS_DOMS = []
+IC_SUBDUST_DOMS = list(range(25, 60+1))
+
+DC_SUBDUST_STRS_DOMS = list(product(DC_STRS, DC_SUBDUST_DOMS))
+DC_IC_SUBDUST_STRS_DOMS = list(product(DC_IC_STRS, IC_SUBDUST_DOMS))
+
+DC_ALL_SUBDUST_STRS_DOMS = DC_SUBDUST_STRS_DOMS + DC_IC_SUBDUST_STRS_DOMS
+
 ALL_STRS = list(range(1, 86+1))
 ALL_DOMS = list(range(1, 60+1))
 ALL_STRS_DOMS = list(product(ALL_STRS, ALL_DOMS))
 
-EMPTY_HITS = Hits(
-    times=np.empty(shape=(0, 1), dtype=np.float32),
-    charges=np.empty(shape=(0, 1), dtype=np.float32)
-)
+#EMPTY_HITS = Hits(
+#    times=np.empty(shape=(0, 1), dtype=np.float32),
+#    charges=np.empty(shape=(0, 1), dtype=np.float32)
+#)
+EMPTY_HITS = np.empty(shape=(2, 0), dtype=np.float32)
 
 
 #@profile
@@ -114,7 +120,7 @@ def get_neg_llh(
         sum_at_all_times_computed = True
 
     sum_log_at_hit_times = np.float64(0.0)
-    for str_dom in ALL_STRS_DOMS:
+    for str_dom in DC_ALL_SUBDUST_STRS_DOMS:
         string = str_dom[0]
         dom = str_dom[1]
 
@@ -122,7 +128,7 @@ def get_neg_llh(
 
         exp_p_at_all_times, exp_p_at_hit_times = dom_tables.get_expected_det(
             sources=hypo_light_sources,
-            hit_times=this_hits.times,
+            hit_times=this_hits[0, :].astype(np.float32),
             string=string,
             dom=dom,
             include_noise=True,
@@ -132,8 +138,16 @@ def get_neg_llh(
         if not sum_at_all_times_computed:
             sum_at_all_times += exp_p_at_all_times
 
+        if np.any(exp_p_at_hit_times <= 0):
+            print('str_dom:', str_dom)
+            print('this_hits:\n{}'.format(this_hits))
+            print('exp_p_at_hit_times:', exp_p_at_hit_times)
+            print('')
+            sum_log_at_hit_times -= np.inf
+            break
+
         sum_log_at_hit_times += np.sum(
-            this_hits.charges * np.log(exp_p_at_hit_times)
+            this_hits[1, :] * np.log(exp_p_at_hit_times)
         )
 
     neg_llh = sum_at_all_times - sum_log_at_hit_times
