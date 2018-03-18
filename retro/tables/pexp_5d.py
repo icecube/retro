@@ -302,8 +302,8 @@ def generate_pexp_5d_function(
             source_photons = source.photons
 
             r = math.sqrt(rsquared)
-            r_bin_idx = int(r**inv_r_power // table_dr_pwr)
-            costheta_bin_idx = int((1 - dz/r) // table_dcostheta)
+            r_bin_idx = int(r**inv_r_power / table_dr_pwr)
+            costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
             if r_bin_idx == prev_r_bin_idx:
                 new_r_bin = False
@@ -417,14 +417,14 @@ def generate_pexp_5d_function(
                             )
 
                 else: # tbl_is_ckv
-                    costhetadir_bin_idx = int((pdir_costheta + 1) // table_dcosthetadir)
+                    costhetadir_bin_idx = int((pdir_costheta + 1.0) / table_dcosthetadir)
 
                     # Make upper edge inclusive
                     if costhetadir_bin_idx > last_costhetadir_bin_idx:
                         costhetadir_bin_idx = last_costhetadir_bin_idx
 
                     pdir_deltaphi = math.acos(pdir_cosdeltaphi)
-                    deltaphidir_bin_idx = int(pdir_deltaphi // table_dphidir)
+                    deltaphidir_bin_idx = int(pdir_deltaphi / table_dphidir)
 
                     # Make upper edge inclusive
                     if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
@@ -471,7 +471,7 @@ def generate_pexp_5d_function(
                 if dt >= t_max:
                     continue
 
-                t_bin_idx = int(dt // table_dt)
+                t_bin_idx = int(dt / table_dt)
 
                 r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
 
@@ -601,8 +601,8 @@ def generate_pexp_5d_function(
             source_photons = source.photons
 
             r = math.sqrt(rsquared)
-            r_bin_idx = int(r**inv_r_power // table_dr_pwr)
-            costheta_bin_idx = int((1 - dz/r) // table_dcostheta)
+            r_bin_idx = int(r**inv_r_power / table_dr_pwr)
+            costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
             if r_bin_idx == prev_r_bin_idx:
                 new_r_bin = False
@@ -670,14 +670,14 @@ def generate_pexp_5d_function(
                     # precision issues cause the dot product to blow up.
                     pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
 
-                costhetadir_bin_idx = int((pdir_costheta + 1) // table_dcosthetadir)
+                costhetadir_bin_idx = int((pdir_costheta + 1) / table_dcosthetadir)
 
                 # Make upper edge inclusive
                 if costhetadir_bin_idx > last_costhetadir_bin_idx:
                     costhetadir_bin_idx = last_costhetadir_bin_idx
 
                 pdir_deltaphi = math.acos(pdir_cosdeltaphi)
-                deltaphidir_bin_idx = int(pdir_deltaphi // table_dphidir)
+                deltaphidir_bin_idx = int(pdir_deltaphi / table_dphidir)
 
                 # Make upper edge inclusive
                 if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
@@ -721,7 +721,7 @@ def generate_pexp_5d_function(
                 if dt >= t_max:
                     continue
 
-                t_bin_idx = int(dt // table_dt)
+                t_bin_idx = int(dt / table_dt)
 
                 r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
 
