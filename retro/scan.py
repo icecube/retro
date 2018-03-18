@@ -103,19 +103,23 @@ def scan(scan_values, metric, metric_kw=None):
         scan_sequences.append(sv)
         shape.append(len(sv))
 
-    #msg_len = 0
+    total_points = np.product(shape)
+
+    times = [time.time()]
     metric_vals = []
-    for param_values in product(*scan_sequences):
-        #sys.stdout.write('\b' * msg_len)
+    for n, param_values in enumerate(product(*scan_sequences)):
         param_values = HYPO_PARAMS_T(*param_values)
-        #msg = repr(param_values)
-        #msg_len = len(msg)
-        #sys.stdout.write(msg)
-        sys.stdout.write('.')
-        #sys.stdout.flush()
         metric_val = metric(param_values, **metric_kw)
         metric_vals.append(metric_val)
-    sys.stdout.write('\n')
+        if n > 0 and n % 500 == 0:
+            times.append(time.time())
+            avg = np.mean(np.diff(times[-5:])) / 500
+            remaining = avg * (total_points - n - 1)
+            print('Elapsed: {} s, avg: {:.3f} ms/pt; remaining ~ {} s'
+                  .format(int(np.round(times[-1] - times[0])),
+                          avg * 1000,
+                          int(np.round(remaining))))
+            sys.stdout.flush()
     metric_vals = np.array(metric_vals, dtype=FTYPE).reshape(shape)
 
     return metric_vals
