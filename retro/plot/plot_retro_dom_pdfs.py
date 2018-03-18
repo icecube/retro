@@ -299,9 +299,9 @@ def plot_run_info(
         if all_zeros:
             continue
 
-        #if xmin == xmax:
-        xmin = np.min(fwd_hists_binning)
-        xmax = np.max(fwd_hists_binning)
+        if xmin == xmax:
+            xmin = np.min(fwd_hists_binning)
+            xmax = np.max(fwd_hists_binning)
 
         if plot:
             ax.set_xlim(xmin, xmax)

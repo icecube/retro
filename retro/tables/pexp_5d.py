@@ -265,10 +265,15 @@ def generate_pexp_5d_function(
         # Initialize "prev_*" vars
         prev_r_bin_idx = -1
         prev_costheta_bin_idx = -1
+
+        pdir_rhosquared = np.nan
+        pdir_rho = np.nan
+        pdir_rsquared = np.nan
+        pdir_r = np.nan
+
         if use_directionality:
-            prev_pdir_r = np.nan
+            prev_pdir_rsquared = np.nan
         else:
-            pdir_r = 0.0
             new_pdir_r = False
 
         # Initialize cached values to nan since it's a bug if these are not
@@ -277,7 +282,9 @@ def generate_pexp_5d_function(
         r_t_bin_norm = np.nan
 
         # Extract the components of the DOM coordinate
-        dom_x, dom_y, dom_z = dom_coord
+        dom_x = dom_coord[0]
+        dom_y = dom_coord[1]
+        dom_z = dom_coord[2]
 
         # Loop over the entries (one per row)
         for source in sources:
@@ -315,32 +322,31 @@ def generate_pexp_5d_function(
                 pdir_y = source.dir_y
                 pdir_z = source.dir_z
                 pdir_rhosquared = pdir_x*pdir_x + pdir_y*pdir_y
-                pdir_r = math.sqrt(pdir_rhosquared + pdir_z*pdir_z)
+                pdir_rsquared = pdir_rhosquared + pdir_z*pdir_z
 
-                if pdir_r != prev_pdir_r:
+                if pdir_rsquared != prev_pdir_rsquared:
                     new_pdir_r = True
-                    prev_pdir_r = pdir_r
+                    prev_pdir_rsquared = pdir_rsquared
+                    pdir_r = math.sqrt(pdir_rsquared)
+                    pdir_rho = math.sqrt(pdir_rhosquared)
                 else:
                     new_pdir_r = False
 
-            if pdir_r == 0.0: # isotropic emitter
+            if pdir_rsquared == 0.0: # isotropic emitter
                 if compute_t_indep_exp and (new_pdir_r or new_r_bin or new_costheta_bin):
                     t_indep_surv_prob = np.mean(
                         t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
                     )
 
-            elif pdir_r < 1.0: # Cherenkov emitter
+            elif pdir_rsquared < 1.0: # Cherenkov emitter
                 # Note that for these tables, we have to invert the photon
                 # direction relative to the vector from the DOM to the photon's
                 # vertex since simulation has photons going _away_ from the DOM
                 # that in reconstruction will hit the DOM if they're moving
                 # _towards_ the DOM.
 
-                pdir_rho = math.sqrt(pdir_rhosquared)
-
                 # Zenith angle is indep. of photon position relative to DOM
                 pdir_costheta = pdir_z / pdir_r
-                pdir_sintheta = pdir_rho / pdir_r
 
                 rho = math.sqrt(rhosquared)
 
@@ -363,16 +369,19 @@ def generate_pexp_5d_function(
                     # Note that the max and min here here in case numerical
                     # precision issues cause the dot product to blow up.
                     pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
-                    pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi*pdir_cosdeltaphi)
-
-                # Cherenkov angle is encoded as the projection of a length-1
-                # vector going in the Ckv direction onto the charged particle's
-                # direction. Ergo, in the length of the pdir vector is the
-                # cosine of the ckv angle.
-                ckv_costheta = pdir_r
-                ckv_theta = math.acos(ckv_costheta)
+                    if tbl_is_raw:
+                        pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi*pdir_cosdeltaphi)
 
                 if tbl_is_raw:
+                    pdir_sintheta = pdir_rho / pdir_r
+
+                    # Cherenkov angle is encoded as the projection of a
+                    # length-1 vector going in the Ckv direction onto the
+                    # charged particle's direction. Ergo, in the length of the
+                    # pdir vector is the cosine of the ckv angle.
+                    ckv_costheta = pdir_r
+                    ckv_theta = math.acos(ckv_costheta)
+
                     if ckv_sigma_deg > 0:
                         if compute_t_indep_exp:
                             t_indep_surv_prob, _a, _b = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
@@ -428,13 +437,13 @@ def generate_pexp_5d_function(
                         deltaphidir_bin_idx
                     ]
 
-            elif pdir_r == 1.0:
+            elif pdir_rsquared == 1.0:
                 if tbl_is_raw:
                     raise NotImplementedError('Line emitter not yet implmented.')
                 else: # tbl_is_ckv
                     raise ValueError('Line emitter cannot be computed with ckv table')
 
-            else: # Gaussian emitter
+            else: # pdir_rsquared > 1 Gaussian emitter
                 if tbl_is_raw:
                     raise NotImplementedError('Gaussian emitter not yet implemented.')
                 else: # tbl_is_ckv

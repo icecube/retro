@@ -59,7 +59,6 @@ ALL_STRS_DOMS = list(product(ALL_STRS, ALL_DOMS))
 EMPTY_HITS = np.empty(shape=(2, 0), dtype=np.float32)
 
 
-#@profile
 def get_neg_llh(
         hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None
     ):
@@ -137,14 +136,6 @@ def get_neg_llh(
 
         if not sum_at_all_times_computed:
             sum_at_all_times += exp_p_at_all_times
-
-        if np.any(exp_p_at_hit_times <= 0):
-            print('str_dom:', str_dom)
-            print('this_hits:\n{}'.format(this_hits))
-            print('exp_p_at_hit_times:', exp_p_at_hit_times)
-            print('')
-            sum_log_at_hit_times -= np.inf
-            break
 
         sum_log_at_hit_times += np.sum(
             this_hits[1, :] * np.log(exp_p_at_hit_times)

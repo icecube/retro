@@ -8,13 +8,13 @@ Retro tables, 5D Cherenkov tables, or template-compressed versions thereof.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    TABLE_NORM_KEYS
-    TABLE_KINDS
-    NORM_VERSIONS
-    Retro5DTables
-    get_table_norm
-'''.split()
+__all__ = [
+    'TABLE_NORM_KEYS',
+    'TABLE_KINDS',
+    'NORM_VERSIONS',
+    'Retro5DTables',
+    'get_table_norm',
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -40,7 +40,10 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.const import SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
+from retro.const import (
+    AGG_STR_ALL, AGG_STR_SUBDET, DOM_ALL, STR_IC, STR_DC, STR_ALL,
+    SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
+)
 from retro.i3info.angsens_model import load_angsens_model
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
@@ -207,8 +210,15 @@ class Retro5DTables(object):
         single_dom_spec = True
         if isinstance(string, basestring):
             string = string.strip().lower()
-            assert string in ['ic', 'dc', 'all']
-            agg_mode = 'all' if string == 'all' else 'subdetector'
+            if string == 'ic':
+                string = STR_IC
+            elif string == 'dc':
+                string = STR_DC
+            elif string == 'all':
+                string = STR_ALL
+            else:
+                raise ValueError('Unhandled string "{}"'.format(string))
+            agg_mode = AGG_STR_ALL if string is STR_ALL else AGG_STR_SUBDET
             if self.string_aggregation is None:
                 self.string_aggregation = agg_mode
             assert agg_mode == self.string_aggregation
@@ -223,6 +233,7 @@ class Retro5DTables(object):
         if isinstance(dom, basestring):
             dom = dom.strip().lower()
             assert dom == 'all'
+            dom = DOM_ALL
             if self.depth_aggregation is None:
                 self.depth_aggregation = True
             assert self.depth_aggregation
@@ -327,23 +338,24 @@ class Retro5DTables(object):
 
         """
         # `string` and `dom` are 1-indexed but array indices are 0-indexed
-        string_idx, dom_idx = string - 1, dom - 1
+        string_idx = string - 1
+        dom_idx = dom - 1
         if not self.operational_doms[string_idx, dom_idx]:
             return np.float64(0.0), np.zeros_like(hit_times, dtype=np.float64)
 
         dom_coord = self.geom[string_idx, dom_idx]
         dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
 
-        if self.string_aggregation == 'all':
-            string = 'all'
-        elif self.string_aggregation == 'subdetector':
+        if self.string_aggregation is AGG_STR_ALL:
+            string = STR_ALL
+        elif self.string_aggregation is AGG_STR_SUBDET:
             if string < 79:
-                string = 'ic'
+                string = STR_IC
             else:
-                string = 'dc'
+                string = STR_DC
 
         if self.depth_aggregation:
-            dom = 'all'
+            dom = DOM_ALL
 
         table_tup = self.tables[(string, dom)]
 

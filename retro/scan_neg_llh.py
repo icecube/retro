@@ -8,7 +8,7 @@ Instantiate Retro tables and scan the negative log-likelihood space.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['scan_neg_llh', 'main', 'parse_args']
+__all__ = ['scan_neg_llh', 'parse_args']
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -52,105 +52,11 @@ from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon
 )
 from retro.i3info.extract_gcd import extract_gcd
-from retro.likelihood import DC_ALL_SUBDUST_STRS_DOMS, get_neg_llh
+from retro.likelihood import get_neg_llh
 from retro.scan import scan
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
-
-
-def scan_neg_llh(
-        # Scan params
-        scan_values,
-
-        # Hit params
-        hits, angsens_model, time_window,
-
-        # Hypo computation params
-        hypo_kernels, kernel_kwargs,
-
-        # DOM tables' params
-        dom_tables_fname_proto, step_length, mmap, dom_table_kind, gcd,
-        norm_version, use_directionality, num_phi_samples, ckv_sigma_deg,
-
-        # TDI table params
-        tdi_table
-    ):
-    """Instantiate Retro tables and perform a likelihood scan.
-
-    """
-    if tdi_table is not None:
-        raise NotImplementedError('TDI table not handled yet')
-
-    compute_t_indep_exp = tdi_table is None
-    if isinstance(gcd, basestring):
-        gcd = extract_gcd(gcd)
-
-    # Instantiate single-DOM tables
-    dom_tables = Retro5DTables(
-        table_kind=dom_table_kind,
-        geom=gcd['geo'],
-        rde=gcd['rde'],
-        noise_rate_hz=gcd['noise'],
-        angsens_model=angsens_model,
-        compute_t_indep_exp=compute_t_indep_exp,
-        use_directionality=use_directionality,
-        norm_version=norm_version,
-        num_phi_samples=num_phi_samples,
-        ckv_sigma_deg=ckv_sigma_deg
-    )
-
-    # Load single-DOM tables
-    common_kw = dict(
-        step_length=step_length,
-        mmap=mmap
-    )
-
-    if '{subdet' in dom_tables_fname_proto:
-        for subdet, dom in list(product(['ic', 'dc'], range(1, 60+1))):
-            if (subdet, dom) not in DC_ALL_SUBDUST_STRS_DOMS:
-                continue
-            fpath = dom_tables_fname_proto.format(
-                subdet=subdet, dom=dom, depth_idx=dom-1
-            )
-            dom_tables.load_table(
-                fpath=fpath,
-                string=subdet,
-                dom=dom,
-                **common_kw
-            )
-    elif '{string' in dom_tables_fname_proto:
-        for string, dom in product(range(1, 86+1), range(1, 60+1)):
-            fpath = dom_tables_fname_proto.format(
-                string=string, string_idx=string - 1,
-                dom=dom, depth_idx=dom - 1
-            )
-            dom_tables.load_table(
-                fpath=fpath,
-                string=string,
-                dom=dom,
-                **common_kw
-            )
-
-    hypo_handler = DiscreteHypo(
-        hypo_kernels=hypo_kernels,
-        kernel_kwargs=kernel_kwargs
-    )
-
-    # Keyword args for the `metric` callable
-    metric_kw = dict(
-        hits=hits, time_window=time_window, hypo_handler=hypo_handler,
-        dom_tables=dom_tables, tdi_table=tdi_table
-    )
-
-    # Perform the actual scan
-    metric_vals = scan(
-        scan_values=scan_values,
-        metric=get_neg_llh,
-        metric_kw=metric_kw
-    )
-
-    return metric_vals
 
 
 def parse_args(description=__doc__):
@@ -250,7 +156,7 @@ def parse_args(description=__doc__):
     return parser.parse_args()
 
 
-def main():
+def scan_neg_llh():
     """Script "main" function"""
     t00 = time.time()
 
@@ -410,7 +316,8 @@ def main():
     t0 = time.time()
 
     metrics = []
-    for event_hits in hits[events_slice]:
+    for event_ofst, event_hits in enumerate(hits[events_slice]):
+        event_idx = start_event_idx + event_ofst
         t1 = time.time()
         if hits_are_photons:
             # For photons, we assign a "charge" from their weight, which comes
@@ -437,7 +344,10 @@ def main():
 
         metrics.append(metric_vals)
 
-        print('  ---> {:.3f} s'.format(time.time() - t1))
+        dt = time.time() - t1
+        n_points = metric_vals.size
+        print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
+              .format(dt, n_points, dt/n_points*1e3))
 
     kwargs.pop('hits')
     info = OrderedDict([
@@ -463,4 +373,4 @@ def main():
 
 
 if __name__ == '__main__':
-    metric_vals, orig_kwargs = main() # pylint: disable=invalid-name
+    metric_vals, orig_kwargs = scan_neg_llh() # pylint: disable=invalid-name

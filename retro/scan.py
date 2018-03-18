@@ -112,7 +112,7 @@ def scan(scan_values, metric, metric_kw=None):
         #msg_len = len(msg)
         #sys.stdout.write(msg)
         sys.stdout.write('.')
-        sys.stdout.flush()
+        #sys.stdout.flush()
         metric_val = metric(param_values, **metric_kw)
         metric_vals.append(metric_val)
     sys.stdout.write('\n')

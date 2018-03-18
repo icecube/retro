@@ -88,7 +88,7 @@ SIM_TO_TEST = 'upgoing_muon'
 TABLE_KIND = 'ckv_uncompr'
 
 # One of {'pde', 'binvol', 'binvol2', 'avgsurfarea', 'wtf', 'wtf2', ...}
-NORM_VERSION = 'wtf'
+NORM_VERSION = 'binvol2'
 
 # Whether to use directionality from tables
 USE_DIRECTIONALITY = True
@@ -101,7 +101,7 @@ NUM_PHI_SAMPLES = 100
 MUON_DEDX = False
 
 # Time step (ns) for discrete muon kernel (whether or not dEdX)
-MUON_DT = 1.0
+MUON_DT = 1.1
 
 ANGSENS_MODEL = 'h2-50cm' #0.338019664877
 STEP_LENGTH = 1.0
