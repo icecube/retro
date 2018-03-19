@@ -61,9 +61,6 @@ def point_cascade(hypo_params):
     sources[0]['y'] = hypo_params.y
     sources[0]['z'] = hypo_params.z
     sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy
-    sources[0]['dir_x'] = 0
-    sources[0]['dir_y'] = 0
-    sources[0]['dir_z'] = 0
     #    [(
     #        SRC_OMNI,
     #        hypo_params.t,

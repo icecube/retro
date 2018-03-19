@@ -9,9 +9,10 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     # Constants
-    'SPEED_OF_LIGHT_M_PER_NS', 'PI', 'TWO_PI', 'PI_BY_TWO',
+    'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS',
 
     # Pre-calculated values
+    'COS_CKV', 'THETA_CKV', 'SIN_CKV',
     'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'CASCADE_PHOTONS_PER_GEV',
     'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'POL_TABLE_DCOSTHETA',
     'POL_TABLE_DRPWR', 'POL_TABLE_DT', 'POL_TABLE_RPWR', 'POL_TABLE_RMAX',
@@ -74,6 +75,12 @@ SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 # -- Pre-calculated values -- #
 
 COS_CKV = 0.764540803152
+"""Cosine of the Cherenkov angle for beta ~1 and IceCube phase index as used"""
+
+THETA_CKV = np.arccos(0.764540803152)
+"""Cosine of the Cherenkov angle for beta ~1 and IceCube phase index as used"""
+
+SIN_CKV = np.sin(THETA_CKV)
 """Cosine of the Cherenkov angle for beta ~1 and IceCube phase index as used"""
 
 TRACK_M_PER_GEV = FTYPE(15 / 3.3)
