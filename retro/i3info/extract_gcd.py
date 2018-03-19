@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position, wildcard-import
 
 """
 Extract positional and calibration info for DOMs
@@ -6,6 +8,28 @@ and save the resulting dict in a pkl file for later use
 """
 
 from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    N_STRINGS
+    N_DOMS
+    extract_gcd
+    parse_args
+'''.split()
+
+__author__ = 'P. Eller, J.L. Lanfranchi'
+__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.'''
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import bz2
@@ -47,7 +71,7 @@ def extract_gcd(gcd_file, outdir=None):
 
     """
     from I3Tray import I3Units, OMKey # pylint: disable=import-error
-    from icecube import dataclasses, dataio # pylint: disable=import-error, unused-import
+    from icecube import dataclasses, dataio # pylint: disable=import-error, unused-variable
 
     gcd_file = expanduser(expandvars(gcd_file))
     src_gcd_basename = basename(gcd_file)
@@ -114,8 +138,8 @@ def extract_gcd(gcd_file, outdir=None):
     gcd_info['noise'] = noise = np.zeros((N_STRINGS, N_DOMS))
     gcd_info['rde'] = rde = np.zeros((N_STRINGS, N_DOMS))
 
-    for string_idx in xrange(N_STRINGS):
-        for dom_idx in xrange(N_DOMS):
+    for string_idx in range(N_STRINGS):
+        for dom_idx in range(N_DOMS):
             omkey = OMKey(string_idx + 1, dom_idx + 1)
             geo[string_idx, dom_idx, 0] = omgeo.get(omkey).position.x
             geo[string_idx, dom_idx, 1] = omgeo.get(omkey).position.y

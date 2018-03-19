@@ -1,11 +1,21 @@
+# -*- coding: utf-8 -*-
+
+from __future__ import absolute_import, division, print_function
+
+__all__ = '''
+    HadLightyield
+'''.split()
+
 from icecube import icetray, dataclasses, clsim
 from numpy import random
 
-# Parametrizations taken from PPC Revision 97875
-# Only the mean value is taken. The variation was done by PPC the first time it was used.
 
 class HadLightyield(icetray.I3Module):
+    """
+    Parametrizations taken from PPC Revision 97875 Only the mean value is
+    taken. The variation was done by PPC the first time it was used.
 
+    """
     def __init__(self, context):
         icetray.I3Module.__init__(self, context)
         self.AddOutBox('OutBox')
@@ -41,8 +51,6 @@ class HadLightyield(icetray.I3Module):
 
     def DAQ(self, frame):
         mctree = frame['I3MCTree']
-        
-        
 
         # Define the particles whose light will be modified
         mctree_particles = mctree.get_daughters(mctree.most_energetic_neutrino)
@@ -60,7 +68,7 @@ class HadLightyield(icetray.I3Module):
 
         # The new I3PhotonSeriesMap needs to be initializaed with a list of tuples
         photonseries_tuples = []
-        
+
         # Go DOM by DOM
         for one_dom, dom_hits in photonseries:
 
@@ -73,24 +81,24 @@ class HadLightyield(icetray.I3Module):
                 if one_hit.particleMinorID in hadrons_ids:
                     new_photon = clsim.I3Photon(one_hit)
                     new_photon.weight *= self.lightyield
-                    #print 'Reduced! ', new_photon.weight
+                    #print('Reduced! ', new_photon.weight)
                     new_dom_photons.append(new_photon)
                     self.counter += 1
                 else:
                     new_dom_photons.append(one_hit)
 
             photonseries_tuples.append((one_dom, new_dom_photons))
-        
+
         # Create a new UnweightedPhotons Map from my tuple
         new_hitseries = clsim.I3PhotonSeriesMap(photonseries_tuples)
 
         # frame.Delete(self.hs_in)
         # Push it to the frame
         frame[self.hs_out] = new_hitseries
-        #print 'DONE!'
+        #print('DONE!')
         self.PushFrame(frame)
         return True
 
     def Finish(self):
         # Inform how many hits were dropped in this file
-        print 'CorrectHadronicLightYield worked, applied ', self.counter
+        print('CorrectHadronicLightYield worked, applied ', self.counter)

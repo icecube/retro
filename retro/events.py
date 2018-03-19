@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position
 
 """
@@ -5,9 +6,7 @@ Events class used as container for loading events from an icetray-produced HDF5
 file and accessing them in a consistent manner.
 """
 
-
 from __future__ import absolute_import, division, print_function
-
 
 __all__ = ['Events']
 
@@ -26,7 +25,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 from os.path import abspath, basename, dirname
 import sys
 
@@ -34,13 +32,13 @@ import h5py
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 from retro import DFLT_PULSE_SERIES, DFLT_ML_RECO_NAME, DFLT_SPE_RECO_NAME
-from retro import Event, Pulses
-from retro import expand, generate_unique_ids
 from retro.particles import ParticleArray
+from retro.retro_types import Event, Pulses
+from retro.utils.misc import expand, generate_unique_ids
 
 
 class Events(object):
@@ -78,8 +76,8 @@ class Events(object):
             strings = pulses['string']
             oms = pulses['om']
 
-            # Note that we will use the convention that strings go from 1 to 86 while depth (om) indices go
-            # from 0 to 59
+            # Note that we will use the convention that strings go from 1 to 86
+            # while depth (om) indices go from 0 to 59
             self.pulses = Pulses(
                 strings=strings,
                 oms=oms - 1,
