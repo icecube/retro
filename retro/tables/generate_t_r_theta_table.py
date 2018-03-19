@@ -47,7 +47,7 @@ from retro.utils.stats import weighted_average
 def generate_t_r_theta_table(
         table,
         n_photons,
-        phase_refractive_index,
+        group_refractive_index,
         t_bin_width,
         angular_acceptance_fract,
         thetadir_centers,
@@ -63,7 +63,7 @@ def generate_t_r_theta_table(
     ----------
     table
     n_photons
-    phase_refractive_index
+    group_refractive_index
     t_bin_width
     angular_acceptance_fract
     thetadir_centers
@@ -99,7 +99,7 @@ def generate_t_r_theta_table(
     norm = (
         1
         / n_photons
-        / (SPEED_OF_LIGHT_M_PER_NS / phase_refractive_index)
+        / (SPEED_OF_LIGHT_M_PER_NS / group_refractive_index)
         / t_bin_width
         * angular_acceptance_fract
         * n_theta_bins

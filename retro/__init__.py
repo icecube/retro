@@ -4,6 +4,8 @@
 from __future__ import absolute_import, division, print_function
 
 __all__ = '''
+    RETRO_DIR
+    DATA_DIR
     NUMBA_AVAIL
     FTYPE
     UITYPE
@@ -36,6 +38,7 @@ from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
 import cPickle as pickle
 from itertools import product
 import math
+from os import environ
 from os.path import abspath, basename, dirname, expanduser, expandvars, join
 import re
 import sys
@@ -68,6 +71,11 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import HypoParams8D
+
+if 'RETRO_DATA_DIR' in environ:
+    DATA_DIR = environ['RETRO_DATA_DIR']
+else:
+    DATA_DIR = join(RETRO_DIR, 'data')
 
 
 # -- Datatype choices for consistency throughout code -- #

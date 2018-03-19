@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=redefined-outer-name
+# pylint: disable=redefined-outer-name, wrong-import-position
 
 """
 Generate time histograms for each DOM from a photon raw data pickle file (as
@@ -32,16 +32,17 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 import cPickle as pickle
-from os.path import dirname, expanduser, expandvars, isfile, realpath
+from os.path import abspath, dirname, expanduser, expandvars, isfile
 import re
 import sys
 
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(realpath(__file__))))
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro.i3info.extract_gcd import extract_gcd
 
 
 def generate_histos(
@@ -107,15 +108,15 @@ def generate_histos(
 
     See also
     --------
-    retro.i3processing.sim.py
+    i3processing.sim
         Perform the repeated simulation to get photons at DOMs. Generates an i3
         file.
 
-    retro.i3processing.extract_photon_info
+    i3processing.extract_photon_info
         Extract photon info (and pertinent metadata) from the i3 file produced
         from the above.
 
-    retro.retro_dom_pdfs
+    retro_dom_pdfs
         Produce distributions corresponding to the histograms made here, but
         using Retro reco.
 
@@ -135,7 +136,6 @@ def generate_histos(
         if exp_gcd.endswith('.pkl'):
             gcd_info = pickle.load(open(exp_gcd, 'rb'))
         elif '.i3' in exp_gcd:
-            from retro.i3info.extract_gcd import extract_gcd
             gcd_info = extract_gcd(exp_gcd)
         else:
             raise ValueError('No idea how to handle GCD file "{}"'.format(gcd))
@@ -146,7 +146,6 @@ def generate_histos(
             if gcd_from_data.endswith('.pkl'):
                 gcd_info_from_data = pickle.load(open(gcd_from_data, 'rb'))
             else:
-                from retro.i3info.extract_gcd import extract_gcd
                 gcd_info_from_data = extract_gcd(gcd_from_data)
         except (AttributeError, KeyError, ValueError):
             raise
@@ -176,14 +175,15 @@ def generate_histos(
 
     histos = OrderedDict()
     keep_gcd_keys = ['source_gcd_name', 'source_gcd_md5', 'source_gcd_i3_md5']
-    histos['gcd_info'] = [gcd_info[k] for k in keep_gcd_keys]
+    histos['gcd_info'] = OrderedDict([(k, gcd_info[k]) for k in keep_gcd_keys])
     histos['include_rde'] = include_rde
     histos['include_noise'] = include_noise
     histos['bin_edges'] = bin_edges
     histos['binning_spec'] = OrderedDict([
         ('domain', (0, t_max)),
         ('num_bins', num_bins),
-        ('spacing', 'linear')
+        ('spacing', 'linear'),
+        ('units', 'ns')
     ])
 
     # Note the first number in the file is a number approximately equal (but
@@ -251,7 +251,7 @@ def generate_histos(
         if include_rde:
             hist *= quantum_effieincy[string_idx, dom_idx]
         if include_noise:
-            hist += noise_rate_hz[string_idx, dom_idx] * bin_widths / 1e9
+            hist += (noise_rate_hz[string_idx, dom_idx] / 1e9) * bin_widths
         results[(string, dom)] = hist
 
     if outfile is not None:
@@ -278,8 +278,8 @@ def parse_args(description=__doc__):
         help='''Filepath to hole ice model to apply to the photons.'''
     )
     parser.add_argument(
-        '--t-max', type=float, required=True,
-        help='''Bin up to this maximum time'''
+        '--t-max', type=int, required=True,
+        help='''Bin up to this maximum time (integer # of nanoseconds)'''
     )
     parser.add_argument(
         '--num-bins', type=int, required=True,
@@ -312,7 +312,13 @@ def parse_args(description=__doc__):
 
     # Construct the output filename if none is provided
     if args.outfile is None:
-        args.outfile = re.sub(r'_photons.pkl', '_photon_histos.pkl', args.photons)
+        args.outfile = re.sub(
+            r'_photons.pkl',
+            '_photon_histos_0-{:d}ns_{:d}bins.pkl'.format(
+                args.t_max, args.num_bins
+            ),
+            args.photons
+        )
 
     return args
 

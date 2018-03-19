@@ -113,8 +113,11 @@ def formatter(mapping, key_only=False, fname=False):
                      'tilt'):
             label_strs.append('{}{}{}'.format(key, sep, value))
 
+        elif key == 'group_refractive_index':
+            label_strs.append('n_grp{}{:.3f}'.format(sep, value))
+
         elif key == 'phase_refractive_index':
-            label_strs.append('n{}{:.3f}'.format(sep, value))
+            label_strs.append('n_phs{}{:.3f}'.format(sep, value))
 
         elif key in ('table_shape', 'underflow', 'overflow'):
             if key == 'table_shape':

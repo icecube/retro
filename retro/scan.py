@@ -2,7 +2,8 @@
 # pylint: disable=wrong-import-position
 
 """
-Perform 1D and 2D parameter scans of the likelihood space.
+Generic function `scan` for performing an N-dimensional parameter scan of some
+metric.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -22,10 +23,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+__all__ = ['scan']
+
 from collections import Sequence
-from itertools import izip, product
+from itertools import product
 from os.path import abspath, dirname
 import sys
+import time
 
 import numpy as np
 
@@ -36,56 +40,51 @@ if __name__ == '__main__' and __package__ is None:
 from retro import FTYPE, HYPO_PARAMS_T
 
 
-def scan(
-        hypo_obj, event, neg_llh_func, dims, scan_values, nominal_params=None,
-        neg_llh_func_kwargs=None
-    ):
-    """Scan likelihoods for hypotheses changing one parameter dimension.
+def scan(scan_values, metric, metric_kw=None):
+    """Scan a metric (e.g., neg_llh) for hypotheses with a set of parameter
+    values.
+
+    Note that `metric` is called via::
+
+        metric(HYPO_PARAMS_T(*hypo_params), **metric_kw)
+
+    and the actual values used as `hypo_params` are the _outer_ product of the
+    values specified in `scan_values`.
 
     Parameters
     ----------
-    hypo_obj
+    scan_values : sequence of len(HYPO_PARAMS_T) of floats or iterables
+        Values used in the scan are the _outer_ product of the items in
+        `scan_values`. Specify a single value for a dimension to disable
+        scanning in that dimension.
 
-    event : Event
-        Event for which to get likelihoods
-
-    neg_llh_func : callable
-        Function used to compute a likelihood. Must take ``pinfo_gen`` and
-        ``event`` as first two arguments, where ``pinfo_gen`` is (...) and
+    metric : callable
+        Function used to compute e.g. a likelihood. Must take ``sources`` and
+        ``event`` as first two arguments, where ``sources`` is (...) and
         ``event`` is the argument passed here. Function must return just one
-        value (the ``llh``)
+        value (e.g., ``-llh``)
 
-    dims : string or iterable thereof
-        One of 't', 'x', 'y', 'z', 'azimuth', 'zenith', 'cascade_energy',
-        or 'track_energy'.
-
-    scan_values : iterable of floats, or iterable thereof
-        Values to set for the dimension being scanned.
-
-    nominal_params : None or HYPO_PARAMS_T namedtuple
-        Nominal values for all param values. The value for the params being
-        scanned are irrelevant, as this is replaced with each value from
-        `scan_values`. Therefore this is optional if _all_ parameters are
-        subject to the scan.
-
-    neg_llh_func_kwargs : mapping or None
+    metric_kw : mapping, optional
         Keyword arguments to pass to `get_neg_llh` function
 
     Returns
     -------
-    all_llh : numpy.ndarray (len(scan_values[0]) x len(scan_values[1]) x ...)
-        Likelihoods corresponding to each value in product(*scan_values).
+    metric_vals : shape (len(scan_values[0]), len(scan_values[1]), ...) array of FTYPE
+        Metric values corresponding to each combination of scan values, i.e.,
+        ``product(*scan_values)``.
 
     """
-    if neg_llh_func_kwargs is None:
-        neg_llh_func_kwargs = {}
+    if metric_kw is None:
+        metric_kw = {}
 
     all_params = HYPO_PARAMS_T._fields
+    num_params = len(all_params)
 
-    # Need list of strings (dim names). If we just have a string, make it the
-    # first element of a single-element tuple.
-    if isinstance(dims, basestring):
-        dims = (dims,)
+    if len(scan_values) != num_params:
+        raise ValueError(
+            'Must specify as many `scan_values` as there are HYPO_PARAMS_T ({}'
+            ' dimensions, coming from {})'.format(num_params, HYPO_PARAMS_T)
+        )
 
     # Need iterable-of-iterables-of-floats. If we have just an iterable of
     # floats (e.g. for 1D scan), then make it the first element of a
@@ -97,35 +96,30 @@ def scan(
     shape = []
     for sv in scan_values:
         if not isinstance(sv, Sequence):
-            sv = list(sv)
+            if np.isscalar(sv):
+                sv = [sv]
+            else:
+                sv = list(sv)
         scan_sequences.append(sv)
         shape.append(len(sv))
 
-    if nominal_params is None:
-        #assert len(dims) == len(all_params)
-        nominal_params = HYPO_PARAMS_T(*([np.nan]*len(all_params)))
+    total_points = np.product(shape)
 
-    # Make nominal into a list so we can mutate its values as we scan
-    params = list(nominal_params)
+    times = [time.time()]
+    metric_vals = []
+    for n, param_values in enumerate(product(*scan_sequences)):
+        param_values = HYPO_PARAMS_T(*param_values)
+        metric_val = metric(param_values, **metric_kw)
+        metric_vals.append(metric_val)
+        if n > 0 and n % 500 == 0:
+            times.append(time.time())
+            avg = np.mean(np.diff(times[-5:])) / 500
+            remaining = avg * (total_points - n - 1)
+            print('Elapsed: {} s, avg: {:.3f} ms/pt; remaining ~ {} s'
+                  .format(int(np.round(times[-1] - times[0])),
+                          avg * 1000,
+                          int(np.round(remaining))))
+            sys.stdout.flush()
+    metric_vals = np.array(metric_vals, dtype=FTYPE).reshape(shape)
 
-    # Get indices for each param that we'll be changing, in the order they will
-    # be specified
-    param_indices = []
-    for dim in dims:
-        param_indices.append(all_params.index(dim))
-
-    all_neg_llh = []
-    for param_values in product(*scan_sequences):
-        for pidx, pval in izip(param_indices, param_values):
-            params[pidx] = pval
-
-        hypo_params = HYPO_PARAMS_T(*params)
-
-        pinfo_gen = hypo_obj.get_pinfo_gen(hypo_params=hypo_params)
-        neg_llh = neg_llh_func(pinfo_gen, event, **neg_llh_func_kwargs)
-        all_neg_llh.append(neg_llh)
-
-    all_neg_llh = np.array(all_neg_llh, dtype=FTYPE)
-    all_neg_llh.reshape(shape)
-
-    return all_neg_llh
+    return metric_vals
