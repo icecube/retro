@@ -43,9 +43,13 @@ SRC_DTYPE = np.dtype(
         ('y', np.float32),
         ('z', np.float32),
         ('photons', np.float32),
-        ('dir_x', np.float32),
-        ('dir_y', np.float32),
-        ('dir_z', np.float32)
+        ('dir_costheta', np.float32),
+        ('dir_sintheta', np.float32),
+        ('dir_cosphi', np.float32),
+        ('dir_sinphi', np.float32),
+        ('ckv_theta', np.float32),
+        ('ckv_costheta', np.float32),
+        ('ckv_sintheta', np.float32),
     ],
     align=True
 )

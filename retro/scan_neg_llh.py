@@ -28,7 +28,6 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
-from itertools import product
 from os.path import abspath, dirname, join
 import pickle
 import sys
@@ -42,7 +41,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T
+from retro import HYPO_PARAMS_T, const
 from retro.utils.misc import expand, mkdir
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
@@ -58,6 +57,7 @@ from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
 
+EMPTY_HITS = np.empty(shape=(2, 0), dtype=np.float32)
 
 def parse_args(description=__doc__):
     """Parse command-line arguments"""
@@ -261,36 +261,40 @@ def scan_neg_llh():
     print('Loading single-DOM tables')
     t0 = time.time()
 
-    common_kw = dict(step_length=step_length, mmap=mmap)
-
     if '{subdet' in dom_tables_fname_proto:
-        for subdet, dom in list(product(['ic', 'dc'], range(1, 60+1))):
-            if subdet == 'ic' and dom < 25:
-                continue
-            if subdet == 'dc' and dom < 11:
-                continue
+        for subdet in ['ic', 'dc']:
+            if subdet == 'ic':
+                subdust_doms = const.IC_SUBDUST_DOMS
+                strings = const.DC_IC_STRS
+            else:
+                subdust_doms = const.DC_SUBDUST_DOMS
+                strings = const.DC_STRS
 
-            fpath = dom_tables_fname_proto.format(
-                subdet=subdet, dom=dom, depth_idx=dom-1
-            )
-            dom_tables.load_table(
-                fpath=fpath,
-                string=subdet,
-                dom=dom,
-                **common_kw
-            )
+            for dom in subdust_doms:
+                fpath = dom_tables_fname_proto.format(
+                    subdet=subdet, dom=dom, depth_idx=dom-1
+                )
+                sd_indices = [const.get_sd_idx(string, dom) for string in strings]
+
+                dom_tables.load_table(
+                    fpath=fpath,
+                    sd_indices=sd_indices,
+                    step_length=step_length,
+                    mmap=mmap
+                )
     elif '{string' in dom_tables_fname_proto:
-        for string, dom in product(range(1, 86+1), range(1, 60+1)):
-            fpath = dom_tables_fname_proto.format(
-                string=string, string_idx=string - 1,
-                dom=dom, depth_idx=dom - 1
-            )
-            dom_tables.load_table(
-                fpath=fpath,
-                string=string,
-                dom=dom,
-                **common_kw
-            )
+        raise NotImplementedError()
+        #for string, dom in product(range(1, 86+1), range(1, 60+1)):
+        #    fpath = dom_tables_fname_proto.format(
+        #        string=string, string_idx=string - 1,
+        #        dom=dom, depth_idx=dom - 1
+        #    )
+        #    dom_tables.load_table(
+        #        fpath=fpath,
+        #        string=string,
+        #        dom=dom,
+        #        **common_kw
+        #    )
 
     print('  -> {:.3f} s\n'.format(time.time() - t0))
 
@@ -333,12 +337,15 @@ def scan_neg_llh():
             # For photons, we assign a "charge" from their weight, which comes
             # from angsens model.
             event_photons = event_hits
-            event_hits = OrderedDict()
+            # DEBUG: set back to EMPTY_HITS when not debugging!
+            event_hits = [EMPTY_HITS]*const.NUM_DOMS_TOT
+            #event_hits = [None]*const.NUM_DOMS_TOT
             for str_dom, pinfo in event_photons.items():
+                sd_idx = const.get_sd_idx(string=str_dom[0], dom=str_dom[1])
                 t = pinfo[0, :]
                 coszen = pinfo[4, :]
                 weight = np.float32(dom_tables.angsens_poly(coszen))
-                event_hits[str_dom] = np.concatenate(
+                event_hits[sd_idx] = np.concatenate(
                     (t[np.newaxis, :], weight[np.newaxis, :]),
                     axis=0
                 )

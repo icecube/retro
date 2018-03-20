@@ -26,6 +26,7 @@ __all__ = '''
     generate_unique_ids
     get_primary_interaction_str
     get_primary_interaction_tex
+    get_sd_idx
 '''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
