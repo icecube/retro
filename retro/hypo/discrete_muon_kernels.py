@@ -110,12 +110,14 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     # (vector components point in direction of motion), as opposed to "IceCube"
     # vector notation (vector components point opposite to direction of
     # motion).
-    opposite_zenith = hypo_params.track_zenith + np.pi
+    opposite_zenith = np.pi - hypo_params.track_zenith
+    opposite_azimuth = np.pi + hypo_params.track_azimuth
+
     dir_costheta = math.cos(opposite_zenith)
     dir_sintheta = math.sin(opposite_zenith)
 
-    dir_cosphi = np.cos(hypo_params.track_azimuth)
-    dir_sinphi = np.sin(hypo_params.track_azimuth)
+    dir_cosphi = np.cos(opposite_azimuth)
+    dir_sinphi = np.sin(opposite_azimuth)
 
     dir_x = dir_sintheta * dir_cosphi
     dir_y = dir_sintheta * dir_sinphi

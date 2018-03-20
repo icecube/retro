@@ -316,8 +316,9 @@ def generate_pexp_5d_function(
                 # the photon source to the DOM. We get the cosine of the angle
                 # between these vectors by solving the identity
                 #   `a dot b = |a| |b| cos(deltaphi)`
-                # for cos(deltaphi).
-                #
+                # for cos(deltaphi), where the `a` and `b` vectors are the
+                # projections of the aforementioned vectors onto the xy-plane.
+
                 if rho <= MACHINE_EPS:
                     pdir_cosdeltaphi = 1.0
                     pdir_sindeltaphi = 0.0
