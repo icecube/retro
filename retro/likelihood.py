@@ -27,6 +27,9 @@ limitations under the License.'''
 
 from os.path import abspath, dirname
 import sys
+from pisa.utils.profiler import line_profile, profile
+from pisa.utils import log
+log.set_verbosity(2)
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -34,7 +37,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import const
 
-
+#@line_profile
 def get_neg_llh(
         hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None
     ):

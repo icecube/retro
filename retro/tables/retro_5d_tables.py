@@ -50,7 +50,6 @@ from retro.retro_types import DOM_INFO
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
 
-
 TABLE_NORM_KEYS = [
     'n_photons', 'group_refractive_index', 'step_length', 'r_bin_edges',
     'costheta_bin_edges', 't_bin_edges'
@@ -115,20 +114,27 @@ class Retro5DTables(object):
         `ckv_sigma_deg` could necessitate higher `num_phi_samples` to get an
         accurate "smearing."
 
+    template_library : shape-(n_templates, n_dir_theta, n_dir_deltaphi) array
+        Containing the directionality templates for compressed tables
+
     """
     def __init__(
             self, table_kind, geom, rde, noise_rate_hz, angsens_model,
             compute_t_indep_exp, use_directionality, norm_version,
-            num_phi_samples=None, ckv_sigma_deg=None
+            num_phi_samples=None, ckv_sigma_deg=None, template_library=None,
         ):
         self.angsens_poly, self.avg_angsens = load_angsens_model(angsens_model)
         self.angsens_model = angsens_model
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
 
-        self.tbl_is_raw = table_kind in ['raw_uncompr', 'raw_templ_compr']
-        self.tbl_is_ckv = table_kind in ['ckv_uncompr', 'ckv_templ_compr']
+        self.tbl_is_raw = table_kind in ['raw_uncompr']
+        self.tbl_is_ckv = table_kind in ['ckv_uncompr']
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
+
+	if self.tbl_is_templ_compr:
+            assert(template_library is not None), 'template library is needed to sue compressed table'
+        self.template_library = template_library
 
         if self.tbl_is_raw:
             from retro.tables.clsim_tables import load_clsim_table_minimal
@@ -145,6 +151,13 @@ class Retro5DTables(object):
             self.usable_table_slice = (slice(None),)*5
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_table'
+        elif self.tbl_is_templ_compr:
+            from retro.tables.ckv_tables_compr import load_ckv_table_compr
+            self.table_loader_func = load_ckv_table_compr
+            self.usable_table_slice = (slice(None),)*3
+            self.t_indep_table_name = 't_indep_ckv_table'
+            self.table_name = 'ckv_template_map'
+
 
         assert len(geom.shape) == 3
         self.geom = geom
@@ -248,7 +261,8 @@ class Retro5DTables(object):
             compute_t_indep_exp=self.compute_t_indep_exp,
             use_directionality=self.use_directionality,
             num_phi_samples=self.num_phi_samples,
-            ckv_sigma_deg=self.ckv_sigma_deg
+            ckv_sigma_deg=self.ckv_sigma_deg,
+	    template_library=self.template_library
         )
         if self.pexp_func is None:
             self.pexp_func = pexp_5d
@@ -264,16 +278,11 @@ class Retro5DTables(object):
             table['table_norm'],
         )
 
-        if self.tbl_is_templ_compr:
-            table_tup += (table['table_map'],)
-
         if self.compute_t_indep_exp:
             table_tup += (
                 table[self.t_indep_table_name],
                 table['t_indep_table_norm']
             )
-            if self.tbl_is_templ_compr:
-                table_tup += (table['t_indep_table_map'],)
 
         for sd_idx in sd_indices:
             self.tables[sd_idx] = table_tup
