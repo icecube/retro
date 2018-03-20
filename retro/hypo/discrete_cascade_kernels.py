@@ -29,6 +29,7 @@ from os.path import abspath, dirname
 import sys
 
 import numpy as np
+import math
 from scipy.stats import gamma
 
 if __name__ == '__main__' and __package__ is None:
@@ -95,9 +96,18 @@ def one_dim_cascade(hypo_params, n_samples=1000):
 
     #assign cascade axis direction
     sin_zen = math.sin(hypo_params.cascade_zenith)
-    dir_x = -sin_zen * math.cos(hypo_params.cascade_azimuth)
-    dir_y = -sin_zen * math.sin(hypo_params.cascade_azimuth)
-    dir_z = -math.cos(hypo_params.cascade_zenith)
+    cos_zen = math.cos(hypo_params.cascade_zenith)
+    sin_azi = math.sin(hypo_params.cascade_azimuth)
+    cos_azi = math.cos(hypo_params.cascade_azimuth)
+    dir_x = -sin_zen * cos_azi
+    dir_y = -sin_zen * sin_azi
+    dir_z = -cos_zen
+
+    #create rotation matrix 
+    rot_mat = -np.array([[cos_azi * cos_zen, -sin_azi, cos_azi * sin_zen],
+               [sin_azi * cos_zen, cos_zen, sin_azi * sin_zen],
+               [-sin_zen, 0, cos_zen]
+               ])
 
     #define photons per sample
     photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / n_samples
@@ -112,6 +122,26 @@ def one_dim_cascade(hypo_params, n_samples=1000):
     long_dist = gamma(a, scale=x/b)
     long_samples = l_dist.rvs(size=n_samples)
 
+    #create angular zenith distribution
+    zen_dist = pareto(b=1.91833423, loc=-22.82924369, scale=22.82924369)
+    zen_samples = zen_dist.rvs(size=n_samples)
+    zen_samples[zen_samples > 180] = 0.
+    zen_samples = zen_samples * np.pi / 180.
+
+    #create angular azimuth distribution
+    azi_samples = np.random.uniform(low=0., high=2*np.pi, size=(n_samples,))
+
+    #create angular vectors distribution
+    x_ang_dist = np.sin(zen_samples) * np.cos(azi_samples)
+    y_ang_dist = np.sin(zen_samples) * np.sin(azi_samples)
+    z_ang_dist = np.cos(zen_samples)
+    ang_dist = np.concatenate(
+        (x_ang_dist[np.newaxis, :],
+         y_ang_dist[np.newaxis, :],
+         z_ang_dist[np.newaxis, :]),
+        axis=0
+    )
+
     #create photon matrix
     pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
 
@@ -121,9 +151,9 @@ def one_dim_cascade(hypo_params, n_samples=1000):
     pinfo_gen[:, 2] = y + long_samples * dir_y
     pinfo_gen[:, 3] = z + long_samples * dir_z
     pinfo_gen[:, 4] = photons_per_samples
-    pinfo_gen[:, 5] = dir_x * COS_CKV 
-    pinfo_gen[:, 6] = dir_y * COS_CKV
-    pinfo_gen[:, 7] = dir_z * COS_CKV
+    pinfo_gen[:, 5] = np.dot(rot_mat, ang_dist)[0] * COS_CKV 
+    pinfo_gen[:, 6] = np.dot(rot_mat, ang_dist)[1] * COS_CKV
+    pinfo_gen[:, 7] = np.dot(rot_mat, ang_dist)[2] * COS_CKV
 
     return pinfo_gen    
 
