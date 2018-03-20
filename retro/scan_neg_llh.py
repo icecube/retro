@@ -152,6 +152,9 @@ def parse_args(description=__doc__):
     parser.add_argument(
         '--tdi-table', default=None
     )
+    parser.add_argument(
+        '--template-library', default=None
+    )
 
     return parser.parse_args()
 
@@ -227,6 +230,12 @@ def scan_neg_llh():
     if tdi_table is not None:
         raise NotImplementedError('TDI table not handled yet')
 
+
+    if dom_table_kind in ['raw_templ_compr', 'ckv_templ_compr']:
+        template_library = np.load(args.template_library)
+    else:
+        template_library = None
+
     compute_t_indep_exp = tdi_table is None
 
     gcd = extract_gcd(kwargs.pop('gcd'))
@@ -242,7 +251,8 @@ def scan_neg_llh():
         use_directionality=use_directionality,
         norm_version=norm_version,
         num_phi_samples=num_phi_samples,
-        ckv_sigma_deg=ckv_sigma_deg
+        ckv_sigma_deg=ckv_sigma_deg,
+        template_library=template_library,
     )
 
     print('  -> {:.3f} s\n'.format(time.time() - t0))

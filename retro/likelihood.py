@@ -28,6 +28,7 @@ limitations under the License.'''
 from itertools import product
 from os.path import abspath, dirname
 import sys
+import time
 
 import numpy as np
 
@@ -103,6 +104,7 @@ def get_neg_llh(
         Negative of the log likelihood
 
     """
+    start_tot_t = time.time()
     hypo_light_sources = hypo_handler.get_sources(hypo)
 
     sum_at_all_times_computed = False
@@ -119,12 +121,14 @@ def get_neg_llh(
         sum_at_all_times_computed = True
 
     sum_log_at_hit_times = np.float64(0.0)
+    table_t = 0.
     for str_dom in DC_ALL_SUBDUST_STRS_DOMS:
         string = str_dom[0]
         dom = str_dom[1]
 
         this_hits = hits.get((string, dom), EMPTY_HITS)
 
+        start_t = time.time()
         exp_p_at_all_times, exp_p_at_hit_times = dom_tables.get_expected_det(
             sources=hypo_light_sources,
             hit_times=this_hits[0, :].astype(np.float32),
@@ -133,6 +137,7 @@ def get_neg_llh(
             include_noise=True,
             time_window=time_window
         )
+        table_t += (time.time() - start_t)
 
         if not sum_at_all_times_computed:
             sum_at_all_times += exp_p_at_all_times
@@ -142,5 +147,9 @@ def get_neg_llh(
         )
 
     neg_llh = sum_at_all_times - sum_log_at_hit_times
+    
+    print('total time : %.5f'%(time.time() - start_tot_t))
+    print('table time : %.5f'%(table_t))
+
 
     return neg_llh

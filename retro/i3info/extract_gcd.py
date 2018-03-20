@@ -125,7 +125,7 @@ def extract_gcd(gcd_file, outdir=None):
                     gcd_info = pickle.load(open(src_gcd_stripped, 'rb'))
                     if outdir is not None and outdir != src_gcd_dir:
                         copyfile(src_gcd_stripped, outfpath)
-                return gcd_info
+                    return gcd_info
 
     if not parsed:
         raise ValueError(

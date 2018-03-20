@@ -33,6 +33,7 @@ limitations under the License.'''
 
 from os.path import abspath, dirname
 import sys
+import time
 
 import numpy as np
 
@@ -113,20 +114,27 @@ class Retro5DTables(object):
         `ckv_sigma_deg` could necessitate higher `num_phi_samples` to get an
         accurate "smearing."
 
+    template_library : shape-(n_templates, n_dir_theta, n_dir_deltaphi) array
+        Containing the directionality templates for compressed tables
+
     """
     def __init__(
             self, table_kind, geom, rde, noise_rate_hz, angsens_model,
             compute_t_indep_exp, use_directionality, norm_version,
-            num_phi_samples=None, ckv_sigma_deg=None
+            num_phi_samples=None, ckv_sigma_deg=None, template_library=None,
         ):
         self.angsens_poly, self.avg_angsens = load_angsens_model(angsens_model)
         self.angsens_model = angsens_model
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
 
-        self.tbl_is_raw = table_kind in ['raw_uncompr', 'raw_templ_compr']
-        self.tbl_is_ckv = table_kind in ['ckv_uncompr', 'ckv_templ_compr']
+        self.tbl_is_raw = table_kind in ['raw_uncompr']#, 'raw_templ_compr']
+        self.tbl_is_ckv = table_kind in ['ckv_uncompr']#, 'ckv_templ_compr']
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
+
+        if self.tbl_is_templ_compr:
+            assert(template_library is not None), 'template library is needed to sue compressed table'
+        self.template_library = template_library
 
         if self.tbl_is_raw:
             from retro.tables.clsim_tables import load_clsim_table_minimal
@@ -143,6 +151,12 @@ class Retro5DTables(object):
             self.usable_table_slice = (slice(None),)*5
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_table'
+        elif self.tbl_is_templ_compr:
+            from retro.tables.ckv_tables_compr import load_ckv_table_compr
+            self.table_loader_func = load_ckv_table_compr
+            self.usable_table_slice = (slice(None),)*3
+            self.t_indep_table_name = 't_indep_ckv_table'
+            self.table_name = 'ckv_template_map'
 
         assert len(geom.shape) == 3
         self.geom = geom
@@ -277,7 +291,8 @@ class Retro5DTables(object):
             compute_t_indep_exp=self.compute_t_indep_exp,
             use_directionality=self.use_directionality,
             num_phi_samples=self.num_phi_samples,
-            ckv_sigma_deg=self.ckv_sigma_deg
+            ckv_sigma_deg=self.ckv_sigma_deg,
+            template_library=self.template_library,
         )
         if self.pexp_func is None:
             self.pexp_func = pexp_5d
@@ -293,16 +308,16 @@ class Retro5DTables(object):
             table['table_norm'],
         )
 
-        if self.tbl_is_templ_compr:
-            table_tup += (table['table_map'],)
+        #if self.tbl_is_templ_compr:
+        #    table_tup += (table['table_map'],)
 
         if self.compute_t_indep_exp:
             table_tup += (
                 table[self.t_indep_table_name],
                 table['t_indep_table_norm']
             )
-            if self.tbl_is_templ_compr:
-                table_tup += (table['t_indep_table_map'],)
+            #if self.tbl_is_templ_compr:
+            #    table_tup += (table['t_indep_table_map'],)
 
         self.tables[(string, dom)] = table_tup
 
@@ -359,6 +374,7 @@ class Retro5DTables(object):
 
         table_tup = self.tables[(string, dom)]
 
+        start_t = time.time()
         exp_p_at_all_times, exp_p_at_hit_times = self.pexp_func(
             sources,
             hit_times,
@@ -366,6 +382,7 @@ class Retro5DTables(object):
             dom_quantum_efficiency,
             *table_tup
         )
+        print('pexp time : %.5f'%(time.time() - start_t))
 
         if include_noise:
             dom_noise_rate_per_ns = self.noise_rate_per_ns[string_idx, dom_idx]
