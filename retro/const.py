@@ -26,7 +26,15 @@ __all__ = [
 
     # "Enum"-like things
     'STR_ALL', 'STR_IC', 'STR_DC', 'AGG_STR_NONE', 'AGG_STR_ALL',
-    'AGG_STR_SUBDET', 'DOM_ALL'
+    'AGG_STR_SUBDET', 'DOM_ALL',
+
+    'NUM_STRINGS', 'NUM_DOMS_PER_STRING', 'NUM_DOMS_TOT',
+
+    'DC_STRS', 'DC_IC_STRS', 'DC_SUBDUST_DOMS', 'IC_SUBDUST_DOMS',
+    'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
+    'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
+
+    'get_sd_idx'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -55,6 +63,23 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import FTYPE
+
+
+def get_sd_idx(string, dom):
+    """Get a single uint16 index from an IceCube string number (from 1 to 86)
+    and DOM number (from 1 to60).
+
+    Parameters
+    ----------
+    string : int in [1, 60]
+    dom : int in [1, 60]
+
+    Returns
+    -------
+    sd_idx : np.uint16 in [0, 5159]
+
+    """
+    return np.uint16((string-1) * NUM_DOMS_PER_STRING + (dom-1))
 
 
 # -- Physical / mathematical constants -- #
@@ -156,3 +181,31 @@ STR_TO_PDG_INTER = {v: k for k, v in PDG_INTER_STR.items()}
 STR_ALL, STR_IC, STR_DC = -1, -2, -3
 AGG_STR_NONE, AGG_STR_ALL, AGG_STR_SUBDET = 0, 1, 2
 DOM_ALL = -1
+
+# -- geom constants --- #
+
+NUM_STRINGS = 86
+NUM_DOMS_PER_STRING = 60
+NUM_DOMS_TOT = NUM_STRINGS * NUM_DOMS_PER_STRING
+
+
+DC_STRS = np.array([79, 80, 81, 82, 83, 84, 85, 86], dtype=np.uint8)
+DC_IC_STRS = np.array([26, 27, 35, 36, 37, 45, 46], dtype=np.uint8)
+
+DC_SUBDUST_DOMS = np.array(list(range(11, 60+1)), dtype=np.uint8)
+IC_SUBDUST_DOMS = np.array(list(range(25, 60+1)), dtype=np.uint8)
+
+DC_SUBDUST_STRS_DOMS = np.array(
+    [get_sd_idx(s, d) for s, d in product(DC_STRS, DC_SUBDUST_DOMS)]
+)
+DC_IC_SUBDUST_STRS_DOMS = np.array(
+    [get_sd_idx(s, d) for s, d in product(DC_IC_STRS, IC_SUBDUST_DOMS)]
+)
+
+DC_ALL_SUBDUST_STRS_DOMS = np.concatenate(
+    (DC_SUBDUST_STRS_DOMS, DC_IC_SUBDUST_STRS_DOMS)
+)
+
+ALL_STRS = list(range(1, 86+1))
+ALL_DOMS = list(range(1, 60+1))
+ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(ALL_STRS, ALL_DOMS)])

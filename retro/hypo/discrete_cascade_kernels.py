@@ -54,6 +54,9 @@ def point_cascade(hypo_params):
     sources
 
     """
+    if hypo_params.cascade_energy == 0:
+        return np.empty(shape=0, dtype=SRC_DTYPE)
+
     sources = np.empty(shape=(1,), dtype=SRC_DTYPE)
     sources[0]['kind'] = SRC_OMNI
     sources[0]['t'] = hypo_params.t

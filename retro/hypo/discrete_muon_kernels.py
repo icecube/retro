@@ -100,7 +100,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
-    n_samples = int(duration // dt)
+    n_samples = int(duration / dt)
     segment_length = 0.0
     if n_samples > 0:
         segment_length = length / n_samples
@@ -110,11 +110,12 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     # (vector components point in direction of motion), as opposed to "IceCube"
     # vector notation (vector components point opposite to direction of
     # motion).
-    dir_costheta = np.cos(hypo_params.track_zenith + np.pi)
-    dir_sintheta = np.sqrt(1 - dir_costheta*dir_costheta)
+    opposite_zenith = hypo_params.track_zenith + np.pi
+    dir_costheta = math.cos(opposite_zenith)
+    dir_sintheta = math.sin(opposite_zenith)
 
     dir_cosphi = np.cos(hypo_params.track_azimuth)
-    dir_sinphi = np.sqrt(1 - dir_cosphi*dir_cosphi)
+    dir_sinphi = np.sin(hypo_params.track_azimuth)
 
     dir_x = dir_sintheta * dir_cosphi
     dir_y = dir_sintheta * dir_sinphi

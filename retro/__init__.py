@@ -80,7 +80,7 @@ else:
 
 # -- Datatype choices for consistency throughout code -- #
 
-FTYPE = np.float64
+FTYPE = np.float32
 """Datatype to use for explicitly-typed floating point numbers"""
 
 UITYPE = np.int64
@@ -90,7 +90,7 @@ HYPO_PARAMS_T = HypoParams8D
 """Global selection of which hypothesis to use throughout the code."""
 
 
-# -- Default choices we've made and constants -- #
+# -- Default choices we've made -- #
 
 DEBUG = 0
 """Level of debug messages to display"""

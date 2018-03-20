@@ -25,38 +25,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from itertools import product
 from os.path import abspath, dirname
 import sys
-
-import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-
-
-DC_STRS = [79, 80, 81, 82, 83, 84, 85, 86]
-DC_IC_STRS = [26, 27, 35, 36, 37, 45, 46]
-
-DC_SUBDUST_DOMS = list(range(11, 60+1))
-IC_SUBDUST_DOMS = list(range(25, 60+1))
-
-DC_SUBDUST_STRS_DOMS = list(product(DC_STRS, DC_SUBDUST_DOMS))
-DC_IC_SUBDUST_STRS_DOMS = list(product(DC_IC_STRS, IC_SUBDUST_DOMS))
-
-DC_ALL_SUBDUST_STRS_DOMS = DC_SUBDUST_STRS_DOMS + DC_IC_SUBDUST_STRS_DOMS
-
-ALL_STRS = list(range(1, 86+1))
-ALL_DOMS = list(range(1, 60+1))
-ALL_STRS_DOMS = list(product(ALL_STRS, ALL_DOMS))
-
-#EMPTY_HITS = Hits(
-#    times=np.empty(shape=(0, 1), dtype=np.float32),
-#    charges=np.empty(shape=(0, 1), dtype=np.float32)
-#)
-EMPTY_HITS = np.empty(shape=(2, 0), dtype=np.float32)
+from retro import const
 
 
 def get_neg_llh(
@@ -71,7 +47,7 @@ def get_neg_llh(
     hypo : HYPO_PARAMS_T
         Hypothesized event parameters
 
-    hits : mapping
+    hits : sequence of length NUM_DOMS_TOT
         Keys are (string, dom) tuples, values are `retro_types.Hits`
         namedtuples, where ``val.times`` and ``val.charges`` are arrays of
         shape (n_dom_hits_i,).
@@ -105,7 +81,7 @@ def get_neg_llh(
     """
     hypo_light_sources = hypo_handler.get_sources(hypo)
 
-    sum_at_all_times_computed = False
+    #sum_at_all_times_computed = False
     if tdi_table is None:
         if not dom_tables.compute_t_indep_exp:
             print('*'*79)
@@ -113,34 +89,37 @@ def get_neg_llh(
             print('*'*79)
         sum_at_all_times = 0.0
     else:
-        sum_at_all_times = tdi_table.get_expected_det(
-            sources=hypo_light_sources
+        raise NotImplementedError()
+        #sum_at_all_times = tdi_table.get_expected_det(
+        #    sources=hypo_light_sources
+        #)
+        #sum_at_all_times_computed = True
+
+    sum_at_all_times = 0.0
+    tot_sum_log_at_hit_times = 0.0
+    for sd_idx in const.DC_ALL_SUBDUST_STRS_DOMS:
+        this_hits = hits[sd_idx]
+        # DEBUG: remove the below if / continue when no longer debugging!
+        #if this_hits is None:
+        #    continue
+        exp_p_at_all_times, sum_log_at_hit_times = dom_tables.pexp_func(
+            hypo_light_sources,
+            this_hits,
+            dom_tables.dom_info[sd_idx],
+            time_window,
+            *dom_tables.tables[sd_idx]
         )
-        sum_at_all_times_computed = True
+        sum_at_all_times += exp_p_at_all_times
+        tot_sum_log_at_hit_times += sum_log_at_hit_times
 
-    sum_log_at_hit_times = np.float64(0.0)
-    for str_dom in DC_ALL_SUBDUST_STRS_DOMS:
-        string = str_dom[0]
-        dom = str_dom[1]
-
-        this_hits = hits.get((string, dom), EMPTY_HITS)
-
-        exp_p_at_all_times, exp_p_at_hit_times = dom_tables.get_expected_det(
-            sources=hypo_light_sources,
-            hit_times=this_hits[0, :].astype(np.float32),
-            string=string,
-            dom=dom,
-            include_noise=True,
-            time_window=time_window
-        )
-
-        if not sum_at_all_times_computed:
-            sum_at_all_times += exp_p_at_all_times
-
-        sum_log_at_hit_times += np.sum(
-            this_hits[1, :] * np.log(exp_p_at_hit_times)
-        )
-
-    neg_llh = sum_at_all_times - sum_log_at_hit_times
+    neg_llh = sum_at_all_times - tot_sum_log_at_hit_times
 
     return neg_llh
+
+
+#@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+#def sum_wtd_log(hits, expectations):
+#    accum = 0.0
+#    for hit, expectation in zip(hits, expectations):
+#        accum += hit * math.log(expectation)
+#    return accum

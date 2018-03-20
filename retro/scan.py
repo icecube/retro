@@ -113,7 +113,7 @@ def scan(scan_values, metric, metric_kw=None):
         metric_vals.append(metric_val)
         if n > 0 and n % 500 == 0:
             times.append(time.time())
-            avg = np.mean(np.diff(times[-5:])) / 500
+            avg = np.mean(np.diff(times[-3:])) / 500
             remaining = avg * (total_points - n - 1)
             print('Elapsed: {} s, avg: {:.3f} ms/pt; remaining ~ {} s'
                   .format(int(np.round(times[-1] - times[0])),

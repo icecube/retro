@@ -31,6 +31,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from itertools import product
 from os.path import abspath, dirname
 import sys
 
@@ -41,10 +42,11 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
-    AGG_STR_ALL, AGG_STR_SUBDET, DOM_ALL, STR_IC, STR_DC, STR_ALL,
-    SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI
+    NUM_STRINGS, NUM_DOMS_PER_STRING, NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS,
+    PI, TWO_PI, get_sd_idx
 )
 from retro.i3info.angsens_model import load_angsens_model
+from retro.retro_types import DOM_INFO
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
 
@@ -168,19 +170,31 @@ class Retro5DTables(object):
             )
         mask = zero_mask | nan_mask | inf_mask
 
-        self.operational_doms = ~mask
-        self.rde = np.ma.masked_where(mask, rde)
+        operational_doms = ~mask
+        self.operational_doms = operational_doms
+        self.rde = rde.astype(np.float32)
         self.quantum_efficiency = 0.25 * self.rde
-        self.noise_rate_hz = np.ma.masked_where(mask, noise_rate_hz)
+        self.noise_rate_hz = noise_rate_hz.astype(np.float32)
         self.noise_rate_per_ns = self.noise_rate_hz / 1e9
 
-        self.tables = {}
+        # TODO: flatten the following loop using simple numpy operations
+        self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO)
+        for s_idx, d_idx in product(range(NUM_STRINGS), range(NUM_DOMS_PER_STRING)):
+            sd_idx = get_sd_idx(string=s_idx + 1, dom=d_idx + 1)
+            self.dom_info[sd_idx]['operational'] = self.operational_doms[s_idx, d_idx]
+            self.dom_info[sd_idx]['x'] = self.geom[s_idx, d_idx, 0]
+            self.dom_info[sd_idx]['y'] = self.geom[s_idx, d_idx, 1]
+            self.dom_info[sd_idx]['z'] = self.geom[s_idx, d_idx, 2]
+            self.dom_info[sd_idx]['quantum_efficiency'] = self.quantum_efficiency[s_idx, d_idx]
+            self.dom_info[sd_idx]['noise_rate_per_ns'] = self.noise_rate_per_ns[s_idx, d_idx]
+
+        self.tables = [tuple()]*NUM_DOMS_TOT
         self.string_aggregation = None
         self.depth_aggregation = None
         self.pexp_func = None
         self.pexp_meta = None
 
-    def load_table(self, fpath, string, dom, mmap, step_length=None):
+    def load_table(self, fpath, sd_indices, mmap, step_length=None):
         """Load a table into the set of tables.
 
         Parameters
@@ -189,9 +203,8 @@ class Retro5DTables(object):
             Path to the table .fits file or table directory (in the case of the
             Retro-formatted directory with .npy files).
 
-        string : int in [1, 86] or str in {'ic', 'dc', or 'all'}
-
-        dom : int in [1, 60] or str == 'all'
+        sd_indices : sd_idx or iterable thereof
+            See utils.misc.get_sd_idx
 
         mmap : bool
             Whether to attempt to memory map the table (only applicable for
@@ -207,50 +220,8 @@ class Retro5DTables(object):
             parameter.
 
         """
-        single_dom_spec = True
-        if isinstance(string, basestring):
-            string = string.strip().lower()
-            if string == 'ic':
-                string = STR_IC
-            elif string == 'dc':
-                string = STR_DC
-            elif string == 'all':
-                string = STR_ALL
-            else:
-                raise ValueError('Unhandled string "{}"'.format(string))
-            agg_mode = AGG_STR_ALL if string is STR_ALL else AGG_STR_SUBDET
-            if self.string_aggregation is None:
-                self.string_aggregation = agg_mode
-            assert agg_mode == self.string_aggregation
-            single_dom_spec = False
-        else:
-            if self.string_aggregation is None:
-                self.string_aggregation = False
-            # `False` is ok but `None` is not ok
-            assert self.string_aggregation == False # pylint: disable=singleton-comparison
-            assert 1 <= string <= 86
-
-        if isinstance(dom, basestring):
-            dom = dom.strip().lower()
-            assert dom == 'all'
-            dom = DOM_ALL
-            if self.depth_aggregation is None:
-                self.depth_aggregation = True
-            assert self.depth_aggregation
-            single_dom_spec = False
-        else:
-            if self.depth_aggregation is None:
-                self.depth_aggregation = False
-            # `False` is ok but `None` is not ok
-            assert self.depth_aggregation == False # pylint: disable=singleton-comparison
-            assert 1 <= dom <= 60
-
-        if single_dom_spec and not self.operational_doms[string - 1, dom - 1]:
-            print(
-                'WARNING: String {}, DOM {} is not operational, skipping'
-                ' loading the corresponding table'.format(string, dom)
-            )
-            return
+        if isinstance(sd_indices, int):
+            sd_indices = [sd_indices]
 
         table = self.table_loader_func(fpath=fpath, mmap=mmap)
         if 'step_length' in table:
@@ -304,27 +275,24 @@ class Retro5DTables(object):
             if self.tbl_is_templ_compr:
                 table_tup += (table['t_indep_table_map'],)
 
-        self.tables[(string, dom)] = table_tup
+        for sd_idx in sd_indices:
+            self.tables[sd_idx] = table_tup
 
-    def get_expected_det(
-            self, sources, hit_times, string, dom, include_noise=False,
-            time_window=None
-        ):
-        """
+    def get_expected_det(self, sources, hits, sd_idx, time_window):
+        """Get the number of photons we expect the DOM to detect (which is the
+        same as saying the number of hits we expect in the DOM).
+
         Parameters
         ----------
         sources : shape (num_sources,) array of dtype SRC_DTYPE
             Info about photons generated photons by the event hypothesis.
 
-        hit_times : shape (num_hits,) array of floats, units of ns
+        hits : shape (2, num_hits) array of floats
+            Row 0 is hit times in units of ns and row 1 is hit multiplicity in
+            photoelectrons.
 
-        string : int in [1, 86]
-
-        dom : int in [1, 60]
-
-        include_noise : bool
-            Include noise in the photon expectations (both at hit time and
-            time-independent). Non-operational DOMs return 0 for both return values
+        sd_idx : uint16 in [0, 5159]
+            See utils.misc.get_sd_idx
 
         time_window : float in units of ns
             Time window for computing the "time-independent" noise expectation.
@@ -332,47 +300,21 @@ class Retro5DTables(object):
 
         Returns
         -------
-        exp_p_at_all_times : float64
+        sum_at_all_times : float64
 
-        exp_p_at_hit_times : shape (num_hits,) array of float64
+        tot_sum_log_at_hit_times : float64
 
         """
-        # `string` and `dom` are 1-indexed but array indices are 0-indexed
-        string_idx = string - 1
-        dom_idx = dom - 1
-        if not self.operational_doms[string_idx, dom_idx]:
-            return np.float64(0.0), np.zeros_like(hit_times, dtype=np.float64)
-
-        dom_coord = self.geom[string_idx, dom_idx]
-        dom_quantum_efficiency = self.quantum_efficiency[string_idx, dom_idx]
-
-        if self.string_aggregation is AGG_STR_ALL:
-            string = STR_ALL
-        elif self.string_aggregation is AGG_STR_SUBDET:
-            if string < 79:
-                string = STR_IC
-            else:
-                string = STR_DC
-
-        if self.depth_aggregation:
-            dom = DOM_ALL
-
-        table_tup = self.tables[(string, dom)]
-
-        exp_p_at_all_times, exp_p_at_hit_times = self.pexp_func(
+        dom_info = self.dom_info[sd_idx]
+        table_tup = self.tables[sd_idx]
+        sum_at_all_times, tot_sum_log_at_hit_times = self.pexp_func(
             sources,
-            hit_times,
-            dom_coord,
-            dom_quantum_efficiency,
+            hits,
+            dom_info,
+            time_window,
             *table_tup
         )
-
-        if include_noise:
-            dom_noise_rate_per_ns = self.noise_rate_per_ns[string_idx, dom_idx]
-            exp_p_at_hit_times += dom_noise_rate_per_ns
-            exp_p_at_all_times += dom_noise_rate_per_ns * time_window
-
-        return exp_p_at_all_times, exp_p_at_hit_times
+        return sum_at_all_times, tot_sum_log_at_hit_times
 
 
 def get_table_norm(
