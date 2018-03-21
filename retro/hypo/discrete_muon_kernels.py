@@ -43,7 +43,8 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
-    COS_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M
+    COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
+    TRACK_PHOTONS_PER_M
 )
 from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_CKV_BETA1
 
@@ -99,16 +100,28 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
-    n_samples = int(duration // dt)
+    n_samples = int(duration / dt)
     segment_length = 0.0
     if n_samples > 0:
         segment_length = length / n_samples
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
-    sin_zen = math.sin(hypo_params.track_zenith)
-    dir_x = -sin_zen * math.cos(hypo_params.track_azimuth)
-    dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
-    dir_z = -math.cos(hypo_params.track_zenith)
+    # NOTE: add pi to make dir vector go in "math-standard" vector notation
+    # (vector components point in direction of motion), as opposed to "IceCube"
+    # vector notation (vector components point opposite to direction of
+    # motion).
+    opposite_zenith = np.pi - hypo_params.track_zenith
+    opposite_azimuth = np.pi + hypo_params.track_azimuth
+
+    dir_costheta = math.cos(opposite_zenith)
+    dir_sintheta = math.sin(opposite_zenith)
+
+    dir_cosphi = np.cos(opposite_azimuth)
+    dir_sinphi = np.sin(opposite_azimuth)
+
+    dir_x = dir_sintheta * dir_cosphi
+    dir_y = dir_sintheta * dir_sinphi
+    dir_z = dir_costheta
 
     sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
 
@@ -135,9 +148,16 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
     sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     sources['photons'] = photons_per_segment
-    sources['dir_x'] = dir_x * COS_CKV
-    sources['dir_y'] = dir_y * COS_CKV
-    sources['dir_z'] = dir_z * COS_CKV
+
+    sources['dir_costheta'] = dir_costheta
+    sources['dir_sintheta'] = dir_sintheta
+
+    sources['dir_cosphi'] = dir_cosphi
+    sources['dir_sinphi'] = dir_sinphi
+
+    sources['ckv_theta'] = THETA_CKV
+    sources['ckv_costheta'] = COS_CKV
+    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
 

@@ -41,18 +41,18 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import PI
+from retro.hypo.discrete_hypo import SRC_CKV_BETA1, SRC_OMNI
 from retro.utils.ckv import (
     survival_prob_from_cone, survival_prob_from_smeared_cone
 )
 from retro.utils.geom import infer_power
-
 
 MACHINE_EPS = 1e-16
 
 
 def generate_pexp_5d_function(
         table, table_kind, compute_t_indep_exp, use_directionality,
-        num_phi_samples=None, ckv_sigma_deg=None
+        num_phi_samples=None, ckv_sigma_deg=None, template_library=None,
     ):
     """Generate a numba-compiled function for computing expected photon counts
     at a DOM, where the table's binning info is used to pre-compute various
@@ -80,6 +80,10 @@ def generate_pexp_5d_function(
         Standard deviation in degrees for Cherenkov angle. (Irrelevant if
         `use_directionality` is False or if you use a Cherenkov table, which
         already has this parameter integrated into it.)
+
+    template_library : shape-(n_templates, n_dir_theta, n_dir_deltaphi) array
+        Containing the directionality templates for compressed tables
+
 
     Returns
     -------
@@ -247,50 +251,78 @@ def generate_pexp_5d_function(
 
         """
 
+    if tbl_is_templ_compr:
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
+            '''
+            helper function for directionality averaged table lookup
+            '''
+            templ = table[
+                r_bin_idx,
+                costheta_bin_idx,
+                t_bin_idx
+            ]
+            return templ['weight'] / template_library[templ['index']].size
+
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx):
+            '''
+            helper function for table lookup
+            '''
+            templ = table[
+                r_bin_idx,
+                costheta_bin_idx,
+                t_bin_idx
+            ]
+            return templ['weight'] * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
+
+    else:
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
+            '''
+            helper function for directionality averaged table lookup
+            '''
+            return np.mean(table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :])
+
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx):
+            '''
+            helper function for table lookup
+            '''
+            return table[r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+
+
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d_uncompr(
+    def pexp_5d(
             sources,
-            hit_times,
-            dom_coord,
-            quantum_efficiency,
+            hits,
+            dom_info,
+            time_window,
             table,
             table_norm,
             t_indep_table=empty_4d_array,
             t_indep_table_norm=empty_1d_array,
         ):
+
+        num_hits = hits.shape[1]
+
+        if not dom_info['operational']:
+            return np.float64(0), np.float64(0)
+
         # Initialize accumulators (using double precision)
         exp_p_at_all_times = np.float64(0.0)
-        exp_p_at_hit_times = np.zeros_like(hit_times, dtype=np.float64)
-
-        # Initialize "prev_*" vars
-        prev_r_bin_idx = -1
-        prev_costheta_bin_idx = -1
-
-        pdir_rhosquared = np.nan
-        pdir_rho = np.nan
-        pdir_rsquared = np.nan
-        pdir_r = np.nan
-
-        if use_directionality:
-            prev_pdir_rsquared = np.nan
-        else:
-            new_pdir_r = False
-
-        # Initialize cached values to nan since it's a bug if these are not
-        # computed at least the first time through and this will help ensure
-        # that such a bug shows itself
-        r_t_bin_norm = np.nan
+        exp_p_at_hit_times = np.zeros(num_hits, dtype=np.float64)
 
         # Extract the components of the DOM coordinate
-        dom_x = dom_coord[0]
-        dom_y = dom_coord[1]
-        dom_z = dom_coord[2]
+        dom_x = dom_info['x']
+        dom_y = dom_info['y']
+        dom_z = dom_info['z']
 
         # Loop over the entries (one per row)
         for source in sources:
-            dx = dom_x - source.x
-            dy = dom_y - source.y
-            dz = dom_z - source.z
+            dx = dom_x - source['x']
+            dy = dom_y - source['y']
+            dz = dom_z - source['z']
 
             rhosquared = dx*dx + dy*dy
             rsquared = rhosquared + dz*dz
@@ -299,46 +331,18 @@ def generate_pexp_5d_function(
             if rsquared >= rsquared_max:
                 continue
 
-            source_photons = source.photons
-
             r = math.sqrt(rsquared)
             r_bin_idx = int(r**inv_r_power / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
-            if r_bin_idx == prev_r_bin_idx:
-                new_r_bin = False
-            else:
-                new_r_bin = True
-                prev_r_bin_idx = r_bin_idx
+            source_kind = source['kind']
 
-            if costheta_bin_idx == prev_costheta_bin_idx:
-                new_costheta_bin = False
-            else:
-                new_costheta_bin = True
-                prev_costheta_bin_idx = costheta_bin_idx
+            if source_kind == SRC_OMNI and compute_t_indep_exp:
+                t_indep_surv_prob = np.mean(
+                    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                )
 
-            if use_directionality:
-                pdir_x = source.dir_x
-                pdir_y = source.dir_y
-                pdir_z = source.dir_z
-                pdir_rhosquared = pdir_x*pdir_x + pdir_y*pdir_y
-                pdir_rsquared = pdir_rhosquared + pdir_z*pdir_z
-
-                if pdir_rsquared != prev_pdir_rsquared:
-                    new_pdir_r = True
-                    prev_pdir_rsquared = pdir_rsquared
-                    pdir_r = math.sqrt(pdir_rsquared)
-                    pdir_rho = math.sqrt(pdir_rhosquared)
-                else:
-                    new_pdir_r = False
-
-            if pdir_rsquared == 0.0: # isotropic emitter
-                if compute_t_indep_exp and (new_pdir_r or new_r_bin or new_costheta_bin):
-                    t_indep_surv_prob = np.mean(
-                        t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
-                    )
-
-            elif pdir_rsquared < 1.0: # Cherenkov emitter
+            elif source_kind == SRC_CKV_BETA1:
                 # Note that for these tables, we have to invert the photon
                 # direction relative to the vector from the DOM to the photon's
                 # vertex since simulation has photons going _away_ from the DOM
@@ -346,7 +350,7 @@ def generate_pexp_5d_function(
                 # _towards_ the DOM.
 
                 # Zenith angle is indep. of photon position relative to DOM
-                pdir_costheta = pdir_z / pdir_r
+                pdir_costheta = source['dir_costheta']
 
                 rho = math.sqrt(rhosquared)
 
@@ -357,14 +361,15 @@ def generate_pexp_5d_function(
                 # the photon source to the DOM. We get the cosine of the angle
                 # between these vectors by solving the identity
                 #   `a dot b = |a| |b| cos(deltaphi)`
-                # for cos(deltaphi).
-                #
-                if pdir_rho <= MACHINE_EPS or rho <= MACHINE_EPS:
+                # for cos(deltaphi), where the `a` and `b` vectors are the
+                # projections of the aforementioned vectors onto the xy-plane.
+
+                if rho <= MACHINE_EPS:
                     pdir_cosdeltaphi = 1.0
                     pdir_sindeltaphi = 0.0
                 else:
                     pdir_cosdeltaphi = (
-                        pdir_x/pdir_rho * dx/rho + pdir_y/pdir_rho * dy/rho
+                        source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
                     )
                     # Note that the max and min here here in case numerical
                     # precision issues cause the dot product to blow up.
@@ -373,14 +378,14 @@ def generate_pexp_5d_function(
                         pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi*pdir_cosdeltaphi)
 
                 if tbl_is_raw:
-                    pdir_sintheta = pdir_rho / pdir_r
+                    pdir_sintheta = source['dir_sintheta']
 
                     # Cherenkov angle is encoded as the projection of a
                     # length-1 vector going in the Ckv direction onto the
                     # charged particle's direction. Ergo, in the length of the
                     # pdir vector is the cosine of the ckv angle.
-                    ckv_costheta = pdir_r
-                    ckv_theta = math.acos(ckv_costheta)
+                    ckv_costheta = source['ckv_costheta']
+                    ckv_theta = source['ckv_theta']
 
                     if ckv_sigma_deg > 0:
                         if compute_t_indep_exp:
@@ -399,7 +404,7 @@ def generate_pexp_5d_function(
                                 random_delta_thetas=random_delta_thetas
                             )
                     else:
-                        ckv_sintheta = math.sqrt(1 - ckv_costheta*ckv_costheta)
+                        ckv_sintheta = source['ckv_sintheta']
                         if compute_t_indep_exp:
                             t_indep_surv_prob, _a, _b = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
                                 costheta=ckv_costheta,
@@ -436,36 +441,38 @@ def generate_pexp_5d_function(
                         costhetadir_bin_idx,
                         deltaphidir_bin_idx
                     ]
+                    if t_indep_surv_prob == 0:
+                        print((r_bin_idx, costheta_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx))
+                        raise ValueError('xyz')
 
-            elif pdir_rsquared == 1.0:
-                if tbl_is_raw:
-                    raise NotImplementedError('Line emitter not yet implmented.')
-                else: # tbl_is_ckv
-                    raise ValueError('Line emitter cannot be computed with ckv table')
+            else:
+                raise NotImplementedError('Source kind not implmented')
 
-            else: # pdir_rsquared > 1 Gaussian emitter
-                if tbl_is_raw:
-                    raise NotImplementedError('Gaussian emitter not yet implemented.')
-                else: # tbl_is_ckv
-                    raise ValueError('Gaussian emitter cannot be computed with ckv table')
+            source_photons = source['photons']
 
             if compute_t_indep_exp:
+                ti_norm = t_indep_table_norm[r_bin_idx]
+                if not ti_norm > 0:
+                    print(r_bin_idx, dom_info, ti_norm)
+                    raise ValueError('time indep norm is not > 0!')
                 exp_p_at_all_times += (
-                    source_photons * t_indep_table_norm[r_bin_idx] * t_indep_surv_prob
+                    source_photons * ti_norm * t_indep_surv_prob
                 )
 
-            for hit_t_idx, hit_t in enumerate(hit_times):
+            for hit_t_idx in range(num_hits):
+                hit_time = hits[0, hit_t_idx]
+
                 # Causally impossible? (Note the comparison is written such that it
                 # will evaluate to True if hit_time is NaN.)
-                source_t = source.t
-                if not source_t <= hit_t:
+                source_t = source['t']
+                if not source_t <= hit_time:
                     continue
 
                 # A photon that starts immediately in the past (before the DOM
                 # was hit) will show up in the Retro DOM tables in bin 0; the
                 # further in the past the photon started, the higher the time
                 # bin index. Therefore, subract source time from hit time.
-                dt = hit_t - source_t
+                dt = hit_time - source_t
 
                 # Is relative time outside binning?
                 if dt >= t_max:
@@ -475,300 +482,325 @@ def generate_pexp_5d_function(
 
                 r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
 
-                if pdir_r == 0.0: # isotropic emitter
-                    surv_prob_at_hit_t = np.mean(
-                        table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                    )
+                if source_kind == SRC_OMNI:
+                    surv_prob_at_hit_t = table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx)
 
-                elif pdir_r < 1.0: # Cherenkov emitter
-                    if tbl_is_raw:
-                        if ckv_sigma_deg > 0:
-                            surv_prob_at_hit_t, _c, _d = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
-                                theta=ckv_theta,
-                                num_phi=num_phi_samples,
-                                rot_costheta=pdir_costheta,
-                                rot_sintheta=pdir_sintheta,
-                                rot_cosphi=pdir_cosdeltaphi,
-                                rot_sinphi=pdir_sindeltaphi,
-                                directional_survival_prob=(
-                                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                                ),
-                                num_costheta_bins=n_costhetadir_bins,
-                                num_deltaphi_bins=n_deltaphidir_bins,
-                                random_delta_thetas=random_delta_thetas
-                            )
-                        else:
-                            surv_prob_at_hit_t, _c, _d = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
-                                costheta=ckv_costheta,
-                                sintheta=ckv_sintheta,
-                                num_phi=num_phi_samples,
-                                rot_costheta=pdir_costheta,
-                                rot_sintheta=pdir_sintheta,
-                                rot_cosphi=pdir_cosdeltaphi,
-                                rot_sinphi=pdir_sindeltaphi,
-                                directional_survival_prob=(
-                                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                                ),
-                                num_costheta_bins=n_costhetadir_bins,
-                                num_deltaphi_bins=n_deltaphidir_bins,
-                            )
+                elif source_kind == SRC_CKV_BETA1:
+                #    if tbl_is_raw and not tbl_is_templ_compr:
+                #        if ckv_sigma_deg > 0:
+                #            surv_prob_at_hit_t, _c, _d = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
+                #                theta=ckv_theta,
+                #                num_phi=num_phi_samples,
+                #                rot_costheta=pdir_costheta,
+                #                rot_sintheta=pdir_sintheta,
+                #                rot_cosphi=pdir_cosdeltaphi,
+                #                rot_sinphi=pdir_sindeltaphi,
+                #                directional_survival_prob=(
+                #                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                #                ),
+                #                num_costheta_bins=n_costhetadir_bins,
+                #                num_deltaphi_bins=n_deltaphidir_bins,
+                #                random_delta_thetas=random_delta_thetas
+                #            )
+                #        else:
+                #            surv_prob_at_hit_t, _c, _d = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
+                #                costheta=ckv_costheta,
+                #                sintheta=ckv_sintheta,
+                #                num_phi=num_phi_samples,
+                #                rot_costheta=pdir_costheta,
+                #                rot_sintheta=pdir_sintheta,
+                #                rot_cosphi=pdir_cosdeltaphi,
+                #                rot_sinphi=pdir_sindeltaphi,
+                #                directional_survival_prob=(
+                #                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                #                ),
+                #                num_costheta_bins=n_costhetadir_bins,
+                #                num_deltaphi_bins=n_deltaphidir_bins,
+                #            )
 
-                    else: # tbl_is_ckv
-                        surv_prob_at_hit_t = table[
-                            r_bin_idx,
-                            costheta_bin_idx,
-                            t_bin_idx,
-                            costhetadir_bin_idx,
-                            deltaphidir_bin_idx
-                        ]
-
-                elif pdir_r == 1.0:
-                    if tbl_is_raw:
-                        raise NotImplementedError(
-                            'Line emitter not yet implmented.'
-                        )
-                    else: # tbl_is_ckv
-                        raise ValueError(
-                            'Line emitter cannot be computed with ckv table'
-                        )
+                #    else: # tbl_is_ckv
+                    surv_prob_at_hit_t = table_lookup(table, 
+                                                          r_bin_idx,
+                                                          costheta_bin_idx,
+                                                          t_bin_idx,
+                                                          costhetadir_bin_idx,
+                                                          deltaphidir_bin_idx
+                                                          )
 
                 else:
-                    if tbl_is_raw:
-                        raise NotImplementedError(
-                            'Gaussian emitter not yet implemented.'
-                        )
-                    else: # tbl_is_ckv
-                        raise ValueError(
-                            'Gaussian emitter cannot be computed with ckv table'
-                        )
+                    raise NotImplementedError('Source kind not implemented')
 
-                exp_p_at_hit_times[hit_t_idx] += (
-                    source_photons * r_t_bin_norm * surv_prob_at_hit_t
-                )
+                exp_p_at_hit_times[hit_t_idx] += source_photons * r_t_bin_norm * surv_prob_at_hit_t
 
-        exp_p_at_hit_times = quantum_efficiency * exp_p_at_hit_times
-        exp_p_at_all_times = quantum_efficiency * exp_p_at_all_times
+        quantum_efficiency = dom_info['quantum_efficiency']
+        noise_rate_per_ns = dom_info['noise_rate_per_ns']
 
-        return exp_p_at_all_times, exp_p_at_hit_times
+        sum_log_at_hit_times = np.float64(0.0)
+        for hit_idx in range(num_hits):
+            ep_at_ht = exp_p_at_hit_times[hit_idx]
+            hit_mult = hits[1, hit_idx]
+            if hit_mult == 0:
+                print(dom_info, hit_idx, hits[:, hit_idx])
+            sum_log_at_hit_times += (
+                hit_mult * math.log(quantum_efficiency * ep_at_ht + noise_rate_per_ns)
+            )
+        #exp_p_at_hit_times = quantum_efficiency * exp_p_at_hit_times
+        exp_p_at_all_times = (
+            exp_p_at_all_times * quantum_efficiency
+            + noise_rate_per_ns * time_window
+        )
 
-    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d_templ_compr(
-            sources,
-            hit_times,
-            dom_coord,
-            quantum_efficiency,
-            table,
-            table_norm,
-            table_map,
-            t_indep_table=empty_4d_array,
-            t_indep_table_norm=empty_1d_array,
-            t_indep_table_map=empty_2d_array
-        ):
-        # Initialize accumulators (using double precision)
-        exp_p_at_all_times = np.float64(0.0)
-        exp_p_at_hit_times = np.zeros_like(hit_times, dtype=np.float64)
+        #if sum_log_at_hit_times == 0 and num_hits > 0:
+        #    print(hits)
+        #    print(dom_info)
+        #    print(sum_log_at_hit_times)
+        #    print(exp_p_at_all_times)
 
-        # Initialize "prev_*" vars
-        prev_r_bin_idx = -1
-        prev_costheta_bin_idx = -1
-        if use_directionality:
-            prev_pdir_r = np.nan
-        else:
-            pdir_r = 0.0
-            new_pdir_r = False
+        if np.isinf(sum_log_at_hit_times):
+            print(dom_info, sum_log_at_hit_times)
+            raise ValueError('sum_log_at_hit_times is inf!')
 
-        # Initialize cached values to nan since it's a bug if these are not
-        # computed at least the first time through and this will help ensure
-        # that such a bug shows itself
-        r_t_bin_norm = np.nan
+        return exp_p_at_all_times, sum_log_at_hit_times
 
-        # Extract the components of the DOM coordinate
-        dom_x, dom_y, dom_z = dom_coord
 
-        # Loop over the entries (one per row)
-        for source in sources:
-            dx = dom_x - source.x
-            dy = dom_y - source.y
-            dz = dom_z - source.z
+    #@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    #def pexp_5d_templ_compr(
+    #        sources,
+    #        hits,
+    #        dom_info,
+    #        time_window,
+    #        table,
+    #        table_norm,
+    #        t_indep_table=empty_4d_array,
+    #        t_indep_table_norm=empty_1d_array,
+    #    ):
+    #    num_hits = hits.shape[1]
 
-            rhosquared = dx*dx + dy*dy
-            rsquared = rhosquared + dz*dz
+    #    if not dom_info['operational']:
+    #        return np.float64(0), np.float64(0)
 
-            # Continue if photon is outside the radial binning limits
-            if rsquared >= rsquared_max:
-                continue
+    #    # Initialize accumulators (using double precision)
+    #    exp_p_at_all_times = np.float64(0.0)
+    #    exp_p_at_hit_times = np.zeros(num_hits, dtype=np.float64)
 
-            source_photons = source.photons
+    #    # Extract the components of the DOM coordinate
+    #    dom_x = dom_info['x']
+    #    dom_y = dom_info['y']
+    #    dom_z = dom_info['z']
 
-            r = math.sqrt(rsquared)
-            r_bin_idx = int(r**inv_r_power / table_dr_pwr)
-            costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
+    #    # Loop over the entries (one per row)
+    #    for source in sources:
+    #        dx = dom_x - source['x']
+    #        dy = dom_y - source['y']
+    #        dz = dom_z - source['z']
 
-            if r_bin_idx == prev_r_bin_idx:
-                new_r_bin = False
-            else:
-                new_r_bin = True
-                prev_r_bin_idx = r_bin_idx
+    #        rhosquared = dx*dx + dy*dy
+    #        rsquared = rhosquared + dz*dz
 
-            if costheta_bin_idx == prev_costheta_bin_idx:
-                new_costheta_bin = False
-            else:
-                new_costheta_bin = True
-                prev_costheta_bin_idx = costheta_bin_idx
+    #        # Continue if photon is outside the radial binning limits
+    #        if rsquared >= rsquared_max:
+    #            continue
 
-            if use_directionality:
-                pdir_x = source.dir_x
-                pdir_y = source.dir_y
-                pdir_z = source.dir_z
-                pdir_rhosquared = pdir_x*pdir_x + pdir_y*pdir_y
-                pdir_r = math.sqrt(pdir_rhosquared + pdir_z*pdir_z)
+    #        r = math.sqrt(rsquared)
+    #        r_bin_idx = int(r**inv_r_power / table_dr_pwr)
+    #        costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
-                if pdir_r != prev_pdir_r:
-                    new_pdir_r = True
-                    prev_pdir_r = pdir_r
-                else:
-                    new_pdir_r = False
+    #        source_kind = source['kind']
 
-            if pdir_r == 0.0: # isotropic emitter
-                if compute_t_indep_exp and (new_pdir_r or new_r_bin or new_costheta_bin):
-                    # Survival probability is simply the weight
-                    ti_templ = (
-                        t_indep_table_map[r_bin_idx, costheta_bin_idx]
-                    )
-                    t_indep_surv_prob = ti_templ.weight
+    #        if source_kind == SRC_OMNI and compute_t_indep_exp:
+    #            t_indep_surv_prob = np.mean(
+    #                t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+    #            )
 
-            elif pdir_r < 1.0: # Cherenkov emitter
-                # Note that for these tables, we have to invert the photon
-                # direction relative to the vector from the DOM to the photon's
-                # vertex since simulation has photons going _away_ from the DOM
-                # that in reconstruction will hit the DOM if they're moving
-                # _towards_ the DOM.
+    #        elif source_kind == SRC_CKV_BETA1:
+    #            # Note that for these tables, we have to invert the photon
+    #            # direction relative to the vector from the DOM to the photon's
+    #            # vertex since simulation has photons going _away_ from the DOM
+    #            # that in reconstruction will hit the DOM if they're moving
+    #            # _towards_ the DOM.
 
-                pdir_rho = math.sqrt(pdir_rhosquared)
+    #            # Zenith angle is indep. of photon position relative to DOM
+    #            pdir_costheta = source['dir_costheta']
 
-                # Zenith angle is indep. of photon position relative to DOM
-                pdir_costheta = pdir_z / pdir_r
+    #            rho = math.sqrt(rhosquared)
 
-                rho = math.sqrt(rhosquared)
+    #            # \Delta\phi depends on photon position relative to the DOM...
 
-                # \Delta\phi depends on photon position relative to the DOM...
+    #            # Below is the projection of pdir into the (x, y) plane and the
+    #            # projection of that onto the vector in that plane connecting
+    #            # the photon source to the DOM. We get the cosine of the angle
+    #            # between these vectors by solving the identity
+    #            #   `a dot b = |a| |b| cos(deltaphi)`
+    #            # for cos(deltaphi).
+    #            #
+    #            if rho <= MACHINE_EPS:
+    #                pdir_cosdeltaphi = 1.0
+    #                pdir_sindeltaphi = 0.0
+    #            else:
+    #                pdir_cosdeltaphi = (
+    #                    source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
+    #                )
+    #                # Note that the max and min here here in case numerical
+    #                # precision issues cause the dot product to blow up.
+    #                pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
+    #                if tbl_is_raw:
+    #                    pdir_sindeltaphi = math.sqrt(1 - pdir_cosdeltaphi*pdir_cosdeltaphi)
 
-                # Below is the projection of pdir into the (x, y) plane and the
-                # projection of that onto the vector in that plane connecting
-                # the photon source to the DOM. We get the cosine of the angle
-                # between these vectors by solving the identity
-                #   `a dot b = |a| |b| cos(deltaphi)`
-                # for cos(deltaphi).
-                #
-                if pdir_rho <= MACHINE_EPS or rho <= MACHINE_EPS:
-                    pdir_cosdeltaphi = 1.0
-                else:
-                    pdir_cosdeltaphi = (
-                        pdir_x/pdir_rho * dx/rho + pdir_y/pdir_rho * dy/rho
-                    )
-                    # Note that the max and min here here in case numerical
-                    # precision issues cause the dot product to blow up.
-                    pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
+    #            if tbl_is_raw:
+    #                pdir_sintheta = source['dir_sintheta']
 
-                costhetadir_bin_idx = int((pdir_costheta + 1) / table_dcosthetadir)
+    #                # Cherenkov angle is encoded as the projection of a
+    #                # length-1 vector going in the Ckv direction onto the
+    #                # charged particle's direction. Ergo, in the length of the
+    #                # pdir vector is the cosine of the ckv angle.
+    #                ckv_costheta = source['ckv_costheta']
+    #                ckv_theta = source['ckv_theta']
 
-                # Make upper edge inclusive
-                if costhetadir_bin_idx > last_costhetadir_bin_idx:
-                    costhetadir_bin_idx = last_costhetadir_bin_idx
+    #                if ckv_sigma_deg > 0:
+    #                    if compute_t_indep_exp:
+    #                        t_indep_surv_prob, _a, _b = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
+    #                            theta=ckv_theta,
+    #                            num_phi=num_phi_samples,
+    #                            rot_costheta=pdir_costheta,
+    #                            rot_sintheta=pdir_sintheta,
+    #                            rot_cosphi=pdir_cosdeltaphi,
+    #                            rot_sinphi=pdir_sindeltaphi,
+    #                            directional_survival_prob=(
+    #                                t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+    #                            ),
+    #                            num_costheta_bins=n_costhetadir_bins,
+    #                            num_deltaphi_bins=n_deltaphidir_bins,
+    #                            random_delta_thetas=random_delta_thetas
+    #                        )
+    #                else:
+    #                    ckv_sintheta = source['ckv_sintheta']
+    #                    if compute_t_indep_exp:
+    #                        t_indep_surv_prob, _a, _b = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
+    #                            costheta=ckv_costheta,
+    #                            sintheta=ckv_sintheta,
+    #                            num_phi=num_phi_samples,
+    #                            rot_costheta=pdir_costheta,
+    #                            rot_sintheta=pdir_sintheta,
+    #                            rot_cosphi=pdir_cosdeltaphi,
+    #                            rot_sinphi=pdir_sindeltaphi,
+    #                            directional_survival_prob=(
+    #                                t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+    #                            ),
+    #                            num_costheta_bins=n_costhetadir_bins,
+    #                            num_deltaphi_bins=n_deltaphidir_bins,
+    #                        )
 
-                pdir_deltaphi = math.acos(pdir_cosdeltaphi)
-                deltaphidir_bin_idx = int(pdir_deltaphi / table_dphidir)
+    #            else: # tbl_is_ckv
+    #                costhetadir_bin_idx = int((pdir_costheta + 1.0) / table_dcosthetadir)
 
-                # Make upper edge inclusive
-                if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
-                    deltaphidir_bin_idx = last_deltaphidir_bin_idx
+    #                # Make upper edge inclusive
+    #                if costhetadir_bin_idx > last_costhetadir_bin_idx:
+    #                    costhetadir_bin_idx = last_costhetadir_bin_idx
 
-                ti_templ = t_indep_table_map[r_bin_idx, costheta_bin_idx]
-                t_indep_surv_prob = (
-                    ti_templ.weight *
-                    t_indep_table[
-                        ti_templ.index,
-                        costhetadir_bin_idx,
-                        deltaphidir_bin_idx
-                    ]
-                )
+    #                pdir_deltaphi = math.acos(pdir_cosdeltaphi)
+    #                deltaphidir_bin_idx = int(pdir_deltaphi / table_dphidir)
 
-            elif pdir_r == 1.0:
-                raise ValueError('Line emitter cannot be computed with ckv table')
+    #                # Make upper edge inclusive
+    #                if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
+    #                    deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
-            else: # Gaussian emitter
-                raise ValueError('Gaussian emitter cannot be computed with ckv table')
+    #                t_indep_surv_prob = t_indep_table[
+    #                    r_bin_idx,
+    #                    costheta_bin_idx,
+    #                    costhetadir_bin_idx,
+    #                    deltaphidir_bin_idx
+    #                ]
+    #                if t_indep_surv_prob == 0:
+    #                    print((r_bin_idx, costheta_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx))
+    #                    raise ValueError('xyz')
 
-            if compute_t_indep_exp:
-                exp_p_at_all_times += (
-                    source_photons * t_indep_table_norm[r_bin_idx] * t_indep_surv_prob
-                )
+    #        else:
+    #            raise NotImplementedError('Source kind not implmented')
 
-            for hit_t_idx, hit_t in enumerate(hit_times):
-                # Causally impossible? (Note the comparison is written such that it
-                # will evaluate to True if hit_time is NaN.)
-                source_t = source.t
-                if not source_t <= hit_t:
-                    continue
+    #        source_photons = source['photons']
 
-                # A photon that starts immediately in the past (before the DOM
-                # was hit) will show up in the Retro DOM tables in bin 0; the
-                # further in the past the photon started, the higher the time
-                # bin index. Therefore, subract source time from hit time.
-                dt = hit_t - source_t
+    #        if compute_t_indep_exp:
+    #            ti_norm = t_indep_table_norm[r_bin_idx]
+    #            if not ti_norm > 0:
+    #                print(r_bin_idx, dom_info, ti_norm)
+    #                raise ValueError('time indep norm is not > 0!')
+    #            exp_p_at_all_times += (
+    #                source_photons * ti_norm * t_indep_surv_prob
+    #            )
 
-                # Is relative time outside binning?
-                if dt >= t_max:
-                    continue
+    #        for hit_t_idx in range(num_hits):
+    #            hit_time = hits[0, hit_t_idx]
 
-                t_bin_idx = int(dt / table_dt)
+    #            # Causally impossible? (Note the comparison is written such that it
+    #            # will evaluate to True if hit_time is NaN.)
+    #            source_t = source['t']
+    #            if not source_t <= hit_time:
+    #                continue
 
-                r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
+    #            # A photon that starts immediately in the past (before the DOM
+    #            # was hit) will show up in the Retro DOM tables in bin 0; the
+    #            # further in the past the photon started, the higher the time
+    #            # bin index. Therefore, subract source time from hit time.
+    #            dt = hit_time - source_t
 
-                if pdir_r == 0.0: # isotropic emitter
-                    templ = (
-                        table_map[r_bin_idx, costhetadir_bin_idx, t_bin_idx]
-                    )
-                    surv_prob_at_hit_t = templ.weight
+    #            # Is relative time outside binning?
+    #            if dt >= t_max:
+    #                continue
 
-                elif pdir_r < 1.0: # Cherenkov emitter
-                    templ = table_map[
-                        r_bin_idx,
-                        costheta_bin_idx,
-                        t_bin_idx
-                    ]
-                    surv_prob_at_hit_t = (
-                        templ.weight *
-                        table[
-                            templ.index,
-                            costhetadir_bin_idx,
-                            deltaphidir_bin_idx
-                        ]
-                    )
+    #            t_bin_idx = int(dt / table_dt)
 
-                elif pdir_r == 1.0:
-                    raise ValueError(
-                        'Line emitter cannot be computed with ckv table'
-                    )
+    #            r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
 
-                else:
-                    raise ValueError(
-                        'Gaussian emitter cannot be computed with ckv table'
-                    )
+    #            templ = table[
+    #                r_bin_idx,
+    #                costheta_bin_idx,
+    #                t_bin_idx
+    #            ]
+    #            if source_kind == SRC_OMNI:
+    #                surv_prob_at_hit_t = np.mean(
+    #                    templ['weight'] *
+    #                    template_library[templ['index'],:,:]
+    #                )
 
-                exp_p_at_hit_times[hit_t_idx] += (
-                    source_photons * r_t_bin_norm * surv_prob_at_hit_t
-                )
+    #            else: # tbl_is_ckv
+    #                surv_prob_at_hit_t = (templ['weight'] * 
+    #                    template_library[templ['index'],
+    #                    costhetadir_bin_idx,
+    #                    deltaphidir_bin_idx
+    #                    ])
 
-        exp_p_at_hit_times = quantum_efficiency * exp_p_at_hit_times
-        exp_p_at_all_times = quantum_efficiency * exp_p_at_all_times
 
-        return exp_p_at_all_times, exp_p_at_hit_times
+    #            exp_p_at_hit_times[hit_t_idx] += source_photons * r_t_bin_norm * surv_prob_at_hit_t
 
-    if tbl_is_templ_compr:
-        pexp_5d = pexp_5d_templ_compr
-    else:
-        pexp_5d = pexp_5d_uncompr
+    #    quantum_efficiency = dom_info['quantum_efficiency']
+    #    noise_rate_per_ns = dom_info['noise_rate_per_ns']
+
+    #    sum_log_at_hit_times = np.float64(0.0)
+    #    for hit_idx in range(num_hits):
+    #        ep_at_ht = exp_p_at_hit_times[hit_idx]
+    #        hit_mult = hits[1, hit_idx]
+    #        if hit_mult == 0:
+    #            print(dom_info, hit_idx, hits[:, hit_idx])
+    #        sum_log_at_hit_times += (
+    #            hit_mult * math.log(quantum_efficiency * ep_at_ht + noise_rate_per_ns)
+    #        )
+    #    #exp_p_at_hit_times = quantum_efficiency * exp_p_at_hit_times
+    #    exp_p_at_all_times = (
+    #        exp_p_at_all_times * quantum_efficiency
+    #        + noise_rate_per_ns * time_window
+    #    )
+
+    #    #if sum_log_at_hit_times == 0 and num_hits > 0:
+    #    #    print(hits)
+    #    #    print(dom_info)
+    #    #    print(sum_log_at_hit_times)
+    #    #    print(exp_p_at_all_times)
+
+    #    if np.isinf(sum_log_at_hit_times):
+    #        print(dom_info, sum_log_at_hit_times)
+    #        raise ValueError('sum_log_at_hit_times is inf!')
+
+    #    return exp_p_at_all_times, sum_log_at_hit_times
 
     pexp_5d.__doc__ = docstr
 
