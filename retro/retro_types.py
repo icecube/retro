@@ -23,7 +23,9 @@ __all__ = [
     'TimeCart3DCoord',
     'TimePolCoord',
     'TimeSphCoord',
-    'DOM_INFO'
+    'DOM_INFO',
+    'LLHP8D',
+    'LLHP10D'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -160,4 +162,14 @@ DOM_INFO = np.dtype(
         ('noise_rate_per_ns', np.float32)
     ],
     align=True
+)
+
+LLHP8D = np.dtype(
+    [('llh', np.float16)]
+    + [(field, np.float16) for field in HypoParams8D._fields]
+)
+
+LLHP10D = np.dtype(
+    [('llh', np.float16)]
+    + [(field, np.float16) for field in HypoParams10D._fields]
 )

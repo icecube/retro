@@ -132,7 +132,7 @@ class Retro5DTables(object):
         self.tbl_is_ckv = table_kind in ['ckv_uncompr']
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
 
-	if self.tbl_is_templ_compr:
+        if self.tbl_is_templ_compr:
             assert(template_library is not None), 'template library is needed to sue compressed table'
         self.template_library = template_library
 
@@ -262,7 +262,7 @@ class Retro5DTables(object):
             use_directionality=self.use_directionality,
             num_phi_samples=self.num_phi_samples,
             ckv_sigma_deg=self.ckv_sigma_deg,
-	    template_library=self.template_library
+            template_library=self.template_library
         )
         if self.pexp_func is None:
             self.pexp_func = pexp_5d
