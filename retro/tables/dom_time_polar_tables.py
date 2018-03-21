@@ -333,13 +333,13 @@ class DOMTimePolarTables(object):
             for dom in range(1, 60+1):
                 self.load_table(string=string, dom=dom, force_reload=False)
 
-    def get_photon_expectation(self, pinfo_gen, hit_time, string, dom,
+    def get_photon_expectation(self, sources, hit_time, string, dom,
                                use_directionality=None):
         """Get the expectation for photon survival.
 
         Parameters
         ----------
-        pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
+        sources : shape (N,) numpy ndarray, dtype SRC_DTYPE
 
         use_directionality : None or bool
             Whether to use photon directionality informatino in hypo / table to
@@ -369,7 +369,7 @@ class DOMTimePolarTables(object):
         survival_prob = table.survival_prob
         time_indep_survival_prob = table.time_indep_survival_prob
         return pexp_t_r_theta(
-            pinfo_gen=pinfo_gen,
+            sources=sources,
             hit_time=hit_time,
             dom_coord=dom_coord,
             survival_prob=survival_prob,

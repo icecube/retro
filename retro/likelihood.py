@@ -25,105 +25,122 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from itertools import izip
+from itertools import product
 from os.path import abspath, dirname
 import sys
+
+import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.stats import poisson_llh
 
 
-#@profile
-def get_neg_llh(pinfo_gen, event, dom_tables, noise_charge=0, tdi_table=None,
-                detailed_info_list=None):
-    """Get log likelihood.
+DC_STRS = [79, 80, 81, 82, 83, 84, 85, 86]
+DC_IC_STRS = [26, 27, 35, 36, 37, 45, 46]
+
+DC_SUBDUST_DOMS = list(range(11, 60+1))
+IC_SUBDUST_DOMS = list(range(25, 60+1))
+
+DC_SUBDUST_STRS_DOMS = list(product(DC_STRS, DC_SUBDUST_DOMS))
+DC_IC_SUBDUST_STRS_DOMS = list(product(DC_IC_STRS, IC_SUBDUST_DOMS))
+
+DC_ALL_SUBDUST_STRS_DOMS = DC_SUBDUST_STRS_DOMS + DC_IC_SUBDUST_STRS_DOMS
+
+ALL_STRS = list(range(1, 86+1))
+ALL_DOMS = list(range(1, 60+1))
+ALL_STRS_DOMS = list(product(ALL_STRS, ALL_DOMS))
+
+#EMPTY_HITS = Hits(
+#    times=np.empty(shape=(0, 1), dtype=np.float32),
+#    charges=np.empty(shape=(0, 1), dtype=np.float32)
+#)
+EMPTY_HITS = np.empty(shape=(2, 0), dtype=np.float32)
+
+
+def get_neg_llh(
+        hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None
+    ):
+    """Get the negative of the log likelihood of `event` having come from
+    hypothesis `hypo` (whose light detection expectation is computed by
+    `hypo_handler`).
 
     Parameters
     ----------
-    pinfo_gen
+    hypo : HYPO_PARAMS_T
+        Hypothesized event parameters
 
-    event : retro.Event namedtuple or convertible thereto
+    hits : mapping
+        Keys are (string, dom) tuples, values are `retro_types.Hits`
+        namedtuples, where ``val.times`` and ``val.charges`` are arrays of
+        shape (n_dom_hits_i,).
 
-    dom_tables
+    time_window : float
+        Time window pertinent to the event's reconstruction. Used for
+        computing expected noise hits.
 
-    tdi_table
+    hypo_handler : hypo.discrete_hypo.DiscreteHypo, etc.
+        Object with method `get_sources` able to produce light sources expected
+        to be produced by a hypothesized event
 
-    detailed_info_list : None or appendable sequence
-        If a list is provided, it is appended with a dict containing detailed
-        info from the calculation useful, e.g., for debugging. If ``None`` is
-        passed, no detailed info is made available.
+    dom_tables : tables.retro_5d_tables.Retro5DTables, etc.
+        Instantiated object able to take light sources and convert into
+        expected detections in each DOM.
+
+    tdi_table : tables.tdi_table.TDITable, optional
+        If provided, this is used to compute total expected hits, independent
+        of time _and_ DOM. Instantiate the `dom_tables` object with
+        `compute_t_indep_exp=False` to avoid unnecessary computations. If
+        `tdi_table` is not provided, then the time-independent
+        expecations must be computed for each DOM in the detector individually
+        using the `dom_tables` object; be sure to instantiate this with
+        `compute_t_indep_exp=True`.
 
     Returns
     -------
-    llh : float
+    neg_llh : float
         Negative of the log likelihood
 
     """
-    neg_llh = 0
-    noise_counts = 0
+    hypo_light_sources = hypo_handler.get_sources(hypo)
 
-    if tdi_table is not None:
-        total_expected_q = tdi_table.get_photon_expectation(pinfo_gen=pinfo_gen)
+    sum_at_all_times_computed = False
+    if tdi_table is None:
+        if not dom_tables.compute_t_indep_exp:
+            print('*'*79)
+            print('WARNING! Time-independent expectation will not be computed')
+            print('*'*79)
+        sum_at_all_times = 0.0
     else:
-        total_expected_q = 0
+        sum_at_all_times = tdi_table.get_expected_det(
+            sources=hypo_light_sources
+        )
+        sum_at_all_times_computed = True
 
-    expected_q_accounted_for = 0
+    sum_log_at_hit_times = np.float64(0.0)
+    for str_dom in DC_ALL_SUBDUST_STRS_DOMS:
+        string = str_dom[0]
+        dom = str_dom[1]
 
-    # Loop over pulses (aka hits) to get likelihood of those hits coming from
-    # the hypo
-    for string, depth_idx, pulse_time, pulse_charge in izip(*event.pulses):
-        expected_charge = dom_tables.get_photon_expectation(
-            pinfo_gen=pinfo_gen,
-            hit_time=pulse_time,
+        this_hits = hits.get((string, dom), EMPTY_HITS)
+
+        exp_p_at_all_times, exp_p_at_hit_times = dom_tables.get_expected_det(
+            sources=hypo_light_sources,
+            hit_times=this_hits[0, :].astype(np.float32),
             string=string,
-            depth_idx=depth_idx
+            dom=dom,
+            include_noise=True,
+            time_window=time_window
         )
 
-        expected_charge_excluding_noise = expected_charge
+        if not sum_at_all_times_computed:
+            sum_at_all_times += exp_p_at_all_times
 
-        if expected_charge < noise_charge:
-            noise_counts += 1
-            # "Add" in noise (i.e.: expected charge must be at least as
-            # large as noise level)
-            expected_charge = noise_charge
-
-        # Poisson log likelihood (take negative to interface w/ minimizers)
-        pulse_neg_llh = -poisson_llh(expected=expected_charge,
-                                     observed=pulse_charge)
-
-        neg_llh += pulse_neg_llh
-        expected_q_accounted_for += expected_charge
-
-    # Penalize the likelihood (_add_ to neg_llh) by expected charge that
-    # would be seen by DOMs other than those hit (by the physics event itself,
-    # i.e. non-noise hits). This is the unaccounted-for excess predicted by the
-    # hypothesis.
-    unaccounted_excess_expected_q = total_expected_q - expected_q_accounted_for
-    if tdi_table is not None:
-        if unaccounted_excess_expected_q > 0:
-            print('neg_llh before correction    :', neg_llh)
-            print('unaccounted_excess_expected_q:',
-                  unaccounted_excess_expected_q)
-            neg_llh += unaccounted_excess_expected_q
-            print('neg_llh after correction     :', neg_llh)
-            print('')
-        else:
-            print('WARNING!!!! DOM tables account for %e expected charge, which'
-                  ' exceeds total expected from TDI tables of %e'
-                  % (expected_q_accounted_for, total_expected_q))
-            #raise ValueError()
-
-    # Record details if user passed a list for storing them
-    if detailed_info_list is not None:
-        detailed_info = dict(
-            noise_counts=noise_counts,
-            total_expected_q=total_expected_q,
-            expected_q_accounted_for=expected_q_accounted_for,
+        sum_log_at_hit_times += np.sum(
+            this_hits[1, :] * np.log(exp_p_at_hit_times)
         )
-        detailed_info_list.append(detailed_info)
 
-    #print('time to compute likelihood: %.5f ms' % ((time.time() - t0) * 1000))
+    neg_llh = sum_at_all_times - sum_log_at_hit_times
+
     return neg_llh

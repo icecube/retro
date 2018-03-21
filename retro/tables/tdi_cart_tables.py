@@ -460,12 +460,12 @@ class TDICartTable(object):
                  self.y_max, self.z_min, self.z_max, self.binwidth))
         print('Time to load: {} s'.format(np.round(time() - t0, 3)))
 
-    def get_photon_expectation(self, pinfo_gen):
+    def get_photon_expectation(self, sources):
         """Get the expectation for photon survival.
 
         Parameters
         ----------
-        pinfo_gen : shape (N, 8) numpy ndarray, dtype float64
+        sources : shape (N,) numpy ndarray, dtype SRC_DTYPE
 
         Returns
         -------
@@ -476,8 +476,8 @@ class TDICartTable(object):
         if not self.tables_loaded:
             raise Exception("Tables haven't been loaded")
 
-        kwargs = dict(
-            pinfo_gen=pinfo_gen,
+        return pexp_xyz(
+            sources=sources,
             x_min=self.x_min, y_min=self.y_min, z_min=self.z_min,
             nx=self.nx, ny=self.ny, nz=self.nz,
             binwidth=self.binwidth,
@@ -487,9 +487,6 @@ class TDICartTable(object):
             avg_photon_z=self.avg_photon_z,
             use_directionality=self.use_directionality
         )
-        photon_expectation = pexp_xyz(**kwargs)
-
-        return photon_expectation
 
     #def plot_slices(self, x_slice=slice(None), y_slice=slice(None),
     #                z_slice=slice(None)):

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=wrong-import-position
 
 """
 Simple class DiscreteHypo for evaluating discrete hypotheses.
@@ -6,7 +7,12 @@ Simple class DiscreteHypo for evaluating discrete hypotheses.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['DiscreteHypo']
+__all__ = '''
+    SRC_DTYPE
+    SRC_OMNI
+    SRC_CKV_BETA1
+    DiscreteHypo
+'''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -27,6 +33,29 @@ from collections import Mapping
 from copy import deepcopy
 
 import numpy as np
+
+
+SRC_DTYPE = np.dtype(
+    [
+        ('kind', np.uint32),
+        ('t', np.float32),
+        ('x', np.float32),
+        ('y', np.float32),
+        ('z', np.float32),
+        ('photons', np.float32),
+        ('dir_x', np.float32),
+        ('dir_y', np.float32),
+        ('dir_z', np.float32)
+    ],
+    align=True
+)
+"""Each source point is described by (up to) these 9 fields"""
+
+SRC_OMNI = np.uint32(0)
+"""Source kind designator for a point emitting omnidirectional light"""
+
+SRC_CKV_BETA1 = np.uint32(1)
+"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
 
 
 class DiscreteHypo(object):
@@ -68,9 +97,9 @@ class DiscreteHypo(object):
         self.hypo_kernels = hypo_kernels
         self.kernel_kwargs = kernel_kwargs
 
-    def get_pinfo_gen(self, hypo_params):
+    def get_sources(self, hypo_params):
         """Evaluate the discrete hypothesis (all hypo kernels) given particular
-        parameters and return the hypothesis's expected generated photons.
+        parameters and return the sources produced by the hypothesis.
 
         Parameters
         ----------
@@ -81,12 +110,11 @@ class DiscreteHypo(object):
 
         Returns
         -------
-        pinfo_gen : shape (N, 8) numpy.ndarray, dtype float64
-            Each row contains (t, x, y, z, p_count, p_x, p_y, p_z)
+        sources : shape (N, len(`SRC_DTYPE`)) numpy.ndarray
+            Each row is a `SRC_DTYPE`.
 
         """
-        pinfo_gen_arrays = []
+        sources = []
         for kernel, kwargs in zip(self.hypo_kernels, self.kernel_kwargs):
-            pinfo_gen_arrays.append(kernel(hypo_params, **kwargs))
-        pinfo_gen = np.concatenate(pinfo_gen_arrays, axis=0)
-        return pinfo_gen
+            sources.append(kernel(hypo_params, **kwargs))
+        return np.concatenate(sources, axis=0)

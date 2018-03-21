@@ -25,11 +25,6 @@ import numpy as np
 import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
-from cycler import cycler
-
-
-HIT_TIMES = np.linspace(0, 2000, 201)
-SAMPLE_HIT_TIMES = 0.5 * (HIT_TIMES[:-1] + HIT_TIMES[1:])
 
 
 def ks_test(a, b):
@@ -47,6 +42,10 @@ def ks_test(a, b):
     else:
         bcs /= np.max(bcs)
     return np.max(np.abs(bcs - acs))
+
+
+def num_fmt(n):
+    return format(n, '.2e').replace('-0', '-').replace('+0', '')
 
 
 def plot_run_info(
@@ -77,17 +76,26 @@ def plot_run_info(
             if 'binning' in fwd_hists:
                 t_min = fwd_hists['binning']['t_min']
                 t_max = fwd_hists['binning']['t_max']
+                t_window = t_max - t_min
                 num_bins = fwd_hists['binning']['num_bins']
                 spacing = fwd_hists['binning']['spacing']
                 assert spacing == 'linear', spacing
                 fwd_hists_binning = np.linspace(t_min, t_max, num_bins + 1)
+            elif 'bin_edges' in fwd_hists:
+                fwd_hists_binning = fwd_hists['bin_edges']
+                t_window = np.max(fwd_hists_binning) - np.min(fwd_hists_binning)
             else:
-                fwd_hists_binning = HIT_TIMES
-
+                raise ValueError(
+                    'Need "binning" or "bin_edges" in fwd_hists; keys are {}'
+                    .format(fwd_hists.keys())
+                )
+            hist_bin_widths = np.diff(fwd_hists_binning)
             if 'results' in fwd_hists:
                 fwd_hists = fwd_hists['results']
             else:
                 raise ValueError('Could not find key "results" in fwd hists!')
+    else:
+        raise NotImplementedError('Need fwd hists for now.')
 
     if not isdir(outdir):
         makedirs(outdir)
@@ -148,43 +156,61 @@ def plot_run_info(
             params_label.append('{}={}{}'.format(plab, pval, units))
         params_label = '$' + r',\;'.join(params_label) + '$'
 
-    maxlabellen = max(len(label) for label in labels)
     if plot:
         fig, ax = plt.subplots(1, 1, figsize=(10, 8), dpi=72)
-    tots = []
+
+    t_indep_tots = []
+    tots_incl_noise = []
+    tots_excl_noise = []
     kss = []
-    ref_tots = []
-    ref_tot = 0
-    for string, dom in sorted(all_string_dom_pairs):
+    ref_tots_incl_noise = []
+    ref_tots_excl_noise = []
+    ref_areas_incl_noise = []
+    for string, dom in reversed(sorted(all_string_dom_pairs)):
         if plot:
             ax.clear()
         all_zeros = True
-        ref_y_all_zeros = True
         xmin = np.inf
         xmax = -np.inf
         ref_y = None
         if fwd_hists:
             if (string, dom) in fwd_hists:
-                y = fwd_hists[(string, dom)]
-                y = np.array([y[0]] + y.tolist())
-                nonzero_mask = y != 0 #~np.isclose(y, 0)
+                # Hit rate per nanosecond in each bin (includes noise hit rate)
+                ref_y = fwd_hists[(string, dom)] / hist_bin_widths
+
+                # Duplicate first element for plotting via `plt.step`
+                ref_y = np.array([ref_y[0]] + ref_y.tolist())
+
+                # Figure out "meaningful" range
+                nonzero_mask = ref_y != 0 #~np.isclose(ref_y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
-                    ref_y_all_zeros = False
-                    min_mask = y >= 0.01 * y.max()
+                    #ref_y_all_zeros = False
+                    min_mask = (ref_y - ref_y.min()) >= 0.01 * (ref_y.max() - ref_y.min())
                     xmin = min(xmin, fwd_hists_binning[min_mask].min())
                     xmax = max(xmax, fwd_hists_binning[min_mask].max())
             else:
-                y = np.zeros_like(fwd_hists_binning)
+                ref_y = np.zeros_like(fwd_hists_binning)
 
-            ref_y = y - np.min(y)
-            ref_tots.append(np.ma.masked_invalid(ref_y).sum())
+            ref_y_areas = ref_y[1:] * hist_bin_widths
+            ref_y_area = np.sum(ref_y_areas)
+
+            ref_tots_incl_noise.append(ref_y_area)
+
+            # Following only works if our time window is large enough s.t. exp
+            # hits from event is zero somewhere, and then it'll only be noise
+            # contributing at that time...
+            ref_tots_excl_noise.append(np.sum(ref_y_areas - ref_y_areas.min()))
+            ref_areas_incl_noise.append(ref_y_area)
 
             if plot:
                 ax.step(
                     fwd_hists_binning, ref_y,
                     lw=1,
-                    label='Forward sim',
+                    label=(
+                        r'Fwd: $\Sigma \lambda_q \Delta t$={}'
+                        .format(num_fmt(ref_y_area))
+                    ),
                     clip_on=True,
                     #color='C0'
                 )
@@ -194,32 +220,49 @@ def plot_run_info(
         linewidths = [5, 3, 2, 2, 2, 2, 2]
 
         for plt_i, (label, run_info) in enumerate(zip(labels, run_infos)):
-            if len(tots) <= plt_i:
-                tots.append([])
+            sample_hit_times = run_info['hit_times']
+            if len(tots_incl_noise) <= plt_i:
+                tots_incl_noise.append([])
+                tots_excl_noise.append([])
+                t_indep_tots.append([])
                 kss.append([])
+
             results = run_info['results']
-            if (string, dom) in results:
-                y = results[(string, dom)]['pexp_at_hit_times']
+            if (string, dom) in results.keys():
+                rslt = results[(string, dom)]
+                if 'exp_p_at_hit_times' in rslt:
+                    y = rslt['exp_p_at_hit_times']
+                    y_ti = rslt['exp_p_at_all_times']
+                    t_indep_tots[plt_i].append(y_ti)
+                else:
+                    y = rslt['pexp_at_hit_times']
+
                 nonzero_mask = y != y[0] #~np.isclose(y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
                     min_mask = y >= 0.01 * y.max()
-                    xmin = min(xmin, SAMPLE_HIT_TIMES[min_mask].min())
-                    xmax = max(xmax, SAMPLE_HIT_TIMES[min_mask].max())
+                    xmin = min(xmin, sample_hit_times[min_mask].min())
+                    xmax = max(xmax, sample_hit_times[min_mask].max())
             else:
-                y = np.zeros_like(SAMPLE_HIT_TIMES)
+                y = np.zeros_like(sample_hit_times)
 
-            y -= np.min(y)
+            #y_area = np.sum(
 
-            tot = np.ma.masked_invalid(y).sum() #np.sum(y) # / np.sum(ref_y[1:])
-            if tot != 0 and not np.isinf(tot) and not np.isnan(tot):
-                tots[plt_i].append(tot)
+            masked_y = np.ma.masked_invalid(y * hist_bin_widths)
+            tot_excl_noise = np.sum(masked_y - masked_y.min())
+            tot_incl_noise = masked_y.sum()
+            if tot_excl_noise != 0:
+                tots_excl_noise[plt_i].append(tot_excl_noise)
+                tots_incl_noise[plt_i].append(tot_incl_noise)
             else:
-                tots[plt_i].append(0)
+                tots_excl_noise[plt_i].append(0)
+                tots_incl_noise[plt_i].append(0)
             kss[plt_i].append(ks_test(y, ref_y[1:]))
 
-            kl_div = None
-            custom_label = label
+            #kl_div = None
+            custom_label = r'{:3s}: $\Sigma \lambda_q \Delta t$={}, ti={}'.format(
+                label, num_fmt(tots_incl_noise[plt_i][-1]), num_fmt(y_ti)
+            )
             #if ref_y is not None: # and not ref_y_all_zeros:
             #    abs_mean_diff = np.abs(np.mean(y - ref_y[1:]))
             #    #rel_abs_mean_diff = abs_mean_diff / np.sum(ref_y[1:])
@@ -245,7 +288,7 @@ def plot_run_info(
 
             if plot:
                 ax.plot(
-                    SAMPLE_HIT_TIMES, y,
+                    sample_hit_times, y,
                     label=custom_label,
                     color=color,
                     linestyle=linestyle,
@@ -257,8 +300,8 @@ def plot_run_info(
             continue
 
         if xmin == xmax:
-            xmin = 0
-            xmax = 2000
+            xmin = np.min(fwd_hists_binning)
+            xmax = np.max(fwd_hists_binning)
 
         if plot:
             ax.set_xlim(xmin, xmax)
@@ -279,7 +322,7 @@ def plot_run_info(
             title = 'Code'
 
             leg = ax.legend(
-                title=title,
+                #title=title,
                 #loc='best',
                 loc='upper right',
                 #frameon=False,
@@ -324,18 +367,45 @@ def plot_run_info(
     sys.stdout.write('\n\n')
     sys.stdout.flush()
 
-    ref_tots = np.array(ref_tots)
-    ref_tot = np.sum(ref_tots)
-    print('{:7s} {:7s} {}'.format('KS'.ljust(7), 'Ratio'.ljust(7), 'Label'))
-    for label, ks, tot in zip(labels, kss, tots):
+    ref_tots_incl_noise = np.array(ref_tots_incl_noise)
+    ref_tots_excl_noise = np.array(ref_tots_excl_noise)
+    ref_areas_incl_noise = np.array(ref_areas_incl_noise)
+
+    ref_tot_incl_noise = np.sum(ref_tots_incl_noise)
+    ref_tot_excl_noise = np.sum(ref_tots_excl_noise)
+    ref_area_incl_noise = np.sum(ref_areas_incl_noise)
+
+    print(
+        '{:9s}  {:9s}  {:16s}  {:16s}  {:16s}  {}'
+        .format(
+            'wtd KS'.rjust(9),
+            'avg KS'.rjust(9),
+            'Ratio incl noise'.rjust(16),
+            'Ratio excl noise'.rjust(16),
+            't-indep ratio'.rjust(16),
+            'Label'
+        )
+    )
+    for label, ks, tot_incl_noise, tot_excl_noise, ti_tot in zip(labels,
+                                                                 kss,
+                                                                 tots_incl_noise,
+                                                                 tots_excl_noise,
+                                                                 t_indep_tots):
         ks = np.array(ks)
         mask = ~np.isnan(ks)
-        ks_wtd_avg = np.sum(ks[mask] * ref_tots[mask]) / np.sum(ref_tots[mask])
+        ks_avg = np.mean(ks[mask])
+        ks_wtd_avg = (
+            np.sum(ks[mask] * ref_tots_excl_noise[mask])
+            / np.sum(ref_tots_excl_noise[mask])
+        )
         print(
-            '{:7.5f} {:7.5f} {}'
+            '{:9s}  {:9s}  {:16s}  {:16s}  {:16s}  {}'
             .format(
-                ks_wtd_avg,
-                np.sum(tot) / ref_tot,
+                format(ks_wtd_avg, '.7f').rjust(9),
+                format(ks_avg, '.7f').rjust(9),
+                format(np.sum(tot_excl_noise) / ref_tot_excl_noise, '.12f').rjust(16),
+                format(np.sum(tot_incl_noise) / ref_tot_incl_noise, '.12f').rjust(16),
+                format(np.sum(ti_tot) / ref_area_incl_noise, '.12f').rjust(16),
                 label
             )
         )

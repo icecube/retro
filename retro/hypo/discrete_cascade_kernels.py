@@ -40,6 +40,7 @@ from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
     COS_CKV, CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS
     )
+from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_OMNI
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -54,23 +55,33 @@ def point_cascade(hypo_params):
 
     Returns
     -------
-    pinfo_gen
+    sources
 
     """
-    pinfo_gen = np.array(
-        [
-            hypo_params.t,
-            hypo_params.x,
-            hypo_params.y,
-            hypo_params.z,
-            CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy,
-            0.0,
-            0.0,
-            0.0
-        ],
-        dtype=np.float32
-    ).reshape((1, 8))
-    return pinfo_gen
+    sources = np.empty(shape=(1,), dtype=SRC_DTYPE)
+    sources[0]['kind'] = SRC_OMNI
+    sources[0]['t'] = hypo_params.t
+    sources[0]['x'] = hypo_params.x
+    sources[0]['y'] = hypo_params.y
+    sources[0]['z'] = hypo_params.z
+    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy
+    sources[0]['dir_x'] = 0
+    sources[0]['dir_y'] = 0
+    sources[0]['dir_z'] = 0
+    #    [(
+    #        SRC_OMNI,
+    #        hypo_params.t,
+    #        hypo_params.x,
+    #        hypo_params.y,
+    #        hypo_params.z,
+    #        CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy,
+    #        0.0,
+    #        0.0,
+    #        0.0
+    #    )],
+    #    dtype=SRC_DTYPE
+    #)
+    return sources
 
 def one_dim_cascade(hypo_params, n_samples=1000):
     """
@@ -156,5 +167,3 @@ def one_dim_cascade(hypo_params, n_samples=1000):
     pinfo_gen[:, 7] = np.dot(rot_mat, ang_dist)[2] * COS_CKV
 
     return pinfo_gen    
-
-
