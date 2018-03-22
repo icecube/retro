@@ -514,7 +514,7 @@ def generate_pexp_5d_function(
 
                 #    else: # tbl_is_ckv
                     surv_prob_at_hit_t = table_lookup(
-                        table, 
+                        table,
                         r_bin_idx,
                         costheta_bin_idx,
                         t_bin_idx,

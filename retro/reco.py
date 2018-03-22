@@ -56,7 +56,6 @@ from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
 
-EMPTY_HITS = np.empty(shape=(2, 0), dtype=np.float32)
 
 def parse_args(description=__doc__):
     """Parse command-line arguments"""

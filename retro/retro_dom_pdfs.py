@@ -101,7 +101,7 @@ NUM_PHI_SAMPLES = 100
 MUON_DEDX = False
 
 # Time step (ns) for discrete muon kernel (whether or not dEdX)
-MUON_DT = 1.1
+MUON_DT = 1.0
 
 ANGSENS_MODEL = 'h2-50cm' #0.338019664877
 STEP_LENGTH = 1.0

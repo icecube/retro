@@ -8,6 +8,8 @@ Physical constants and constant-for-us values
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    'get_sd_idx',
+
     # Constants
     'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS',
 
@@ -34,7 +36,7 @@ __all__ = [
     'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
     'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
 
-    'get_sd_idx'
+    'EMPTY_HITS',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -209,3 +211,6 @@ DC_ALL_SUBDUST_STRS_DOMS = np.concatenate(
 ALL_STRS = list(range(1, 86+1))
 ALL_DOMS = list(range(1, 60+1))
 ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(ALL_STRS, ALL_DOMS)])
+
+
+EMPTY_HITS = np.empty(shape=(2, 0), dtype=FTYPE)
