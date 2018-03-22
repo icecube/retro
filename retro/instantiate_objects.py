@@ -65,12 +65,13 @@ def setup_dom_tables(
         angsens_model,
         norm_version,
         sd_indices=const.ALL_STRS_DOMS,
+        step_length=1.0,
         num_phi_samples=None,
         ckv_sigma_deg=None,
         template_library=None,
-        step_length=1,
         compute_t_indep_exp=True,
-        no_dir=False,
+        use_directionality=True,
+        no_noise=False,
         force_no_mmap=False,
     ):
     """Instantiate and load single-DOM tables
@@ -90,6 +91,9 @@ def setup_dom_tables(
 
     gcd = extract_gcd(gcd)
 
+    if no_noise:
+        gcd['noise'] = np.zeros_like(gcd['noise'])
+
     # Instantiate single-DOM tables class
     dom_tables = Retro5DTables(
         table_kind=dom_tables_kind,
@@ -98,7 +102,7 @@ def setup_dom_tables(
         noise_rate_hz=gcd['noise'],
         angsens_model=angsens_model,
         compute_t_indep_exp=compute_t_indep_exp,
-        use_directionality=not no_dir,
+        use_directionality=use_directionality,
         norm_version=norm_version,
         num_phi_samples=num_phi_samples,
         ckv_sigma_deg=ckv_sigma_deg,
@@ -286,7 +290,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
         parser.add_argument(
             '--angsens-model',
             choices='nominal  h1-100cm  h2-50cm  h3-30cm'.split(),
-            help='''Angular sensitivity model.'''
+            help='''Angular sensitivity model'''
         )
 
     if dom_tables:
@@ -332,6 +336,11 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
         group.add_argument(
             '--step-length', type=float, default=1.0,
             help='''Step length used in the CLSim table generator.'''
+        )
+        group.add_argument(
+            '--no-noise', action='store_true',
+            help='''Set noise rates to 0 in the GCD (e.g. for processing
+            raw photons)'''
         )
         group.add_argument(
             '--no-t-indep', action='store_true',
@@ -392,15 +401,17 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
     args = parser.parse_args()
     kwargs = vars(args)
 
-    strs_doms = kwargs.pop('strs_doms').lower()
-    if strs_doms == 'all':
-        sd_indices = const.ALL_STRS_DOMS
-    elif strs_doms == 'dc':
-        sd_indices = const.DC_ALL_STRS_DOMS
-    elif strs_doms == 'dc_subdust':
-        sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
-    kwargs['sd_indices'] = sd_indices
-    #kwargs['
+    if dom_tables:
+        strs_doms = kwargs.pop('strs_doms').strip().lower()
+        if strs_doms == 'all':
+            sd_indices = const.ALL_STRS_DOMS
+        elif strs_doms == 'dc':
+            sd_indices = const.DC_ALL_STRS_DOMS
+        elif strs_doms == 'dc_subdust':
+            sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
+        kwargs['sd_indices'] = sd_indices
+        kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
+        kwargs['use_directionality'] = not kwargs.pop('no_dir')
 
     for key, val in kwargs.items():
         taken = False
