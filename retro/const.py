@@ -34,7 +34,8 @@ __all__ = [
 
     'DC_STRS', 'DC_IC_STRS', 'DC_SUBDUST_DOMS', 'IC_SUBDUST_DOMS',
     'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
-    'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
+    'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS',
+    'ALL_STRS_DOMS', 'DC_ALL_STRS_DOMS',
 
     'EMPTY_HITS',
 ]
@@ -211,6 +212,7 @@ DC_ALL_SUBDUST_STRS_DOMS = np.concatenate(
 ALL_STRS = list(range(1, 86+1))
 ALL_DOMS = list(range(1, 60+1))
 ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(ALL_STRS, ALL_DOMS)])
+DC_ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(DC_STRS, ALL_DOMS)])
 
 
 EMPTY_HITS = np.empty(shape=(2, 0), dtype=FTYPE)

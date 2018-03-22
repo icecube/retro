@@ -12,6 +12,7 @@ __all__ = [
     'setup_dom_tables',
     'setup_discrete_hypo',
     'get_hits',
+    'parse_args'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -59,18 +60,17 @@ from retro.tables.retro_5d_tables import (
 
 def setup_dom_tables(
         table_kind,
-        fname_proto,
+        dom_table_fname_proto,
         gcd,
         angsens_model,
         norm_version,
-        time_window,
-        no_dir=False,
-        compute_t_indep_exp=True,
-        force_no_mmap=False,
         num_phi_samples=None,
         ckv_sigma_deg=None,
-        step_length=None,
         template_library=None,
+        step_length=1,
+        compute_t_indep_exp=True,
+        no_dir=False,
+        force_no_mmap=False,
     ):
     """Instantiate and load single-DOM tables
 
@@ -104,7 +104,7 @@ def setup_dom_tables(
         template_library=template_library,
     )
 
-    if '{subdet' in fname_proto:
+    if '{subdet' in dom_table_fname_proto:
         for subdet in ['ic', 'dc']:
             if subdet == 'ic':
                 subdust_doms = const.IC_SUBDUST_DOMS
@@ -114,7 +114,7 @@ def setup_dom_tables(
                 strings = const.DC_STRS
 
             for dom in subdust_doms:
-                fpath = fname_proto.format(
+                fpath = dom_table_fname_proto.format(
                     subdet=subdet, dom=dom, depth_idx=dom-1
                 )
                 sd_indices = [const.get_sd_idx(string, dom)
@@ -126,59 +126,12 @@ def setup_dom_tables(
                     step_length=step_length,
                     mmap=mmap
                 )
-    elif '{string' in fname_proto:
+    elif '{string' in dom_table_fname_proto:
         raise NotImplementedError()
 
     print('  -> {:.3f} s\n'.format(time.time() - t0))
 
-
-def get_hits(hits_file, hits_are_photons, start_idx=0, angsens_model=None):
-    """Generator that loads hits and, if they are raw photons, reweights and
-    reformats them into "standard" hits format.
-
-    Parameters
-    ----------
-    hits_file : string
-    hits_are_photons : bool
-    start_idx : int, optional
-    angsens_model : string, required if `hits_are_photons`
-
-    Yields
-    ------
-    event_idx : int
-    event_hits
-
-    """
-    hits_file = expand(hits_file)
-    _, ext = splitext(hits_file)
-    if ext == '.pkl':
-        with open(hits_file, 'rb') as f:
-            hits = pickle.load(f)
-    else:
-        raise NotImplementedError()
-
-    if hits_are_photons:
-        angsens_poly, _ = load_angsens_model(angsens_model)
-
-    events_slice = slice(start_idx, None)
-    for event_ofst, event_hits in enumerate(hits[events_slice]):
-        event_idx = start_idx + event_ofst
-        if hits_are_photons:
-            event_photons = event_hits
-            event_hits = [const.EMPTY_HITS]*const.NUM_DOMS_TOT
-            for str_dom, pinfo in event_photons.items():
-                sd_idx = const.get_sd_idx(string=str_dom[0], dom=str_dom[1])
-                t = pinfo[0, :]
-                coszen = pinfo[4, :]
-                weight = np.float32(angsens_poly(coszen))
-                event_hits[sd_idx] = np.concatenate(
-                    (t[np.newaxis, :], weight[np.newaxis, :]),
-                    axis=0
-                )
-        yield event_idx, event_hits
-
-
-#def get_events(events_file, start_idx=0):
+    return dom_tables
 
 
 def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
@@ -229,23 +182,119 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
     return hypo_handler
 
 
-def generate_parser(dom_tables=True, hypo=True, hits=True, parser=None):
+def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
+             angsens_model=None):
+    """Generator that loads hits and, if they are raw photons, reweights and
+    reformats them into "standard" hits format.
+
+    Parameters
+    ----------
+    hits_file : string
+    hits_are_photons : bool
+    start_idx : int, optional
+    num_events : int, optional
+    angsens_model : string, required if `hits_are_photons`
+
+    Yields
+    ------
+    event_idx : int
+    event_hits
+    time_window : float
+
+    """
+    hits_file = expand(hits_file)
+    _, ext = splitext(hits_file)
+    if ext == '.pkl':
+        with open(hits_file, 'rb') as f:
+            hits = pickle.load(f)
+    else:
+        raise NotImplementedError()
+
+    if hits_are_photons:
+        angsens_poly, _ = load_angsens_model(angsens_model)
+
+    events_slice = slice(start_idx, None)
+    for event_ofst, event_hits in enumerate(hits[events_slice]):
+        if event_ofst >= num_events:
+            break
+        event_idx = start_idx + event_ofst
+        if hits_are_photons:
+            time_window = 0.0
+            event_photons = event_hits
+            event_hits = [const.EMPTY_HITS]*const.NUM_DOMS_TOT
+            for str_dom, pinfo in event_photons.items():
+                sd_idx = const.get_sd_idx(string=str_dom[0], dom=str_dom[1])
+                t = pinfo[0, :]
+                coszen = pinfo[4, :]
+                weight = np.float32(angsens_poly(coszen))
+                event_hits[sd_idx] = np.concatenate(
+                    (t[np.newaxis, :], weight[np.newaxis, :]),
+                    axis=0
+                )
+        else:
+            raise NotImplementedError()
+
+        yield event_idx, event_hits, time_window
+
+
+def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
+               parser=None):
+    """Parse command line arguments.
+
+    If `parser` is supplied, args are added to that; otherwise, a new parser is
+    generated.
+
+    Parameters
+    ----------
+    description : string, optional
+
+    dom_tables : bool
+        Whether to include args for instantiating and loading single-DOM
+        tables.
+
+    hypo : bool
+        Whether to include args for instantiating a DiscreteHypo and its hypo
+        kernels.
+
+    hits : bool
+        Whether to include args for loading hits (either photons or pulses).
+
+    parser : argparse.ArgumentParser, optional
+        An existing parser onto which these arguments will be added.
+
+    Returns
+    -------
+    dom_tables_kw, hypo_kw, hits_kw, other_kw
+
+    """
+    dom_tables_kw = {k: None for k in setup_dom_tables.__code__.co_varnames}
+    hypo_kw = {k: None for k in setup_discrete_hypo.__code__.co_varnames}
+    hits_kw = {k: None for k in get_hits.__code__.co_varnames}
+    other_kw = {}
+
     if parser is None:
-        parser = ArgumentParser()
+        parser = ArgumentParser(description=description)
 
     if dom_tables or hits:
+        parser.add_argument(
+            '--angsens-model',
+            choices='nominal  h1-100cm  h2-50cm  h3-30cm'.split(),
+            help='''Angular sensitivity model.'''
+        )
 
     if dom_tables:
         group = parser.add_argument_group(
             title='Single-DOM tables',
-            description='Args used to instantiate and load single-DOM tables'
+            description='''Arguments used to instantiate and load single-DOM
+            Retro tables'''
         )
+
         group.add_argument(
             '--table-kind', required=True, choices=TABLE_KINDS,
             help='''Kind of single-DOM table to use.'''
         )
         group.add_argument(
-            '--fname-proto', required=True,
+            '--dom-table-fname-proto', required=True,
             help='''Must have one of the brace-enclosed fields "{string}" or
             "{subdet}", and must have one of "{dom}" or "{depth_idx}". E.g.:
             "my_tables_{subdet}_{depth_idx}"'''
@@ -254,10 +303,6 @@ def generate_parser(dom_tables=True, hypo=True, hits=True, parser=None):
             '--gcd', required=True,
             help='''IceCube GCD file; can either specify an i3 file, or the
             extracted pkl file used in Retro.'''
-        )
-        group.add_argument(
-            '--step-length', type=float, default=1.0,
-            help='''Step length used in the CLSim table generator.'''
         )
         group.add_argument(
             '--norm-version', choices=NORM_VERSIONS, required=True,
@@ -270,6 +315,18 @@ def generate_parser(dom_tables=True, hypo=True, hits=True, parser=None):
             '--ckv-sigma-deg', type=float, default=None,
         )
         group.add_argument(
+            '--template-library', default=None,
+        )
+        group.add_argument(
+            '--step-length', type=float, default=1.0,
+            help='''Step length used in the CLSim table generator.'''
+        )
+        group.add_argument(
+            '--no-t-indep', action='store_true',
+            help='''Do NOT load t-indep tables (time-independent expectations
+            would have to be handled by specifying a TDI table'''
+        )
+        group.add_argument(
             '--no-dir', action='store_true',
             help='''Do NOT use source photon directionality'''
         )
@@ -279,5 +336,58 @@ def generate_parser(dom_tables=True, hypo=True, hits=True, parser=None):
             sensible default is chosen for the type of tables being used.'''
         )
 
+    if hypo:
+        group = parser.add_argument_group(
+            title='Hypo',
+            description='''Arguments used to instantiate hypothesis handler
+            and kernels'''
+        )
 
+        group.add_argument(
+            '--cascade-kernel', choices=['point', 'one_dim'], required=True,
+        )
+        group.add_argument(
+            '--cascade-samples', type=int, default=None,
+        )
+        group.add_argument(
+            '--track-kernel', required=True,
+            choices=['const_e_loss', 'table_e_loss'],
+        )
+        group.add_argument(
+            '--track-time-step', type=float, required=True,
+        )
 
+    if hits:
+        group = parser.add_argument_group(
+            title='Hits',
+            description='''Arguments for loading hits (either photon-level or
+            a pulse series) from events.'''
+        )
+
+        group.add_argument(
+            '--hits-file', required=True,
+        )
+        group.add_argument(
+            '--hits-are-photons', action='store_true',
+        )
+        group.add_argument(
+            '--start-event-idx', type=int, default=0
+        )
+        group.add_argument(
+            '--n-events', type=int, default=None
+        )
+
+    args = parser.parse_args()
+    kwargs = vars(args)
+
+    for key, val in kwargs.items():
+        taken = False
+        for kwargs in [dom_tables_kw, hypo_kw, hits_kw]:
+            if key not in kwargs:
+                pass
+            kwargs[key] = val
+            taken = True
+        if not taken:
+            other_kw[key] = val
+
+    return dom_tables_kw, hypo_kw, hits_kw, other_kw

@@ -8,7 +8,7 @@ have generated.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['get_neg_llh']
+__all__ = ['get_llh']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -37,9 +37,10 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import const
 
-#@line_profile
-def get_neg_llh(
-        hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None
+
+def get_llh(
+        hypo, hits, sd_indices, time_window, hypo_handler, dom_tables,
+        tdi_table=None
     ):
     """Get the negative of the log likelihood of `event` having come from
     hypothesis `hypo` (whose light detection expectation is computed by
@@ -54,6 +55,8 @@ def get_neg_llh(
         Keys are (string, dom) tuples, values are `retro_types.Hits`
         namedtuples, where ``val.times`` and ``val.charges`` are arrays of
         shape (n_dom_hits_i,).
+
+    sd_indices
 
     time_window : float
         Time window pertinent to the event's reconstruction. Used for
@@ -78,18 +81,14 @@ def get_neg_llh(
 
     Returns
     -------
-    neg_llh : float
-        Negative of the log likelihood
+    llh : float
+        Log likelihood
 
     """
     hypo_light_sources = hypo_handler.get_sources(hypo)
 
     #sum_at_all_times_computed = False
     if tdi_table is None:
-        if not dom_tables.compute_t_indep_exp:
-            print('*'*79)
-            print('WARNING! Time-independent expectation will not be computed')
-            print('*'*79)
         sum_at_all_times = 0.0
     else:
         raise NotImplementedError()
@@ -98,9 +97,8 @@ def get_neg_llh(
         #)
         #sum_at_all_times_computed = True
 
-    sum_at_all_times = 0.0
-    tot_sum_log_at_hit_times = 0.0
-    for sd_idx in const.DC_ALL_SUBDUST_STRS_DOMS:
+    llh = 0.0
+    for sd_idx in sd_indices:
         this_hits = hits[sd_idx]
         # DEBUG: remove the below if / continue when no longer debugging!
         #if this_hits is None:
@@ -112,17 +110,8 @@ def get_neg_llh(
             time_window,
             *dom_tables.tables[sd_idx]
         )
-        sum_at_all_times += exp_p_at_all_times
-        tot_sum_log_at_hit_times += sum_log_at_hit_times
+        llh += tot_sum_log_at_hit_times - exp_p_at_all_times
 
-    neg_llh = sum_at_all_times - tot_sum_log_at_hit_times
+    llh = tot_sum_log_at_hit_times - sum_at_all_times
 
-    return neg_llh
-
-
-#@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-#def sum_wtd_log(hits, expectations):
-#    accum = 0.0
-#    for hit, expectation in zip(hits, expectations):
-#        accum += hit * math.log(expectation)
-#    return accum
+    return llh

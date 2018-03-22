@@ -178,10 +178,55 @@ def generate_pexp_5d_function(
         )
 
     empty_1d_array = np.array([], dtype=np.float32).reshape((0,))
-    empty_2d_array = np.array([], dtype=np.float32).reshape((0,)*2)
     empty_4d_array = np.array([], dtype=np.float32).reshape((0,)*4)
 
-    docstr = """For a set of generated photons `sources`, compute the expected
+    if tbl_is_templ_compr:
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
+            """Helper function for directionality-averaged table lookup"""
+            templ = table[
+                r_bin_idx,
+                costheta_bin_idx,
+                t_bin_idx
+            ]
+            return templ['weight'] / template_library[templ['index']].size
+
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
+                         costhetadir_bin_idx, deltaphidir_bin_idx):
+            """Helper function for table lookup"""
+            templ = table[
+                r_bin_idx,
+                costheta_bin_idx,
+                t_bin_idx
+            ]
+            return templ['weight'] * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
+
+    else:
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
+            """Helper function for directionality averaged table lookup"""
+            return np.mean(table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :])
+
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
+                         costhetadir_bin_idx, deltaphidir_bin_idx):
+            """Helper function for table lookup"""
+            return table[r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def pexp_5d( # pylint: disable=missing-docstring
+            sources,
+            hits,
+            dom_info,
+            time_window,
+            table,
+            table_norm,
+            t_indep_table=empty_4d_array,
+            t_indep_table_norm=empty_1d_array,
+        ):
+        """For a set of generated photons `sources`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
         photons, independent of time.
 
@@ -250,75 +295,21 @@ def generate_pexp_5d_function(
             specified DOM at the times the DOM recorded the hit.
 
         """
-
-    if tbl_is_templ_compr:
-        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
-            '''
-            helper function for directionality averaged table lookup
-            '''
-            templ = table[
-                r_bin_idx,
-                costheta_bin_idx,
-                t_bin_idx
-            ]
-            return templ['weight'] / template_library[templ['index']].size
-
-        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx):
-            '''
-            helper function for table lookup
-            '''
-            templ = table[
-                r_bin_idx,
-                costheta_bin_idx,
-                t_bin_idx
-            ]
-            return templ['weight'] * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
-
-    else:
-        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
-            '''
-            helper function for directionality averaged table lookup
-            '''
-            return np.mean(table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :])
-
-        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx):
-            '''
-            helper function for table lookup
-            '''
-            return table[r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
-
-
-    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d(
-            sources,
-            hits,
-            dom_info,
-            time_window,
-            table,
-            table_norm,
-            t_indep_table=empty_4d_array,
-            t_indep_table_norm=empty_1d_array,
-        ):
-
-        num_hits = hits.shape[1]
-
         if not dom_info['operational']:
             return np.float64(0), np.float64(0)
 
-        # Initialize accumulators (using double precision)
+        num_hits = hits.shape[1]
+
+        # Initialize accumulators (use double precision, as accumulation
+        # compounds finite-precision errors)
         exp_p_at_all_times = np.float64(0.0)
         exp_p_at_hit_times = np.zeros(num_hits, dtype=np.float64)
 
-        # Extract the components of the DOM coordinate
+        # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
         dom_y = dom_info['y']
         dom_z = dom_info['z']
 
-        # Loop over the entries (one per row)
         for source in sources:
             dx = dom_x - source['x']
             dy = dom_y - source['y']
@@ -477,42 +468,45 @@ def generate_pexp_5d_function(
                 r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
 
                 if source_kind == SRC_OMNI:
-                    surv_prob_at_hit_t = table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx)
+                    surv_prob_at_hit_t = table_lookup_mean(
+                        table, r_bin_idx, costheta_bin_idx, t_bin_idx
+                    )
 
                 elif source_kind == SRC_CKV_BETA1:
-                #    if tbl_is_raw and not tbl_is_templ_compr:
-                #        if ckv_sigma_deg > 0:
-                #            surv_prob_at_hit_t, _c, _d = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
-                #                theta=ckv_theta,
-                #                num_phi=num_phi_samples,
-                #                rot_costheta=pdir_costheta,
-                #                rot_sintheta=pdir_sintheta,
-                #                rot_cosphi=pdir_cosdeltaphi,
-                #                rot_sinphi=pdir_sindeltaphi,
-                #                directional_survival_prob=(
-                #                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                #                ),
-                #                num_costheta_bins=n_costhetadir_bins,
-                #                num_deltaphi_bins=n_deltaphidir_bins,
-                #                random_delta_thetas=random_delta_thetas
-                #            )
-                #        else:
-                #            surv_prob_at_hit_t, _c, _d = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
-                #                costheta=ckv_costheta,
-                #                sintheta=ckv_sintheta,
-                #                num_phi=num_phi_samples,
-                #                rot_costheta=pdir_costheta,
-                #                rot_sintheta=pdir_sintheta,
-                #                rot_cosphi=pdir_cosdeltaphi,
-                #                rot_sinphi=pdir_sindeltaphi,
-                #                directional_survival_prob=(
-                #                    table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
-                #                ),
-                #                num_costheta_bins=n_costhetadir_bins,
-                #                num_deltaphi_bins=n_deltaphidir_bins,
-                #            )
-
-                #    else: # tbl_is_ckv
+                    # TODO: get this working again
+                    #if tbl_is_raw and not tbl_is_templ_compr:
+                    #    if ckv_sigma_deg > 0:
+                    #        surv_prob_at_hit_t, _c, _d = survival_prob_from_smeared_cone( # pylint: disable=unused-variable, invalid-name
+                    #            theta=ckv_theta,
+                    #            num_phi=num_phi_samples,
+                    #            rot_costheta=pdir_costheta,
+                    #            rot_sintheta=pdir_sintheta,
+                    #            rot_cosphi=pdir_cosdeltaphi,
+                    #            rot_sinphi=pdir_sindeltaphi,
+                    #            directional_survival_prob=(
+                    #                table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                    #            ),
+                    #            num_costheta_bins=n_costhetadir_bins,
+                    #            num_deltaphi_bins=n_deltaphidir_bins,
+                    #            random_delta_thetas=random_delta_thetas
+                    #        )
+                    #    else:
+                    #        surv_prob_at_hit_t, _c, _d = survival_prob_from_cone( # pylint: disable=unused-variable, invalid-name
+                    #            costheta=ckv_costheta,
+                    #            sintheta=ckv_sintheta,
+                    #            num_phi=num_phi_samples,
+                    #            rot_costheta=pdir_costheta,
+                    #            rot_sintheta=pdir_sintheta,
+                    #            rot_cosphi=pdir_cosdeltaphi,
+                    #            rot_sinphi=pdir_sindeltaphi,
+                    #            directional_survival_prob=(
+                    #                table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :]
+                    #            ),
+                    #            num_costheta_bins=n_costhetadir_bins,
+                    #            num_deltaphi_bins=n_deltaphidir_bins,
+                    #        )
+                    #
+                    #else: # tbl_is_ckv
                     surv_prob_at_hit_t = table_lookup(
                         table,
                         r_bin_idx,
@@ -538,13 +532,12 @@ def generate_pexp_5d_function(
                 hit_mult * math.log(quantum_efficiency * ep_at_ht + noise_rate_per_ns)
             )
 
-        exp_p_at_all_times = (
-            exp_p_at_all_times * quantum_efficiency
-            + noise_rate_per_ns * time_window
-        )
+        if compute_t_indep_exp:
+            exp_p_at_all_times = (
+                exp_p_at_all_times * quantum_efficiency
+                + noise_rate_per_ns * time_window
+            )
 
         return exp_p_at_all_times, sum_log_at_hit_times
-
-    pexp_5d.__doc__ = docstr
 
     return pexp_5d, meta
