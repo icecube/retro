@@ -59,11 +59,12 @@ from retro.tables.retro_5d_tables import (
 
 
 def setup_dom_tables(
-        table_kind,
-        dom_table_fname_proto,
+        dom_tables_kind,
+        dom_tables_fname_proto,
         gcd,
         angsens_model,
         norm_version,
+        sd_indices=const.ALL_STRS_DOMS,
         num_phi_samples=None,
         ckv_sigma_deg=None,
         template_library=None,
@@ -81,17 +82,17 @@ def setup_dom_tables(
     if force_no_mmap:
         mmap = False
     else:
-        mmap = 'uncompr' in table_kind
+        mmap = 'uncompr' in dom_tables_kind
 
     template_library = None
-    if table_kind in ['raw_templ_compr', 'ckv_templ_compr']:
+    if dom_tables_kind in ['raw_templ_compr', 'ckv_templ_compr']:
         template_library = np.load(template_library)
 
     gcd = extract_gcd(gcd)
 
     # Instantiate single-DOM tables class
     dom_tables = Retro5DTables(
-        table_kind=table_kind,
+        table_kind=dom_tables_kind,
         geom=gcd['geo'],
         rde=gcd['rde'],
         noise_rate_hz=gcd['noise'],
@@ -104,21 +105,27 @@ def setup_dom_tables(
         template_library=template_library,
     )
 
-    if '{subdet' in dom_table_fname_proto:
+    if '{subdet' in dom_tables_fname_proto:
+        doms = const.ALL_DOMS
         for subdet in ['ic', 'dc']:
             if subdet == 'ic':
-                subdust_doms = const.IC_SUBDUST_DOMS
-                strings = const.DC_IC_STRS
+                strings = const.IC_STRS
             else:
-                subdust_doms = const.DC_SUBDUST_DOMS
                 strings = const.DC_STRS
 
-            for dom in subdust_doms:
-                fpath = dom_table_fname_proto.format(
+            for dom in doms:
+                fpath = dom_tables_fname_proto.format(
                     subdet=subdet, dom=dom, depth_idx=dom-1
                 )
-                sd_indices = [const.get_sd_idx(string, dom)
-                              for string in strings]
+                shared_table_sd_indices = []
+                for string in strings:
+                    sd_idx = const.get_sd_idx(string, dom)
+                    if sd_idx not in sd_indices:
+                        continue
+                    shared_table_sd_indices.append(sd_idx)
+
+                if not shared_table_sd_indices:
+                    continue
 
                 dom_tables.load_table(
                     fpath=fpath,
@@ -126,7 +133,7 @@ def setup_dom_tables(
                     step_length=step_length,
                     mmap=mmap
                 )
-    elif '{string' in dom_table_fname_proto:
+    elif '{string' in dom_tables_fname_proto:
         raise NotImplementedError()
 
     print('  -> {:.3f} s\n'.format(time.time() - t0))
@@ -290,15 +297,20 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
         )
 
         group.add_argument(
-            '--table-kind', required=True, choices=TABLE_KINDS,
+            '--dom-tables-kind', required=True, choices=TABLE_KINDS,
             help='''Kind of single-DOM table to use.'''
         )
         group.add_argument(
-            '--dom-table-fname-proto', required=True,
+            '--dom-tables-fname-proto', required=True,
             help='''Must have one of the brace-enclosed fields "{string}" or
             "{subdet}", and must have one of "{dom}" or "{depth_idx}". E.g.:
             "my_tables_{subdet}_{depth_idx}"'''
         )
+        group.add_argument(
+            '--strs-doms', required=True,
+            choices=['all', 'dc', 'dc_subdust']
+        )
+
         group.add_argument(
             '--gcd', required=True,
             help='''IceCube GCD file; can either specify an i3 file, or the
@@ -380,14 +392,29 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
     args = parser.parse_args()
     kwargs = vars(args)
 
+    strs_doms = kwargs.pop('strs_doms').lower()
+    if strs_doms == 'all':
+        sd_indices = const.ALL_STRS_DOMS
+    elif strs_doms == 'dc':
+        sd_indices = const.DC_ALL_STRS_DOMS
+    elif strs_doms == 'dc_subdust':
+        sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
+    kwargs['sd_indices'] = sd_indices
+    #kwargs['
+
     for key, val in kwargs.items():
         taken = False
-        for kwargs in [dom_tables_kw, hypo_kw, hits_kw]:
-            if key not in kwargs:
-                pass
-            kwargs[key] = val
+        for kw in [dom_tables_kw, hypo_kw, hits_kw]:
+            if key not in kw:
+                continue
+            kw[key] = val
             taken = True
         if not taken:
             other_kw[key] = val
+
+    print('other_kw:', other_kw)
+    print('dom_tables_kw:', dom_tables_kw)
+    print('hypo_kw:', hypo_kw)
+    print('hits_kw:', hits_kw)
 
     return dom_tables_kw, hypo_kw, hits_kw, other_kw

@@ -128,6 +128,8 @@ class Retro5DTables(object):
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
 
+        self.loaded_sd_indices = []
+
         self.tbl_is_raw = table_kind in ['raw_uncompr']
         self.tbl_is_ckv = table_kind in ['ckv_uncompr']
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
@@ -286,6 +288,8 @@ class Retro5DTables(object):
 
         for sd_idx in sd_indices:
             self.tables[sd_idx] = table_tup
+
+        self.loaded_sd_indices.extend(sd_indices)
 
     def get_expected_det(self, sources, hits, sd_idx, time_window):
         """Get the number of photons we expect the DOM to detect (which is the

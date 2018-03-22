@@ -25,23 +25,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from os.path import abspath, dirname
-import sys
-from pisa.utils.profiler import line_profile, profile
-from pisa.utils import log
-log.set_verbosity(2)
 
-if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(abspath(__file__)))
-    if RETRO_DIR not in sys.path:
-        sys.path.append(RETRO_DIR)
-from retro import const
-
-
-def get_llh(
-        hypo, hits, sd_indices, time_window, hypo_handler, dom_tables,
-        tdi_table=None
-    ):
+def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None):
     """Get the negative of the log likelihood of `event` having come from
     hypothesis `hypo` (whose light detection expectation is computed by
     `hypo_handler`).
@@ -55,8 +40,6 @@ def get_llh(
         Keys are (string, dom) tuples, values are `retro_types.Hits`
         namedtuples, where ``val.times`` and ``val.charges`` are arrays of
         shape (n_dom_hits_i,).
-
-    sd_indices
 
     time_window : float
         Time window pertinent to the event's reconstruction. Used for
@@ -87,18 +70,14 @@ def get_llh(
     """
     hypo_light_sources = hypo_handler.get_sources(hypo)
 
-    #sum_at_all_times_computed = False
-    if tdi_table is None:
-        sum_at_all_times = 0.0
-    else:
+    llh = 0.0
+    if tdi_table is not None:
         raise NotImplementedError()
-        #sum_at_all_times = tdi_table.get_expected_det(
+        #llh = - tdi_table.get_expected_det(
         #    sources=hypo_light_sources
         #)
-        #sum_at_all_times_computed = True
 
-    llh = 0.0
-    for sd_idx in sd_indices:
+    for sd_idx in dom_tables.loaded_sd_indices:
         this_hits = hits[sd_idx]
         # DEBUG: remove the below if / continue when no longer debugging!
         #if this_hits is None:
@@ -110,8 +89,6 @@ def get_llh(
             time_window,
             *dom_tables.tables[sd_idx]
         )
-        llh += tot_sum_log_at_hit_times - exp_p_at_all_times
-
-    llh = tot_sum_log_at_hit_times - sum_at_all_times
+        llh += sum_log_at_hit_times - exp_p_at_all_times
 
     return llh

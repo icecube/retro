@@ -41,9 +41,6 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import HYPO_PARAMS_T, instantiate_objects
-from retro.const import ( # pylint: disable=unused-import
-    ALL_STRS_DOMS, DC_ALL_STRS_DOMS, DC_ALL_SUBDUST_STRS_DOMS
-)
 from retro.likelihood import get_llh
 from retro.scan import scan
 from retro.utils.misc import expand, mkdir
@@ -57,12 +54,6 @@ def parse_args(description=__doc__):
         '--outdir', required=True
     )
 
-    parser.add_argument(
-        '--strs-doms', required=True,
-        choices=['ALL_STRS_DOMS', 'DC_ALL_STRS_DOMS',
-                 'DC_ALL_SUBDUST_STRS_DOMS']
-    )
-
     for dim in HYPO_PARAMS_T._fields:
         parser.add_argument(
             '--{}'.format(dim.replace('_', '-')), nargs='+', required=True,
@@ -74,9 +65,8 @@ def parse_args(description=__doc__):
         )
 
     dom_tables_kw, hypo_kw, hits_kw, scan_kw = (
-        instantiate_objects.parse_args(parser)
+        instantiate_objects.parse_args(parser=parser)
     )
-    scan_kw['strs_doms'] = eval(scan_kw['strs_doms']) # pylint: disable=eval-used
 
     return scan_kw, dom_tables_kw, hypo_kw, hits_kw
 
