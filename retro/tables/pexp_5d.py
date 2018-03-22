@@ -184,22 +184,14 @@ def generate_pexp_5d_function(
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
             """Helper function for directionality-averaged table lookup"""
-            templ = table[
-                r_bin_idx,
-                costheta_bin_idx,
-                t_bin_idx
-            ]
+            templ = table[r_bin_idx, costheta_bin_idx, t_bin_idx]
             return templ['weight'] / template_library[templ['index']].size
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx):
             """Helper function for table lookup"""
-            templ = table[
-                r_bin_idx,
-                costheta_bin_idx,
-                t_bin_idx
-            ]
+            templ = table[r_bin_idx, costheta_bin_idx, t_bin_idx]
             return templ['weight'] * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
 
     else:
@@ -296,7 +288,7 @@ def generate_pexp_5d_function(
 
         """
         if not dom_info['operational']:
-            return np.float64(0), np.float64(0)
+            return np.float64(0) #, np.float64(0)
 
         num_hits = hits.shape[1]
 
@@ -538,6 +530,7 @@ def generate_pexp_5d_function(
                 + noise_rate_per_ns * time_window
             )
 
-        return exp_p_at_all_times, sum_log_at_hit_times
+        #return exp_p_at_all_times, sum_log_at_hit_times
+        return sum_log_at_hit_times - exp_p_at_all_times
 
     return pexp_5d, meta

@@ -85,9 +85,10 @@ def setup_dom_tables(
     else:
         mmap = 'uncompr' in dom_tables_kind
 
-    template_library = None
     if dom_tables_kind in ['raw_templ_compr', 'ckv_templ_compr']:
         template_library = np.load(template_library)
+    else:
+        template_library = None
 
     gcd = extract_gcd(gcd)
 
@@ -133,7 +134,7 @@ def setup_dom_tables(
 
                 dom_tables.load_table(
                     fpath=fpath,
-                    sd_indices=sd_indices,
+                    sd_indices=shared_table_sd_indices,
                     step_length=step_length,
                     mmap=mmap
                 )
@@ -213,22 +214,28 @@ def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
     time_window : float
 
     """
+    if start_idx is None:
+        start_idx = 0
+
+    if num_events is None:
+        events_slice = slice(start_idx, None)
+    else:
+        events_slice = slice(start_idx, start_idx + num_events)
+
     hits_file = expand(hits_file)
     _, ext = splitext(hits_file)
     if ext == '.pkl':
         with open(hits_file, 'rb') as f:
             hits = pickle.load(f)
+            offset_hits_iter = hits[events_slice]
     else:
         raise NotImplementedError()
 
     if hits_are_photons:
         angsens_poly, _ = load_angsens_model(angsens_model)
 
-    events_slice = slice(start_idx, None)
-    for event_ofst, event_hits in enumerate(hits[events_slice]):
-        if event_ofst >= num_events:
-            break
-        event_idx = start_idx + event_ofst
+    for event_offset, event_hits in enumerate(offset_hits_iter):
+        event_idx = event_offset - start_idx
         if hits_are_photons:
             time_window = 0.0
             event_photons = event_hits
@@ -278,11 +285,6 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
     dom_tables_kw, hypo_kw, hits_kw, other_kw
 
     """
-    dom_tables_kw = {k: None for k in setup_dom_tables.__code__.co_varnames}
-    hypo_kw = {k: None for k in setup_discrete_hypo.__code__.co_varnames}
-    hits_kw = {k: None for k in get_hits.__code__.co_varnames}
-    other_kw = {}
-
     if parser is None:
         parser = ArgumentParser(description=description)
 
@@ -395,11 +397,25 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
             '--start-event-idx', type=int, default=0
         )
         group.add_argument(
-            '--n-events', type=int, default=None
+            '--num-events', type=int, default=None
         )
 
     args = parser.parse_args()
     kwargs = vars(args)
+
+    dom_tables_kw = {}
+    hypo_kw = {}
+    hits_kw = {}
+    other_kw = {}
+    if dom_tables:
+        code = setup_dom_tables.__code__
+        dom_tables_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
+    if hypo:
+        code = setup_discrete_hypo.__code__
+        hypo_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
+    if hits:
+        code = get_hits.__code__
+        hits_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
 
     if dom_tables:
         strs_doms = kwargs.pop('strs_doms').strip().lower()
@@ -409,6 +425,9 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
             sd_indices = const.DC_ALL_STRS_DOMS
         elif strs_doms == 'dc_subdust':
             sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
+        else:
+            raise ValueError(strs_doms)
+        print('nubmer of doms = {}'.format(len(sd_indices)))
         kwargs['sd_indices'] = sd_indices
         kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
         kwargs['use_directionality'] = not kwargs.pop('no_dir')
@@ -422,10 +441,5 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
             taken = True
         if not taken:
             other_kw[key] = val
-
-    print('other_kw:', other_kw)
-    print('dom_tables_kw:', dom_tables_kw)
-    print('hypo_kw:', hypo_kw)
-    print('hits_kw:', hits_kw)
 
     return dom_tables_kw, hypo_kw, hits_kw, other_kw

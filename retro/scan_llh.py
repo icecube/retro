@@ -68,7 +68,17 @@ def parse_args(description=__doc__):
         instantiate_objects.parse_args(parser=parser)
     )
 
-    return scan_kw, dom_tables_kw, hypo_kw, hits_kw
+    #print('')
+    #print('dom_tables_kw:', dom_tables_kw)
+    #print('')
+    #print('hypo_kw:', hypo_kw)
+    #print('')
+    #print('hits_kw:', hits_kw)
+    #print('')
+    #print('scan_kw:', scan_kw)
+    #print('')
+
+    return dom_tables_kw, hypo_kw, hits_kw, scan_kw
 
 
 def sort_dict(d):
@@ -76,13 +86,13 @@ def sort_dict(d):
     return OrderedDict([(k, d[k]) for k in sorted(d.keys())])
 
 
-def scan_llh(scan_kw, dom_tables_kw, hypo_kw, hits_kw):
+def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
     """Script "main" function"""
     t00 = time.time()
 
     scan_values = []
     for dim in HYPO_PARAMS_T._fields:
-        val_str = ''.join(scan_kw[dim])
+        val_str = ''.join(scan_kw.pop(dim))
         val_str.replace('pi', format(np.pi, '.17e'))
         scan_values.append(hrlist2list(val_str))
 
@@ -99,7 +109,7 @@ def scan_llh(scan_kw, dom_tables_kw, hypo_kw, hits_kw):
     t0 = time.time()
 
     metric_kw = dict(
-        sd_indices=scan_kw['sd_indices'],
+        sd_indices=dom_tables.loaded_sd_indices,
         time_window=None,
         hypo_handler=hypo_handler,
         dom_tables=dom_tables,

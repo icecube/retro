@@ -26,7 +26,8 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 
-def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None):
+def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
+            tdi_table=None):
     """Get the negative of the log likelihood of `event` having come from
     hypothesis `hypo` (whose light detection expectation is computed by
     `hypo_handler`).
@@ -53,6 +54,10 @@ def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None):
         Instantiated object able to take light sources and convert into
         expected detections in each DOM.
 
+    sd_indices : None or iterable of shape (2,) arrays
+        Only use this subset of loaded doms. If None, all loaded DOMs will be
+        used for computing the LLH.
+
     tdi_table : tables.tdi_table.TDITable, optional
         If provided, this is used to compute total expected hits, independent
         of time _and_ DOM. Instantiate the `dom_tables` object with
@@ -77,18 +82,24 @@ def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None):
         #    sources=hypo_light_sources
         #)
 
-    for sd_idx in dom_tables.loaded_sd_indices:
-        this_hits = hits[sd_idx]
+    pexp_func = dom_tables.pexp_func
+    dom_info = dom_tables.dom_info
+    tables = dom_tables.tables
+
+    if sd_indices is None:
+        sd_indices = dom_tables.loaded_sd_indices
+
+    for sd_idx in sd_indices:
         # DEBUG: remove the below if / continue when no longer debugging!
         #if this_hits is None:
         #    continue
-        exp_p_at_all_times, sum_log_at_hit_times = dom_tables.pexp_func(
+        llh += pexp_func(
             hypo_light_sources,
-            this_hits,
-            dom_tables.dom_info[sd_idx],
+            hits[sd_idx],
+            dom_info[sd_idx],
             time_window,
-            *dom_tables.tables[sd_idx]
+            *tables[sd_idx]
         )
-        llh += sum_log_at_hit_times - exp_p_at_all_times
+        #llh += sum_log_at_hit_times - exp_p_at_all_times
 
     return llh
