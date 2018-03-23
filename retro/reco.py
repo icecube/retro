@@ -27,7 +27,7 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from copy import deepcopy
+
 from os.path import abspath, dirname, join
 import pickle
 import sys
@@ -40,7 +40,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T, LLHP_T, const, init_obj
+from retro import HYPO_PARAMS_T, LLHP_T, init_obj
 from retro.const import PI, TWO_PI
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.likelihood import get_llh
@@ -55,7 +55,10 @@ def parse_args(description=__doc__):
     )
 
     group = parser.add_argument_group(
-        title='Parameter priors'
+        title='Parameter priors',
+        description='''Priors for the hypothesis parameters. Note that angles
+        get uniform priors in their full range and time limits are set by the
+        extentes of the tables' time binning (and event duration).'''
     )
 
     group.add_argument(
@@ -72,7 +75,8 @@ def parse_args(description=__doc__):
     )
 
     group = parser.add_argument_group(
-        title='MultiNest parameters'
+        title='MultiNest parameters',
+        description='Parameters that affect how MultiNest runs'
     )
 
     group.add_argument(
@@ -95,10 +99,18 @@ def parse_args(description=__doc__):
     )
 
     dom_tables_kw, hypo_kw, hits_kw, reco_kw = (
-        init_ob.parse_args(parser=parser)
+        init_obj.parse_args(parser=parser)
     )
 
-    reco_kw['energy_lims'] = ''.join(reco_kw['energy_lims'])
+    elims = ''.join(reco_kw['energy_lims'])
+    elims = [float(l) for l in elims.split(',')]
+    reco_kw['energy_lims'] = elims
+
+    return dom_tables_kw, hypo_kw, hits_kw, reco_kw
+
+
+PRI_UNIFORM = 0
+PRI_LOG_UNIFORM = 1
 
 
 def run_multinest(
@@ -106,13 +118,50 @@ def run_multinest(
         event_idx,
         llh_kw,
         t_lims,
-        #x_lims=(-600, 600),
-        #y_lims=(-550, 550),
-        #z_lims=(-550, 550),
-        x_lims=(-150, 250),
-        y_lims=(-200, 150),
-        z_lims=(-550, 0),
+        spatial_lims,
+        total_energy_lims,
+        total_energy_prior,
+        seed,
+        n_dims,
+        n_live_points,
+        importance_nested_sampling,
+        const_efficiency,
+        evidence_tolerance,
+        sampling_efficiency,
+        max_modes,
+        max_iter,
     ):
+    if total_energy_prior == 'uniform':
+        total_energy_prior = PRI_UNIFORM
+        e_min = np.min(total_energy_lims)
+        e_range = np.max(total_energy_lims) - e_min
+    elif total_energy_prior == 'log_uniform':
+        total_energy_prior = PRI_LOG_UNIFORM
+        log_e_min = np.log(np.min(total_energy_lims))
+        log_e_range = np.log(np.max(total_energy_lims) / log_e_min)
+    else:
+        raise ValueError(str(total_energy_prior))
+
+    total_energy_lims = (np.min(total_energy_lims), np.max(total_energy_lims))
+
+    if isinstance(spatial_lims, basestring):
+        spatial_lims = spatial_lims.strip().lower()
+        if spatial_lims == 'ic':
+            x_lims = [-860., 870.]
+            y_lims = [-780., 770.]
+            z_lims = [-780., 790.]
+        elif spatial_lims == 'dc':
+            x_lims = [-150., 270.]
+            y_lims = [-210., 150.]
+            z_lims = [-770., 760.]
+        elif spatial_lims == 'dc_subdust':
+            x_lims = [-150., 270.]
+            y_lims = [-210., 150.]
+            z_lims = [-610., -60.]
+        else:
+            raise ValueError(spatial_lims)
+    else:
+        raise ValueError(str(spatial_lims))
 
     priors = OrderedDict([
         ('t', ('uniform', t_lims)),
@@ -122,7 +171,7 @@ def run_multinest(
         ('z', ('uniform', z_lims)),
         ('track_zenith', ('uniform', (0, np.pi))),
         ('track_azimuth', ('uniform', (0, 2*np.pi))),
-        ('total_energy', ('log_uniform', (0, 3))),
+        ('total_energy', (total_energy_prior, total_energy_lims)),
         ('track_fraction', ('uniform', (0, 1)))
     ])
 
@@ -138,6 +187,9 @@ def run_multinest(
 
     param_values = []
     log_likelihoods = []
+    t_start = []
+
+    report_after = 200
 
     def prior(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function for pymultinest to translate the hypercube MultiNest uses
@@ -158,10 +210,11 @@ def run_multinest(
         # azimuth
         cube[5] *= TWO_PI
 
-        # energy: log uniform prior between 10^0 and 10^3
-        cube[6] = 10**(cube[6]*3)
-
-    t_start = []
+        # energy: either uniform or log uniform prior
+        if total_energy_prior is PRI_UNIFORM:
+            cube[6] = cube[6] * e_range + e_min
+        elif total_energy_prior is PRI_LOG_UNIFORM:
+            cube[6] = np.exp(cube[6] * log_e_range + log_e_min)
 
     def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function pymultinest calls to get llh values.
@@ -175,6 +228,10 @@ def run_multinest(
             t_start.append(time.time())
 
         t0 = time.time()
+
+        total_energy = cube[6]
+        track_fraction = cube[7]
+
         hypo_params = HYPO_PARAMS_T(
             t=cube[0],
             x=cube[1],
@@ -182,10 +239,11 @@ def run_multinest(
             z=cube[3],
             track_zenith=cube[4],
             track_azimuth=cube[5],
-            cascade_energy=cube[6]*(1 - cube[7]),
-            track_energy=cube[6]*cube[7]
+            cascade_energy=total_energy * (1 - track_fraction),
+            track_energy=total_energy * track_fraction
         )
         llh = get_llh(hypo_params, **llh_kw)
+
         t1 = time.time()
 
         param_values.append(hypo_params)
@@ -193,21 +251,20 @@ def run_multinest(
 
         n_calls = len(log_likelihoods)
 
-        if n_calls % 200 == 0:
+        if n_calls % report_after == 0:
             t_now = time.time()
             best_idx = np.argmax(log_likelihoods)
             best_llh = log_likelihoods[best_idx]
             best_p = param_values[best_idx]
-            print(
-                'best llh = {:.3f} @ (t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f}, zen={:.1f} deg, az={:.1f} deg, Etrk={:.1f}, Ecscd={:.1f})'
-                .format(
-                    best_llh, best_p.t, best_p.x, best_p.y, best_p.z,
-                    np.rad2deg(best_p.track_zenith),
-                    np.rad2deg(best_p.track_azimuth),
-                    best_p.track_energy,
-                    best_p.cascade_energy
-                )
-            )
+            print(('best llh = {:.3f} @ '
+                   '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
+                   ' zen={:.1f} deg, az={:.1f} deg, Etrk={:.1f}, Ecscd={:.1f})')
+                  .format(
+                      best_llh, best_p.t, best_p.x, best_p.y, best_p.z,
+                      np.rad2deg(best_p.track_zenith),
+                      np.rad2deg(best_p.track_azimuth),
+                      best_p.track_energy,
+                      best_p.cascade_energy))
             print('{} LLH computed'.format(n_calls))
             print('avg time per llh: {:.3f} ms'.format((t_now - t_start[0])/n_calls*1000))
             print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
@@ -216,15 +273,23 @@ def run_multinest(
         return llh
 
     n_dims = len(HYPO_PARAMS_T._fields)
-
     mn_kw = OrderedDict([
+        ('n_dims', n_dims),
+        ('n_params', n_dims),
         ('n_clustering_params', n_dims),
-        ('n_live_points', 160),
-        ('evidence_tolerance', 0.1),
-        ('sampling_efficiency', 0.8),
-        ('max_modes', 10),
-        ('seed', 0),
-        ('max_iter', 100000),
+        ('wrapped_params', [int('azimuth' in p) for p in HYPO_PARAMS_T._fields]),
+        ('importance_nested_sampling', importance_nested_sampling),
+        ('multimodal', max_modes > 1),
+        ('const_efficiency', const_efficiency),
+        ('n_live_points', n_live_points),
+        ('evidence_tolerance', evidence_tolerance),
+        ('sampling_efficiency', sampling_efficiency),
+        ('null_log_evidence', -1e90),
+        ('max_modes', max_modes),
+        ('mode_tolerance', -1e90),
+        ('seed', seed),
+        ('log_zero', -1e100),
+        ('max_iter', max_iter),
     ])
 
     mn_meta = OrderedDict([
@@ -246,8 +311,6 @@ def run_multinest(
     pymultinest.run(
         LogLikelihood=loglike,
         Prior=prior,
-        n_dims=n_dims,
-        n_params=n_dims,
         verbose=False,
         outputfiles_basename=outname,
         resume=False,
@@ -265,10 +328,12 @@ def reco(dom_tables_kw, hypo_kw, hits_kw, reco_kw):
     hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
     hits_generator = init_obj.get_hits(**hits_kw)
 
+    table_t_max = dom_tables.pexp_meta['binning_info']['t_max']
+
     print('Running reconstructions...')
     t0 = time.time()
 
-    metric_kw = dict(
+    llh_kw = dict(
         sd_indices=dom_tables.loaded_sd_indices,
         time_window=None,
         hypo_handler=hypo_handler,
@@ -280,42 +345,29 @@ def reco(dom_tables_kw, hypo_kw, hits_kw, reco_kw):
     best_llh_params = []
     n_points = 0
 
-    for event_ofst, event_hits in enumerate(hits[events_slice]):
-        event_idx = start_event_idx + event_ofst
+    outdir = reco_kw['outdir']
+
+    for event_idx, hits, time_window in hits_generator: # pylint: disable=unused-variable
         t1 = time.time()
         first_hit_t = np.inf
         last_hit_t = -np.inf
-        if hits_are_photons:
-            # For photons, we assign a "charge" from their weight, which comes
-            # from angsens model.
-            event_photons = event_hits
-            # DEBUG: set back to EMPTY_HITS when not debugging!
-            event_hits = [EMPTY_HITS]*const.NUM_DOMS_TOT
-            #event_hits = [None]*const.NUM_DOMS_TOT
-            for str_dom, pinfo in event_photons.items():
-                sd_idx = const.get_sd_idx(string=str_dom[0], dom=str_dom[1])
-                t = pinfo[0, :]
-                coszen = pinfo[4, :]
-                weight = np.float32(dom_tables.angsens_poly(coszen))
-                event_hits[sd_idx] = np.concatenate(
-                    (t[np.newaxis, :], weight[np.newaxis, :]),
-                    axis=0
-                )
-                first_hit_t = min(first_hit_t, t.min())
-                last_hit_t = max(last_hit_t, t.max())
+        for hit_info in hits.values():
+            t = hit_info[0, :]
+            first_hit_t = min(first_hit_t, t.min())
+            last_hit_t = max(last_hit_t, t.max())
 
-        llh_kw['hits'] = event_hits
+        llh_kw['hits'] = hits
 
-        t_lims = (first_hit_t - table_t_max + 100, last_hit_t)
-        #t_lims = (-100, 100)
-        t_range = last_hit_t - first_hit_t + table_t_max
+        t_lims = (first_hit_t - table_t_max - 1e3, last_hit_t)
+        t_range = t_lims[1] - t_lims[0]
         llh_kw['time_window'] = t_range
 
         param_values, log_likelihoods = run_multinest(
             outdir=outdir,
             event_idx=event_idx,
             llh_kw=llh_kw,
-            t_lims=t_lims
+            t_lims=t_lims,
+            **reco_kw
         )
 
         log_likelihoods = np.array(log_likelihoods)
@@ -349,7 +401,6 @@ def reco(dom_tables_kw, hypo_kw, hits_kw, reco_kw):
         print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
               .format(dt, n_points, dt/n_points*1e3))
 
-    kwargs.pop('hits')
     info = OrderedDict([
         ('hypo_params', HYPO_PARAMS_T._fields),
         ('metric_name', 'llh'),
@@ -372,4 +423,6 @@ def reco(dom_tables_kw, hypo_kw, hits_kw, reco_kw):
 
 
 if __name__ == '__main__':
-    best_llh_params, best_llh_vals, orig_kwargs = reco() # pylint: disable=invalid-name
+    best_llh_params, best_llh_vals, orig_kwargs = reco( # pylint: disable=invalid-name
+        *parse_args()
+    )
