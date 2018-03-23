@@ -29,7 +29,7 @@ import numpy as np
 from scipy import interpolate
 
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.hypo.discrete_muon_kernels import (

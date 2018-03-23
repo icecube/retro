@@ -45,10 +45,10 @@ if __name__ == '__main__' and __package__ is None:
 import retro
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon
-from retro.hypo.discrete_cascade_kernels import point_cascade
+from retro.hypo.discrete_cascade_kernels import point_cascade, one_dim_cascade
 from retro.i3info.extract_gcd import extract_gcd
 from retro.tables.dom_time_polar_tables import DOMTimePolarTables
-from retro.tables.tdi_cart_tables import TDICartTable
+#from retro.tables.tdi_cart_tables import TDICartTable
 from retro.tables.retro_5d_tables import Retro5DTables
 from retro.utils.misc import expand, mkdir
 
@@ -82,7 +82,7 @@ else:
 
 
 # One of the keys from SIMULATIONS dict, below
-SIM_TO_TEST = 'upgoing_muon'
+SIM_TO_TEST = 'upgoing_em_cascade'
 
 # One of {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr', 'dom_time_polar'}
 TABLE_KIND = 'ckv_uncompr'
@@ -101,7 +101,7 @@ NUM_PHI_SAMPLES = 100
 MUON_DEDX = False
 
 # Time step (ns) for discrete muon kernel (whether or not dEdX)
-MUON_DT = 1.1
+MUON_DT = 1.0
 
 ANGSENS_MODEL = 'h2-50cm' #0.338019664877
 STEP_LENGTH = 1.0
@@ -126,16 +126,18 @@ CODE_TO_TEST = (
     )
 )
 
-OUTDIR = expand(join('~', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
+OUTDIR = expand(join('~/projects/retro', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
 
 run_info['sim_to_test'] = SIM_TO_TEST
 
 # pylint: disable=line-too-long
+#CHANGING FROM 8D TO 10D
 SIMULATIONS = dict(
     upgoing_muon=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=np.pi,
+#            cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl'
@@ -144,6 +146,7 @@ SIMULATIONS = dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-300,
             track_azimuth=0, track_zenith=0,
+#            cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
@@ -152,17 +155,19 @@ SIMULATIONS = dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-350,
             track_azimuth=0, track_zenith=np.pi/2,
+#            cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
     ),
-    em_cascade=dict(
+    upgoing_em_cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=0,
+#            cascade_azimuth=0, cascade_zenith=np.pi,
             track_energy=0, cascade_energy=20
         ),
-        fwd_sim_histo_file='cascade_step4_SplitUncleanedInIcePulses.pkl'
+        fwd_sim_histo_file='EMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-4000ns_400bins.pkl'
     ),
 )
 
