@@ -23,6 +23,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from argparse import ArgumentParser
 from collections import OrderedDict
 import cPickle as pickle
 import hashlib
@@ -59,56 +60,23 @@ run_info = OrderedDict([
     ('hostname', hostname)
 ])
 
-if hostname in ['schwyz', 'uri', 'unterwalden', 'luzern']:
-    fwd_sim_dir = '/data/icecube/retro/sims/'
-    dom_time_polar_tables_basedir = '/data/icecube/retro_tables/full1000'
-    single_table_path = '/data/icecube/retro_tables/large_5d_notilt_string_dc_depth_0-59'
-    orig_table_basedir = None
-    combined_tables_basedir = '/data/icecube/retro_tables/large_5d_notilt_combined'
-    if hostname == 'luzern':
-        ckv_tables_basedir = '/fastio2/icecube/retro/tables'
-    elif hostname in ['schwyz', 'uri', 'unterwalden']:
-        ckv_tables_basedir = '/data/icecube/retro_tables/large_5d_notilt_combined'
-elif 'aci.ics.psu.edu' in hostname:
-    fwd_sim_dir = '/gpfs/group/dfc13/default/sim/retro'
-    dom_time_polar_tables_basedir = None
-    single_table_path = None
-    orig_table_basedir = None
-    combined_tables_basedir = '/gpfs/scratch/jll1062/retro_tables'
-    ckv_tables_basedir = None
-else:
-    raise ValueError('Unhandled HOSTNAME="{}" for using CLSimTables'
-                     .format(hostname))
+def parse_args(description=__doc__):
+    """Parse command-line arguments"""
+    parser = ArgumentParser(description=description)
 
+    parser.add_argument(
+        '--outdir', required=True,
+    )
+    parser.add_argument(
+        '--sim-to-test', required=True,
+    )
 
-# One of the keys from SIMULATIONS dict, below
-SIM_TO_TEST = 'upgoing_em_cascade'
+    dom_tables_kw, hypo_kw, _, pdf_kw = (
+        init_obj.parse_args(parser=parser)
+    )
 
-# One of {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr', 'dom_time_polar'}
-TABLE_KIND = 'ckv_uncompr'
+    return dom_tables_kw, hypo_kw, _, pdf_kw
 
-# One of {'pde', 'binvol', 'binvol2', 'avgsurfarea', 'wtf', 'wtf2', ...}
-NORM_VERSION = 'binvol2'
-
-# Whether to use directionality from tables
-USE_DIRECTIONALITY = True
-
-# Use CKV_SIGMA_DEG and NUM_PHI_SAMPLES if USE_DIRECTIONALITY and TABLE_KIND is raw
-CKV_SIGMA_DEG = 10
-NUM_PHI_SAMPLES = 100
-
-# Use dE/dX discrete muon kernel?
-MUON_DEDX = False
-
-# Time step (ns) for discrete muon kernel (whether or not dEdX)
-MUON_DT = 1.0
-
-ANGSENS_MODEL = 'h2-50cm' #0.338019664877
-STEP_LENGTH = 1.0
-MMAP = True
-MAKE_PLOTS = False
-
-retro.DEBUG = 0
 
 CODE_TO_TEST = (
     '{tables}_tables_{norm}norm_{no_dir_str}{cone_str}{dedx_str}dt{muon_dt:.1f}'

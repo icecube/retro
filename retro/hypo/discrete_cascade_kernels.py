@@ -83,7 +83,7 @@ def point_cascade(hypo_params):
     #)
     return sources
 
-def one_dim_cascade(hypo_params, n_samples=1000):
+def one_dim_cascade(hypo_params, n_samples):
     """
     Cascade with both longitudinal and angular distributions
 

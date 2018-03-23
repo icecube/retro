@@ -74,7 +74,7 @@ with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
 SPLINE = interpolate.splrep(energies, stopping_power, s=0)
 
 @numba_jit(nopython=False, cache=True) #(**DFLT_NUMBA_JIT_KWARGS)
-def const_energy_loss_muon(hypo_params, dt=1.0):
+def const_energy_loss_muon(hypo_params, dt):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -162,7 +162,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     return sources
 
 
-def table_energy_loss_muon(hypo_params, dt=1.0):
+def table_energy_loss_muon(hypo_params, dt):
     """Discrete-time track hypothesis that calculates dE/dx as the muon travels
     using splined tabulated data.
 
