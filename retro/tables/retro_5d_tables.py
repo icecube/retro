@@ -41,6 +41,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import FTYPE
 from retro.const import (
     NUM_STRINGS, NUM_DOMS_PER_STRING, NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS,
     PI, TWO_PI, get_sd_idx
@@ -128,11 +129,13 @@ class Retro5DTables(object):
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
 
+        self.loaded_sd_indices = []
+
         self.tbl_is_raw = table_kind in ['raw_uncompr']
         self.tbl_is_ckv = table_kind in ['ckv_uncompr']
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
 
-	if self.tbl_is_templ_compr:
+        if self.tbl_is_templ_compr:
             assert(template_library is not None), 'template library is needed to sue compressed table'
         self.template_library = template_library
 
@@ -252,26 +255,30 @@ class Retro5DTables(object):
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
+
+        table_norm = table_norm.astype(FTYPE)
+        t_indep_table_norm = t_indep_table_norm.astype(FTYPE)
+
         table['table_norm'] = table_norm
         table['t_indep_table_norm'] = t_indep_table_norm
 
-        pexp_5d, pexp_meta = generate_pexp_5d_function(
-            table=table,
-            table_kind=self.table_kind,
-            compute_t_indep_exp=self.compute_t_indep_exp,
-            use_directionality=self.use_directionality,
-            num_phi_samples=self.num_phi_samples,
-            ckv_sigma_deg=self.ckv_sigma_deg,
-	    template_library=self.template_library
-        )
         if self.pexp_func is None:
+            pexp_5d, pexp_meta = generate_pexp_5d_function(
+                table=table,
+                table_kind=self.table_kind,
+                compute_t_indep_exp=self.compute_t_indep_exp,
+                use_directionality=self.use_directionality,
+                num_phi_samples=self.num_phi_samples,
+                ckv_sigma_deg=self.ckv_sigma_deg,
+                template_library=self.template_library
+            )
             self.pexp_func = pexp_5d
             self.pexp_meta = pexp_meta
-        elif pexp_meta != self.pexp_meta:
-            raise ValueError(
-                'All binnings and table parameters currently must be equal to'
-                ' one another.'
-            )
+        #elif pexp_meta != self.pexp_meta:
+        #    raise ValueError(
+        #        'All binnings and table parameters currently must be equal to'
+        #        ' one another.'
+        #    )
 
         table_tup = (
             table[self.table_name][self.usable_table_slice],
@@ -286,6 +293,8 @@ class Retro5DTables(object):
 
         for sd_idx in sd_indices:
             self.tables[sd_idx] = table_tup
+
+        self.loaded_sd_indices.extend(sd_indices)
 
     def get_expected_det(self, sources, hits, sd_idx, time_window):
         """Get the number of photons we expect the DOM to detect (which is the

@@ -10,6 +10,7 @@ __all__ = '''
     FTYPE
     UITYPE
     HYPO_PARAMS_T
+    LLHP_T
     DEBUG
     DFLT_NUMBA_JIT_KWARGS
     DFLT_PULSE_SERIES
@@ -70,7 +71,7 @@ RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.retro_types import HypoParams8D
+from retro.retro_types import HypoParams8D, HypoParams10D, LLHP8D, LLHP10D
 
 if 'RETRO_DATA_DIR' in environ:
     DATA_DIR = environ['RETRO_DATA_DIR']
@@ -80,7 +81,7 @@ else:
 
 # -- Datatype choices for consistency throughout code -- #
 
-FTYPE = np.float32
+FTYPE = np.float64
 """Datatype to use for explicitly-typed floating point numbers"""
 
 UITYPE = np.int64
@@ -88,6 +89,9 @@ UITYPE = np.int64
 
 HYPO_PARAMS_T = HypoParams8D
 """Global selection of which hypothesis to use throughout the code."""
+
+LLHP_T = LLHP8D if HYPO_PARAMS_T is HypoParams8D else LLHP10D
+"""Global selection of LLH/params dtype."""
 
 
 # -- Default choices we've made -- #

@@ -8,7 +8,7 @@ have generated.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['get_neg_llh']
+__all__ = ['get_llh']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -27,20 +27,18 @@ limitations under the License.'''
 
 from os.path import abspath, dirname
 import sys
-from pisa.utils.profiler import line_profile, profile
-from pisa.utils import log
-log.set_verbosity(2)
+
+import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const
+from retro.const import EMPTY_HITS # pylint: disable=unused-import
 
-#@line_profile
-def get_neg_llh(
-        hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None
-    ):
+
+def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
+            tdi_table=None):
     """Get the negative of the log likelihood of `event` having come from
     hypothesis `hypo` (whose light detection expectation is computed by
     `hypo_handler`).
@@ -55,7 +53,7 @@ def get_neg_llh(
         namedtuples, where ``val.times`` and ``val.charges`` are arrays of
         shape (n_dom_hits_i,).
 
-    time_window : float
+    time_window : FTYPE
         Time window pertinent to the event's reconstruction. Used for
         computing expected noise hits.
 
@@ -66,6 +64,10 @@ def get_neg_llh(
     dom_tables : tables.retro_5d_tables.Retro5DTables, etc.
         Instantiated object able to take light sources and convert into
         expected detections in each DOM.
+
+    sd_indices : None or iterable of shape (2,) arrays
+        Only use this subset of loaded doms. If None, all loaded DOMs will be
+        used for computing the LLH.
 
     tdi_table : tables.tdi_table.TDITable, optional
         If provided, this is used to compute total expected hits, independent
@@ -78,51 +80,37 @@ def get_neg_llh(
 
     Returns
     -------
-    neg_llh : float
-        Negative of the log likelihood
+    llh : float
+        Log likelihood
 
     """
     hypo_light_sources = hypo_handler.get_sources(hypo)
 
-    #sum_at_all_times_computed = False
-    if tdi_table is None:
-        if not dom_tables.compute_t_indep_exp:
-            print('*'*79)
-            print('WARNING! Time-independent expectation will not be computed')
-            print('*'*79)
-        sum_at_all_times = 0.0
-    else:
+    llh = 0.0
+    if tdi_table is not None:
         raise NotImplementedError()
-        #sum_at_all_times = tdi_table.get_expected_det(
+        #llh = - tdi_table.get_expected_det(
         #    sources=hypo_light_sources
         #)
-        #sum_at_all_times_computed = True
 
-    sum_at_all_times = 0.0
-    tot_sum_log_at_hit_times = 0.0
-    for sd_idx in const.DC_ALL_SUBDUST_STRS_DOMS:
-        this_hits = hits[sd_idx]
+    pexp_func = dom_tables.pexp_func
+    dom_info = dom_tables.dom_info
+    tables = dom_tables.tables
+
+    if sd_indices is None:
+        sd_indices = dom_tables.loaded_sd_indices
+
+    for sd_idx in sd_indices:
         # DEBUG: remove the below if / continue when no longer debugging!
-        #if this_hits is None:
+        #if this_hits is EMPTY_HITS:
         #    continue
-        exp_p_at_all_times, sum_log_at_hit_times = dom_tables.pexp_func(
+        exp_p_at_all_times, sum_log_at_hit_times = pexp_func(
             hypo_light_sources,
-            this_hits,
-            dom_tables.dom_info[sd_idx],
-            time_window,
-            *dom_tables.tables[sd_idx]
+            hits[sd_idx],
+            dom_info[sd_idx],
+            np.float32(time_window),
+            *tables[sd_idx]
         )
-        sum_at_all_times += exp_p_at_all_times
-        tot_sum_log_at_hit_times += sum_log_at_hit_times
+        llh += sum_log_at_hit_times - exp_p_at_all_times
 
-    neg_llh = sum_at_all_times - tot_sum_log_at_hit_times
-
-    return neg_llh
-
-
-#@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-#def sum_wtd_log(hits, expectations):
-#    accum = 0.0
-#    for hit, expectation in zip(hits, expectations):
-#        accum += hit * math.log(expectation)
-#    return accum
+    return llh

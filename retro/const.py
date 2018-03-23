@@ -8,6 +8,8 @@ Physical constants and constant-for-us values
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    'get_sd_idx',
+
     # Constants
     'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS',
 
@@ -30,11 +32,12 @@ __all__ = [
 
     'NUM_STRINGS', 'NUM_DOMS_PER_STRING', 'NUM_DOMS_TOT',
 
-    'DC_STRS', 'DC_IC_STRS', 'DC_SUBDUST_DOMS', 'IC_SUBDUST_DOMS',
+    'IC_STRS', 'DC_STRS', 'DC_IC_STRS', 'DC_SUBDUST_DOMS', 'IC_SUBDUST_DOMS',
     'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
-    'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
+    'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS',
+    'ALL_STRS_DOMS', 'DC_ALL_STRS_DOMS',
 
-    'get_sd_idx'
+    'EMPTY_HITS',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -189,7 +192,8 @@ NUM_DOMS_PER_STRING = 60
 NUM_DOMS_TOT = NUM_STRINGS * NUM_DOMS_PER_STRING
 
 
-DC_STRS = np.array([79, 80, 81, 82, 83, 84, 85, 86], dtype=np.uint8)
+IC_STRS = np.array(list(range(1, 78+1)), dtype=np.uint8)
+DC_STRS = np.array(list(range(79, 86+1)), dtype=np.uint8)
 DC_IC_STRS = np.array([26, 27, 35, 36, 37, 45, 46], dtype=np.uint8)
 
 DC_SUBDUST_DOMS = np.array(list(range(11, 60+1)), dtype=np.uint8)
@@ -209,3 +213,7 @@ DC_ALL_SUBDUST_STRS_DOMS = np.concatenate(
 ALL_STRS = list(range(1, 86+1))
 ALL_DOMS = list(range(1, 60+1))
 ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(ALL_STRS, ALL_DOMS)])
+DC_ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(DC_STRS, ALL_DOMS)])
+
+
+EMPTY_HITS = np.empty(shape=(2, 0), dtype=FTYPE)
