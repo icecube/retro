@@ -41,13 +41,13 @@ ckernel="point"
 
 tscan="-100-100:1"
 xscan="-100-100:1"
-zscan="-450--250:1"
+zscan="-400--200:1"
 zenscan="0-pi:0.031415926535897934"
 azscan="-pi-pi:0.06283185307179587"
 trckescan="0-100:1"
 cscdescan="0-100:1"
 
-~/src/retro/retro/scan_neg_llh.py \
+~/src/retro/retro/scan_llh.py \
 	--outdir="$base/t_${tscan}_z_${zscan}" \
 	--start-event-idx=$start_evt \
 	--num-events=$n_events \
@@ -73,7 +73,7 @@ cscdescan="0-100:1"
 	$noise \
 	--norm-version="$norm" &
 
-~/src/retro/retro/scan_neg_llh.py \
+~/src/retro/retro/scan_llh.py \
 	--outdir="$base/x_${xscan}_z_${zscan}" \
 	--start-event-idx=$start_evt \
 	--num-events=$n_events \
@@ -99,7 +99,7 @@ cscdescan="0-100:1"
 	$noise \
 	--norm-version="$norm" &
 
-~/src/retro/retro/scan_neg_llh.py \
+~/src/retro/retro/scan_llh.py \
 	--outdir="$base/zenith_${zenscan}_azimuth_${azscan}" \
 	--start-event-idx=$start_evt \
 	--num-events=$n_events \
@@ -125,7 +125,7 @@ cscdescan="0-100:1"
 	$noise \
 	--norm-version="$norm" &
 
-~/src/retro/retro/scan_neg_llh.py \
+~/src/retro/retro/scan_llh.py \
 	--outdir="$base/t_${tscan}_zenith_${zenscan}" \
 	--start-event-idx=$start_evt \
 	--num-events=$n_events \
@@ -151,7 +151,7 @@ cscdescan="0-100:1"
 	$noise \
 	--norm-version="$norm" &
 
-~/src/retro/retro/scan_neg_llh.py \
+~/src/retro/retro/scan_llh.py \
 	--outdir="$base/cascade_energy_${cscdescan}_track_energy_${trckescan}" \
 	--start-event-idx=$start_evt \
 	--num-events=$n_events \

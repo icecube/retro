@@ -42,7 +42,7 @@ ckernel="point"
 
 tscan="-100-100:1"
 xscan="-100-100:1"
-zscan="-450--250:1"
+zscan="-500--300:1"
 zenscan="0-pi:0.031415926535897934"
 azscan="-pi-pi:0.06283185307179587"
 trckescan="0-100:1"
