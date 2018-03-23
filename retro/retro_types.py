@@ -165,11 +165,11 @@ DOM_INFO = np.dtype(
 )
 
 LLHP8D = np.dtype(
-    [('llh', np.float16)]
-    + [(field, np.float16) for field in HypoParams8D._fields]
+    [('llh', np.float32)]
+    + [(field, np.float32) for field in HypoParams8D._fields]
 )
 
 LLHP10D = np.dtype(
-    [('llh', np.float16)]
-    + [(field, np.float16) for field in HypoParams10D._fields]
+    [('llh', np.float32)]
+    + [(field, np.float32) for field in HypoParams10D._fields]
 )

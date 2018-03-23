@@ -40,21 +40,10 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T, LLHP_T, const
+from retro import HYPO_PARAMS_T, LLHP_T, const, init_obj
 from retro.const import PI, TWO_PI
-from retro.utils.misc import expand, mkdir
-from retro.hypo.discrete_hypo import DiscreteHypo
-from retro.hypo.discrete_cascade_kernels import (
-    point_cascade
-)
-from retro.hypo.discrete_muon_kernels import (
-    const_energy_loss_muon, table_energy_loss_muon
-)
-from retro.i3info.extract_gcd import extract_gcd
-from retro.likelihood import get_neg_llh
-from retro.tables.retro_5d_tables import (
-    NORM_VERSIONS, TABLE_KINDS, Retro5DTables
-)
+from retro.utils.misc import expand, mkdir, sort_dict
+from retro.likelihood import get_llh
 
 
 def parse_args(description=__doc__):
@@ -64,103 +53,58 @@ def parse_args(description=__doc__):
     parser.add_argument(
         '--outdir', required=True
     )
-    parser.add_argument(
-        '--n-events', type=int, default=None
-    )
-    parser.add_argument(
-        '--start-event-idx', type=int, default=0
+
+    group = parser.add_argument_group(
+        title='Parameter priors'
     )
 
-    #for dim in HYPO_PARAMS_T._fields:
-    #    parser.add_argument(
-    #        '--{}'.format(dim.replace('_', '-')), nargs='+', required=True,
-    #        help='''Hypothses will take this(these) value(s) for dimension
-    #        {dim_hr}. Specify a single value to not scan over this dimension;
-    #        specify a human-readable string of values, e.g. '0, 0.5, 1-10:0.2'
-    #        scans 0, 0.5, and from 1 to 10 (inclusive of both endpoints) with
-    #        stepsize of 0.2.'''.format(dim_hr=dim.replace('_', ' '))
-    #    )
-
-    parser.add_argument(
-        '--hits', required=True,
+    group.add_argument(
+        '--spatial-lims', choices=['dc', 'dc_subdust', 'ic'],
+        help='''Choose a volume for limiting spatial samples'''
     )
-    parser.add_argument(
-        '--hits-are-photons', action='store_true',
+    group.add_argument(
+        '--energy-lims', nargs='+',
+        help='''Lower and upper energy limits, in GeV. E.g.: --energy-lims=1,100'''
     )
-    #parser.add_argument(
-    #    '--time-window', type=float, required=True,
-    #)
-    parser.add_argument(
-        '--angsens-model',
-        choices='nominal  h1-100cm  h2-50cm  h3-30cm'.split()
+    group.add_argument(
+        '--energy-prior', choices=['log-uniform', 'uniform'],
+        help='''Prior to put on _total_ event energy'''
     )
 
-    parser.add_argument(
-        '--cascade-kernel', choices=['point', 'one_dim'], required=True,
-    )
-    parser.add_argument(
-        '--cascade-samples', type=int, default=1,
-    )
-    parser.add_argument(
-        '--track-kernel', required=True,
-        choices=['const_e_loss', 'nonconst_e_loss'],
-    )
-    parser.add_argument(
-        '--track-time-step', type=float, required=True,
+    group = parser.add_argument_group(
+        title='MultiNest parameters'
     )
 
-    parser.add_argument(
-        '--dom-tables-fname-proto', required=True,
-        help='''Must have one of the brace-enclosed fields "{string}" or
-        "{subdet}", and must have one of "{dom}" or "{depth_idx}". E.g.:
-        "my_tables_{subdet}_{depth_idx}"'''
+    group.add_argument(
+        '--n-live-points', type=int,
     )
-    parser.add_argument(
-        '--step-length', type=float, default=1.0,
-        help='''Step length used in the CLSim table generator.'''
+    group.add_argument(
+        '--evidence-tolerance', type=float,
     )
-    parser.add_argument(
-        '--force-no-mmap', action='store_true',
-        help='''Specify to NOT memory map the tables. If not specified, a
-        sensible default is chosen for the type of tables being used.'''
+    group.add_argument(
+        '--sampling-efficiency', type=float,
     )
-    parser.add_argument(
-        '--dom-table-kind', choices=TABLE_KINDS, required=True,
-        help='''Kind of single-DOM table to use.'''
+    group.add_argument(
+        '--max-modes', type=int,
     )
-    parser.add_argument(
-        '--gcd', required=True,
-        help='''IceCube GCD file; can either specify an i3 file, or the
-        extracted pkl file used in Retro.'''
+    group.add_argument(
+        '--seed', type=int,
     )
-    parser.add_argument(
-        '--norm-version', choices=NORM_VERSIONS, required=True,
-        help='''Norm version.'''
-    )
-    parser.add_argument(
-        '--no-dir', action='store_true',
-        help='''Do NOT use source photon directionality'''
-    )
-    parser.add_argument(
-        '--num-phi-samples', type=int, default=None,
-    )
-    parser.add_argument(
-        '--ckv-sigma-deg', type=float, default=None,
-    )
-    parser.add_argument(
-        '--tdi-table', default=None
-    )
-    parser.add_argument(
-        '--template-library', default=None
+    group.add_argument(
+        '--max-iter', type=int,
     )
 
-    return parser.parse_args()
+    dom_tables_kw, hypo_kw, hits_kw, reco_kw = (
+        init_ob.parse_args(parser=parser)
+    )
+
+    reco_kw['energy_lims'] = ''.join(reco_kw['energy_lims'])
 
 
 def run_multinest(
         outdir,
         event_idx,
-        neg_llh_kw,
+        llh_kw,
         t_lims,
         #x_lims=(-600, 600),
         #y_lims=(-550, 550),
@@ -241,7 +185,7 @@ def run_multinest(
             cascade_energy=cube[6]*(1 - cube[7]),
             track_energy=cube[6]*cube[7]
         )
-        llh = -get_neg_llh(hypo_params, **neg_llh_kw)
+        llh = get_llh(hypo_params, **llh_kw)
         t1 = time.time()
 
         param_values.append(hypo_params)
@@ -313,168 +257,24 @@ def run_multinest(
     return param_values, log_likelihoods
 
 
-def reco():
+def reco(dom_tables_kw, hypo_kw, hits_kw, reco_kw):
     """Script "main" function"""
     t00 = time.time()
 
-    args = parse_args()
-    kwargs = vars(args)
-    orig_kwargs = deepcopy(kwargs)
+    dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+    hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
+    hits_generator = init_obj.get_hits(**hits_kw)
 
-    # -- Instantiate hypo class with kernels -- #
-    print('Instantiating hypo object & kernels')
+    print('Running reconstructions...')
     t0 = time.time()
 
-    hypo_kernels = []
-    kernel_kwargs = []
-
-    cascade_kernel = kwargs.pop('cascade_kernel')
-    cascade_samples = kwargs.pop('cascade_samples')
-    if cascade_kernel == 'point':
-        hypo_kernels.append(point_cascade)
-        kernel_kwargs.append(dict())
-    else:
-        raise NotImplementedError('{} cascade not implemented yet.'
-                                  .format(cascade_kernel))
-        #hypo_kernels.append(one_dim_cascade)
-        #kernel_kwargs.append(dict(num_samples=cascade_samples))
-
-    track_kernel = kwargs.pop('track_kernel')
-    if track_kernel == 'const_e_loss':
-        hypo_kernels.append(const_energy_loss_muon)
-    else:
-        hypo_kernels.append(table_energy_loss_muon)
-    kernel_kwargs.append(dict(dt=kwargs.pop('track_time_step')))
-
-    hypo_handler = DiscreteHypo(
-        hypo_kernels=hypo_kernels,
-        kernel_kwargs=kernel_kwargs
-    )
-
-    print('  -> {:.3f} s\n'.format(time.time() - t0))
-
-    # -- Instantiate tables class and load tables -- #
-    print('Instantiating tables object')
-    t0 = time.time()
-
-    dom_table_kind = kwargs.pop('dom_table_kind')
-    angsens_model = kwargs.pop('angsens_model')
-    norm_version = kwargs.pop('norm_version')
-    num_phi_samples = kwargs.pop('num_phi_samples')
-    ckv_sigma_deg = kwargs.pop('ckv_sigma_deg')
-    dom_tables_fname_proto = kwargs.pop('dom_tables_fname_proto')
-    step_length = kwargs.pop('step_length')
-    force_no_mmap = kwargs.pop('force_no_mmap')
-    if force_no_mmap:
-        mmap = False
-    else:
-        mmap = 'uncompr' in dom_table_kind
-
-    use_directionality = not kwargs.pop('no_dir')
-
-    tdi_table = kwargs.pop('tdi_table')
-    if tdi_table is not None:
-        raise NotImplementedError('TDI table not handled yet')
-
-    if dom_table_kind in ['raw_templ_compr', 'ckv_templ_compr']:
-        template_library = np.load(args.template_library)
-    else:
-        template_library = None
-
-    compute_t_indep_exp = tdi_table is None
-
-    gcd = extract_gcd(kwargs.pop('gcd'))
-
-    # Instantiate single-DOM tables
-    dom_tables = Retro5DTables(
-        table_kind=dom_table_kind,
-        geom=gcd['geo'],
-        rde=gcd['rde'],
-        noise_rate_hz=gcd['noise'],
-        angsens_model=angsens_model,
-        compute_t_indep_exp=compute_t_indep_exp,
-        use_directionality=use_directionality,
-        norm_version=norm_version,
-        num_phi_samples=num_phi_samples,
-        ckv_sigma_deg=ckv_sigma_deg,
-        template_library=template_library,
-    )
-
-    print('  -> {:.3f} s\n'.format(time.time() - t0))
-
-    # Load single-DOM tables
-    print('Loading single-DOM tables')
-    t0 = time.time()
-
-    if '{subdet' in dom_tables_fname_proto:
-        for subdet in ['ic', 'dc']:
-            if subdet == 'ic':
-                subdust_doms = const.IC_SUBDUST_DOMS
-                strings = const.DC_IC_STRS
-            else:
-                subdust_doms = const.DC_SUBDUST_DOMS
-                strings = const.DC_STRS
-
-            for dom in subdust_doms:
-                fpath = dom_tables_fname_proto.format(
-                    subdet=subdet, dom=dom, depth_idx=dom-1
-                )
-                sd_indices = [const.get_sd_idx(string, dom) for string in strings]
-
-                dom_tables.load_table(
-                    fpath=fpath,
-                    sd_indices=sd_indices,
-                    step_length=step_length,
-                    mmap=mmap
-                )
-    elif '{string' in dom_tables_fname_proto:
-        raise NotImplementedError()
-        #for string, dom in product(range(1, 86+1), range(1, 60+1)):
-        #    fpath = dom_tables_fname_proto.format(
-        #        string=string, string_idx=string - 1,
-        #        dom=dom, depth_idx=dom - 1
-        #    )
-        #    dom_tables.load_table(
-        #        fpath=fpath,
-        #        string=string,
-        #        dom=dom,
-        #        **common_kw
-        #    )
-
-    table_t_max = dom_tables.pexp_meta['binning_info']['t_max']
-
-    print('  -> {:.3f} s\n'.format(time.time() - t0))
-
-    # -- Load hits -- #
-    print('Loading hits')
-    t0 = time.time()
-
-    hits_are_photons = kwargs.pop('hits_are_photons')
-
-    hits_file = expand(kwargs['hits'])
-    with open(hits_file, 'rb') as f:
-        hits = pickle.load(f)
-
-    outdir = kwargs.pop('outdir')
-    mkdir(outdir)
-
-    start_event_idx = kwargs.pop('start_event_idx')
-    n_events = kwargs.pop('n_events')
-    stop_event_idx = None if n_events is None else start_event_idx + n_events
-    events_slice = slice(start_event_idx, stop_event_idx)
-
-    # Keyword args for the `metric` callable (get_neg_llh)
-    neg_llh_kw = dict(
+    metric_kw = dict(
+        sd_indices=dom_tables.loaded_sd_indices,
         time_window=None,
         hypo_handler=hypo_handler,
         dom_tables=dom_tables,
-        tdi_table=tdi_table
+        tdi_table=None
     )
-
-    print('  -> {:.3f} s\n'.format(time.time() - t0))
-
-    print('Scanning paramters')
-    t0 = time.time()
 
     best_llh_vals = []
     best_llh_params = []
@@ -504,17 +304,17 @@ def reco():
                 first_hit_t = min(first_hit_t, t.min())
                 last_hit_t = max(last_hit_t, t.max())
 
-        neg_llh_kw['hits'] = event_hits
+        llh_kw['hits'] = event_hits
 
         t_lims = (first_hit_t - table_t_max + 100, last_hit_t)
         #t_lims = (-100, 100)
         t_range = last_hit_t - first_hit_t + table_t_max
-        neg_llh_kw['time_window'] = t_range
+        llh_kw['time_window'] = t_range
 
         param_values, log_likelihoods = run_multinest(
             outdir=outdir,
             event_idx=event_idx,
-            neg_llh_kw=neg_llh_kw,
+            llh_kw=llh_kw,
             t_lims=t_lims
         )
 
@@ -552,7 +352,7 @@ def reco():
     kwargs.pop('hits')
     info = OrderedDict([
         ('hypo_params', HYPO_PARAMS_T._fields),
-        ('metric_name', 'neg_llh'),
+        ('metric_name', 'llh'),
         ('best_params', best_llh_params),
         ('best_metric_vals', best_llh_vals),
     ])

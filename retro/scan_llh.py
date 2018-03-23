@@ -40,10 +40,10 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T, instantiate_objects
+from retro import HYPO_PARAMS_T, init_obj
 from retro.likelihood import get_llh
 from retro.scan import scan
-from retro.utils.misc import expand, mkdir
+from retro.utils.misc import expand, mkdir, sort_dict
 
 
 def parse_args(description=__doc__):
@@ -54,8 +54,11 @@ def parse_args(description=__doc__):
         '--outdir', required=True
     )
 
+    group = parser.add_argument_group(
+        title='Scan parameters'
+    )
     for dim in HYPO_PARAMS_T._fields:
-        parser.add_argument(
+        group.add_argument(
             '--{}'.format(dim.replace('_', '-')), nargs='+', required=True,
             help='''Hypothses will take this(these) value(s) for dimension
             {dim_hr}. Specify a single value to not scan over this dimension;
@@ -65,25 +68,10 @@ def parse_args(description=__doc__):
         )
 
     dom_tables_kw, hypo_kw, hits_kw, scan_kw = (
-        instantiate_objects.parse_args(parser=parser)
+        init_obj.parse_args(parser=parser)
     )
 
-    #print('')
-    #print('dom_tables_kw:', dom_tables_kw)
-    #print('')
-    #print('hypo_kw:', hypo_kw)
-    #print('')
-    #print('hits_kw:', hits_kw)
-    #print('')
-    #print('scan_kw:', scan_kw)
-    #print('')
-
     return dom_tables_kw, hypo_kw, hits_kw, scan_kw
-
-
-def sort_dict(d):
-    """Return an OrderedDict like `d` but with sorted keys."""
-    return OrderedDict([(k, d[k]) for k in sorted(d.keys())])
 
 
 def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
@@ -96,9 +84,9 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
         val_str.replace('pi', format(np.pi, '.17e'))
         scan_values.append(hrlist2list(val_str))
 
-    dom_tables = instantiate_objects.setup_dom_tables(**dom_tables_kw)
-    hypo_handler = instantiate_objects.setup_discrete_hypo(**hypo_kw)
-    hits_generator = instantiate_objects.get_hits(**hits_kw)
+    dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+    hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
+    hits_generator = init_obj.get_hits(**hits_kw)
 
     # Pop 'outdir' from `scan_kw` since we don't want to store this info in
     # the metadata dict.
@@ -118,7 +106,7 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
 
     n_points_total = 0
     metric_vals = []
-    for _, hits, time_window in hits_generator:
+    for event_idx, hits, time_window in hits_generator: # pylint: disable=unused-variable
         metric_kw['hits'] = hits
         metric_kw['time_window'] = time_window
 

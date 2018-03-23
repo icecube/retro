@@ -2,8 +2,9 @@
 # pylint: disable=wrong-import-position
 
 """
-Convenience functions for instantiating and loading the major pieces needed for
-Retro likelihood processing.
+Convenience functions for intializing major objects needed for Retro likelihood
+processing (includes instantiating objects and loading the data needed for
+them).
 """
 
 from __future__ import absolute_import, division, print_function
