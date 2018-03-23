@@ -25,6 +25,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from os.path import abspath, dirname
+import sys
+
+import numpy as np
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.const import EMPTY_HITS # pylint: disable=unused-import
+
 
 def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
             tdi_table=None):
@@ -42,7 +53,7 @@ def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
         namedtuples, where ``val.times`` and ``val.charges`` are arrays of
         shape (n_dom_hits_i,).
 
-    time_window : float
+    time_window : FTYPE
         Time window pertinent to the event's reconstruction. Used for
         computing expected noise hits.
 
@@ -91,15 +102,15 @@ def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
 
     for sd_idx in sd_indices:
         # DEBUG: remove the below if / continue when no longer debugging!
-        #if this_hits is None:
+        #if this_hits is EMPTY_HITS:
         #    continue
-        llh += pexp_func(
+        exp_p_at_all_times, sum_log_at_hit_times = pexp_func(
             hypo_light_sources,
             hits[sd_idx],
             dom_info[sd_idx],
-            time_window,
+            np.float32(time_window),
             *tables[sd_idx]
         )
-        #llh += sum_log_at_hit_times - exp_p_at_all_times
+        llh += sum_log_at_hit_times - exp_p_at_all_times
 
     return llh

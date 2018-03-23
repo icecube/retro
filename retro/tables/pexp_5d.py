@@ -34,6 +34,7 @@ from os.path import abspath, dirname
 import sys
 
 import numpy as np
+#from numba.pycc import CC
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -46,6 +47,10 @@ from retro.utils.ckv import (
     survival_prob_from_cone, survival_prob_from_smeared_cone
 )
 from retro.utils.geom import infer_power
+
+
+#cc = CC('pexp_precomp')
+#cc.verbose = True
 
 MACHINE_EPS = 1e-16
 
@@ -192,7 +197,10 @@ def generate_pexp_5d_function(
                          costhetadir_bin_idx, deltaphidir_bin_idx):
             """Helper function for table lookup"""
             templ = table[r_bin_idx, costheta_bin_idx, t_bin_idx]
-            return templ['weight'] * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
+            return (
+                templ['weight']
+                * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
+            )
 
     else:
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -204,11 +212,55 @@ def generate_pexp_5d_function(
         def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx):
             """Helper function for table lookup"""
-            return table[r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx]
+            return table[r_bin_idx, costheta_bin_idx, t_bin_idx,
+                         costhetadir_bin_idx, deltaphidir_bin_idx]
 
-
+    #@cc.export(
+    #    'pexp_5d',
+    #    '''
+    #    array(
+    #        Record([
+    #            ('kind', '<u4'),
+    #            ('t', '<f4'),
+    #            ('x', '<f4'),
+    #            ('y', '<f4'),
+    #            ('z', '<f4'),
+    #            ('photons', '<f4'),
+    #            ('dir_costheta', '<f4'),
+    #            ('dir_sintheta', '<f4'),
+    #            ('dir_cosphi', '<f4'),
+    #            ('dir_sinphi', '<f4'),
+    #            ('ckv_theta', '<f4'),
+    #            ('ckv_costheta', '<f4'),
+    #            ('ckv_sintheta', '<f4')
+    #        ]),
+    #        1d, C
+    #    ),
+    #    array(float32, 2d, C),
+    #    Record([
+    #        ('operational', '|b1'),
+    #        ('', '|V3'),
+    #        ('x', '<f4'),
+    #        ('y', '<f4'),
+    #        ('z', '<f4'),
+    #        ('quantum_efficiency', '<f4'),
+    #        ('noise_rate_per_ns', '<f4')
+    #    ]),
+    #    float32,
+    #    unaligned array(
+    #        Record([
+    #            ('index', '<u2'),
+    #            ('weight', '<f4')
+    #        ]),
+    #        3d, C
+    #    ),
+    #    array(float32, 2d, C),
+    #    array(float32, 4d, C),
+    #    array(float32, 1d, C)
+    #    '''
+    #)
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d( # pylint: disable=missing-docstring
+    def pexp_5d( # pylint: disable=missing-docstring, too-many-locals
             sources,
             hits,
             dom_info,
@@ -218,7 +270,7 @@ def generate_pexp_5d_function(
             t_indep_table=empty_4d_array,
             t_indep_table_norm=empty_1d_array,
         ):
-        """For a set of generated photons `sources`, compute the expected
+        r"""For a set of generated photons `sources`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
         photons, independent of time.
 
@@ -282,9 +334,15 @@ def generate_pexp_5d_function(
             the hypothesis expected to arrive at the specified DOM for _all_
             times. If `compute_t_indep_exp` is False, return value is 0.0.
 
-        exp_p_at_hit_times : array of shape (num_hits,), dtype float64
-            Total photons due to the hypothesis expected to arrive at the
-            specified DOM at the times the DOM recorded the hit.
+        sum_log_at_hit_times : float64
+            .. math::
+
+                \Sum_i q_i \log( \rm{QE} \bar N_{\gamma, i} + \rm{noise} )
+
+            $q_i$ is the hit multiplicity at the hit time, $t_i$, QE is quantum
+            efficiency of the DOM, $\bar N_{\gamma, i}$ is the expected number
+            of photons at the DOM at $t_i$, and noise is the noise _rate_ in
+            the DOM.
 
         """
         if not dom_info['operational']:
@@ -518,19 +576,17 @@ def generate_pexp_5d_function(
 
         sum_log_at_hit_times = np.float64(0.0)
         for hit_idx in range(num_hits):
-            ep_at_ht = exp_p_at_hit_times[hit_idx]
+            exp_p_at_hit_time = exp_p_at_hit_times[hit_idx]
             hit_mult = hits[1, hit_idx]
             sum_log_at_hit_times += (
-                hit_mult * math.log(quantum_efficiency * ep_at_ht + noise_rate_per_ns)
+                hit_mult * math.log(quantum_efficiency * exp_p_at_hit_time + noise_rate_per_ns)
             )
 
         if compute_t_indep_exp:
             exp_p_at_all_times = (
-                exp_p_at_all_times * quantum_efficiency
-                + noise_rate_per_ns * time_window
+                quantum_efficiency * exp_p_at_all_times + noise_rate_per_ns * time_window
             )
 
-        #return exp_p_at_all_times, sum_log_at_hit_times
-        return sum_log_at_hit_times - exp_p_at_all_times
+        return exp_p_at_all_times, sum_log_at_hit_times
 
     return pexp_5d, meta
