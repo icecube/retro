@@ -346,7 +346,7 @@ def generate_pexp_5d_function(
 
         """
         if not dom_info['operational']:
-            return np.float64(0) #, np.float64(0)
+            return np.float64(0), np.float64(0)
 
         num_hits = hits.shape[1]
 

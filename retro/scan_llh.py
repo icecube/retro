@@ -81,7 +81,7 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
     scan_values = []
     for dim in HYPO_PARAMS_T._fields:
         val_str = ''.join(scan_kw.pop(dim))
-        val_str.replace('pi', format(np.pi, '.17e'))
+        val_str = val_str.lower().replace('pi', format(np.pi, '.17e'))
         scan_values.append(hrlist2list(val_str))
 
     dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)

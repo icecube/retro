@@ -41,6 +41,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import FTYPE
 from retro.const import (
     NUM_STRINGS, NUM_DOMS_PER_STRING, NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS,
     PI, TWO_PI, get_sd_idx
