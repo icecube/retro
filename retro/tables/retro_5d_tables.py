@@ -254,26 +254,30 @@ class Retro5DTables(object):
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
+
+        table_norm = table_norm.astype(FTYPE)
+        t_indep_table_norm = t_indep_table_norm.astype(FTYPE)
+
         table['table_norm'] = table_norm
         table['t_indep_table_norm'] = t_indep_table_norm
 
-        pexp_5d, pexp_meta = generate_pexp_5d_function(
-            table=table,
-            table_kind=self.table_kind,
-            compute_t_indep_exp=self.compute_t_indep_exp,
-            use_directionality=self.use_directionality,
-            num_phi_samples=self.num_phi_samples,
-            ckv_sigma_deg=self.ckv_sigma_deg,
-            template_library=self.template_library
-        )
         if self.pexp_func is None:
+            pexp_5d, pexp_meta = generate_pexp_5d_function(
+                table=table,
+                table_kind=self.table_kind,
+                compute_t_indep_exp=self.compute_t_indep_exp,
+                use_directionality=self.use_directionality,
+                num_phi_samples=self.num_phi_samples,
+                ckv_sigma_deg=self.ckv_sigma_deg,
+                template_library=self.template_library
+            )
             self.pexp_func = pexp_5d
             self.pexp_meta = pexp_meta
-        elif pexp_meta != self.pexp_meta:
-            raise ValueError(
-                'All binnings and table parameters currently must be equal to'
-                ' one another.'
-            )
+        #elif pexp_meta != self.pexp_meta:
+        #    raise ValueError(
+        #        'All binnings and table parameters currently must be equal to'
+        #        ' one another.'
+        #    )
 
         table_tup = (
             table[self.table_name][self.usable_table_slice],
