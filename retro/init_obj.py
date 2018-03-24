@@ -213,15 +213,28 @@ def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
     event_idx : int
     event_hits
     time_window : float
+    hit_tmin
+    hit_tmax
 
     """
     if start_idx is None:
         start_idx = 0
 
+    if hits_are_photons:
+        hit_kind = 'photons'
+    else:
+        hit_kind = 'pulses'
+
     if num_events is None:
         events_slice = slice(start_idx, None)
+        print("Hit generator will yield all events' {},"
+              " starting at event index {}"
+              .format(hit_kind, start_idx))
     else:
         events_slice = slice(start_idx, start_idx + num_events)
+        print("Hit generator will yield {} events' {},"
+              " starting at event index {}"
+              .format(num_events, hit_kind, start_idx))
 
     hits_file = expand(hits_file)
     _, ext = splitext(hits_file)
@@ -237,6 +250,8 @@ def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
 
     for event_offset, event_hits in enumerate(offset_hits_iter):
         event_idx = event_offset - start_idx
+        hit_tmin = np.inf
+        hit_tmax = -np.inf
         if hits_are_photons:
             time_window = 0.0
             event_photons = event_hits
@@ -250,10 +265,12 @@ def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
                     (t[np.newaxis, :], weight[np.newaxis, :]),
                     axis=0
                 )
+                hit_tmin = min(hit_tmin, t.min())
+                hit_tmax = max(hit_tmax, t.max())
         else:
             raise NotImplementedError()
 
-        yield event_idx, event_hits, time_window
+        yield event_idx, event_hits, time_window, hit_tmin, hit_tmax
 
 
 def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
@@ -298,9 +315,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     if dom_tables:
         group = parser.add_argument_group(
-            title='Single-DOM tables',
-            description='''Arguments used to instantiate and load single-DOM
-            Retro tables'''
+            title='Single-DOM tables arguments',
         )
 
         group.add_argument(
@@ -362,9 +377,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     if hypo:
         group = parser.add_argument_group(
-            title='Hypo',
-            description='''Arguments used to instantiate hypothesis handler
-            and kernels'''
+            title='Hypothesis handler and kernel parameters',
         )
 
         group.add_argument(
@@ -383,9 +396,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     if hits:
         group = parser.add_argument_group(
-            title='Hits',
-            description='''Arguments for loading hits (either photon-level or
-            a pulse series) from events.'''
+            title='Hits parameters',
         )
 
         group.add_argument(
@@ -395,7 +406,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
             '--hits-are-photons', action='store_true',
         )
         group.add_argument(
-            '--start-event-idx', type=int, default=0
+            '--start-idx', type=int, default=0
         )
         group.add_argument(
             '--num-events', type=int, default=None
