@@ -1,17 +1,19 @@
 #!/bin/bash
 
-start_evt=$1
+start_evt=$2
 n_events=1
 
 timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 end_evt=$(( start_evt + n_events - 1 ))
-outdir="/data/justin/retro/recos/dnmuckvcompr_uni_ins_mm1_lv160_et0.5_ef0.3_cz_cd8"
+outdir="$3" #/data/justin/retro/recos/dnmuckvcompr_uni_ins_mm1_lv160_et0.5_ef0.3_cz_cd8"
 mkdir -p "$outdir"
 
 #hits="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1/photon_series/photons.pkl"
-hits="~justin/src/retro/data/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1_photon_series_photons0-9.pkl"
-hits_are_photons="--hits-are-photons"
+#hits="~justin/src/retro/data/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1_photon_series_photons0-9.pkl"
+#hits_are_photons="--hits-are-photons"
+hits="$1"
+hits_are_photons=""
 
 #proto="/fastio2/icecube/retro/tables/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib=""
@@ -33,7 +35,7 @@ consteff=""
 ~/src/retro/retro/reco.py \
 	--outdir "$outdir" \
 	--spatial-lims ic \
-	--energy-lims 1,1000  \
+	--energy-lims 0,1000  \
 	--energy-prior uniform \
 	$importance_sampling \
 	--max-modes 1 \
@@ -46,7 +48,7 @@ consteff=""
 	--start-idx $start_evt \
 	--num-events $n_events \
 	--hits-file "$hits" \
-	--hits-are-photons \
+	$hits_are_photons \
 	--angsens-model "h2-50cm" \
 	--cascade-kernel "point" \
 	--track-kernel "const_e_loss" \

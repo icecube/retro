@@ -93,12 +93,27 @@ def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
         #    sources=hypo_light_sources
         #)
 
+    if sd_indices is None:
+        sd_indices = dom_tables.loaded_sd_indices
+
+    #print('t_indep_tables dtypes:')
+    #print([t.dtype for t in dom_tables.grouped_tuples['t_indep_tables']])
+
+    #llh += dom_tables.get_llh(
+    #    hypo_light_sources=hypo_light_sources,
+    #    hits=hits,
+    #    time_window=np.float32(time_window),
+    #    dom_info=dom_tables.dom_info,
+    #    sd_indices=sd_indices,
+    #    tables=dom_tables.grouped_tuples['tables'],
+    #    table_norms=dom_tables.grouped_tuples['table_norms'],
+    #    t_indep_tables=dom_tables.grouped_tuples['t_indep_tables'],
+    #    t_indep_table_norms=dom_tables.grouped_tuples['t_indep_table_norms'],
+    #)
+
     pexp_func = dom_tables.pexp_func
     dom_info = dom_tables.dom_info
     tables = dom_tables.tables
-
-    if sd_indices is None:
-        sd_indices = dom_tables.loaded_sd_indices
 
     for sd_idx in sd_indices:
         # DEBUG: remove the below if / continue when no longer debugging!

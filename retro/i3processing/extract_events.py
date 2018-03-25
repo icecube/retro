@@ -37,6 +37,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import const
 from retro.utils.misc import expand, mkdir
 
 
@@ -117,7 +118,7 @@ def extract_pulses(frame, pulse_series_name):
     pulses : OrderedDict
         Keys are (string, dom) and values OrderedDicts with keys 'time',
         'charge', and 'width' and values arrays of shape (n_hits_dom[i],) and
-        dtype float16.
+        dtype float32.
 
     """
     from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
@@ -129,12 +130,10 @@ def extract_pulses(frame, pulse_series_name):
     if not isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMap): # pylint: disable=no-member
         raise TypeError(type(pulse_series))
 
-    pulses = OrderedDict()
+    pulses = []
 
     for (string, dom, _), pinfo in pulse_series:
-        string = np.uint8(string)
-        dom = np.uint8(dom)
-        str_dom = (np.uint8(string), np.uint8(dom))
+        sd_idx = const.get_sd_idx(string, dom)
 
         pls = []
         for pulse in pinfo:
@@ -143,9 +142,9 @@ def extract_pulses(frame, pulse_series_name):
                 pulse.charge,
                 pulse.width
             ])
-        pls = np.array(pls, dtype=np.float16).T
+        pls = np.array(pls, dtype=np.float32).T
 
-        pulses[str_dom] = pls
+        pulses.append((sd_idx, pls))
 
     return pulses
 
@@ -155,10 +154,10 @@ def extract_photons(frame, photon_key):
 
     photon_series = frame[photon_key]
     photons = OrderedDict()
-    #photons = []
+    photons = []
     #strs_doms = []
     for (string, dom), pinfos in photon_series:
-        str_dom = (np.uint8(string), np.uint8(dom))
+        sd_idx = const.get_sd_idx(string, dom)
 
         phot = [] #Photon(*([] for _ in range(len(Photon._fields))))
         for pinfo in pinfos:
@@ -171,7 +170,7 @@ def extract_photons(frame, photon_key):
                 pinfo.dir.azimuth,
                 pinfo.wavelength
             ])
-        phot = np.array(phot, dtype=np.float16).T
+        phot = np.array(phot, dtype=np.float32).T
 
         #strs_doms.append(str_dom)
         #photons.append(phot)
@@ -202,7 +201,7 @@ def extract_photons(frame, photon_key):
         #phot = OrderedDict(
         #    (k, np.array(v, dtype=np.float32)) for k, v in phot.items()
         #)
-        photons[str_dom] = phot
+        photons.append((sd_idx, phot))
 
     #strs_doms = np.array(strs_doms, dtype=np.uint8)
 
@@ -483,7 +482,7 @@ def extract_events(
         if mc_truth:
             mc_truths.append(extract_mc_truth(frame, run_id=run_id,
                                               event_id=event_id))
-            event['unique_id'] = unique_id = mc_truth['unique_id']
+            event['unique_id'] = unique_id = mc_truths[-1]['unique_id']
 
         events.append(event)
 

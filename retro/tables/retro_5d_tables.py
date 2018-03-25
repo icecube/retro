@@ -31,6 +31,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from collections import OrderedDict
 from itertools import product
 from os.path import abspath, dirname
 import sys
@@ -129,7 +130,7 @@ class Retro5DTables(object):
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
 
-        self.loaded_sd_indices = []
+        self.loaded_sd_indices = np.empty(shape=(0,), dtype=np.uint8)
 
         self.tbl_is_raw = table_kind in ['raw_uncompr']
         self.tbl_is_ckv = table_kind in ['ckv_uncompr']
@@ -204,11 +205,23 @@ class Retro5DTables(object):
             self.dom_info[sd_idx]['quantum_efficiency'] = self.quantum_efficiency[s_idx, d_idx]
             self.dom_info[sd_idx]['noise_rate_per_ns'] = self.noise_rate_per_ns[s_idx, d_idx]
 
-        self.tables = [tuple()]*NUM_DOMS_TOT
+        self._empty_tup = (
+            np.empty(shape=(0,)*5, dtype=np.float32),
+            np.empty(shape=(0,)*2, dtype=np.float32)
+        )
+        if self.compute_t_indep_exp:
+            self._empty_tup += (
+                np.empty(shape=(0,)*4, dtype=np.float32),
+                np.empty(shape=(0,), dtype=np.float32)
+            )
+
+        self.tables = [self._empty_tup]*NUM_DOMS_TOT
         self.string_aggregation = None
         self.depth_aggregation = None
         self.pexp_func = None
+        self.get_llh = None
         self.pexp_meta = None
+        self.grouped_tuples = OrderedDict()
 
     def load_table(self, fpath, sd_indices, mmap, step_length=None):
         """Load a table into the set of tables.
@@ -263,7 +276,7 @@ class Retro5DTables(object):
         table['t_indep_table_norm'] = t_indep_table_norm
 
         if self.pexp_func is None:
-            pexp_5d, pexp_meta = generate_pexp_5d_function(
+            pexp_5d, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=table,
                 table_kind=self.table_kind,
                 compute_t_indep_exp=self.compute_t_indep_exp,
@@ -273,7 +286,9 @@ class Retro5DTables(object):
                 template_library=self.template_library
             )
             self.pexp_func = pexp_5d
+            self.get_llh = get_llh
             self.pexp_meta = pexp_meta
+
         #elif pexp_meta != self.pexp_meta:
         #    raise ValueError(
         #        'All binnings and table parameters currently must be equal to'
@@ -281,7 +296,7 @@ class Retro5DTables(object):
         #    )
 
         table_tup = (
-            table[self.table_name][self.usable_table_slice],
+            table[self.table_name], #[self.usable_table_slice],
             table['table_norm'],
         )
 
@@ -294,7 +309,27 @@ class Retro5DTables(object):
         for sd_idx in sd_indices:
             self.tables[sd_idx] = table_tup
 
-        self.loaded_sd_indices.extend(sd_indices)
+        self.loaded_sd_indices = np.sort(np.concatenate([
+            self.loaded_sd_indices,
+            np.atleast_1d(sd_indices).astype(np.uint16)
+        ]))
+
+        self._generate_grouped_tuples()
+
+    def _generate_grouped_tuples(self):
+        grp_tup = [list() for _ in self._empty_tup]
+        #print('t0')
+        #if 'tables' in self.grouped_tuples:
+        #    print('len(self.grouped_tuples["tables"])', len(self.grouped_tuples['tables']))
+        for table_tup in self.tables:
+            for idx, item in enumerate(table_tup):
+                grp_tup[idx].append(item)
+        self.grouped_tuples['tables'] = tuple(grp_tup[0])
+        self.grouped_tuples['table_norms'] = tuple(grp_tup[1])
+        if self.compute_t_indep_exp:
+            self.grouped_tuples['t_indep_tables'] = tuple(grp_tup[2])
+            self.grouped_tuples['t_indep_table_norms'] = tuple(grp_tup[3])
+        #print('len(self.grouped_tuples["tables"])', len(self.grouped_tuples['tables']))
 
     def get_expected_det(self, sources, hits, sd_idx, time_window):
         """Get the number of photons we expect the DOM to detect (which is the
