@@ -102,7 +102,7 @@ def setup_dom_tables(
         mmap = 'uncompr' in dom_tables_kind
 
     if dom_tables_kind in ['raw_templ_compr', 'ckv_templ_compr']:
-        template_library = np.load(template_library)
+        template_library = np.load(expand(template_library))
     else:
         template_library = None
 
