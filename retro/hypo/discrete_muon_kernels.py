@@ -110,8 +110,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     sources['kind'] = SRC_CKV_BETA1
     sources['t'] = hypo_params.t + sampled_dt
-    sources['x'] = hypo_params.x + sampled_dt * (dir_x *
-                                                 SPEED_OF_LIGHT_M_PER_NS)
+    sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
     sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
     sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     sources['photons'] = photons_per_segment
