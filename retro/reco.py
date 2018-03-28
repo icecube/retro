@@ -308,7 +308,7 @@ def run_multinest(
 
     llhp = np.empty(shape=len(param_values), dtype=LLHP_T)
     llhp['llh'] = log_likelihoods
-    llhp[[f for f in llhp.dtype.fields.keys() if f != 'llh']] = param_values
+    llhp[HYPO_PARAMS_T._fields] = param_values
 
     llhp_outf = out_prefix + 'llhp.npy'
     print('Saving llhp to "{}"...'.format(llhp_outf))
