@@ -286,15 +286,8 @@ def run_multinest(
     out_prefix = join(outdir, 'evt{}-'.format(event_idx))
     print('Output files prefix: "{}"\n'.format(out_prefix))
 
-    mn_meta_outf = out_prefix + 'multinest_meta.pkl'
-    print('Saving MultiNest metadata to "{}"'.format(mn_meta_outf))
-    pickle.dump(
-        mn_meta,
-        open(mn_meta_outf, 'wb'),
-        protocol=pickle.HIGHEST_PROTOCOL
-    )
-
     print('Runing MultiNest...')
+    t0 = time.time()
     pymultinest.run(
         LogLikelihood=loglike,
         Prior=prior,
@@ -305,6 +298,7 @@ def run_multinest(
         n_iter_before_update=5000,
         **mn_kw
     )
+    t1 = time.time()
 
     llhp = np.empty(shape=len(param_values), dtype=LLHP_T)
     llhp['llh'] = log_likelihoods
@@ -313,6 +307,16 @@ def run_multinest(
     llhp_outf = out_prefix + 'llhp.npy'
     print('Saving llhp to "{}"...'.format(llhp_outf))
     np.save(llhp_outf, llhp)
+
+    mn_meta['num_llhp'] = len(param_values)
+    mn_meta['run_time'] = t1 - t0
+    mn_meta_outf = out_prefix + 'multinest_meta.pkl'
+    print('Saving MultiNest metadata to "{}"'.format(mn_meta_outf))
+    pickle.dump(
+        mn_meta,
+        open(mn_meta_outf, 'wb'),
+        protocol=pickle.HIGHEST_PROTOCOL
+    )
 
     return llhp, mn_meta
 
