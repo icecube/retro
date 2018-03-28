@@ -10,7 +10,9 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'ALL_REALS',
+    'EMPTY_SOURCES',
     'MULEN_INTERP',
+    'TABLE_UPPER_BOUND',
     'const_energy_loss_muon',
     'table_energy_loss_muon'
 ]
@@ -51,6 +53,7 @@ from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_CKV_BETA1
 
 
 ALL_REALS = (-np.inf, np.inf)
+EMPTY_SOURCES = np.empty(shape=(0,), dtype=SRC_DTYPE)
 
 
 def const_energy_loss_muon(hypo_params, dt=1.0):
@@ -75,7 +78,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     track_energy = hypo_params.track_energy
 
     if track_energy == 0:
-        return np.empty((0,), dtype=SRC_DTYPE)
+        return EMPTY_SOURCES
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
@@ -137,14 +140,16 @@ with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
 energies = np.array([float(x) for x in rows[0][1:]])
 stopping_power = np.array([float(x) for x in rows[1][1:]])
 dxde = interpolate.UnivariateSpline(x=energies, y=1/stopping_power, s=0, k=3)
-esamps = np.logspace(-1, 5, int(1e4))
-dxde_samps = dxde(esamps)
+esamps = np.logspace(np.min(energies), np.max(energies), int(1e4))
+dxde_samps = np.clip(dxde(esamps), a_min=0, a_max=np.inf)
 
 lengths = [0]
 for idx, egy in enumerate(esamps[1:]):
     lengths.append(np.trapz(y=dxde_samps[:idx+1], x=esamps[:idx+1]))
 lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
+
 MULEN_INTERP = interpolate.UnivariateSpline(x=esamps, y=lengths, k=1, s=0)
+TABLE_UPPER_BOUND = np.max(energies)
 
 
 def table_energy_loss_muon(hypo_params, dt=1.0):
@@ -170,10 +175,19 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
     # Check for no-track condition
     if track_energy == 0:
-        return np.array([], dtype=SRC_DTYPE)
+        return EMPTY_SOURCES
+
+    if track_energy > TABLE_UPPER_BOUND:
+        raise ValueError('Make sure to set energy bounds such that track_energy'
+                         ' cannot exceed table upper limit of {:.3f}'
+                         ' GeV'.format(TABLE_UPPER_BOUND))
 
     # Total expected length of muon from table
     muon_len = MULEN_INTERP(track_energy)
+
+    # Since table cuts off, this can be 0 even for track_energy != 0
+    if muon_len == 0:
+        return EMPTY_SOURCES
 
     # At least one segment
     n_segments = max(1.0, muon_len // (SPEED_OF_LIGHT_M_PER_NS * dt))
