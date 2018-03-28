@@ -11,6 +11,7 @@ __all__ = '''
     poisson_llh
     partial_poisson_llh
     weighted_average
+    estimate
 '''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -115,3 +116,50 @@ def weighted_average(x, w):
         sum_xw += x_i * w_i
         sum_w += w_i
     return sum_xw / sum_w
+
+def estimate(llhp, percentila_nd=0.95):
+    '''
+    Evaluate estimator for reconstruction quantities given
+    the MultiNest points of LLH space exploration
+    
+    Paranters:
+    llhp : structured nd array with columns `llh` + any reco quantities
+    percentile_nd : float
+        on what percentile of llh values to base the calculation on
+    
+    Returns : dict of estimated points incluing uncertainties
+    '''
+    
+    columns = list(llhp.dtype.names)
+    assert 'llh' in columns, 'llh not in %s'%columns
+    columns.remove('llh')
+    
+    nd = len(columns)
+    
+    # keep best LLHs
+    cut = llhp['llh'] > llhp['llh'].max() - stats.chi2.ppf(percentile_nd, nd)
+
+    estimator = {}
+    estimator['mean'] = {}
+    estimator['low'] = {}
+    estimator['high'] = {}
+
+    # cut away upper and lower 13.35% to arrive at 1 sigma
+    percentile = (percentile_nd - 0.682689492137086) / 2. * 100.
+
+    for col in columns:
+        var = llhp[col][cut]
+        if 'azimuth' in col:
+            # azimuth is a cyclic function, so need some special treatement to get correct mean
+            mean = stats.circmean(var)
+            shifted = (var - mean + np.pi)%(2*np.pi)
+            low = (np.percentile(shifted, percentile) + mean - np.pi)%(2*np.pi)
+            high = (np.percentile(shifted, 100-percentile) + mean - np.pi)%(2*np.pi)
+        else:
+            mean = var.mean()
+            low = np.percentile(var, percentile)
+            high = np.percentile(var, 100-percentile)
+        estimator['mean'][col] = mean
+        estimator['low'][col] = low
+        estimator['high'][col] = high
+    return estimator
