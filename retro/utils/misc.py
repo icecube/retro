@@ -19,6 +19,7 @@ __all__ = '''
     hash_obj
     test_hash_obj
     get_file_md5
+    sort_dict
     convert_to_namedtuple
     event_to_hypo_params
     hypo_to_track_params
@@ -26,6 +27,7 @@ __all__ = '''
     generate_unique_ids
     get_primary_interaction_str
     get_primary_interaction_tex
+    get_sd_idx
 '''.split()
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -44,7 +46,7 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 import base64
-from collections import Iterable, Mapping, Sequence
+from collections import Iterable, OrderedDict, Mapping, Sequence
 import cPickle as pickle
 import errno
 import hashlib
@@ -288,6 +290,21 @@ def get_file_md5(fpath, blocksize=2**20):
                 break
             md5.update(buf)
     return md5.hexdigest()
+
+
+def sort_dict(d):
+    """Return an OrderedDict like `d` but with sorted keys.
+
+    Parameters
+    ----------
+    d : mapping
+
+    Returns
+    -------
+    od : OrderedDict
+
+    """
+    return OrderedDict([(k, d[k]) for k in sorted(d.keys())])
 
 
 def convert_to_namedtuple(val, nt_type):

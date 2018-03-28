@@ -8,7 +8,7 @@ have generated.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['get_neg_llh']
+__all__ = ['get_llh']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -25,7 +25,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from itertools import product
 from os.path import abspath, dirname
 import sys
 
@@ -35,33 +34,11 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro.const import EMPTY_HITS # pylint: disable=unused-import
 
 
-DC_STRS = [79, 80, 81, 82, 83, 84, 85, 86]
-DC_IC_STRS = [26, 27, 35, 36, 37, 45, 46]
-
-DC_SUBDUST_DOMS = list(range(11, 60+1))
-IC_SUBDUST_DOMS = list(range(25, 60+1))
-
-DC_SUBDUST_STRS_DOMS = list(product(DC_STRS, DC_SUBDUST_DOMS))
-DC_IC_SUBDUST_STRS_DOMS = list(product(DC_IC_STRS, IC_SUBDUST_DOMS))
-
-DC_ALL_SUBDUST_STRS_DOMS = DC_SUBDUST_STRS_DOMS + DC_IC_SUBDUST_STRS_DOMS
-
-ALL_STRS = list(range(1, 86+1))
-ALL_DOMS = list(range(1, 60+1))
-ALL_STRS_DOMS = list(product(ALL_STRS, ALL_DOMS))
-
-#EMPTY_HITS = Hits(
-#    times=np.empty(shape=(0, 1), dtype=np.float32),
-#    charges=np.empty(shape=(0, 1), dtype=np.float32)
-#)
-EMPTY_HITS = np.empty(shape=(2, 0), dtype=np.float32)
-
-
-def get_neg_llh(
-        hypo, hits, time_window, hypo_handler, dom_tables, tdi_table=None
-    ):
+def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
+            tdi_table=None):
     """Get the negative of the log likelihood of `event` having come from
     hypothesis `hypo` (whose light detection expectation is computed by
     `hypo_handler`).
@@ -71,12 +48,12 @@ def get_neg_llh(
     hypo : HYPO_PARAMS_T
         Hypothesized event parameters
 
-    hits : mapping
+    hits : sequence of length NUM_DOMS_TOT
         Keys are (string, dom) tuples, values are `retro_types.Hits`
         namedtuples, where ``val.times`` and ``val.charges`` are arrays of
         shape (n_dom_hits_i,).
 
-    time_window : float
+    time_window : FTYPE
         Time window pertinent to the event's reconstruction. Used for
         computing expected noise hits.
 
@@ -87,6 +64,10 @@ def get_neg_llh(
     dom_tables : tables.retro_5d_tables.Retro5DTables, etc.
         Instantiated object able to take light sources and convert into
         expected detections in each DOM.
+
+    sd_indices : None or iterable of shape (2,) arrays
+        Only use this subset of loaded doms. If None, all loaded DOMs will be
+        used for computing the LLH.
 
     tdi_table : tables.tdi_table.TDITable, optional
         If provided, this is used to compute total expected hits, independent
@@ -99,48 +80,52 @@ def get_neg_llh(
 
     Returns
     -------
-    neg_llh : float
-        Negative of the log likelihood
+    llh : float
+        Log likelihood
 
     """
     hypo_light_sources = hypo_handler.get_sources(hypo)
 
-    sum_at_all_times_computed = False
-    if tdi_table is None:
-        if not dom_tables.compute_t_indep_exp:
-            print('*'*79)
-            print('WARNING! Time-independent expectation will not be computed')
-            print('*'*79)
-        sum_at_all_times = 0.0
-    else:
-        sum_at_all_times = tdi_table.get_expected_det(
-            sources=hypo_light_sources
+    llh = 0.0
+    if tdi_table is not None:
+        raise NotImplementedError()
+        #llh = - tdi_table.get_expected_det(
+        #    sources=hypo_light_sources
+        #)
+
+    if sd_indices is None:
+        sd_indices = dom_tables.loaded_sd_indices
+
+    #print('t_indep_tables dtypes:')
+    #print([t.dtype for t in dom_tables.grouped_tuples['t_indep_tables']])
+
+    #llh += dom_tables.get_llh(
+    #    hypo_light_sources=hypo_light_sources,
+    #    hits=hits,
+    #    time_window=np.float32(time_window),
+    #    dom_info=dom_tables.dom_info,
+    #    sd_indices=sd_indices,
+    #    tables=dom_tables.grouped_tuples['tables'],
+    #    table_norms=dom_tables.grouped_tuples['table_norms'],
+    #    t_indep_tables=dom_tables.grouped_tuples['t_indep_tables'],
+    #    t_indep_table_norms=dom_tables.grouped_tuples['t_indep_table_norms'],
+    #)
+
+    pexp_func = dom_tables.pexp_func
+    dom_info = dom_tables.dom_info
+    tables = dom_tables.tables
+
+    for sd_idx in sd_indices:
+        # DEBUG: remove the below if / continue when no longer debugging!
+        #if this_hits is EMPTY_HITS:
+        #    continue
+        exp_p_at_all_times, sum_log_at_hit_times = pexp_func(
+            hypo_light_sources,
+            hits[sd_idx],
+            dom_info[sd_idx],
+            np.float32(time_window),
+            *tables[sd_idx]
         )
-        sum_at_all_times_computed = True
+        llh += sum_log_at_hit_times - exp_p_at_all_times
 
-    sum_log_at_hit_times = np.float64(0.0)
-    for str_dom in DC_ALL_SUBDUST_STRS_DOMS:
-        string = str_dom[0]
-        dom = str_dom[1]
-
-        this_hits = hits.get((string, dom), EMPTY_HITS)
-
-        exp_p_at_all_times, exp_p_at_hit_times = dom_tables.get_expected_det(
-            sources=hypo_light_sources,
-            hit_times=this_hits[0, :].astype(np.float32),
-            string=string,
-            dom=dom,
-            include_noise=True,
-            time_window=time_window
-        )
-
-        if not sum_at_all_times_computed:
-            sum_at_all_times += exp_p_at_all_times
-
-        sum_log_at_hit_times += np.sum(
-            this_hits[1, :] * np.log(exp_p_at_hit_times)
-        )
-
-    neg_llh = sum_at_all_times - sum_log_at_hit_times
-
-    return neg_llh
+    return llh

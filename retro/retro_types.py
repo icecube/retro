@@ -22,7 +22,10 @@ __all__ = [
     'SphCoord',
     'TimeCart3DCoord',
     'TimePolCoord',
-    'TimeSphCoord'
+    'TimeSphCoord',
+    'DOM_INFO',
+    'LLHP8D',
+    'LLHP10D'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -41,6 +44,8 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import namedtuple
+
+import numpy as np
 
 
 HypoParams8D = namedtuple( # pylint: disable=invalid-name
@@ -146,3 +151,25 @@ TimeSphCoord = namedtuple( # pylint: disable=invalid-name
     field_names=('t',) + SphCoord._fields
 )
 """Time and spherical coordinate: t, r, theta, phi."""
+
+DOM_INFO = np.dtype(
+    [
+        ('operational', np.bool),
+        ('x', np.float32),
+        ('y', np.float32),
+        ('z', np.float32),
+        ('quantum_efficiency', np.float32),
+        ('noise_rate_per_ns', np.float32)
+    ],
+    align=True
+)
+
+LLHP8D = np.dtype(
+    [('llh', np.float32)]
+    + [(field, np.float32) for field in HypoParams8D._fields]
+)
+
+LLHP10D = np.dtype(
+    [('llh', np.float32)]
+    + [(field, np.float32) for field in HypoParams10D._fields]
+)

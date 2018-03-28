@@ -28,7 +28,6 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
-from itertools import product
 from os.path import abspath, dirname, join
 import pickle
 import sys
@@ -42,7 +41,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T
+from retro import HYPO_PARAMS_T, const
 from retro.utils.misc import expand, mkdir
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
@@ -73,16 +72,6 @@ def parse_args(description=__doc__):
         '--start-event-idx', type=int, default=0
     )
 
-    for dim in HYPO_PARAMS_T._fields:
-        parser.add_argument(
-            '--{}'.format(dim.replace('_', '-')), nargs='+', required=True,
-            help='''Hypothses will take this(these) value(s) for dimension
-            {dim_hr}. Specify a single value to not scan over this dimension;
-            specify a human-readable string of values, e.g. '0, 0.5, 1-10:0.2'
-            scans 0, 0.5, and from 1 to 10 (inclusive of both endpoints) with
-            stepsize of 0.2.'''.format(dim_hr=dim.replace('_', ' '))
-        )
-
     parser.add_argument(
         '--hits', required=True,
     )
@@ -91,6 +80,10 @@ def parse_args(description=__doc__):
     )
     parser.add_argument(
         '--time-window', type=float, required=True,
+    )
+    parser.add_argument(
+        '--events', required=True,
+        help='''Events file corresponding the hits file specified'''
     )
     parser.add_argument(
         '--angsens-model',
@@ -152,163 +145,59 @@ def parse_args(description=__doc__):
     parser.add_argument(
         '--tdi-table', default=None
     )
+    parser.add_argument(
+        '--template-library', default=None
+    )
 
     return parser.parse_args()
 
 
-def scan_neg_llh():
-    """Script "main" function"""
-    t00 = time.time()
+def get_llh_at_truth(outdir, hypo_kw, dom_tables_kw, hits_kw, num_events=None):
+    """Script "main" function
 
-    args = parse_args()
-    kwargs = vars(args)
-    orig_kwargs = deepcopy(kwargs)
+    Parameters
+    ----------
+    outdir : string
 
-    scan_values = []
-    for dim in HYPO_PARAMS_T._fields:
-        val_str = ''.join(kwargs.pop(dim))
-        val_str.replace('pi', format(np.pi, '.17e'))
-        val_str.replace('e', format(np.exp(1), '.17e'))
-        scan_values.append(hrlist2list(val_str))
+    hypo_kw : mapping
+        Keyword args to pass to ``setup_discrete_hypo(**hypo_kw)``.
 
-    # -- Instantiate hypo class with kernels -- #
-    print('Instantiating hypo object & kernels')
-    t0 = time.time()
+    dom_tables_kw : mapping
+        Keyword args to pass to ``setup_dom_tables(**dom_tables_kw)``.
 
-    hypo_kernels = []
-    kernel_kwargs = []
+    hits_kw : mapping
+        Keyword args to pass to ``get_hits(**dom_tables_kw)``.
 
-    cascade_kernel = kwargs.pop('cascade_kernel')
-    cascade_samples = kwargs.pop('cascade_samples')
-    if cascade_kernel == 'point':
-        hypo_kernels.append(point_cascade)
-        kernel_kwargs.append(dict())
-    else:
-        raise NotImplementedError('{} cascade not implemented yet.'
-                                  .format(cascade_kernel))
-        #hypo_kernels.append(one_dim_cascade)
-        #kernel_kwargs.append(dict(num_samples=cascade_samples))
-
-    track_kernel = kwargs.pop('track_kernel')
-    if track_kernel == 'const_e_loss':
-        hypo_kernels.append(const_energy_loss_muon)
-    else:
-        hypo_kernels.append(table_energy_loss_muon)
-    kernel_kwargs.append(dict(dt=kwargs.pop('track_time_step')))
-
-    hypo_handler = DiscreteHypo(
-        hypo_kernels=hypo_kernels,
-        kernel_kwargs=kernel_kwargs
-    )
-
-    print('  -> {:.3f} s\n'.format(time.time() - t0))
-
-    # -- Instantiate tables class and load tables -- #
-    print('Instantiating tables object')
-    t0 = time.time()
-
-    dom_table_kind = kwargs.pop('dom_table_kind')
-    angsens_model = kwargs.pop('angsens_model')
-    norm_version = kwargs.pop('norm_version')
-    num_phi_samples = kwargs.pop('num_phi_samples')
-    ckv_sigma_deg = kwargs.pop('ckv_sigma_deg')
-    dom_tables_fname_proto = kwargs.pop('dom_tables_fname_proto')
-    time_window = kwargs.pop('time_window')
-    step_length = kwargs.pop('step_length')
-    force_no_mmap = kwargs.pop('force_no_mmap')
-    if force_no_mmap:
-        mmap = False
-    else:
-        mmap = 'uncompr' in dom_table_kind
-
-    use_directionality = not kwargs.pop('no_dir')
-
-    tdi_table = kwargs.pop('tdi_table')
-    if tdi_table is not None:
-        raise NotImplementedError('TDI table not handled yet')
-
-    compute_t_indep_exp = tdi_table is None
-
-    gcd = extract_gcd(kwargs.pop('gcd'))
-
-    # Instantiate single-DOM tables
-    dom_tables = Retro5DTables(
-        table_kind=dom_table_kind,
-        geom=gcd['geo'],
-        rde=gcd['rde'],
-        noise_rate_hz=gcd['noise'],
-        angsens_model=angsens_model,
-        compute_t_indep_exp=compute_t_indep_exp,
-        use_directionality=use_directionality,
-        norm_version=norm_version,
-        num_phi_samples=num_phi_samples,
-        ckv_sigma_deg=ckv_sigma_deg
-    )
-
-    print('  -> {:.3f} s\n'.format(time.time() - t0))
-
-    # Load single-DOM tables
-    print('Loading single-DOM tables')
-    t0 = time.time()
-
-    common_kw = dict(step_length=step_length, mmap=mmap)
-
-    if '{subdet' in dom_tables_fname_proto:
-        for subdet, dom in list(product(['ic', 'dc'], range(1, 60+1))):
-            if subdet == 'ic' and dom < 25:
-                continue
-            if subdet == 'dc' and dom < 11:
-                continue
-
-            fpath = dom_tables_fname_proto.format(
-                subdet=subdet, dom=dom, depth_idx=dom-1
-            )
-            dom_tables.load_table(
-                fpath=fpath,
-                string=subdet,
-                dom=dom,
-                **common_kw
-            )
-    elif '{string' in dom_tables_fname_proto:
-        for string, dom in product(range(1, 86+1), range(1, 60+1)):
-            fpath = dom_tables_fname_proto.format(
-                string=string, string_idx=string - 1,
-                dom=dom, depth_idx=dom - 1
-            )
-            dom_tables.load_table(
-                fpath=fpath,
-                string=string,
-                dom=dom,
-                **common_kw
-            )
-
-    print('  -> {:.3f} s\n'.format(time.time() - t0))
-
-    # -- Load hits -- #
-    print('Loading hits')
-    t0 = time.time()
-
-    hits_are_photons = kwargs.pop('hits_are_photons')
-
-    hits_file = expand(kwargs['hits'])
-    with open(hits_file, 'rb') as f:
-        hits = pickle.load(f)
+    num_events : int or None
+        If None, process all events returned by the hits generator.
+    
+    """
+    hypo_handler = setup_discrete_hypo(**hypo_kw)
+    dom_tables = setup_dom_tables(**dom_tables_kw)
+    tdi_table = None
+    hits_generator = get_hits(**hits_kw)
 
     outdir = kwargs.pop('outdir')
     mkdir(outdir)
 
-    start_event_idx = kwargs.pop('start_event_idx')
-    n_events = kwargs.pop('n_events')
-    stop_event_idx = None if n_events is None else start_event_idx + n_events
-    events_slice = slice(start_event_idx, stop_event_idx)
+    for count, (event_idx, event_hits) in enumerate(hits_generator):
+        if count >= num_events:
+            break
+        min_t = np.inf
+        max_t = -np.inf
+        for hits in event_hits.values():
+            min_t = min(min_t, hits[
+        t_lims = (first_hit_t - table_t_max + 100, last_hit_t)
+        t_range = last_hit_t - first_hit_t + table_t_max
+        time_window = t_range
 
-    # Keyword args for the `metric` callable (get_neg_llh)
-    metric_kw = dict(
-        time_window=time_window,
-        hypo_handler=hypo_handler,
-        dom_tables=dom_tables,
-        tdi_table=tdi_table
-    )
+        # Keyword args for the `metric` callable (get_neg_llh)
+        metric_kw = dict(
+            time_window=time_window,
+            hypo_handler=hypo_handler,
+            dom_tables=dom_tables,
+            tdi_table=tdi_table
+        )
 
     print('  -> {:.3f} s\n'.format(time.time() - t0))
 
@@ -323,12 +212,15 @@ def scan_neg_llh():
             # For photons, we assign a "charge" from their weight, which comes
             # from angsens model.
             event_photons = event_hits
-            event_hits = OrderedDict()
+            # DEBUG: set back to EMPTY_HITS when not debugging!
+            event_hits = [const.EMPTY_HITS]*const.NUM_DOMS_TOT
+            #event_hits = [None]*const.NUM_DOMS_TOT
             for str_dom, pinfo in event_photons.items():
+                sd_idx = const.get_sd_idx(string=str_dom[0], dom=str_dom[1])
                 t = pinfo[0, :]
                 coszen = pinfo[4, :]
                 weight = np.float32(dom_tables.angsens_poly(coszen))
-                event_hits[str_dom] = np.concatenate(
+                event_hits[sd_idx] = np.concatenate(
                     (t[np.newaxis, :], weight[np.newaxis, :]),
                     axis=0
                 )
