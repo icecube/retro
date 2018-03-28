@@ -12,6 +12,7 @@ __all__ = [
     'ALL_REALS',
     'EMPTY_SOURCES',
     'MULEN_INTERP',
+    'TABLE_LOWER_BOUND',
     'TABLE_UPPER_BOUND',
     'const_energy_loss_muon',
     'table_energy_loss_muon'
@@ -137,9 +138,13 @@ with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
         rows.append(row)
 
 energies = np.array([float(x) for x in rows[0][1:]])
+
+TABLE_UPPER_BOUND = np.max(energies)
+TABLE_LOWER_BOUND = np.min(energies)
+
 stopping_power = np.array([float(x) for x in rows[1][1:]])
 dxde = interpolate.UnivariateSpline(x=energies, y=1/stopping_power, s=0, k=3)
-esamps = np.logspace(np.min(energies), np.max(energies), int(1e4))
+esamps = np.logspace(np.log10(TABLE_LOWER_BOUND), np.log10(TABLE_UPPER_BOUND), int(1e4))
 dxde_samps = np.clip(dxde(esamps), a_min=0, a_max=np.inf)
 
 lengths = [0]
@@ -148,7 +153,6 @@ for idx, egy in enumerate(esamps[1:]):
 lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
 
 MULEN_INTERP = interpolate.UnivariateSpline(x=esamps, y=lengths, k=1, s=0)
-TABLE_UPPER_BOUND = np.max(energies)
 
 
 def table_energy_loss_muon(hypo_params, dt=1.0):
