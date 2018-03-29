@@ -34,6 +34,7 @@ import sys
 
 import numpy as np
 from scipy.special import gammaln
+from scipy import stats
 
 RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
@@ -117,7 +118,7 @@ def weighted_average(x, w):
         sum_w += w_i
     return sum_xw / sum_w
 
-def estimate(llhp, percentila_nd=0.95):
+def estimate(llhp, percentile_nd=0.95):
     '''
     Evaluate estimator for reconstruction quantities given
     the MultiNest points of LLH space exploration
@@ -136,9 +137,12 @@ def estimate(llhp, percentila_nd=0.95):
     
     nd = len(columns)
     
+    # replace NaNs with worst LLH value
+    llhp['llh'][np.isnan(llhp['llh'])] = np.min(llhp['llh'][~np.isnan(llhp['llh'])])
+
     # keep best LLHs
     cut = llhp['llh'] > llhp['llh'].max() - stats.chi2.ppf(percentile_nd, nd)
-
+    
     estimator = {}
     estimator['mean'] = {}
     estimator['low'] = {}
