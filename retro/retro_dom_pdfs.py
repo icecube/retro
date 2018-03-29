@@ -52,6 +52,7 @@ from retro.tables.dom_time_polar_tables import DOMTimePolarTables
 #from retro.tables.tdi_cart_tables import TDICartTable
 from retro.tables.retro_5d_tables import Retro5DTables
 from retro.utils.misc import expand, mkdir
+from retro import init_obj
 
 
 hostname = socket.gethostname()
@@ -75,28 +76,25 @@ def parse_args(description=__doc__):
         init_obj.parse_args(parser=parser)
     )
 
-    return dom_tables_kw, hypo_kw, _, pdf_kw
+    return dom_tables_kw, hypo_kw, pdf_kw
 
+dom_tables_kw, hypo_kw, pdf_kw = parse_args()
 
 CODE_TO_TEST = (
     '{tables}_tables_{norm}norm_{no_dir_str}{cone_str}{dedx_str}dt{muon_dt:.1f}'
     .format(
-        tables=TABLE_KIND,
-        norm=NORM_VERSION,
-        no_dir_str='no_dir_' if not USE_DIRECTIONALITY else '',
+        tables=dom_tables_kw['dom_tables_kind'],
+        norm=dom_tables_kw['norm_version'],
+        no_dir_str='no_dir_' if dom_tables_kw['no_dir'] else '',
         cone_str=(
-            'sigma{}deg_{}phi_'.format(CKV_SIGMA_DEG, NUM_PHI_SAMPLES)
-            if USE_DIRECTIONALITY and TABLE_KIND in ['raw_uncompr', 'raw_templ_compr']
+            'sigma{}deg_{}phi_'.format(dom_tables_kw['ckv_sigma_deg'], dom_tables_kw['ckv_sigma_deg'])
+            if not dom_tables_kw['no_dir'] and dom_tables_kw['dom_tables_kind'] in ['raw_uncompr', 'raw_templ_compr']
             else ''
         ),
         dedx_str='dedx_' if MUON_DEDX else '',
-        muon_dt=MUON_DT
+        muon_dt=hypo_kw['track_time_step']
     )
 )
-
-OUTDIR = expand(join('~/projects/retro', 'dom_pdfs', SIM_TO_TEST, CODE_TO_TEST))
-
-run_info['sim_to_test'] = SIM_TO_TEST
 
 # pylint: disable=line-too-long
 #CHANGING FROM 8D TO 10D
@@ -139,7 +137,10 @@ SIMULATIONS = dict(
     ),
 )
 
-sim = SIMULATIONS[SIM_TO_TEST]
+dom_tables = init_obj.setup_dom-tables(**dom_tables_kw)
+hypo_handler = init_obj.setup_discrete_hypo(**hypo_hw)
+sim=SIMULATIONS[pdf_kw['sim_to_test']]
+outdir = expand(pdf_kw.pop('outdir'))
 
 sim['fwd_sim_histo_file'] = join(fwd_sim_dir, sim['fwd_sim_histo_file'])
 
@@ -165,11 +166,9 @@ run_info['sim'] = OrderedDict([
     ('fwd_sim_histo_file_md5', fwd_sim_histo_file_md5)
 ])
 
-strings = [86] + [36] + [79, 80, 81, 82, 83, 84, 85] + [26, 27, 35, 37, 45, 46]
-doms = list(range(1, 60+1))
-loaded_strings_doms = list(product(strings, doms))
-
 hit_times = (0.5 * (bin_edges[:-1] + bin_edges[1:])).astype(np.float32)
+
+sources = hypo_handler.get_sources(hypo_params=sim[mc_true_params])
 
 run_info['strings'] = strings
 run_info['doms'] = doms
@@ -179,297 +178,37 @@ run_info['time_window'] = time_window
 
 t_start = time.time()
 
-# Load detector GCD
-t0 = time.time()
-if sim['fwd_sim_histo_file'] is not None:
-    try:
-        gcd_file = fwd_sim_histos['gcd_info']['source_gcd_name']
-    except (IndexError, TypeError):
-        gcd_file = fwd_sim_histos['gcd_info'][0]
-print('Loading detector geometry, calibration, and noise from "{}"...'
-      .format(gcd_file))
-gcd_info = extract_gcd(gcd_file)
-
-copy_keys = ['source_gcd_name', 'source_gcd_md5', 'source_gcd_i3_md5']
-run_info['gcd_info'] = OrderedDict()
-for key in copy_keys:
-    run_info['gcd_info'][key] = gcd_info[key]
-geom, rde, noise_rate_hz = gcd_info['geo'], gcd_info['rde'], gcd_info['noise']
-print(' {:.3f} sec\n'.format(np.round(time.time() - t0, 3)))
-
-t0 = time.time()
-if TABLE_KIND == 'dom_time_polar':
-    print('Instantiating DOMTimePolarTables...')
-    assert isdir(dom_time_polar_tables_basedir), str(dom_time_polar_tables_basedir)
-
-    assert NORM_VERSION == 'pde'
-    retro_tables = DOMTimePolarTables(
-        tables_dir=dom_time_polar_tables_basedir,
-        hash_val=None,
-        geom=geom,
-        angsens_model=ANGSENS_MODEL,
-        use_directionality=USE_DIRECTIONALITY,
-        naming_version=0,
-    )
-    print('Loading tables...')
-    retro_tables.load_tables()
-
-    run_info['tables_class'] = 'DOMTimePolarTables'
-    run_info['tables_dir'] = dom_time_polar_tables_basedir
-    run_info['norm_version'] = NORM_VERSION
-
-elif TABLE_KIND == 'raw_uncompr':
-    if not USE_DIRECTIONALITY:
-        print('Instantiating CLSimTables (NOT using directionality), norm={}...'
-              .format(NORM_VERSION))
-        CKV_SIGMA_DEG = None
-        NUM_PHI_SAMPLES = None
-    else:
-        print(
-            'Instantiating CLSimTables using directionality;'
-            ' CKV_SIGMA_DEG={} deg'
-            ' and {} phi_dir samples; norm={}...'
-            .format(CKV_SIGMA_DEG, NUM_PHI_SAMPLES, NORM_VERSION))
-
-    retro_tables = Retro5DTables(
-        table_kind=TABLE_KIND,
-        geom=geom,
-        rde=rde,
-        noise_rate_hz=noise_rate_hz,
-        angsens_model=ANGSENS_MODEL,
-        compute_t_indep_exp=True,
-        use_directionality=USE_DIRECTIONALITY,
-        norm_version=NORM_VERSION,
-        num_phi_samples=NUM_PHI_SAMPLES,
-        ckv_sigma_deg=CKV_SIGMA_DEG
-    )
-
-    run_info['tables_class'] = 'Retro5DTables'
-    run_info['table_kind'] = TABLE_KIND
-    run_info['angsens_model'] = ANGSENS_MODEL
-    run_info['use_directionality'] = USE_DIRECTIONALITY
-    run_info['num_phi_samples'] = NUM_PHI_SAMPLES
-    run_info['ckv_sigma_deg'] = CKV_SIGMA_DEG
-    run_info['norm_version'] = NORM_VERSION
-
-    if 'single_table' in CODE_TO_TEST:
-        print('Loading single table for all DOMs...')
-        assert (isfile(single_table_path) or isdir(single_table_path)), str(single_table_path)
-        retro_tables.load_table(
-            fpath=single_table_path,
-            string='all',
-            dom='all',
-            mmap=MMAP
-        )
-
-        run_info['tables'] = OrderedDict([
-            (('all', 'all'),
-             OrderedDict([
-                 ('fpath', single_table_path),
-                 ('step_length', STEP_LENGTH),
-                 ('mmap', MMAP)
-             ])
-            )
-        ])
-
-    else:
-        print('Loading {} tables...'.format(2 * len(doms)))
-        tables = OrderedDict()
-        loaded_strings_doms = []
-        for string, dom in product(('dc', 'ic'), doms):
-            depth_idx = dom - 1
-
-            if string == 'ic':
-                subdet_strings = list(range(1, 79))
-            elif string == 'dc':
-                subdet_strings = list(range(79, 86 + 1))
-
-            if 'orig' in CODE_TO_TEST:
-                assert isdir(orig_table_basedir), str(orig_table_basedir)
-                table_path = join(
-                    orig_table_basedir,
-                    'full1000_{}{}'.format(string, depth_idx)
-                )
-            else:
-                assert isdir(combined_tables_basedir), str(combined_tables_basedir)
-                table_path = join(
-                    combined_tables_basedir,
-                    'large_5d_notilt_string_{:s}_depth_{:d}'.format(string, depth_idx)
-                )
-
-            try:
-                retro_tables.load_table(
-                    fpath=table_path,
-                    string=string,
-                    dom=dom,
-                    step_length=STEP_LENGTH,
-                    mmap=MMAP
-                )
-            except (AssertionError, ValueError) as err:
-                print(err)
-                tables[(string, dom)] = None
-            else:
-                loaded_strings_doms.extend(
-                    [(s, dom) for s in subdet_strings if s in strings]
-                )
-                tables[(string, dom)] = OrderedDict([
-                    ('fpath', table_path),
-                    ('step_length', STEP_LENGTH),
-                    ('mmap', MMAP)
-                ])
-
-        run_info['tables'] = tables
-
-elif TABLE_KIND in ['ckv_uncompr', 'ckv_templ_compr']:
-    assert isdir(ckv_tables_basedir), str(ckv_tables_basedir)
-
-    retro_tables = Retro5DTables(
-        table_kind=TABLE_KIND,
-        geom=geom,
-        rde=rde,
-        noise_rate_hz=noise_rate_hz,
-        angsens_model=ANGSENS_MODEL,
-        compute_t_indep_exp=True,
-        use_directionality=USE_DIRECTIONALITY,
-        norm_version=NORM_VERSION
-    )
-
-    run_info['tables_class'] = 'Retro5DTables'
-    run_info['table_kind'] = TABLE_KIND
-    run_info['use_directionality'] = USE_DIRECTIONALITY
-    run_info['norm_version'] = NORM_VERSION
-
-    print('Loading {} tables...'.format(2 * len(doms)))
-    tables = OrderedDict()
-    loaded_strings_doms = []
-    for string, dom in product(('dc', 'ic'), doms):
-        if string == 'ic':
-            subdet_strings = list(range(1, 79))
-        elif string == 'dc':
-            subdet_strings = list(range(79, 86 + 1))
-
-        depth_idx = dom - 1
-        table_path = join(
-            ckv_tables_basedir,
-            'large_5d_notilt_string_{:s}_depth_{:d}'.format(string, depth_idx)
-        )
-
-        try:
-            retro_tables.load_table(
-                fpath=table_path,
-                string=string,
-                dom=dom,
-                step_length=STEP_LENGTH,
-                mmap=MMAP
-            )
-        except (AssertionError, ValueError) as err:
-            #print('Could not load table for ({}, {}), skipping.'
-            #      .format(string, dom))
-            print(err)
-            #print('')
-            tables[(string, dom)] = None
-        else:
-            loaded_strings_doms.extend(
-                [(s, dom) for s in subdet_strings if s in strings]
-            )
-            tables[(string, dom)] = OrderedDict([
-                ('fpath', table_path),
-                ('step_length', STEP_LENGTH),
-                ('mmap', MMAP)
-            ])
-
-    run_info['tables'] = tables
-
-else:
-    raise ValueError(TABLE_KIND)
-
-# Sort loaded_strings_doms first by subdet (dc then ic); then by depth index
-# (descending index); then by string (ascending index)
-loaded_strings_doms.sort(key=lambda sd: (sd[0] < 79, -sd[1], sd[0]))
-
-print(' ', np.round(time.time() - t0, 3), 'sec\n')
-
-
-if MUON_DEDX:
-    muon_kernel = table_energy_loss_muon
-    muon_kernel_label = 'table_energy_loss_muon'
-else:
-    muon_kernel = const_energy_loss_muon
-    muon_kernel_label = 'const_energy_loss_muon'
-
-print('Generating source photons from "point_cascade" + "{}" kernels'.format(muon_kernel_label))
-print('  fed with MC-true parameters:\n ', sim['mc_true_params'])
-t0 = time.time()
-
-print('Generating track hypo (if present) with dt={}'.format(MUON_DT))
-
-kernel_kwargs = [dict(), dict(dt=MUON_DT)]
-
-discrete_hypo = DiscreteHypo(
-    hypo_kernels=[point_cascade, muon_kernel],
-    kernel_kwargs=kernel_kwargs
-)
-mc_true_params = tuple(np.float32(val) for val in sim['mc_true_params'])
-print(mc_true_params)
-mc_true_params = retro.HYPO_PARAMS_T(*mc_true_params)
-print(mc_true_params)
-sources = discrete_hypo.get_sources(mc_true_params)
-
-run_info['hypo_class'] = 'DiscreteHypo'
-run_info['hypo_kernels'] = ['point_cascade', muon_kernel_label]
-run_info['kernel_kwargs'] = kernel_kwargs
-
-print(' ', np.round(time.time() - t0, 3), 'sec\n')
-
-msg = 'Running test "{}" on "{}" sim'.format(CODE_TO_TEST, SIM_TO_TEST)
-print('\n' + '='*len(msg))
-print(msg)
-print('='*len(msg) + '\n')
-
-print('Getting expectations for {} loaded DOMs: {}'.format(len(loaded_strings_doms), loaded_strings_doms))
-t0 = time.time()
-
-results = OrderedDict()
-
-pexp_timings = []
-pgen_count = 0
-hypo_count = 0
-total_p = 0
-prev_string = -1
-n_source_points = sources.shape[0]
-
-mkdir(OUTDIR)
-
 #for string, dom in product(unique_strings, unique_doms):
-for string, dom in loaded_strings_doms:
-    sys.stdout.write('OMKey: ({:2s}, {:2s})'.format(str(string), str(dom)))
+for sd_idx in dom_tables.loaded_sd_indices:
+    #TODO: ask justin what this line does
     t00 = time.time()
-    exp_p_at_all_times, exp_p_at_hit_times = retro_tables.get_expected_det(
-        sources=sources,
-        hit_times=hit_times,
-        string=string,
-        dom=dom,
-        include_noise=True,
-        time_window=time_window
-    )
+    exp_p_at_hit_times = []
+    for hit in hit_times: 
+        exp_p_at_all_times, sum_log_at_hit_times = dom_tables.pexp_func(
+            sources=sources,
+            hits=np.array([[hit, 1]]).T,
+            dom_info=dom_tables.dom_info[sd_idx],
+            table=dom_tables.tables[sd_idx][0],
+            table_norm=dom_tables.tables[sd_idx][1],
+            time_window=time_window
+        )
+        exp_p_at_hit_times.append(np.exp(sum_log_at_hit_times))
     t11 = time.time() - t00
     pexp_timings.append(t11)
-    hypo_count += hit_times.size
-    pgen_count += hit_times.size * n_source_points
+    #hypo_count += hit_times.size
+    #pgen_count += hit_times.size * n_source_points
 
     tot_retro = np.sum(exp_p_at_hit_times)
 
-    results[(string, dom)] = OrderedDict([
+    results[sd_idx] = OrderedDict([
         ('exp_p_at_all_times', exp_p_at_all_times),
         ('exp_p_at_hit_times', exp_p_at_hit_times)
     ])
 
-    msg = (
-        '{:12.0f} ns ({:.2e} hypos computed, w/ total of {:.2e} source points)'
-        .format(np.round(np.sum(pexp_timings)/pgen_count * 1e9, 3), hypo_count, pgen_count)
-    )
-    sys.stdout.write('  (running avg time per source point per hit DOM: {})\n'.format(msg))
-    #sys.stdout.write('  ' + '\b'*len(msg) + msg)
+    #msg = (
+    #    '{:12.0f} ns ({:.2e} hypos computed, w/ total of {:.2e} source points)'
+    #    .format(np.round(np.sum(pexp_timings)/pgen_count * 1e9, 3), hypo_count, pgen_count)
+    #)
 
     if MAKE_PLOTS:
         plt.clf()
