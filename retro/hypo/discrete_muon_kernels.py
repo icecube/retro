@@ -10,7 +10,6 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'ALL_REALS',
-    'EMPTY_SOURCES',
     'MULEN_INTERP',
     'TABLE_LOWER_BOUND',
     'TABLE_UPPER_BOUND',
@@ -50,11 +49,10 @@ from retro.const import (
     COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
     TRACK_PHOTONS_PER_M
 )
-from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_CKV_BETA1
+from retro.hypo.discrete_hypo import EMPTY_SOURCES, SRC_DTYPE, SRC_CKV_BETA1
 
 
 ALL_REALS = (-np.inf, np.inf)
-EMPTY_SOURCES = np.empty(shape=(0,), dtype=SRC_DTYPE)
 
 
 def const_energy_loss_muon(hypo_params, dt=1.0):

@@ -7,12 +7,13 @@ Simple class DiscreteHypo for evaluating discrete hypotheses.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    SRC_DTYPE
-    SRC_OMNI
-    SRC_CKV_BETA1
-    DiscreteHypo
-'''.split()
+__all__ = [
+    'SRC_DTYPE',
+    'SRC_OMNI',
+    'SRC_CKV_BETA1',
+    'EMPTY_SOURCES',
+    'DiscreteHypo'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -60,6 +61,8 @@ SRC_OMNI = np.uint32(0)
 
 SRC_CKV_BETA1 = np.uint32(1)
 """Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
+
+EMPTY_SOURCES = np.empty(shape=0, dtype=SRC_DTYPE)
 
 
 class DiscreteHypo(object):
