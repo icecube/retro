@@ -110,6 +110,7 @@ def run_multinest(
     # Import pymultinest here since it's a "difficult" dependency
     import pymultinest
 
+    energy_prior_name = energy_prior
     if energy_prior == 'uniform':
         energy_prior = PRI_UNIFORM
         e_min = np.min(energy_lims)
@@ -149,7 +150,7 @@ def run_multinest(
         ('t', ('uniform', t_lims)),
         ('track_cosen', ('uniform', (-1, 1))),
         ('track_azimuth', ('uniform', (0, 2*np.pi))),
-        ('energy', (energy_prior, energy_lims)),
+        ('energy', (energy_prior_name, energy_lims)),
         ('track_fraction', ('uniform', (0, 1)))
     ])
 
@@ -167,7 +168,7 @@ def run_multinest(
     log_likelihoods = []
     t_start = []
 
-    report_after = 500
+    report_after = 1000
 
     def prior(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function for pymultinest to translate the hypercube MultiNest uses

@@ -42,7 +42,9 @@ from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
     PI, COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV
 )
-from retro.hypo.discrete_hypo import EMPTY_SOURCES, SRC_DTYPE, SRC_OMNI
+from retro.hypo.discrete_hypo import (
+    EMPTY_SOURCES, SRC_DTYPE, SRC_OMNI, SRC_CKV_BETA1
+)
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -74,7 +76,7 @@ def point_cascade(hypo_params):
     return sources
 
 
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+#@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def point_ckv_cascade(hypo_params):
     """Single-point Cherenkov-emitting cascade with axis collinear with the
     track.
@@ -103,7 +105,7 @@ def point_ckv_cascade(hypo_params):
     dir_sinphi = math.sin(opposite_azimuth)
 
     sources = np.empty(shape=(1,), dtype=SRC_DTYPE)
-    sources[0]['kind'] = SRC_OMNI
+    sources[0]['kind'] = SRC_CKV_BETA1
     sources[0]['t'] = hypo_params.t
     sources[0]['x'] = hypo_params.x
     sources[0]['y'] = hypo_params.y
