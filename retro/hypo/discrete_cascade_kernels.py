@@ -36,11 +36,13 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
+from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS, HYPO_PARAMS_T
 from retro.const import (
     COS_CKV, CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS
     )
 from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_OMNI
+from retro.retro_types import HypoParams8D
+
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -105,11 +107,17 @@ def one_dim_cascade(hypo_params, n_samples):
     y = hypo_params.y
     z = hypo_params.z
 
-    #assign cascade axis direction
-    sin_zen = math.sin(hypo_params.cascade_zenith)
-    cos_zen = math.cos(hypo_params.cascade_zenith)
-    sin_azi = math.sin(hypo_params.cascade_azimuth)
-    cos_azi = math.cos(hypo_params.cascade_azimuth)
+    #assign cascade axis direction, works with 8D or 10D
+    if HYPO_PARAMS_T is HypoParams8D:
+        zenith = hypo_params.track_zenith
+        azimuth = hypo_params.track_azimuth
+    else:
+        zenith = hypo_params.cascade_zenith
+        azimuth = hypo_params.cascade_azimuth
+    sin_zen = math.sin(zenith)
+    cos_zen = math.cos(zenith)
+    sin_azi = math.sin(azimuth)
+    cos_azi = math.cos(azimuth)
     dir_x = -sin_zen * cos_azi
     dir_y = -sin_zen * sin_azi
     dir_z = -cos_zen

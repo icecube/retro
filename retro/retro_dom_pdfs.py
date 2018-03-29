@@ -52,6 +52,7 @@ from retro.tables.dom_time_polar_tables import DOMTimePolarTables
 #from retro.tables.tdi_cart_tables import TDICartTable
 from retro.tables.retro_5d_tables import Retro5DTables
 from retro.utils.misc import expand, mkdir
+from retro.const import NUM_DOMS_TOT
 from retro import init_obj
 
 
@@ -73,7 +74,7 @@ def parse_args(description=__doc__):
     )
 
     dom_tables_kw, hypo_kw, _, pdf_kw = (
-        init_obj.parse_args(parser=parser)
+        init_obj.parse_args(parser=parser, hits=False)
     )
 
     return dom_tables_kw, hypo_kw, pdf_kw
@@ -85,13 +86,13 @@ CODE_TO_TEST = (
     .format(
         tables=dom_tables_kw['dom_tables_kind'],
         norm=dom_tables_kw['norm_version'],
-        no_dir_str='no_dir_' if dom_tables_kw['no_dir'] else '',
+        no_dir_str='no_dir_' if not dom_tables_kw['use_directionality'] else '',
         cone_str=(
             'sigma{}deg_{}phi_'.format(dom_tables_kw['ckv_sigma_deg'], dom_tables_kw['ckv_sigma_deg'])
-            if not dom_tables_kw['no_dir'] and dom_tables_kw['dom_tables_kind'] in ['raw_uncompr', 'raw_templ_compr']
+            if dom_tables_kw['use_directionality'] and dom_tables_kw['dom_tables_kind'] in ['raw_uncompr', 'raw_templ_compr']
             else ''
         ),
-        dedx_str='dedx_' if MUON_DEDX else '',
+        dedx_str='dedx_' if hypo_kw['track_kernel'] == 'table_e_loss' else '',
         muon_dt=hypo_kw['track_time_step']
     )
 )
@@ -137,11 +138,12 @@ SIMULATIONS = dict(
     ),
 )
 
-dom_tables = init_obj.setup_dom-tables(**dom_tables_kw)
-hypo_handler = init_obj.setup_discrete_hypo(**hypo_hw)
+dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
 sim=SIMULATIONS[pdf_kw['sim_to_test']]
 outdir = expand(pdf_kw.pop('outdir'))
 
+fwd_sim_dir = '/data/icecube/retro/sims/'
 sim['fwd_sim_histo_file'] = join(fwd_sim_dir, sim['fwd_sim_histo_file'])
 
 fwd_sim_histo_file_md5 = None
@@ -168,33 +170,32 @@ run_info['sim'] = OrderedDict([
 
 hit_times = (0.5 * (bin_edges[:-1] + bin_edges[1:])).astype(np.float32)
 
-sources = hypo_handler.get_sources(hypo_params=sim[mc_true_params])
+sources = hypo_handler.get_sources(hypo_params=sim['mc_true_params'])
 
-run_info['strings'] = strings
-run_info['doms'] = doms
+run_info['sd_indices'] = dom_tables.loaded_sd_indices
 run_info['hit_times'] = hit_times
 time_window = np.max(bin_edges) - np.min(bin_edges)
 run_info['time_window'] = time_window
 
-t_start = time.time()
+results = [None] * NUM_DOMS_TOT
+#t_start = time.time()
 
 #for string, dom in product(unique_strings, unique_doms):
 for sd_idx in dom_tables.loaded_sd_indices:
     #TODO: ask justin what this line does
-    t00 = time.time()
+    #t00 = time.time()
     exp_p_at_hit_times = []
     for hit in hit_times: 
         exp_p_at_all_times, sum_log_at_hit_times = dom_tables.pexp_func(
-            sources=sources,
-            hits=np.array([[hit, 1]]).T,
-            dom_info=dom_tables.dom_info[sd_idx],
-            table=dom_tables.tables[sd_idx][0],
-            table_norm=dom_tables.tables[sd_idx][1],
-            time_window=time_window
+            sources,
+            np.array([[hit, 1]]).T,
+            dom_tables.dom_info[sd_idx],
+            time_window,
+            *dom_tables.tables[sd_idx]
         )
         exp_p_at_hit_times.append(np.exp(sum_log_at_hit_times))
-    t11 = time.time() - t00
-    pexp_timings.append(t11)
+    #t11 = time.time() - t00
+    #pexp_timings.append(t11)
     #hypo_count += hit_times.size
     #pgen_count += hit_times.size * n_source_points
 
@@ -210,71 +211,71 @@ for sd_idx in dom_tables.loaded_sd_indices:
     #    .format(np.round(np.sum(pexp_timings)/pgen_count * 1e9, 3), hypo_count, pgen_count)
     #)
 
-    if MAKE_PLOTS:
-        plt.clf()
-        plt.plot(hit_times, exp_p_at_hit_times, label='Retro')
-    tot_clsim = 0.0
-    try:
-        fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][(string, dom)])
-        tot_clsim = np.sum(fwd_sim_histo)
-        if MAKE_PLOTS:
-            plt.plot(hit_times, fwd_sim_histo, label='CLSim fwd sim')
-    except KeyError:
-        pass
-
-    # Don't plot if both are 0
-    if tot_clsim == 0 and tot_retro == 0:
-        continue
-
-    a_text = AnchoredText(
-        '{sum} Retro t-dep = {retro:.5f}      {sum} Retro / {sum} CLSim = {ratio:.5f}\n'
-        '{sum} CLSim       = {clsim:.5f}\n'
-        'Retro t-indep = {exp_p_at_all_times:.5f}\n'
-        .format(
-            sum=r'$\Sigma$',
-            retro=tot_retro,
-            clsim=tot_clsim,
-            ratio=tot_retro/tot_clsim if tot_clsim != 0 else np.nan,
-            exp_p_at_all_times=exp_p_at_all_times
-        ),
-        loc=2,
-        prop=dict(family='monospace', size=10),
-        frameon=False,
-    )
-    if MAKE_PLOTS:
-        ax = plt.gca()
-        ax.add_artist(a_text)
-
-        ax.set_xlim(np.min(bin_edges), np.max(bin_edges))
-        ax.set_ylim(0, ax.get_ylim()[1])
-        ax.set_title('String {}, DOM {}'.format(string, dom))
-        ax.set_xlabel('time (ns)')
-        ax.legend(loc='center left', frameon=False)
-
-        clsim_code = 'c' if tot_clsim > 0 else ''
-        retro_code = 'r' if tot_retro > 0 else ''
-
-        fname = (
-            'sim_{hypo}_code_{code}_{string}_{dom}_{retro_code}_{clsim_code}'
-            .format(
-                hypo=SIM_TO_TEST, code=CODE_TO_TEST, string=string, dom=dom,
-                retro_code=retro_code, clsim_code=clsim_code
-            )
-        )
-        fpath = join(OUTDIR, fname + '.png')
-        print('Saving "{}"'.format(fpath))
-        plt.savefig(fpath)
-
-print('total of {} unique DOMs'.format(len(loaded_strings_doms)))
-
+#    if MAKE_PLOTS:
+#        plt.clf()
+#        plt.plot(hit_times, exp_p_at_hit_times, label='Retro')
+#    tot_clsim = 0.0
+#    try:
+#        fwd_sim_histo = np.nan_to_num(fwd_sim_histos['results'][(string, dom)])
+#        tot_clsim = np.sum(fwd_sim_histo)
+#        if MAKE_PLOTS:
+#            plt.plot(hit_times, fwd_sim_histo, label='CLSim fwd sim')
+#    except KeyError:
+#        pass
+#
+#    # Don't plot if both are 0
+#    if tot_clsim == 0 and tot_retro == 0:
+#        continue
+#
+#    a_text = AnchoredText(
+#        '{sum} Retro t-dep = {retro:.5f}      {sum} Retro / {sum} CLSim = {ratio:.5f}\n'
+#        '{sum} CLSim       = {clsim:.5f}\n'
+#        'Retro t-indep = {exp_p_at_all_times:.5f}\n'
+#        .format(
+#            sum=r'$\Sigma$',
+#            retro=tot_retro,
+#            clsim=tot_clsim,
+#            ratio=tot_retro/tot_clsim if tot_clsim != 0 else np.nan,
+#            exp_p_at_all_times=exp_p_at_all_times
+#        ),
+#        loc=2,
+#        prop=dict(family='monospace', size=10),
+#        frameon=False,
+#    )
+#    if MAKE_PLOTS:
+#        ax = plt.gca()
+#        ax.add_artist(a_text)
+#
+#        ax.set_xlim(np.min(bin_edges), np.max(bin_edges))
+#        ax.set_ylim(0, ax.get_ylim()[1])
+#        ax.set_title('String {}, DOM {}'.format(string, dom))
+#        ax.set_xlabel('time (ns)')
+#        ax.legend(loc='center left', frameon=False)
+#
+#        clsim_code = 'c' if tot_clsim > 0 else ''
+#        retro_code = 'r' if tot_retro > 0 else ''
+#
+#        fname = (
+#            'sim_{hypo}_code_{code}_{string}_{dom}_{retro_code}_{clsim_code}'
+#            .format(
+#                hypo=SIM_TO_TEST, code=CODE_TO_TEST, string=string, dom=dom,
+#                retro_code=retro_code, clsim_code=clsim_code
+#            )
+#        )
+#        fpath = join(OUTDIR, fname + '.png')
+#        print('Saving "{}"'.format(fpath))
+#        plt.savefig(fpath)
+#
+#print('total of {} unique DOMs'.format(len(loaded_strings_doms)))
+#
 run_info['results'] = results
-
-run_info_fpath = expand(join(OUTDIR, 'run_info.pkl'))
+#
+run_info_fpath = expand(join(outdir, 'run_info.pkl'))
 print('Writing run info to "{}"'.format(run_info_fpath))
 pickle.dump(run_info, open(run_info_fpath, 'wb'), pickle.HIGHEST_PROTOCOL)
 
 sys.stdout.write('\n\n')
-print(' ', 'Time to compute and plot:')
-print(' ', np.round(time.time() - t0, 3), 'sec\n')
+#print(' ', 'Time to compute and plot:')
+#print(' ', np.round(time.time() - t0, 3), 'sec\n')
 
-print('Body of script took {:.3f} sec'.format(time.time() - t_start))
+#print('Body of script took {:.3f} sec'.format(time.time() - t_start))
