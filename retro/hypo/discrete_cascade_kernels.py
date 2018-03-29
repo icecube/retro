@@ -8,7 +8,10 @@ hypo_kernels in discrete_hypo/DiscreteHypo class.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['point_cascade']
+__all__ = [
+    'point_cascade',
+    'point_ckv_cascade'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
