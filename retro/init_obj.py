@@ -291,7 +291,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     if dom_tables or hits:
         parser.add_argument(
-            '--angsens-model',
+            '--angsens-model', required=True,
             choices='nominal  h1-100cm  h2-50cm  h3-30cm'.split(),
             help='''Angular sensitivity model'''
         )
