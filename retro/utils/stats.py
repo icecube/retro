@@ -29,11 +29,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from collections import OrderedDict
 from os.path import abspath, dirname
 import sys
 
 import numpy as np
 from scipy.special import gammaln
+from scipy import stats
 
 RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
@@ -117,49 +119,59 @@ def weighted_average(x, w):
         sum_w += w_i
     return sum_xw / sum_w
 
-def estimate(llhp, percentila_nd=0.95):
-    '''
-    Evaluate estimator for reconstruction quantities given
-    the MultiNest points of LLH space exploration
-    
-    Paranters:
-    llhp : structured nd array with columns `llh` + any reco quantities
+
+def estimate(llhp, percentile_nd=0.95):
+    """Evaluate estimator for reconstruction quantities given the MultiNest
+    points of LLH space exploration.
+
+    Paranters
+    ---------
+    llhp : shape (num_llh,) array of dtype retro_types.LLHP8D, LLHP10, etc.
+        Fields of the structured array must contain 'llh' and any reconstructed
+        quantities
+
     percentile_nd : float
-        on what percentile of llh values to base the calculation on
-    
-    Returns : dict of estimated points incluing uncertainties
-    '''
-    
+        On what percentile of llh values to base the calculation
+
+    Returns
+    -------
+    estimator : OrderedDict
+        Containing estimated points incluing uncertainties.
+
+    """
     columns = list(llhp.dtype.names)
     assert 'llh' in columns, 'llh not in %s'%columns
     columns.remove('llh')
-    
+
     nd = len(columns)
-    
+
     # keep best LLHs
     cut = llhp['llh'] > llhp['llh'].max() - stats.chi2.ppf(percentile_nd, nd)
 
-    estimator = {}
-    estimator['mean'] = {}
-    estimator['low'] = {}
-    estimator['high'] = {}
+    estimator = OrderedDict()
 
     # cut away upper and lower 13.35% to arrive at 1 sigma
-    percentile = (percentile_nd - 0.682689492137086) / 2. * 100.
+    percentile = (percentile_nd - 0.682689492137086) / 2 * 100
+
+    cut_llhp = llhp[cut]
 
     for col in columns:
-        var = llhp[col][cut]
-        if 'azimuth' in col:
-            # azimuth is a cyclic function, so need some special treatement to get correct mean
+        estimator[col] = OrderedDict()
+        var = cut_llhp[col]
+        if 'azimuth' in col.lower():
+            # azimuth is a cyclic function, so need some special treatement to
+            # get correct mean
             mean = stats.circmean(var)
             shifted = (var - mean + np.pi)%(2*np.pi)
-            low = (np.percentile(shifted, percentile) + mean - np.pi)%(2*np.pi)
-            high = (np.percentile(shifted, 100-percentile) + mean - np.pi)%(2*np.pi)
+            low = (np.percentile(shifted, percentile) + mean - np.pi) % (2*np.pi)
+            high = (np.percentile(shifted, 100 - percentile) + mean - np.pi) % (2*np.pi)
         else:
             mean = var.mean()
             low = np.percentile(var, percentile)
-            high = np.percentile(var, 100-percentile)
-        estimator['mean'][col] = mean
-        estimator['low'][col] = low
-        estimator['high'][col] = high
+            high = np.percentile(var, 100 - percentile)
+
+        estimator[col]['mean'] = mean
+        estimator[col]['low'] = low
+        estimator[col]['high'] = high
+
     return estimator
