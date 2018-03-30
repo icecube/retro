@@ -106,7 +106,7 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
 
     n_points_total = 0
     metric_vals = []
-    for event_idx, hits, time_window in hits_generator: # pylint: disable=unused-variable
+    for event_idx, hits, time_window, _, _ in hits_generator: # pylint: disable=unused-variable
         metric_kw['hits'] = hits
         metric_kw['time_window'] = time_window
 

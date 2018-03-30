@@ -32,8 +32,10 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from argparse import ArgumentParser
-from os.path import abspath, dirname, splitext
+from collections import Mapping
+from os.path import abspath, basename, dirname, splitext
 import pickle
+import re
 import sys
 import time
 
@@ -43,7 +45,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const
+from retro import FTYPE, const
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
     point_cascade, one_dim_cascade
@@ -56,6 +58,19 @@ from retro.i3info.extract_gcd import extract_gcd
 from retro.utils.misc import expand
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
+)
+
+
+I3_FNAME_INFO_RE = re.compile(
+    r'''
+    Level(?P<proc_level>.+) # processing level e.g. 5p or 5pt (???)
+    _(?P<detector>[^.]+)    # detector, e.g. IC86
+    \.(?P<year>\d+)         # year
+    _(?P<generator>.+)      # generator, e.g. genie
+    _(?P<flavor>.+)         # flavor, e.g. nue
+    \.(?P<run>\d+)          # run, e.g. 012600
+    \.(?P<filenum>\d+)      # file number, e.g. 000000
+    ''', (re.VERBOSE | re.IGNORECASE)
 )
 
 
@@ -87,7 +102,7 @@ def setup_dom_tables(
         mmap = 'uncompr' in dom_tables_kind
 
     if dom_tables_kind in ['raw_templ_compr', 'ckv_templ_compr']:
-        template_library = np.load(template_library)
+        template_library = np.load(expand(template_library))
     else:
         template_library = None
 
@@ -196,7 +211,7 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
 
 
 def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
-             angsens_model=None):
+             angsens_model=None, frame_path=None):
     """Generator that loads hits and, if they are raw photons, reweights and
     reformats them into "standard" hits format.
 
@@ -213,47 +228,166 @@ def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
     event_idx : int
     event_hits
     time_window : float
+    hit_tmin
+    hit_tmax
 
     """
     if start_idx is None:
         start_idx = 0
 
+    if hits_are_photons:
+        hit_kind = 'photons'
+    else:
+        hit_kind = 'pulses'
+
     if num_events is None:
         events_slice = slice(start_idx, None)
+        print("Hit generator will yield all events' {},"
+              " starting at event index {}"
+              .format(hit_kind, start_idx))
     else:
         events_slice = slice(start_idx, start_idx + num_events)
+        if num_events > 1:
+            possessive = "s'"
+        else:
+            possessive = "'s"
+        print("Hit generator will yield {} event{} {},"
+              " starting at event index {}"
+              .format(num_events, possessive, hit_kind, start_idx))
 
     hits_file = expand(hits_file)
-    _, ext = splitext(hits_file)
+    base = basename(hits_file)
+
+    ext = None
+    while ext in [None, '.bz2', '.gz', '.lzma', '.zst']:
+        base, ext = splitext(base)
+
     if ext == '.pkl':
         with open(hits_file, 'rb') as f:
             hits = pickle.load(f)
-            offset_hits_iter = hits[events_slice]
+            offset_hits_iter = enumerate(hits[events_slice], start_idx)
+
+    elif ext == '.i3':
+        assert frame_path is not None
+        def offset_hits_iter(hits_file, start_idx, num_events, frame_path):
+            from icecube import ( # pylint: disable=unused-variable
+                icetray, dataio, dataclasses, recclasses, simclasses
+            )
+            fname_info = None
+            fname_info_match = I3_FNAME_INFO_RE.match(base)
+            if fname_info_match is not None:
+                fname_info = fname_info_match.groupdict()
+
+            assert num_events > 0
+
+            i3file = dataio.I3File(hits_file, 'r')
+            num_daq_frames_processed = 0
+            daq_frame_index = -1
+            while i3file.more():
+                frame = i3file.pop_daq()
+                if frame.Stop != frame.DAQ:
+                    continue
+                daq_frame_index += 1
+                if daq_frame_index < start_idx:
+                    continue
+
+                hdr = frame['I3EventHeader']
+                run_id = hdr.run_id
+                if run_id <= 1 and fname_info is not None:
+                    event_idx = '{}.{}.{}'.format(
+                        int(fname_info['run']),
+                        int(fname_info['filenum']),
+                        hdr.event_id
+                    )
+                else:
+                    event_idx = '{}.{}'.format(run_id, hdr.event_id)
+
+                event_hits = []
+
+                series = frame[frame_path]
+                if isinstance(series, dataclasses.I3RecoPulseSeriesMapMask): # pylint: disable=no-member
+                    series = series.apply(frame)
+
+                if isinstance(series, dataclasses.I3RecoPulseSeriesMap): # pylint: disable=no-member
+                    assert not hits_are_photons
+                    for (string, dom, _), pinfos in series:
+                        sd_idx = const.get_sd_idx(string, dom)
+
+                        pls = []
+                        for pinfo in pinfos:
+                            pls.append(
+                                (pinfo.time, pinfo.charge, pinfo.width)
+                            )
+                        event_hits.append(
+                            (sd_idx, np.array(pls, dtype=np.float32).T)
+                        )
+                else: # isinstance(series, simclasses.):
+                    assert hits_are_photons
+                    for (string, dom), pinfos in series:
+                        sd_idx = const.get_sd_idx(string, dom)
+                        phot = []
+                        for pinfo in pinfos:
+                            phot.append([
+                                pinfo.time,
+                                pinfo.pos.x,
+                                pinfo.pos.y,
+                                pinfo.pos.z,
+                                np.cos(pinfo.dir.zenith),
+                                pinfo.dir.azimuth,
+                                pinfo.wavelength
+                            ])
+                        event_hits.append(
+                            (sd_idx, np.array(phot, dtype=np.float32).T)
+                        )
+
+                num_daq_frames_processed += 1
+
+                yield event_idx, event_hits
+
+                if num_daq_frames_processed >= num_events:
+                    break
+
     else:
-        raise NotImplementedError()
+        raise ValueError('Unhandled extension "{}" on `hits_file` "{}"`'
+                         .format(ext, hits_file))
 
     if hits_are_photons:
         angsens_poly, _ = load_angsens_model(angsens_model)
 
-    for event_offset, event_hits in enumerate(offset_hits_iter):
-        event_idx = event_offset - start_idx
+    for event_idx, orig_event_hits in offset_hits_iter:
+        if isinstance(orig_event_hits, Mapping):
+            orig_event_hits = [(const.get_sd_idx(*k), v)
+                               for k, v in orig_event_hits.items()]
+
+        hit_tmin = np.inf
+        hit_tmax = -np.inf
+        event_hits = [const.EMPTY_HITS]*const.NUM_DOMS_TOT
         if hits_are_photons:
             time_window = 0.0
-            event_photons = event_hits
-            event_hits = [const.EMPTY_HITS]*const.NUM_DOMS_TOT
-            for str_dom, pinfo in event_photons.items():
-                sd_idx = const.get_sd_idx(string=str_dom[0], dom=str_dom[1])
+            for sd_idx, pinfo in orig_event_hits:
                 t = pinfo[0, :]
                 coszen = pinfo[4, :]
-                weight = np.float32(angsens_poly(coszen))
+                weight = angsens_poly(coszen)
                 event_hits[sd_idx] = np.concatenate(
                     (t[np.newaxis, :], weight[np.newaxis, :]),
                     axis=0
-                )
+                ).astype(FTYPE)
+                hit_tmin = min(hit_tmin, t.min())
+                hit_tmax = max(hit_tmax, t.max())
         else:
-            raise NotImplementedError()
+            time_window = 1e4
+            for sd_idx, pinfo in orig_event_hits:
+                t = pinfo[0, :]
+                q = pinfo[1, :]
 
-        yield event_idx, event_hits, time_window
+                hit_tmin = min(hit_tmin, t.min())
+                hit_tmax = max(hit_tmax, t.max())
+                event_hits[sd_idx] = np.concatenate(
+                    (t[np.newaxis, :], q[np.newaxis, :]),
+                    axis=0
+                ).astype(FTYPE)
+
+        yield event_idx, tuple(event_hits), time_window, hit_tmin, hit_tmax
 
 
 def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
@@ -298,9 +432,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     if dom_tables:
         group = parser.add_argument_group(
-            title='Single-DOM tables',
-            description='''Arguments used to instantiate and load single-DOM
-            Retro tables'''
+            title='Single-DOM tables arguments',
         )
 
         group.add_argument(
@@ -362,9 +494,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     if hypo:
         group = parser.add_argument_group(
-            title='Hypo',
-            description='''Arguments used to instantiate hypothesis handler
-            and kernels'''
+            title='Hypothesis handler and kernel parameters',
         )
 
         group.add_argument(
@@ -383,9 +513,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     if hits:
         group = parser.add_argument_group(
-            title='Hits',
-            description='''Arguments for loading hits (either photon-level or
-            a pulse series) from events.'''
+            title='Hits parameters',
         )
 
         group.add_argument(
@@ -395,7 +523,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
             '--hits-are-photons', action='store_true',
         )
         group.add_argument(
-            '--start-event-idx', type=int, default=0
+            '--start-idx', type=int, default=0
         )
         group.add_argument(
             '--num-events', type=int, default=None

@@ -49,8 +49,8 @@ from retro.utils.ckv import (
 from retro.utils.geom import infer_power
 
 
-#cc = CC('pexp_precomp')
-#cc.verbose = True
+#NUMBA_CC = CC('pexp_5d_compiled')
+#NUMBA_CC.verbose = True
 
 MACHINE_EPS = 1e-16
 
@@ -215,49 +215,9 @@ def generate_pexp_5d_function(
             return table[r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx]
 
-    #@cc.export(
+    #@NUMBA_CC.export(
     #    'pexp_5d',
-    #    '''
-    #    array(
-    #        Record([
-    #            ('kind', '<u4'),
-    #            ('t', '<f4'),
-    #            ('x', '<f4'),
-    #            ('y', '<f4'),
-    #            ('z', '<f4'),
-    #            ('photons', '<f4'),
-    #            ('dir_costheta', '<f4'),
-    #            ('dir_sintheta', '<f4'),
-    #            ('dir_cosphi', '<f4'),
-    #            ('dir_sinphi', '<f4'),
-    #            ('ckv_theta', '<f4'),
-    #            ('ckv_costheta', '<f4'),
-    #            ('ckv_sintheta', '<f4')
-    #        ]),
-    #        1d, C
-    #    ),
-    #    array(float32, 2d, C),
-    #    Record([
-    #        ('operational', '|b1'),
-    #        ('', '|V3'),
-    #        ('x', '<f4'),
-    #        ('y', '<f4'),
-    #        ('z', '<f4'),
-    #        ('quantum_efficiency', '<f4'),
-    #        ('noise_rate_per_ns', '<f4')
-    #    ]),
-    #    float32,
-    #    unaligned array(
-    #        Record([
-    #            ('index', '<u2'),
-    #            ('weight', '<f4')
-    #        ]),
-    #        3d, C
-    #    ),
-    #    array(float32, 2d, C),
-    #    array(float32, 4d, C),
-    #    array(float32, 1d, C)
-    #    '''
+    #    '''Tuple((float64, float64)) (array( Record([ ("kind", uint32), ("t", float32), ('x', float32), ('y', float32), ('z', float32), ('photons', float32), ('dir_costheta', float32), ('dir_sintheta', float32), ('dir_cosphi', float32), ('dir_sinphi', float32), ('ckv_theta', float32), ('ckv_costheta', float32), ('ckv_sintheta', float32) ]), 1d, C), array(float32, 2d, C), Record([ ('operational', bool), ('', '|V3'), ('x', float32), ('y', float32), ('z', float32), ('quantum_efficiency', float32), ('noise_rate_per_ns', float32) ]), float32, unaligned array( Record([ ('index', <u2), ('weight', float32) ]), 3d, C), array(float32, 2d, C), array(float32, 4d, C), array(float32, 1d, C) ) '''
     #)
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d( # pylint: disable=missing-docstring, too-many-locals
@@ -311,9 +271,6 @@ def generate_pexp_5d_function(
             Normalization to apply to `table`, which is assumed to depend on
             both r- and t-dimensions and therefore is an array.
 
-        table_map : shape (n_templates, n_costhetadir, n_deltaphidir) array, optional
-            Only used if `table_kind` is template-compressed
-
         t_indep_table : array, optional
             Time-independent photon survival probability table. If using an
             uncompressed table, this will have shape
@@ -323,9 +280,6 @@ def generate_pexp_5d_function(
         t_indep_table_norm : array, optional
             r-dependent normalization (any t-dep normalization is assumed to
             already have been applied to generate the t_indep_table).
-
-        t_indep_table_map : array, optional
-            Only used if `table_kind` is template-compressed.
 
         Returns
         -------
@@ -589,4 +543,51 @@ def generate_pexp_5d_function(
 
         return exp_p_at_all_times, sum_log_at_hit_times
 
-    return pexp_5d, meta
+    #NUMBA_CC.compile()
+
+    #import pexp_5d_compiled
+
+    if compute_t_indep_exp:
+        def get_llh(hypo_light_sources, hits, time_window, dom_info,
+                    sd_indices, tables, table_norms, t_indep_tables,
+                    t_indep_table_norms):
+            llh = np.float64(0)
+
+            for sd_idx in sd_indices:
+                hts = hits[sd_idx]
+                dnfo = dom_info[sd_idx]
+                tbl = tables[sd_idx]
+                tbln = table_norms[sd_idx]
+                titbl = t_indep_tables[sd_idx]
+                titbln = t_indep_table_norms[sd_idx]
+
+                exp_p_at_all_times, sum_log_at_hit_times = pexp_5d(
+                    sources=hypo_light_sources,
+                    hits=hts,
+                    dom_info=dnfo,
+                    time_window=np.float32(time_window),
+                    table=tbl,
+                    table_norm=tbln,
+                    t_indep_table=titbl,
+                    t_indep_table_norm=titbln
+                )
+                llh += sum_log_at_hit_times - exp_p_at_all_times
+            return llh
+    else:
+        def get_llh(hypo_light_sources, hits, time_window, dom_info,
+                    sd_indices, tables, table_norms):
+            llh = np.float64(0)
+            for sd_idx in sd_indices:
+                exp_p_at_all_times, sum_log_at_hit_times = pexp_5d(
+                    hypo_light_sources,
+                    hits[sd_idx],
+                    dom_info[sd_idx],
+                    np.float32(time_window),
+                    tables[sd_idx],
+                    table_norms[sd_idx],
+                )
+                llh += sum_log_at_hit_times - exp_p_at_all_times
+            return llh
+
+
+    return pexp_5d, get_llh, meta

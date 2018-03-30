@@ -32,10 +32,10 @@ __all__ = [
 
     'NUM_STRINGS', 'NUM_DOMS_PER_STRING', 'NUM_DOMS_TOT',
 
-    'IC_STRS', 'DC_STRS', 'DC_IC_STRS', 'DC_SUBDUST_DOMS', 'IC_SUBDUST_DOMS',
-    'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
-    'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS',
-    'ALL_STRS_DOMS', 'DC_ALL_STRS_DOMS',
+    'IC_STRS', 'DC_STRS', 'DC_IC_STRS', 'DC_ALL_STRS', 'DC_SUBDUST_DOMS',
+    'IC_SUBDUST_DOMS', 'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
+    'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
+    'DC_ALL_STRS_DOMS',
 
     'EMPTY_HITS',
 ]
@@ -195,6 +195,7 @@ NUM_DOMS_TOT = NUM_STRINGS * NUM_DOMS_PER_STRING
 IC_STRS = np.array(list(range(1, 78+1)), dtype=np.uint8)
 DC_STRS = np.array(list(range(79, 86+1)), dtype=np.uint8)
 DC_IC_STRS = np.array([26, 27, 35, 36, 37, 45, 46], dtype=np.uint8)
+DC_ALL_STRS = np.concatenate([DC_STRS, DC_IC_STRS], axis=0)
 
 DC_SUBDUST_DOMS = np.array(list(range(11, 60+1)), dtype=np.uint8)
 IC_SUBDUST_DOMS = np.array(list(range(25, 60+1)), dtype=np.uint8)

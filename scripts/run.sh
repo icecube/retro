@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MYDIR=`dirname $0`
-PROCDIR="${MYDIR}/../retro/retro/i3processing"
+PROCDIR="${MYDIR}/../retro/i3processing"
 
 #==============================================================================
 # User-defined simulation parameters
@@ -17,13 +17,13 @@ HOLE_ICE_MODEL="$I3_SRC/ice-models/resources/models/angsens/as.h2-50cm"
 
 USE_GEANT4=false
 
-PARTICLE="MuMinus"
+PARTICLE="EMinus"
 E=20
-X=75
+X=0
 Y=0
 Z=-400
-CZ=-0.75
-AZ=2.35619
+CZ=-1.0
+AZ=0
 
 NUM_EVENTS=1000000
 

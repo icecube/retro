@@ -8,11 +8,12 @@ in discrete_hypo/DiscreteHypo class.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    ALL_REALS
-    const_energy_loss_muon
-    table_energy_loss_muon
-'''.split()
+__all__ = [
+    'ALL_REALS',
+    'MULEN_INTERP',
+    'const_energy_loss_muon',
+    'table_energy_loss_muon'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi, K. Crust'
 __license__ = '''Copyright 2017 Philipp Eller, Justin L. Lanfranchi, Kevin Crust
@@ -41,7 +42,6 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
     COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
     TRACK_PHOTONS_PER_M
@@ -52,29 +52,7 @@ from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_CKV_BETA1
 ALL_REALS = (-np.inf, np.inf)
 
 
-# Create spline (for table_energy_loss_muon)
-with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
-    # pylint: disable=invalid-name
-    reader = csv.reader(csvfile)
-    rows = []
-    for row in reader:
-        rows.append(row)
-    energies = rows[0]
-    stopping_power = rows[1]
-    energies.pop(0)
-    stopping_power.pop(0)
-    idx = 0
-    while idx < len(energies):
-        energies[idx] = float(energies[idx])
-        stopping_power[idx] = float(stopping_power[idx])
-        idx += 1
-
-
-#create spline (for table_energy_loss_muon)
-SPLINE = interpolate.splrep(energies, stopping_power, s=0)
-
-@numba_jit(nopython=False, cache=True) #(**DFLT_NUMBA_JIT_KWARGS)
-def const_energy_loss_muon(hypo_params, dt):
+def const_energy_loss_muon(hypo_params, dt=1.0):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -100,10 +78,9 @@ def const_energy_loss_muon(hypo_params, dt):
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
-    n_samples = int(duration / dt)
-    segment_length = 0.0
-    if n_samples > 0:
-        segment_length = length / n_samples
+    n_segments = max(1.0, duration // dt)
+    segment_length = length / n_segments
+    dt = segment_length / SPEED_OF_LIGHT_M_PER_NS
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
     # NOTE: add pi to make dir vector go in "math-standard" vector notation
@@ -123,28 +100,14 @@ def const_energy_loss_muon(hypo_params, dt):
     dir_y = dir_sintheta * dir_sinphi
     dir_z = dir_costheta
 
-    sampled_dt = np.linspace(dt*0.5, dt * (n_samples - 0.5), n_samples)
+    sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
 
-    sources = np.empty(shape=(n_samples,), dtype=SRC_DTYPE)
-
-    #dt0 = dt * 0.5
-    #dir_x_
-
-    #for samp_n in range(n_samples):
-    #    sources[samp_n]['kind'] = SRC_CKV_BETA1
-    #    step_dt = dt0 + i * dt
-    #    sources[samp_n]['t'] = hypo_params.t + step_dt
-    #    sources[samp_n]['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
-    #    sources[samp_n]['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
-    #    sources[samp_n]['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
-    #    sources[samp_n]['photons'] = photons_per_segment
-    #    sources[samp_n]['dir_x'] = dir_x * COS_CKV
-    #    sources[samp_n]['dir_y'] = dir_y * COS_CKV
-    #    sources[samp_n]['dir_z'] = dir_z * COS_CKV
+    sources = np.empty(shape=int(n_segments), dtype=SRC_DTYPE)
 
     sources['kind'] = SRC_CKV_BETA1
     sources['t'] = hypo_params.t + sampled_dt
-    sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    sources['x'] = hypo_params.x + sampled_dt * (dir_x *
+                                                 SPEED_OF_LIGHT_M_PER_NS)
     sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
     sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     sources['photons'] = photons_per_segment
@@ -162,7 +125,28 @@ def const_energy_loss_muon(hypo_params, dt):
     return sources
 
 
-def table_energy_loss_muon(hypo_params, dt):
+# Create spline (for table_energy_loss_muon)
+with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
+    # pylint: disable=invalid-name
+    reader = csv.reader(csvfile)
+    rows = []
+    for row in reader:
+        rows.append(row)
+
+energies = np.array([float(x) for x in rows[0][1:]])
+stopping_power = np.array([float(x) for x in rows[1][1:]])
+dxde = interpolate.UnivariateSpline(x=energies, y=1/stopping_power, s=0, k=3)
+esamps = np.logspace(-1, 5, int(1e4))
+dxde_samps = dxde(esamps)
+
+lengths = [0]
+for idx, egy in enumerate(esamps[1:]):
+    lengths.append(np.trapz(y=dxde_samps[:idx+1], x=esamps[:idx+1]))
+lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
+MULEN_INTERP = interpolate.UnivariateSpline(x=esamps, y=lengths, k=1, s=0)
+
+
+def table_energy_loss_muon(hypo_params, dt=1.0):
     """Discrete-time track hypothesis that calculates dE/dx as the muon travels
     using splined tabulated data.
 
@@ -183,73 +167,53 @@ def table_energy_loss_muon(hypo_params, dt):
     """
     track_energy = hypo_params.track_energy
 
-    # Check for no track
+    # Check for no-track condition
     if track_energy == 0:
         return np.array([], dtype=SRC_DTYPE)
 
-    # Declare constants
-    segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
+    # Total expected length of muon from table
+    muon_len = MULEN_INTERP(track_energy)
+
+    # At least one segment
+    n_segments = max(1.0, muon_len // (SPEED_OF_LIGHT_M_PER_NS * dt))
+    segment_length = muon_len / n_segments
+    dt = segment_length / SPEED_OF_LIGHT_M_PER_NS
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
-    # Assign vertex
-    t = hypo_params.t
-    x = hypo_params.x
-    y = hypo_params.y
-    z = hypo_params.z
-
     # Assign dir_x, dir_y, dir_z for the track
-    #NOTE: ask justin about the negative sign on zenith
-    sin_zen = math.sin(hypo_params.track_zenith)
-    dir_x = -sin_zen * math.cos(hypo_params.track_azimuth)
-    dir_y = -sin_zen * math.sin(hypo_params.track_azimuth)
-    dir_z = -math.cos(hypo_params.track_zenith)
+    opposite_zenith = np.pi - hypo_params.track_zenith
+    opposite_azimuth = np.pi + hypo_params.track_azimuth
 
-    # Loop uses rest mass of 105.658 MeV/c^2 for muon
-    rest_mass = 0.105658
-    # Create array at vertex
-    photon_array = [
-        (SRC_CKV_BETA1,
-         t,
-         x,
-         y,
-         z,
-         photons_per_segment,
-         dir_x * COS_CKV,
-         dir_y * COS_CKV,
-         dir_z * COS_CKV)
-    ]
+    dir_costheta = math.cos(opposite_zenith)
+    dir_sintheta = math.sin(opposite_zenith)
 
-    dx = dt * dir_x * SPEED_OF_LIGHT_M_PER_NS
-    dy = dt * dir_y * SPEED_OF_LIGHT_M_PER_NS
-    dz = dt * dir_z * SPEED_OF_LIGHT_M_PER_NS
+    dir_cosphi = np.cos(opposite_azimuth)
+    dir_sinphi = np.sin(opposite_azimuth)
 
-    # Loop through track, appending new photon dump on axis 0
-    while True:
-        # Move along track
-        t += dt
-        x += dx
-        y += dy
-        z += dz
+    dir_x = dir_sintheta * dir_cosphi
+    dir_y = dir_sintheta * dir_sinphi
+    dir_z = dir_costheta
 
-        # Change energy of muon
-        dedx = interpolate.splev(track_energy, SPLINE, der=0)
-        track_energy -= dedx * segment_length
+    sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
 
-        # Append new row if energy still above rest mass, else break out of
-        # loop
-        if track_energy < rest_mass:
-            break
+    sources = np.empty(shape=int(n_segments), dtype=SRC_DTYPE)
 
-        photon_array.append(
-            (SRC_CKV_BETA1,
-             t,
-             x,
-             y,
-             z,
-             photons_per_segment,
-             dir_x * COS_CKV,
-             dir_y * COS_CKV,
-             dir_z * COS_CKV)
-        )
+    sources['kind'] = SRC_CKV_BETA1
+    sources['t'] = hypo_params.t + sampled_dt
+    sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
+    sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
+    sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
+    sources['photons'] = photons_per_segment
 
-    return np.array(photon_array, dtype=SRC_DTYPE)
+    sources['dir_costheta'] = dir_costheta
+    sources['dir_sintheta'] = dir_sintheta
+
+    sources['dir_cosphi'] = dir_cosphi
+    sources['dir_sinphi'] = dir_sinphi
+
+    sources['ckv_theta'] = THETA_CKV
+    sources['ckv_costheta'] = COS_CKV
+    sources['ckv_sintheta'] = SIN_CKV
+
+    return sources
+>>>>>>> origin
