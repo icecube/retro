@@ -30,7 +30,7 @@ import sys
 
 import numpy as np
 import math
-from scipy.stats import gamma
+from scipy.stats import gamma, pareto
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -38,10 +38,11 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS, HYPO_PARAMS_T
 from retro.const import (
-    COS_CKV, CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS
+    COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV, SPEED_OF_LIGHT_M_PER_NS
     )
-from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_OMNI
+from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_OMNI, SRC_CKV_BETA1
 from retro.retro_types import HypoParams8D
+
 
 
 
@@ -85,7 +86,7 @@ def point_cascade(hypo_params):
     #)
     return sources
 
-def one_dim_cascade(hypo_params, n_samples):
+def one_dim_cascade(hypo_params, num_samples):
     """
     Cascade with both longitudinal and angular distributions
 
@@ -94,7 +95,7 @@ def one_dim_cascade(hypo_params, n_samples):
     Parameters
     ----------
     hypo_params : MUST BE HypoParams10D
-    n_samples : integer, number of times to sample the distributions
+    num_samples : integer, number of times to sample the distributions
 
     Returns
     -------
@@ -109,27 +110,28 @@ def one_dim_cascade(hypo_params, n_samples):
 
     #assign cascade axis direction, works with 8D or 10D
     if HYPO_PARAMS_T is HypoParams8D:
-        zenith = hypo_params.track_zenith
-        azimuth = hypo_params.track_azimuth
+        zenith = np.pi - hypo_params.track_zenith
+        azimuth = np.pi + hypo_params.track_azimuth
     else:
-        zenith = hypo_params.cascade_zenith
-        azimuth = hypo_params.cascade_azimuth
+        zenith = np.pi - hypo_params.cascade_zenith
+        azimuth = np.pi + hypo_params.cascade_azimuth
+    
     sin_zen = math.sin(zenith)
     cos_zen = math.cos(zenith)
     sin_azi = math.sin(azimuth)
     cos_azi = math.cos(azimuth)
-    dir_x = -sin_zen * cos_azi
-    dir_y = -sin_zen * sin_azi
-    dir_z = -cos_zen
+    dir_x = sin_zen * cos_azi
+    dir_y = sin_zen * sin_azi
+    dir_z = cos_zen
 
     #create rotation matrix 
-    rot_mat = -np.array([[cos_azi * cos_zen, -sin_azi, cos_azi * sin_zen],
+    rot_mat = np.array([[cos_azi * cos_zen, -sin_azi, cos_azi * sin_zen],
                [sin_azi * cos_zen, cos_zen, sin_azi * sin_zen],
                [-sin_zen, 0, cos_zen]
                ])
 
     #define photons per sample
-    photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / n_samples
+    photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / num_samples
 
     #create longitudinal distribution (from arXiv:1210.5140v2)
     alpha = 2.01849
@@ -138,17 +140,17 @@ def one_dim_cascade(hypo_params, n_samples):
     b = 0.63207
     rad_length = 0.3975
 
-    long_dist = gamma(a, scale=x/b)
-    long_samples = l_dist.rvs(size=n_samples)
+    long_dist = gamma(a, scale=rad_length/b)
+    long_samples = long_dist.rvs(size=num_samples)
 
     #create angular zenith distribution
     zen_dist = pareto(b=1.91833423, loc=-22.82924369, scale=22.82924369)
-    zen_samples = zen_dist.rvs(size=n_samples)
+    zen_samples = zen_dist.rvs(size=num_samples)
     zen_samples[zen_samples > 180] = 0.
     zen_samples = zen_samples * np.pi / 180.
 
     #create angular azimuth distribution
-    azi_samples = np.random.uniform(low=0., high=2*np.pi, size=(n_samples,))
+    azi_samples = np.random.uniform(low=0., high=2*np.pi, size=(num_samples,))
 
     #create angular vectors distribution
     x_ang_dist = np.sin(zen_samples) * np.cos(azi_samples)
@@ -161,17 +163,29 @@ def one_dim_cascade(hypo_params, n_samples):
         axis=0
     )
 
+    final_ang_dist = np.dot(rot_mat, ang_dist)
+    final_phi_dist = np.arctan2(final_ang_dist[1], final_ang_dist[0])
+    final_theta_dist = np.arccos(final_ang_dist[2])
+
     #create photon matrix
-    pinfo_gen = np.empty((n_samples, 8), dtype=np.float32)
+    sources = np.empty(shape=num_samples, dtype=SRC_DTYPE)
 
-    #NOTE: ask justin about COS_CKV
-    pinfo_gen[:, 0] = t + long_samples / SPEED_OF_LIGHT_M_PER_NS
-    pinfo_gen[:, 1] = x + long_samples * dir_x
-    pinfo_gen[:, 2] = y + long_samples * dir_y
-    pinfo_gen[:, 3] = z + long_samples * dir_z
-    pinfo_gen[:, 4] = photons_per_samples
-    pinfo_gen[:, 5] = np.dot(rot_mat, ang_dist)[0] * COS_CKV 
-    pinfo_gen[:, 6] = np.dot(rot_mat, ang_dist)[1] * COS_CKV
-    pinfo_gen[:, 7] = np.dot(rot_mat, ang_dist)[2] * COS_CKV
+    sources['kind'] = SRC_CKV_BETA1
+    sources['t'] = t + long_samples / SPEED_OF_LIGHT_M_PER_NS
+    sources['x'] = x + long_samples * dir_x
+    sources['y'] = y + long_samples * dir_y
+    sources['z'] = z + long_samples * dir_z
+    sources['photons'] = photons_per_sample
 
-    return pinfo_gen    
+    sources['dir_costheta'] = np.cos(final_theta_dist)
+    sources['dir_sintheta'] = np.sin(final_theta_dist)
+
+    sources['dir_cosphi'] = np.cos(final_phi_dist)
+    sources['dir_sinphi'] = np.sin(final_phi_dist)
+
+    sources['ckv_theta'] = THETA_CKV
+    sources['ckv_costheta'] = COS_CKV
+    sources['ckv_sintheta'] = SIN_CKV
+
+
+    return sources    

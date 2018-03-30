@@ -130,7 +130,7 @@ SIMULATIONS = dict(
     upgoing_em_cascade=dict(
         mc_true_params=retro.HYPO_PARAMS_T(
             t=0, x=0, y=0, z=-400,
-            track_azimuth=0, track_zenith=0,
+            track_azimuth=0, track_zenith=np.pi,
 #            cascade_azimuth=0, cascade_zenith=np.pi,
             track_energy=0, cascade_energy=20
         ),

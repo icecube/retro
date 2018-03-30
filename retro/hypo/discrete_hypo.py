@@ -121,4 +121,5 @@ class DiscreteHypo(object):
         sources = []
         for kernel, kwargs in zip(self.hypo_kernels, self.kernel_kwargs):
             sources.append(kernel(hypo_params, **kwargs))
+        print(sources)
         return np.concatenate(sources, axis=0)

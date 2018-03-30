@@ -46,7 +46,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import const
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
-    point_cascade
+    point_cascade, one_dim_cascade
 )
 from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon
@@ -175,10 +175,10 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
             hypo_kernels.append(point_cascade)
             kernel_kwargs.append(dict())
         else:
-            raise NotImplementedError('{} cascade not implemented yet.'
-                                      .format(cascade_kernel))
-            #hypo_kernels.append(one_dim_cascade)
-            #kernel_kwargs.append(dict(num_samples=cascade_samples))
+            #raise NotImplementedError('{} cascade not implemented yet.'
+            #                          .format(cascade_kernel))
+            hypo_kernels.append(one_dim_cascade)
+        kernel_kwargs.append(dict(num_samples=cascade_samples))
 
     if track_kernel is not None:
         if track_kernel == 'const_e_loss':
