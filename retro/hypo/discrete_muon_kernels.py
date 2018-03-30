@@ -216,4 +216,3 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
     sources['ckv_sintheta'] = SIN_CKV
 
     return sources
->>>>>>> origin
