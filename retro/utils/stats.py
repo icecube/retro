@@ -118,6 +118,20 @@ def weighted_average(x, w):
         sum_w += w_i
     return sum_xw / sum_w
 
+def weighted_percentile(data, percentile, weights=None):
+    '''
+    percenttile (0..100)
+    weights specifies the frequency (count) of data.
+    '''
+    if weights is None:
+        return np.percentile(data, percents)
+    ind=np.argsort(data)
+    d=data[ind]
+    w=weights[ind]
+    p=1.*w.cumsum()/w.sum()*100
+    y=np.interp(percentile, p, d)
+    return y
+
 def estimate(llhp, percentile_nd=0.95):
     '''
     Evaluate estimator for reconstruction quantities given
@@ -143,8 +157,19 @@ def estimate(llhp, percentile_nd=0.95):
     # keep best LLHs
     cut = llhp['llh'] > llhp['llh'].max() - stats.chi2.ppf(percentile_nd, nd)
     
+    if np.sum(cut) == 0:
+        raise IndexError('no points')
+
+    # undo exp prior
+    weights = llhp['track_energy'][cut] + llhp['cascade_energy'][cut]
+    # try fuckin around with time
+    #t = llhp['t'][cut]
+    #weights *= (t-t.min()+1)**-0.2
+
     estimator = {}
     estimator['mean'] = {}
+    estimator['weighted_mean'] = {}
+    estimator['median'] = {}
     estimator['low'] = {}
     estimator['high'] = {}
 
@@ -157,13 +182,19 @@ def estimate(llhp, percentile_nd=0.95):
             # azimuth is a cyclic function, so need some special treatement to get correct mean
             mean = stats.circmean(var)
             shifted = (var - mean + np.pi)%(2*np.pi)
-            low = (np.percentile(shifted, percentile) + mean - np.pi)%(2*np.pi)
-            high = (np.percentile(shifted, 100-percentile) + mean - np.pi)%(2*np.pi)
+            weighted_mean = (np.average(shifted, weights=weights) + mean - np.pi)%(2*np.pi)
+            median = (weighted_percentile(shifted, 50, weights) + mean - np.pi)%(2*np.pi)
+            low = (weighted_percentile(shifted, percentile, weights) + mean - np.pi)%(2*np.pi)
+            high = (weighted_percentile(shifted, 100-percentile, weights) + mean - np.pi)%(2*np.pi)
         else:
-            mean = var.mean()
-            low = np.percentile(var, percentile)
-            high = np.percentile(var, 100-percentile)
+            mean = np.mean(var)
+            weighted_mean = np.average(var, weights=weights)
+            median = weighted_percentile(var, 50, weights)
+            low = weighted_percentile(var, percentile, weights)
+            high = weighted_percentile(var, 100-percentile, weights)
         estimator['mean'][col] = mean
+        estimator['weighted_mean'][col] = weighted_mean
+        estimator['median'][col] = median
         estimator['low'][col] = low
         estimator['high'][col] = high
     return estimator
