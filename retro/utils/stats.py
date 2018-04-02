@@ -146,7 +146,7 @@ def estimate(llhp, percentile_nd=0.95):
     nd = len(columns)
 
     # keep best LLHs
-    cut = llhp['llh'] > llhp['llh'].max() - stats.chi2.ppf(percentile_nd, nd)
+    cut = llhp['llh'] >= np.nanmax(llhp['llh']) - stats.chi2.ppf(percentile_nd, nd)
 
     estimator = OrderedDict()
 
