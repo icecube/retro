@@ -38,6 +38,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import const
+from retro.retro_types import PHOTON_T, PULSE_T, TRIGGER_T
 from retro.utils.misc import expand, mkdir
 
 
@@ -101,8 +102,30 @@ def extract_reco(frame, reco):
     #        break
 
 
+def extract_trigger_hierarchy(frame, path):
+    from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
+    trigger_hierarchy = frame[path]
+    triggers = []
+    for _, trigger in trigger_hierarchy.iteritems():
+        config_id = trigger.key.config_id or 0
+        triggers.append((
+            int(trigger.key.type),
+            int(trigger.key.subtype),
+            int(trigger.key.source),
+            config_id,
+            trigger.fired,
+            trigger.time,
+            trigger.length
+        ))
+    try:
+        triggers = np.array(triggers, dtype=TRIGGER_T)
+    except TypeError:
+        print('triggers:', triggers)
+    return triggers
+
+
 def extract_pulses(frame, pulse_series_name):
-    """Extract pulses from an I3 frame.
+    """Extract a pulse series from an I3 frame.
 
     Parameters
     ----------
@@ -115,10 +138,10 @@ def extract_pulses(frame, pulse_series_name):
 
     Returns
     -------
-    pulses : OrderedDict
-        Keys are (string, dom) and values OrderedDicts with keys 'time',
-        'charge', and 'width' and values arrays of shape (n_hits_dom[i],) and
-        dtype float32.
+    pulses : list of (sd_idx, pulses) tuples
+        `sd_idx` is from get_sd_idx and each `pulses` object is a 1-D array of
+        dtype retro_types.PULSE_T with length the number of pulses recorded in
+        that DOM.
 
     """
     from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
@@ -137,12 +160,8 @@ def extract_pulses(frame, pulse_series_name):
 
         pls = []
         for pulse in pinfo:
-            pls.append([
-                pulse.time,
-                pulse.charge,
-                pulse.width
-            ])
-        pls = np.array(pls, dtype=np.float32).T
+            pls.append((pulse.time, pulse.charge, pulse.width))
+        pls = np.array(pls, dtype=PULSE_T)
 
         pulses.append((sd_idx, pls))
 
@@ -150,6 +169,24 @@ def extract_pulses(frame, pulse_series_name):
 
 
 def extract_photons(frame, photon_key):
+    """Extract a photon series from an I3 frame.
+
+    Parameters
+    ----------
+    frame : icetray.I3Frame
+        Frame object from which to extract the pulses.
+
+    photon_key : str
+        Name of the photon series to retrieve.
+
+    Returns
+    -------
+    photons : list of (sd_idx, phot) tuples
+        `sd_idx` is from get_sd_idx and each `phot` object is a 1D array of
+        dtype retro_types.PHOTON_T with length the number of photons recorded
+        in that DOM.
+
+    """
     from icecube import dataclasses, simclasses # pylint: disable=unused-variable
 
     photon_series = frame[photon_key]
@@ -161,7 +198,7 @@ def extract_photons(frame, photon_key):
 
         phot = [] #Photon(*([] for _ in range(len(Photon._fields))))
         for pinfo in pinfos:
-            phot.append([
+            phot.append((
                 pinfo.time,
                 pinfo.pos.x,
                 pinfo.pos.y,
@@ -169,41 +206,10 @@ def extract_photons(frame, photon_key):
                 np.cos(pinfo.dir.zenith),
                 pinfo.dir.azimuth,
                 pinfo.wavelength
-            ])
-        phot = np.array(phot, dtype=np.float32).T
+            ))
+        phot = np.array(phot, dtype=PHOTON_T)
 
-        #strs_doms.append(str_dom)
-        #photons.append(phot)
-
-        #phot = Photon(*([] for _ in range(len(Photon._fields))))
-        #for pinfo in pinfos:
-        #    phot.t.append(np.float16(pinfo.time))
-        #    phot.x.append(np.float16(pinfo.pos.x))
-        #    phot.y.append(np.float16(pinfo.pos.y))
-        #    phot.z.append(np.float16(pinfo.pos.z))
-        #    phot.coszen.append(np.float16(np.cos(pinfo.dir.zenith)))
-        #    phot.azimuth.append(np.float16(pinfo.dir.azimuth))
-        #    phot.wavelength.append(np.float16(pinfo.wavelength))
-        #phot = Photon(*(np.array(lst) for lst in phot))
-
-        #phot = OrderedDict(
-        #    (d, [])
-        #    for d in 't x y z coszen azimuth wavelength'.split()
-        #)
-        #for pinfo in pinfos:
-        #    phot['t'].append(np.float16(pinfo.time))
-        #    phot['x'].append(np.float16(pinfo.pos.x))
-        #    phot['y'].append(np.float16(pinfo.pos.y))
-        #    phot['z'].append(np.float16(pinfo.pos.z))
-        #    phot['coszen'].append(np.float32(np.cos(pinfo.dir.zenith)))
-        #    phot['azimuth'].append(np.float16(pinfo.dir.azimuth))
-        #    phot['wavelength'].append(np.float32(pinfo.wavelength))
-        #phot = OrderedDict(
-        #    (k, np.array(v, dtype=np.float32)) for k, v in phot.items()
-        #)
         photons.append((sd_idx, phot))
-
-    #strs_doms = np.array(strs_doms, dtype=np.uint8)
 
     return photons
 
@@ -371,6 +377,7 @@ def extract_events(
         photon_names=tuple(),
         pulse_names=tuple(),
         reco_names=tuple(),
+        trigger_hierarchy_names=tuple(),
         mc_truth=False
     ):
     """Extract information from an i3 file.
@@ -389,6 +396,9 @@ def extract_events(
 
     reco_names : None, str, or iterable of str
         Names of reconstructions to extract from each event
+
+    trigger_hierarchy_names : None, str, or iterable of str
+        Names of trigger hierarchies to extract from each event
 
     mc_truth : bool
         Whether or not Monte Carlo truth for the event should be extracted for
@@ -412,7 +422,7 @@ def extract_events(
                     'photons': [[...], [...], ...],
                     'other_photons': [[...], [...], ...]
                 },
-                'pulses': {
+                'pulse_series': {
                     'SRTOfflinePulses': [[...], [...], ...],
                     'WaveDeformPulses': [[...], [...], ...]
                 },
@@ -420,11 +430,13 @@ def extract_events(
                     'PegLeg8D': [{...}, ...],
                     'Retro8D': [{...}, ...]
                 },
+                'triggers': {
+                    'I3TriggerHierarchy': [{...}, ...],
+                }
             }
 
     """
-    from icecube import dataclasses, dataio # pylint: disable=unused-variable
-    from icecube import icetray # pylint: disable=unused-variable
+    from icecube import dataclasses, dataio, icetray # pylint: disable=unused-variable
 
     fpath = expand(fpath)
     file_info = None
@@ -449,6 +461,10 @@ def extract_events(
     recos = OrderedDict()
     for name in reco_names:
         recos[name] = []
+
+    trigger_hierarchies = OrderedDict()
+    for name in trigger_hierarchy_names:
+        trigger_hierarchies[name] = []
 
     if outdir is None:
         outdir = fpath.rstrip('.bz2').rstrip('.gz').rstrip('.i3')
@@ -495,12 +511,18 @@ def extract_events(
         for reco_name in reco_names:
             recos[reco_name].append(extract_reco(frame, reco_name))
 
+        for trigger_hierarchy_name in trigger_hierarchy_names:
+            trigger_hierarchies[trigger_hierarchy_name].append(
+                extract_trigger_hierarchy(frame, trigger_hierarchy_name)
+            )
+
         # Clear frame buffer and start a new "chain" with the next frame
         frame_buffer = [next_frame]
 
-    photon_series_dir = join(outdir, 'photon_series')
-    pulse_series_dir = join(outdir, 'pulse_series')
+    photon_series_dir = join(outdir, 'photons')
+    pulse_series_dir = join(outdir, 'pulses')
     recos_dir = join(outdir, 'recos')
+    trigger_hierarchy_dir = join(outdir, 'triggers')
 
     if photon_names:
         mkdir(photon_series_dir)
@@ -508,6 +530,8 @@ def extract_events(
         mkdir(pulse_series_dir)
     if reco_names:
         mkdir(recos_dir)
+    if trigger_hierarchy_names:
+        mkdir(trigger_hierarchy_dir)
 
     pickle.dump(events,
                 open(join(outdir, 'events.pkl'), 'wb'),
@@ -533,6 +557,11 @@ def extract_events(
                     open(join(recos_dir, name + '.pkl'), 'wb'),
                     protocol=pickle.HIGHEST_PROTOCOL)
 
+    for name in trigger_hierarchy_names:
+        pickle.dump(trigger_hierarchies[name],
+                    open(join(trigger_hierarchy_dir, name + '.pkl'), 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL)
+
 
 def parse_args(description=__doc__):
     """Parse command line args"""
@@ -555,6 +584,10 @@ def parse_args(description=__doc__):
     parser.add_argument(
         '--reco-names', nargs='+', default=[],
         help='''Pulse series names to extract from each event'''
+    )
+    parser.add_argument(
+        '--trigger-hierarchy-names', nargs='+', default=[],
+        help='''Trigger hierarchy names to extract from each event'''
     )
     parser.add_argument(
         '--mc-truth', action='store_true',

@@ -25,7 +25,14 @@ __all__ = [
     'TimeSphCoord',
     'DOM_INFO',
     'LLHP8D',
-    'LLHP10D'
+    'LLHP10D',
+    'HIT_T',
+    'INDEXER_T',
+    'HITS_SUMMARY_T',
+    'TypeID',
+    'SourceID',
+    'SubtypeID',
+    'TRIGGER_T'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -44,6 +51,7 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import namedtuple
+import enum
 
 import numpy as np
 
@@ -173,3 +181,94 @@ LLHP10D = np.dtype(
     [('llh', np.float32)]
     + [(field, np.float32) for field in HypoParams10D._fields]
 )
+
+PULSE_T = np.dtype([
+    ('time', np.float32),
+    ('charge', np.float32),
+    ('width', np.float32),
+])
+
+PHOTON_T = np.dtype([
+    ('time', np.float32),
+    ('x', np.float32),
+    ('y', np.float32),
+    ('z', np.float32),
+    ('coszen', np.float32),
+    ('azimuth', np.float32),
+    ('wavelength', np.float32),
+])
+
+HIT_T = np.dtype([
+    ('time', np.float32),
+    ('charge', np.float32)
+])
+
+#EVENT_INDEXER_T = np.dtype([
+#    ('first_idx', np.uint32),
+#    ('num', np.uint32)
+#])
+
+INDEXER_T = np.dtype([
+    ('sd_idx', np.uint32),
+    ('offset', np.uint64),
+    ('num', np.uint32)
+])
+
+HITS_SUMMARY_T = np.dtype([
+    ('earliest_hit_time', np.float32),
+    ('latest_hit_time', np.float32),
+    ('average_hit_time', np.float32),
+    ('total_charge', np.float32),
+    ('total_num_hits', np.uint32),
+    ('total_num_doms_hit', np.uint32),
+    ('time_window_start', np.float32),
+    ('time_window_stop', np.float32)
+])
+
+class TypeID(enum.IntEnum):
+    SIMPLE_MULTIPLICITY = 0
+    CALIBRATION = 10
+    MIN_BIAS = 20
+    THROUGHPUT = 30
+    TWO_COINCIDENCE = 40
+    THREE_COINCIDENCE = 50
+    MERGED = 70
+    SLOW_PARTICLE = 80
+    FRAGMENT_MULTIPLICITY = 105
+    STRING = 120
+    VOLUME = 125
+    SPHERE = 127
+    UNBIASED = 129
+    SPASE_2 = 170
+    UNKNOWN_TYPE = 180
+
+
+class SourceID(enum.IntEnum):
+    IN_ICE = 0
+    ICE_TOP = 10
+    AMANDA_TWR_DAQ = 20
+    EXTERNAL = 30
+    GLOBAL = 40
+    AMANDA_MUON_DAQ = 50
+    SPASE = 70
+    UNKNOWN_SOURCE = 80
+
+
+class SubtypeID(enum.IntEnum):
+    NO_SUBTYPE = 0
+    M18 = 50
+    M24 = 100
+    T0 = 150
+    LASER = 200
+    UNKNOWN_SUBTYPE = 250
+
+
+TRIGGER_T = np.dtype([
+    ('type', np.uint8),
+    ('subtype', np.uint8),
+    ('source', np.uint8),
+    ('config_id', np.int32),
+    ('fired', np.bool),
+    ('time', np.float32),
+    ('length', np.float32)
+])

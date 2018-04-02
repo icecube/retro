@@ -32,8 +32,9 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from argparse import ArgumentParser
-from collections import Mapping
-from os.path import abspath, basename, dirname, splitext
+from collections import Mapping, OrderedDict
+from operator import getitem
+from os.path import abspath, dirname, join, splitext
 import pickle
 import re
 import sys
@@ -45,7 +46,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import FTYPE, const
+from retro import const
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
     point_cascade, point_ckv_cascade
@@ -55,10 +56,13 @@ from retro.hypo.discrete_muon_kernels import (
 )
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
-from retro.utils.misc import expand
+from retro.retro_types import (
+    HIT_T, INDEXER_T, HITS_SUMMARY_T, TypeID, SourceID
+)
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
+from retro.utils.misc import expand
 
 
 I3_FNAME_INFO_RE = re.compile(
@@ -213,187 +217,516 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
     return hypo_handler
 
 
-def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
-             angsens_model=None, frame_path=None):
-    """Generator that loads hits and, if they are raw photons, reweights and
-    reformats them into "standard" hits format.
+def get_events(
+        events_base,
+        start=0,
+        stop=None,
+        step=None,
+        truth=False,
+        photons=None,
+        pulses=None,
+        recos=None,
+        triggers=None,
+        angsens_model=None,
+        hits=None
+    ):
+    """Iterate through a Retro events directory, getting events in a
+    the form of a nested OrderedDict, with leaf nodes numpy structured arrays.
+
+    It is attempted to iterate through the source intelligently to minimize
+    disk access and in a thread-safe manner.
 
     Parameters
     ----------
-    hits_file : string
-    hits_are_photons : bool
-    start_idx : int, optional
-    num_events : int, optional
-    angsens_model : string, required if `hits_are_photons`
+    events_base : string
+        Path to a Retro events directory (i.e., directory that corresponds to a
+        single i3 file).
+
+    start, stop, step : optional
+        Arguments passed to ``slice`` for only retrieving select events from
+        the source.
+
+    truth : bool, optional
+        Whether to extract Monte Carlo truth information from the file (only
+        applicable to simulation).
+
+    photons : sequence of strings, optional
+        Photon series names to extract. If any are specified, you must specify
+        `angsens_model` for proper weighting of the photons. Default is to
+        not extract any photon series.
+
+    pulses : sequences of strings, optional
+        Pulse series names to extract. Default is to not extract any pulse
+        series.
+
+    recos : sequence of strings, optional
+        Reeconstruction names to extract. Default is to not extract any
+        reconstructions.
+
+    triggers : sequence of strings
+        Trigger hierarchy names to extract. Required if pulses are specified to
+        be used as hits (such that the time window can be computed). Default is
+        to not extract any trigger hierarchies.
+
+    angsens_model : string
+        Required if `photons` specifies any photon series to extract.
+
+    hits : sequence of strings, optional
+        Path to photon or pulse series to extract as ``event["hits"]`` field.
+        Default is to not populate "hits".
 
     Yields
     ------
-    event_idx : int
-    event_hits
-    time_window : float
-    hit_tmin
-    hit_tmax
+    event : nested OrderedDict
 
     """
-    if start_idx is None:
-        start_idx = 0
-
-    if hits_are_photons:
-        hit_kind = 'photons'
-    else:
-        hit_kind = 'pulses'
-
-    if num_events is None:
-        events_slice = slice(start_idx, None)
-        print("Hit generator will yield all events' {},"
-              " starting at event index {}"
-              .format(hit_kind, start_idx))
-    else:
-        events_slice = slice(start_idx, start_idx + num_events)
-        if num_events > 1:
-            possessive = "s'"
-        else:
-            possessive = "'s"
-        print("Hit generator will yield {} event{} {},"
-              " starting at event index {}"
-              .format(num_events, possessive, hit_kind, start_idx))
-
-    hits_file = expand(hits_file)
-    base = basename(hits_file)
-
-    ext = None
-    while ext in [None, '.bz2', '.gz', '.lzma', '.zst']:
-        base, ext = splitext(base)
-
-    if ext == '.pkl':
-        with open(hits_file, 'rb') as f:
-            hits = pickle.load(f)
-            offset_hits_iter = enumerate(hits[events_slice], start_idx)
-
-    elif ext == '.i3':
-        assert frame_path is not None
-        def offset_hits_iter(hits_file, start_idx, num_events, frame_path):
-            from icecube import ( # pylint: disable=unused-variable
-                icetray, dataio, dataclasses, recclasses, simclasses
+    slice_kw = dict(start=start, stop=stop, step=step)
+    file_iterator_tree = OrderedDict()
+    file_iterator_tree['EventHeader'] = iterate_file(
+        join(events_base, 'events.pkl')
+    )
+    if truth:
+        file_iterator_tree['mc_truth'] = iterate_file(
+            fpath=join(events_base, 'mc_truth.pkl'), **slice_kw
+        )
+    if photons:
+        if isinstance(photons, basestring):
+            photons = [photons]
+        photons = sorted(photons)
+        file_iterator_tree['photons'] = iterators = OrderedDict()
+        for photon_series in photons:
+            iterators[photon_series] = iterate_file(
+                fpath=join(events_base, 'photons', photon_series + '.pkl'), **slice_kw
             )
-            fname_info = None
-            fname_info_match = I3_FNAME_INFO_RE.match(base)
-            if fname_info_match is not None:
-                fname_info = fname_info_match.groupdict()
+    if pulses:
+        if isinstance(pulses, basestring):
+            pulses = [pulses]
+        file_iterator_tree['pulses'] = iterators = OrderedDict()
+        for pulse_series in sorted(pulses):
+            iterators[pulse_series] = iterate_file(
+                fpath=join(events_base, 'pulses', pulse_series + '.pkl'), **slice_kw
+            )
+    if recos:
+        if isinstance(recos, basestring):
+            recos = [recos]
+        file_iterator_tree['recos'] = iterators = OrderedDict()
+        for reco in sorted(recos):
+            iterators[reco] = iterate_file(
+                fpath=join(events_base, 'recos', reco + '.pkl'), **slice_kw
+            )
+    if triggers:
+        if isinstance(triggers, basestring):
+            triggers = [triggers]
+        file_iterator_tree['triggers'] = iterators = OrderedDict()
+        for trigger_hier in sorted(triggers):
+            iterators[trigger_hier] = iterate_file(
+                fpath=join(events_base, 'triggers', trigger_hier + '.pkl'), **slice_kw
+            )
 
-            assert num_events > 0
+    if hits and hits[0] == 'photons':
+        angsens_model, _ = load_angsens_model(angsens_model)
+    else:
+        angsens_model = None
 
-            i3file = dataio.I3File(hits_file, 'r')
-            num_daq_frames_processed = 0
-            daq_frame_index = -1
-            while i3file.more():
-                frame = i3file.pop_daq()
-                if frame.Stop != frame.DAQ:
-                    continue
-                daq_frame_index += 1
-                if daq_frame_index < start_idx:
-                    continue
+    while True:
+        try:
+            event = extract_next_event(file_iterator_tree)
+        except StopIteration:
+            break
 
-                hdr = frame['I3EventHeader']
-                run_id = hdr.run_id
-                if run_id <= 1 and fname_info is not None:
-                    event_idx = '{}.{}.{}'.format(
-                        int(fname_info['run']),
-                        int(fname_info['filenum']),
-                        hdr.event_id
-                    )
-                else:
-                    event_idx = '{}.{}'.format(run_id, hdr.event_id)
+        if hits:
+            event['hits'] = get_hits(event, hits, angsens_model=angsens_model)
 
-                event_hits = []
+        yield event
 
-                series = frame[frame_path]
-                if isinstance(series, dataclasses.I3RecoPulseSeriesMapMask): # pylint: disable=no-member
-                    series = series.apply(frame)
 
-                if isinstance(series, dataclasses.I3RecoPulseSeriesMap): # pylint: disable=no-member
-                    assert not hits_are_photons
-                    for (string, dom, _), pinfos in series:
-                        sd_idx = const.get_sd_idx(string, dom)
+def iterate_file(fpath, start=0, stop=None, step=None):
+    """Iterate through the elements in a pickle (.pkl) or numpy (.npy) file. If
+    a pickle file, structure must be a sequence of objects, one object per
+    event. If a numpy file, it must be a one-dimensional structured array where
+    each "entry" in the array contains the information from one event.
 
-                        pls = []
-                        for pinfo in pinfos:
-                            pls.append(
-                                (pinfo.time, pinfo.charge, pinfo.width)
-                            )
-                        event_hits.append(
-                            (sd_idx, np.array(pls, dtype=np.float32).T)
-                        )
-                else: # isinstance(series, simclasses.):
-                    assert hits_are_photons
-                    for (string, dom), pinfos in series:
-                        sd_idx = const.get_sd_idx(string, dom)
-                        phot = []
-                        for pinfo in pinfos:
-                            phot.append([
-                                pinfo.time,
-                                pinfo.pos.x,
-                                pinfo.pos.y,
-                                pinfo.pos.z,
-                                np.cos(pinfo.dir.zenith),
-                                pinfo.dir.azimuth,
-                                pinfo.wavelength
-                            ])
-                        event_hits.append(
-                            (sd_idx, np.array(phot, dtype=np.float32).T)
-                        )
+    Parameters
+    ----------
+    fpath : string
+    start, stop, step : optional
+        Arguments passed to `slice` for extracting select events from the
+        file.
 
-                num_daq_frames_processed += 1
+    Yields
+    ------
+    info : OrderedDict
+        Information extracted from the file for each event.
 
-                yield event_idx, event_hits
+    """
+    slicer = slice(start, stop, step)
+    _, ext = splitext(fpath)
+    if ext == '.pkl':
+        events = pickle.load(open(fpath, 'rb'))
+    elif ext == '.npy':
+        events = np.load(fpath, mmap_mode='r')
+    else:
+        raise ValueError(fpath)
 
-                if num_daq_frames_processed >= num_events:
-                    break
+    for event in events[slicer]:
+        yield event
+
+
+def get_path(event, path):
+    if isinstance(path, basestring):
+        path = [path]
+    node = event
+    for subpath in path:
+        node = getitem(node, subpath)
+    return node
+
+
+def get_hits(event, path, angsens_model=None):
+    """From an event, take either pulses or photons (optionally applying
+    weights to the latter for angular sensitivity) and create the three
+    structured numpy arrays necessary for Retro to process the information as
+    "hits".
+
+    Parameters
+    ----------
+    event
+
+    path
+
+    angsens_model : basestring, numpy.polynomial.Polynomial, or None
+        If specified and photons are extracted, weights for the photons will be
+        applied according to the angular sensitivity model specified.
+        Otherwise, each photon will carry a weight of one.
+
+    Returns
+    -------
+    hits : shape (n_hits,) array of dtype HIT_T
+    hits_indexer : shape (n_hit_doms,) array of dtype HITS_ARRAY_INDEXER_T
+    hits_summary : shape (1,) array of dtype HITS_SUMMARY_T
+
+    """
+    photons = path[0] == 'photons'
+
+    series = get_path(event, path)
+
+    if photons:
+        time_window_start = 0
+        time_window_stop = 0
+        if angsens_model is not None:
+            if isinstance(angsens_model, basestring):
+                angsens_poly, _ = load_angsens_model(angsens_model)
+            elif isinstance(angsens_model, np.polynomial.Polynomial):
+                angsens_poly = angsens_model
+            else:
+                raise TypeError('`angsens_model` is {} but must be either'
+                                ' string or np.polynomial.Polynomial'
+                                .format(type(angsens_model)))
 
     else:
-        raise ValueError('Unhandled extension "{}" on `hits_file` "{}"`'
-                         .format(ext, hits_file))
+        trigger_hierarchy = event['triggers']['I3TriggerHierarchy']
+        time_window_start = np.inf
+        time_window_stop = -np.inf
+        for trigger in trigger_hierarchy:
+            source = trigger['source']
 
-    if hits_are_photons:
-        angsens_poly, _ = load_angsens_model(angsens_model)
+            # Do not expand the in-ice window based on a GLOBAL triggers (of
+            # any TypeID... e.g. MERGED or THROUGHPUT)
+            if source == SourceID.GLOBAL:
+                continue
 
-    for event_idx, orig_event_hits in offset_hits_iter:
-        if isinstance(orig_event_hits, Mapping):
-            orig_event_hits = [(const.get_sd_idx(*k), v)
-                               for k, v in orig_event_hits.items()]
+            tr_type = trigger['type']
+            config_id = trigger['config_id']
+            tr_time = trigger['time']
 
-        hit_tmin = np.inf
-        hit_tmax = -np.inf
-        event_hits = [const.EMPTY_HITS]*const.NUM_DOMS_TOT
-        if hits_are_photons:
-            time_window = 0.0
-            for sd_idx, pinfo in orig_event_hits:
-                t = pinfo[0, :]
-                coszen = pinfo[4, :]
-                weight = angsens_poly(coszen)
-                event_hits[sd_idx] = np.concatenate(
-                    (t[np.newaxis, :], weight[np.newaxis, :]),
-                    axis=0
-                ).astype(FTYPE)
-                hit_tmin = min(hit_tmin, t.min())
-                hit_tmax = max(hit_tmax, t.max())
+            trigger_handled = False
+            if tr_type == TypeID.SIMPLE_MULTIPLICITY:
+                if source == SourceID.IN_ICE:
+                    if config_id == 1011:
+                        trigger_handled = True
+                        left_dt = -4e3
+                        right_dt = 5e3 + 6e3
+                    elif config_id == 1006:
+                        trigger_handled = True
+                        left_dt = -4e3
+                        right_dt = 2.5e3 + 6e3
+            elif tr_type == TypeID.VOLUME:
+                if source == SourceID.IN_ICE:
+                    trigger_handled = True
+                    left_dt = -4e3
+                    right_dt = 1e3 + 6e3
+            elif tr_type == TypeID.STRING:
+                if source == SourceID.IN_ICE:
+                    trigger_handled = True
+                    left_dt = -4e3
+                    right_dt = 1.5e3 + 6e3
+
+            if not trigger_handled:
+                raise NotImplementedError(
+                    'Trigger TypeID {}, SourceID {}, config_id {} not'
+                    ' implemented'
+                    .format(TypeID(tr_type).name, # pylint: disable=no-member
+                            SourceID(source).name, # pylint: disable=no-member
+                            config_id)
+                )
+
+            time_window_start = min(time_window_start, tr_time + left_dt)
+            time_window_stop = max(time_window_stop, tr_time + right_dt)
+
+    hits = []
+    hits_indexer = []
+    offset = 0
+
+    for sd_idx, p in series:
+        num = len(p)
+        sd_hits = np.empty(shape=num, dtype=HIT_T)
+        sd_hits['time'] = p['time']
+        if not photons:
+            sd_hits['charge'] = p['charge']
+        elif angsens_model:
+            sd_hits['charge'] = angsens_poly(p['coszen'])
         else:
-            time_window = 1e4
-            for sd_idx, pinfo in orig_event_hits:
-                t = pinfo[0, :]
-                q = pinfo[1, :]
+            sd_hits['charge'] = 1
 
-                hit_tmin = min(hit_tmin, t.min())
-                hit_tmax = max(hit_tmax, t.max())
-                event_hits[sd_idx] = np.concatenate(
-                    (t[np.newaxis, :], q[np.newaxis, :]),
-                    axis=0
-                ).astype(FTYPE)
+        hits.append(sd_hits)
+        hits_indexer.append((sd_idx, offset, num))
+        offset += num
 
-        yield event_idx, tuple(event_hits), time_window, hit_tmin, hit_tmax
+    hits = np.concatenate(hits) #, dtype=HIT_T)
+    hits_indexer = np.array(hits_indexer, dtype=INDEXER_T)
+
+    hit_times = hits['time']
+    hit_charges = hits['charge']
+    total_charge = np.sum(hit_charges)
+
+    earliest_hit_time = hit_times.min()
+    latest_hit_time = hit_times.max()
+    average_hit_time = np.sum(hit_times * hit_charges) / total_charge
+
+    total_num_hits = len(hits)
+    total_num_doms_hit = len(hits_indexer)
+
+    hits_summary = np.array(
+        (
+            earliest_hit_time,
+            latest_hit_time,
+            average_hit_time,
+            total_charge,
+            total_num_hits,
+            total_num_doms_hit,
+            time_window_start,
+            time_window_stop
+        ),
+        dtype=HITS_SUMMARY_T
+    )
+
+    return hits, hits_indexer, hits_summary
 
 
-def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
+def extract_next_event(file_iterator_tree, event=None):
+    """Recursively extract events from file iterators, where the structure of
+    the iterator tree is reflected in the produced event.
+
+    Parameters
+    ----------
+    file_iterator_tree : nested OrderedDict, leaf nodes are file iterators
+    event : None or OrderedDict
+
+    Returns
+    -------
+    event : OrderedDict
+
+    """
+    if event is None:
+        event = OrderedDict()
+    for key, val in file_iterator_tree.items():
+        if isinstance(val, Mapping):
+            event[key] = extract_next_event(val)
+        else:
+            event[key] = next(val)
+    return event
+
+
+#def get_hits(hits_file, hits_are_photons, start_idx=0, num_events=None,
+#             angsens_model=None, frame_path=None):
+#    """Generator that loads hits and, if they are raw photons, reweights and
+#    reformats them into "standard" hits format.
+#
+#    Parameters
+#    ----------
+#    hits_file : string
+#    hits_are_photons : bool
+#    start_idx : int, optional
+#    num_events : int, optional
+#    angsens_model : string, required if `hits_are_photons`
+#
+#    Yields
+#    ------
+#    event_idx : int
+#    event_hits
+#    time_window : float
+#    hit_tmin
+#    hit_tmax
+#
+#    """
+#    if start_idx is None:
+#        start_idx = 0
+#
+#    if hits_are_photons:
+#        hit_kind = 'photons'
+#    else:
+#        hit_kind = 'pulses'
+#
+#    if num_events is None:
+#        events_slice = slice(start_idx, None)
+#        print("Hit generator will yield all events' {},"
+#              " starting at event index {}"
+#              .format(hit_kind, start_idx))
+#    else:
+#        events_slice = slice(start_idx, start_idx + num_events)
+#        if num_events > 1:
+#            possessive = "s'"
+#        else:
+#            possessive = "'s"
+#        print("Hit generator will yield {} event{} {},"
+#              " starting at event index {}"
+#              .format(num_events, possessive, hit_kind, start_idx))
+#
+#    hits_file = expand(hits_file)
+#    base = basename(hits_file)
+#
+#    ext = None
+#    while ext in [None, '.bz2', '.gz', '.lzma', '.zst']:
+#        base, ext = splitext(base)
+#
+#    if ext == '.pkl':
+#        with open(hits_file, 'rb') as f:
+#            hits = pickle.load(f)
+#            offset_hits_iter = enumerate(hits[events_slice], start_idx)
+#
+#    elif ext == '.i3':
+#        assert frame_path is not None
+#        def offset_hits_iter(hits_file, start_idx, num_events, frame_path):
+#            from icecube import ( # pylint: disable=unused-variable
+#                icetray, dataio, dataclasses, recclasses, simclasses
+#            )
+#            fname_info = None
+#            fname_info_match = I3_FNAME_INFO_RE.match(base)
+#            if fname_info_match is not None:
+#                fname_info = fname_info_match.groupdict()
+#
+#            assert num_events > 0
+#
+#            i3file = dataio.I3File(hits_file, 'r')
+#            num_daq_frames_processed = 0
+#            daq_frame_index = -1
+#            while i3file.more():
+#                frame = i3file.pop_daq()
+#                if frame.Stop != frame.DAQ:
+#                    continue
+#                daq_frame_index += 1
+#                if daq_frame_index < start_idx:
+#                    continue
+#
+#                hdr = frame['I3EventHeader']
+#                run_id = hdr.run_id
+#                if run_id <= 1 and fname_info is not None:
+#                    event_idx = '{}.{}.{}'.format(
+#                        int(fname_info['run']),
+#                        int(fname_info['filenum']),
+#                        hdr.event_id
+#                    )
+#                else:
+#                    event_idx = '{}.{}'.format(run_id, hdr.event_id)
+#
+#                event_hits = []
+#
+#                series = frame[frame_path]
+#                if isinstance(series, dataclasses.I3RecoPulseSeriesMapMask): # pylint: disable=no-member
+#                    series = series.apply(frame)
+#
+#                if isinstance(series, dataclasses.I3RecoPulseSeriesMap): # pylint: disable=no-member
+#                    assert not hits_are_photons
+#                    for (string, dom, _), pinfos in series:
+#                        sd_idx = const.get_sd_idx(string, dom)
+#
+#                        pls = []
+#                        for pinfo in pinfos:
+#                            pls.append(
+#                                (pinfo.time, pinfo.charge, pinfo.width)
+#                            )
+#                        event_hits.append(
+#                            (sd_idx, np.array(pls, dtype=np.float32).T)
+#                        )
+#                else: # isinstance(series, simclasses.):
+#                    assert hits_are_photons
+#                    for (string, dom), pinfos in series:
+#                        sd_idx = const.get_sd_idx(string, dom)
+#                        phot = []
+#                        for pinfo in pinfos:
+#                            phot.append([
+#                                pinfo.time,
+#                                pinfo.pos.x,
+#                                pinfo.pos.y,
+#                                pinfo.pos.z,
+#                                np.cos(pinfo.dir.zenith),
+#                                pinfo.dir.azimuth,
+#                                pinfo.wavelength
+#                            ])
+#                        event_hits.append(
+#                            (sd_idx, np.array(phot, dtype=np.float32).T)
+#                        )
+#
+#                num_daq_frames_processed += 1
+#
+#                yield event_idx, event_hits
+#
+#                if num_daq_frames_processed >= num_events:
+#                    break
+#
+#    else:
+#        raise ValueError('Unhandled extension "{}" on `hits_file` "{}"`'
+#                         .format(ext, hits_file))
+#
+#    if hits_are_photons:
+#        angsens_poly, _ = load_angsens_model(angsens_model)
+#
+#    for event_idx, orig_event_hits in offset_hits_iter:
+#        if isinstance(orig_event_hits, Mapping):
+#            orig_event_hits = [(const.get_sd_idx(*k), v)
+#                               for k, v in orig_event_hits.items()]
+#
+#        hit_tmin = np.inf
+#        hit_tmax = -np.inf
+#        event_hits = [const.EMPTY_HITS]*const.NUM_DOMS_TOT
+#        if hits_are_photons:
+#            time_window = 0.0
+#            for sd_idx, pinfo in orig_event_hits:
+#                t = pinfo[0, :]
+#                coszen = pinfo[4, :]
+#                weight = angsens_poly(coszen)
+#                event_hits[sd_idx] = np.concatenate(
+#                    (t[np.newaxis, :], weight[np.newaxis, :]),
+#                    axis=0
+#                ).astype(FTYPE)
+#                hit_tmin = min(hit_tmin, t.min())
+#                hit_tmax = max(hit_tmax, t.max())
+#        else:
+#            time_window = 1e4
+#            for sd_idx, pinfo in orig_event_hits:
+#                t = pinfo[0, :]
+#                q = pinfo[1, :]
+#
+#                hit_tmin = min(hit_tmin, t.min())
+#                hit_tmax = max(hit_tmax, t.max())
+#                event_hits[sd_idx] = np.concatenate(
+#                    (t[np.newaxis, :], q[np.newaxis, :]),
+#                    axis=0
+#                ).astype(FTYPE)
+#
+#        yield event_idx, tuple(event_hits), time_window, hit_tmin, hit_tmax
+
+
+def parse_args(description=None, dom_tables=True, hypo=True, events=True,
                parser=None):
     """Parse command line arguments.
 
@@ -412,8 +745,8 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
         Whether to include args for instantiating a DiscreteHypo and its hypo
         kernels.
 
-    hits : bool
-        Whether to include args for loading hits (either photons or pulses).
+    events : bool
+        Whether to include args for loading events.
 
     parser : argparse.ArgumentParser, optional
         An existing parser onto which these arguments will be added.
@@ -426,11 +759,12 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
     if parser is None:
         parser = ArgumentParser(description=description)
 
-    if dom_tables or hits:
+    if dom_tables or events:
         parser.add_argument(
             '--angsens-model',
             choices='nominal  h1-100cm  h2-50cm  h3-30cm'.split(),
-            help='''Angular sensitivity model'''
+            help='''Angular sensitivity model; only necessary if loading tables
+            or photon hits.'''
         )
 
     if dom_tables:
@@ -515,16 +849,14 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
             '--track-time-step', type=float, required=True,
         )
 
-    if hits:
+    if events:
         group = parser.add_argument_group(
-            title='Hits parameters',
+            title='Events and fields within the events to extract',
         )
 
         group.add_argument(
-            '--hits-file', required=True,
-        )
-        group.add_argument(
-            '--hits-are-photons', action='store_true',
+            '--events-base', type=str,
+            help='''i3 file or a directory contining Retro .pkl events files'''
         )
         group.add_argument(
             '--start-idx', type=int, default=0
@@ -532,13 +864,32 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
         group.add_argument(
             '--num-events', type=int, default=None
         )
+        group.add_argument(
+            '--photons', action='append',
+            help='''Photon series name. Repeat --photons to specify multiple
+            photon series.'''
+        )
+        group.add_argument(
+            '--pulses', action='append',
+            help='''Name of pulse series to extract. Repeat --pulses to specify
+            multiple pulse series.'''
+        )
+        group.add_argument(
+            '--truth', action='store_true',
+            help='''Whether to extract Monte Carlo truth information.'''
+        )
+        group.add_argument(
+            '--reco', action='append',
+            help='''Name of reconstruction to extract. Repeat --reco to extract
+            multiple reconstructions.'''
+        )
 
     args = parser.parse_args()
     kwargs = vars(args)
 
     dom_tables_kw = {}
     hypo_kw = {}
-    hits_kw = {}
+    events_kw = {}
     other_kw = {}
     if dom_tables:
         code = setup_dom_tables.__code__
@@ -546,9 +897,9 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
     if hypo:
         code = setup_discrete_hypo.__code__
         hypo_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
-    if hits:
-        code = get_hits.__code__
-        hits_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
+    if events:
+        code = get_events.__code__
+        events_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
 
     if dom_tables:
         strs_doms = kwargs.pop('strs_doms').strip().lower()
@@ -567,7 +918,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
 
     for key, val in kwargs.items():
         taken = False
-        for kw in [dom_tables_kw, hypo_kw, hits_kw]:
+        for kw in [dom_tables_kw, hypo_kw, events_kw]:
             if key not in kw:
                 continue
             kw[key] = val
@@ -575,4 +926,4 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
         if not taken:
             other_kw[key] = val
 
-    return dom_tables_kw, hypo_kw, hits_kw, other_kw
+    return dom_tables_kw, hypo_kw, events_kw, other_kw

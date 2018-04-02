@@ -19,3 +19,4 @@ build
 *.i3
 *.i3.bz2
 *.xml
+*.egg-info
