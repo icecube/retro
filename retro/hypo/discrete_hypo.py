@@ -8,10 +8,6 @@ Simple class DiscreteHypo for evaluating discrete hypotheses.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'SRC_DTYPE',
-    'SRC_OMNI',
-    'SRC_CKV_BETA1',
-    'EMPTY_SOURCES',
     'DiscreteHypo'
 ]
 
@@ -34,35 +30,6 @@ from collections import Mapping
 from copy import deepcopy
 
 import numpy as np
-
-
-SRC_DTYPE = np.dtype(
-    [
-        ('kind', np.uint32),
-        ('t', np.float32),
-        ('x', np.float32),
-        ('y', np.float32),
-        ('z', np.float32),
-        ('photons', np.float32),
-        ('dir_costheta', np.float32),
-        ('dir_sintheta', np.float32),
-        ('dir_cosphi', np.float32),
-        ('dir_sinphi', np.float32),
-        ('ckv_theta', np.float32),
-        ('ckv_costheta', np.float32),
-        ('ckv_sintheta', np.float32),
-    ],
-    align=True
-)
-"""Each source point is described by (up to) these 9 fields"""
-
-SRC_OMNI = np.uint32(0)
-"""Source kind designator for a point emitting omnidirectional light"""
-
-SRC_CKV_BETA1 = np.uint32(1)
-"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
-
-EMPTY_SOURCES = np.empty(shape=0, dtype=SRC_DTYPE)
 
 
 class DiscreteHypo(object):
@@ -117,8 +84,8 @@ class DiscreteHypo(object):
 
         Returns
         -------
-        sources : shape (N, len(`SRC_DTYPE`)) numpy.ndarray
-            Each row is a `SRC_DTYPE`.
+        sources : shape (N, len(`SRC_T`)) numpy.ndarray
+            Each row is a `SRC_T`.
 
         """
         sources = []

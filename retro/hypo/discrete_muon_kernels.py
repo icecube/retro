@@ -42,14 +42,13 @@ from scipy import interpolate
 
 RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
     COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-    TRACK_PHOTONS_PER_M
+    TRACK_PHOTONS_PER_M, SRC_CKV_BETA1, EMPTY_SOURCES
 )
-from retro.hypo.discrete_hypo import EMPTY_SOURCES, SRC_DTYPE, SRC_CKV_BETA1
+from retro.retro_types import SRC_T
 
 
 ALL_REALS = (-np.inf, np.inf)
@@ -63,7 +62,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     Parameters
     ----------
     hypo_params : HypoParams*
-        Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
+        Must have vertex (`.time`, `.x`, `.y`, and `.z), `.track_energy`,
         `.track_azimuth`, and `.track_zenith` attributes.
 
     dt : float
@@ -71,7 +70,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_DTYPE
+    sources : shape (N,) numpy.ndarray, dtype SRC_T
 
     """
     track_energy = hypo_params.track_energy
@@ -105,10 +104,10 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
 
-    sources = np.empty(shape=int(n_segments), dtype=SRC_DTYPE)
+    sources = np.empty(shape=int(n_segments), dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
-    sources['t'] = hypo_params.t + sampled_dt
+    sources['time'] = hypo_params.time + sampled_dt
     sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
     sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
     sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
@@ -162,7 +161,7 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
     Parameters
     ----------
     hypo_params : HypoParams*
-        Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
+        Must have vertex (`.time`, `.x`, `.y`, and `.z), `.track_energy`,
         `.track_azimuth`, and `.track_zenith` attributes.
 
     dt : float
@@ -170,7 +169,7 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_DTYPE
+    sources : shape (N,) numpy.ndarray, dtype SRC_T
     """
     track_energy = hypo_params.track_energy
 
@@ -212,10 +211,10 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
     sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
 
-    sources = np.empty(shape=int(n_segments), dtype=SRC_DTYPE)
+    sources = np.empty(shape=int(n_segments), dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
-    sources['t'] = hypo_params.t + sampled_dt
+    sources['time'] = hypo_params.time + sampled_dt
     sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
     sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
     sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)

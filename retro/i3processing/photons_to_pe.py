@@ -91,7 +91,7 @@ from I3Tray import *
 
 from icecube import icetray, dataclasses, dataio, simclasses # pylint: disable=unused-import
 from icecube import ( # pylint: disable=unused-import
-    phys_services, sim_services, DOMLauncher, DomTools, genie_icetray, clsim,
+    phys_services, sim_services, DOMLauncher, DomTools, clsim,
     trigger_sim
 )
 

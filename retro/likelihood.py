@@ -113,7 +113,7 @@ def get_llh(hypo, hits, time_window, hypo_handler, dom_tables, sd_indices=None,
 
     pexp_func = dom_tables.pexp_func
     dom_info = dom_tables.dom_info
-    tables = dom_tables.tables
+    tables = dom_tables.table_tups
 
     for sd_idx in sd_indices:
         # DEBUG: remove the below if / continue when no longer debugging!

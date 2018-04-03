@@ -27,12 +27,13 @@ __all__ = [
     'LLHP8D',
     'LLHP10D',
     'HIT_T',
-    'INDEXER_T',
+    'SD_INDEXER_T',
     'HITS_SUMMARY_T',
     'TypeID',
     'SourceID',
     'SubtypeID',
-    'TRIGGER_T'
+    'TRIGGER_T',
+    'SRC_T'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -58,7 +59,7 @@ import numpy as np
 
 HypoParams8D = namedtuple( # pylint: disable=invalid-name
     typename='HypoParams8D',
-    field_names=('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
+    field_names=('time', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
                  'track_energy', 'cascade_energy')
 )
 """Hypothesis in 8 dimensions (parameters). Units are: t/ns, {x,y,z}/m,
@@ -74,7 +75,7 @@ HypoParams10D = namedtuple( # pylint: disable=invalid-name
 
 TrackParams = namedtuple( # pylint: disable=invalid-name
     typename='TrackParams',
-    field_names=('t', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
+    field_names=('time', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
                  'track_energy')
 )
 """Hypothesis for just the track (7 dimensions / parameters). Units are: t/ns,
@@ -93,7 +94,7 @@ Hit = namedtuple(
 
 Photon = namedtuple(
     typename='Photon',
-    field_names=('x', 'y', 'z', 't', 'wavelength', 'coszen', 'azimuth')
+    field_names=('x', 'y', 'z', 'time', 'wavelength', 'coszen', 'azimuth')
 )
 
 RetroPhotonInfo = namedtuple( # pylint: disable=invalid-name
@@ -144,19 +145,19 @@ SphCoord = namedtuple( # pylint: disable=invalid-name
 
 TimeCart3DCoord = namedtuple( # pylint: disable=invalid-name
     typename='Time3DCartCoord',
-    field_names=('t',) + Cart3DCoord._fields
+    field_names=('time',) + Cart3DCoord._fields
 )
 """Time and Cartesian 3D coordinate: t, x, y, z."""
 
 TimePolCoord = namedtuple( # pylint: disable=invalid-name
     typename='TimePolCoord',
-    field_names=('t',) + PolCoord._fields
+    field_names=('time',) + PolCoord._fields
 )
 """Time and polar coordinate: t, r, theta."""
 
 TimeSphCoord = namedtuple( # pylint: disable=invalid-name
     typename='TimeSphCoord',
-    field_names=('t',) + SphCoord._fields
+    field_names=('time',) + SphCoord._fields
 )
 """Time and spherical coordinate: t, r, theta, phi."""
 
@@ -208,7 +209,7 @@ HIT_T = np.dtype([
 #    ('num', np.uint32)
 #])
 
-INDEXER_T = np.dtype([
+SD_INDEXER_T = np.dtype([
     ('sd_idx', np.uint32),
     ('offset', np.uint64),
     ('num', np.uint32)
@@ -272,3 +273,24 @@ TRIGGER_T = np.dtype([
     ('time', np.float32),
     ('length', np.float32)
 ])
+
+
+SRC_T = np.dtype(
+    [
+        ('kind', np.uint32),
+        ('time', np.float32),
+        ('x', np.float32),
+        ('y', np.float32),
+        ('z', np.float32),
+        ('photons', np.float32),
+        ('dir_costheta', np.float32),
+        ('dir_sintheta', np.float32),
+        ('dir_cosphi', np.float32),
+        ('dir_sinphi', np.float32),
+        ('ckv_theta', np.float32),
+        ('ckv_costheta', np.float32),
+        ('ckv_sintheta', np.float32),
+    ],
+    align=True
+)
+"""Each source point is described by (up to) these 9 fields"""

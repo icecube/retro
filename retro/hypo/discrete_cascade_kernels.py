@@ -40,11 +40,10 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
-    PI, COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV
+    PI, COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES,
+    SRC_OMNI, SRC_CKV_BETA1
 )
-from retro.hypo.discrete_hypo import (
-    EMPTY_SOURCES, SRC_DTYPE, SRC_OMNI, SRC_CKV_BETA1
-)
+from retro.retro_types import SRC_T
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -65,9 +64,9 @@ def point_cascade(hypo_params):
     if hypo_params.cascade_energy == 0:
         return EMPTY_SOURCES
 
-    sources = np.empty(shape=(1,), dtype=SRC_DTYPE)
+    sources = np.empty(shape=(1,), dtype=SRC_T)
     sources[0]['kind'] = SRC_OMNI
-    sources[0]['t'] = hypo_params.t
+    sources[0]['time'] = hypo_params.time
     sources[0]['x'] = hypo_params.x
     sources[0]['y'] = hypo_params.y
     sources[0]['z'] = hypo_params.z
@@ -89,7 +88,7 @@ def point_ckv_cascade(hypo_params):
 
     Returns
     -------
-    sources : shape (1,) array of dtype retro_types.SRC_DTYPE
+    sources : shape (1,) array of dtype retro_types.SRC_T
 
     """
     if hypo_params.cascade_energy == 0:
@@ -104,9 +103,9 @@ def point_ckv_cascade(hypo_params):
     dir_cosphi = math.cos(opposite_azimuth)
     dir_sinphi = math.sin(opposite_azimuth)
 
-    sources = np.empty(shape=(1,), dtype=SRC_DTYPE)
+    sources = np.empty(shape=(1,), dtype=SRC_T)
     sources[0]['kind'] = SRC_CKV_BETA1
-    sources[0]['t'] = hypo_params.t
+    sources[0]['time'] = hypo_params.time
     sources[0]['x'] = hypo_params.x
     sources[0]['y'] = hypo_params.y
     sources[0]['z'] = hypo_params.z

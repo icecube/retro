@@ -34,30 +34,25 @@ from os.path import abspath, dirname
 import sys
 
 import numpy as np
-#from numba.pycc import CC
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
-from retro.const import PI
-from retro.hypo.discrete_hypo import SRC_CKV_BETA1, SRC_OMNI
+from retro.const import PI, EMPTY_HITS, NUM_DOMS_TOT, SRC_CKV_BETA1, SRC_OMNI
 from retro.utils.ckv import (
     survival_prob_from_cone, survival_prob_from_smeared_cone
 )
 from retro.utils.geom import infer_power
 
 
-#NUMBA_CC = CC('pexp_5d_compiled')
-#NUMBA_CC.verbose = True
-
 MACHINE_EPS = 1e-16
 
 
 def generate_pexp_5d_function(
         table, table_kind, compute_t_indep_exp, use_directionality,
-        num_phi_samples=None, ckv_sigma_deg=None, template_library=None,
+        num_phi_samples=None, ckv_sigma_deg=None, template_library=None
     ):
     """Generate a numba-compiled function for computing expected photon counts
     at a DOM, where the table's binning info is used to pre-compute various
@@ -88,7 +83,6 @@ def generate_pexp_5d_function(
 
     template_library : shape-(n_templates, n_dir_theta, n_dir_deltaphi) array
         Containing the directionality templates for compressed tables
-
 
     Returns
     -------
@@ -215,10 +209,6 @@ def generate_pexp_5d_function(
             return table[r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx]
 
-    #@NUMBA_CC.export(
-    #    'pexp_5d',
-    #    '''Tuple((float64, float64)) (array( Record([ ("kind", uint32), ("t", float32), ('x', float32), ('y', float32), ('z', float32), ('photons', float32), ('dir_costheta', float32), ('dir_sintheta', float32), ('dir_cosphi', float32), ('dir_sinphi', float32), ('ckv_theta', float32), ('ckv_costheta', float32), ('ckv_sintheta', float32) ]), 1d, C), array(float32, 2d, C), Record([ ('operational', bool), ('', '|V3'), ('x', float32), ('y', float32), ('z', float32), ('quantum_efficiency', float32), ('noise_rate_per_ns', float32) ]), float32, unaligned array( Record([ ('index', <u2), ('weight', float32) ]), 3d, C), array(float32, 2d, C), array(float32, 4d, C), array(float32, 1d, C) ) '''
-    #)
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d( # pylint: disable=missing-docstring, too-many-locals
             sources,
@@ -244,7 +234,7 @@ def generate_pexp_5d_function(
 
         Parameters
         ----------
-        sources : shape (num_sources,) array of dtype SRC_DTYPE
+        sources : shape (num_sources,) array of dtype SRC_T
             A discrete sequence of points describing expected sources of
             photons that result from a hypothesized event.
 
@@ -283,12 +273,12 @@ def generate_pexp_5d_function(
 
         Returns
         -------
-        exp_p_at_all_times : float64
+        t_indep_exp : float64
             If `compute_t_indep_exp` is True, return the total photons due to
             the hypothesis expected to arrive at the specified DOM for _all_
             times. If `compute_t_indep_exp` is False, return value is 0.0.
 
-        sum_log_at_hit_times : float64
+        sum_log_exp_at_hit_times : float64
             .. math::
 
                 \Sum_i q_i \log( \rm{QE} \bar N_{\gamma, i} + \rm{noise} )
@@ -302,12 +292,12 @@ def generate_pexp_5d_function(
         if not dom_info['operational']:
             return np.float64(0), np.float64(0)
 
-        num_hits = hits.shape[1]
+        num_hits = len(hits)
 
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
-        exp_p_at_all_times = np.float64(0.0)
-        exp_p_at_hit_times = np.zeros(num_hits, dtype=np.float64)
+        t_indep_exp = np.float64(0.0)
+        exp_at_hit_times = np.zeros(num_hits, dtype=np.float64)
 
         # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
@@ -444,16 +434,16 @@ def generate_pexp_5d_function(
 
             if compute_t_indep_exp:
                 ti_norm = t_indep_table_norm[r_bin_idx]
-                exp_p_at_all_times += (
+                t_indep_exp += (
                     source_photons * ti_norm * t_indep_surv_prob
                 )
 
             for hit_t_idx in range(num_hits):
-                hit_time = hits[0, hit_t_idx]
+                hit_time = hits[hit_t_idx]['time']
 
                 # Causally impossible? (Note the comparison is written such that it
                 # will evaluate to True if hit_time is NaN.)
-                source_t = source['t']
+                source_t = source['time']
                 if not source_t <= hit_time:
                     continue
 
@@ -523,71 +513,142 @@ def generate_pexp_5d_function(
                 else:
                     raise NotImplementedError('Source kind not implemented')
 
-                exp_p_at_hit_times[hit_t_idx] += source_photons * r_t_bin_norm * surv_prob_at_hit_t
+                exp_at_hit_times[hit_t_idx] += source_photons * r_t_bin_norm * surv_prob_at_hit_t
 
         quantum_efficiency = dom_info['quantum_efficiency']
         noise_rate_per_ns = dom_info['noise_rate_per_ns']
 
-        sum_log_at_hit_times = np.float64(0.0)
+        sum_log_exp_at_hit_times = np.float64(0.0)
         for hit_idx in range(num_hits):
-            exp_p_at_hit_time = exp_p_at_hit_times[hit_idx]
-            hit_mult = hits[1, hit_idx]
-            sum_log_at_hit_times += (
+            exp_p_at_hit_time = exp_at_hit_times[hit_idx]
+            hit_mult = hits[hit_idx]['charge']
+            sum_log_exp_at_hit_times += (
                 hit_mult * math.log(quantum_efficiency * exp_p_at_hit_time + noise_rate_per_ns)
             )
 
         if compute_t_indep_exp:
-            exp_p_at_all_times = (
-                quantum_efficiency * exp_p_at_all_times + noise_rate_per_ns * time_window
+            t_indep_exp = (
+                quantum_efficiency * t_indep_exp + noise_rate_per_ns * time_window
             )
 
-        return exp_p_at_all_times, sum_log_at_hit_times
-
-    #NUMBA_CC.compile()
-
-    #import pexp_5d_compiled
+        return t_indep_exp, sum_log_exp_at_hit_times
 
     if compute_t_indep_exp:
-        def get_llh(hypo_light_sources, hits, time_window, dom_info,
-                    sd_indices, tables, table_norms, t_indep_tables,
-                    t_indep_table_norms):
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def get_llh(
+                sources,
+                hits,
+                hits_indexer,
+                hits_summary,
+                dom_info,
+                tables,
+                table_norm,
+                t_indep_tables,
+                t_indep_table_norm,
+                sd_idx_table_indexer
+            ):
+            total_num_doms_hit = hits_summary['total_num_doms_hit']
+            time_window = np.float32(
+                hits_summary['time_window_stop'] - hits_summary['time_window_start']
+            )
+
+            hit_sd_idx_start = hits_indexer[0]['sd_idx']
+            hit_sd_idx_end = hits_indexer[-1]['sd_idx']
+
             llh = np.float64(0)
-
-            for sd_idx in sd_indices:
-                hts = hits[sd_idx]
-                dnfo = dom_info[sd_idx]
-                tbl = tables[sd_idx]
-                tbln = table_norms[sd_idx]
-                titbl = t_indep_tables[sd_idx]
-                titbln = t_indep_table_norms[sd_idx]
-
-                exp_p_at_all_times, sum_log_at_hit_times = pexp_5d(
-                    sources=hypo_light_sources,
-                    hits=hts,
-                    dom_info=dnfo,
-                    time_window=np.float32(time_window),
-                    table=tbl,
-                    table_norm=tbln,
-                    t_indep_table=titbl,
-                    t_indep_table_norm=titbln
+            for sd_idx in range(0, hit_sd_idx_start):
+                table_idx = sd_idx_table_indexer[sd_idx]
+                t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
+                    sources=sources,
+                    hits=EMPTY_HITS,
+                    dom_info=dom_info[sd_idx],
+                    time_window=time_window,
+                    table=tables[table_idx],
+                    table_norm=table_norm,
+                    t_indep_table=t_indep_tables[table_idx],
+                    t_indep_table_norm=t_indep_table_norm
                 )
-                llh += sum_log_at_hit_times - exp_p_at_all_times
+                llh += sum_log_exp_at_hit_times - t_indep_exp
+
+            for sd_idx in range(hit_sd_idx_end + 1, NUM_DOMS_TOT):
+                table_idx = sd_idx_table_indexer[sd_idx]
+                t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
+                    sources=sources,
+                    hits=EMPTY_HITS,
+                    dom_info=dom_info[sd_idx],
+                    time_window=time_window,
+                    table=tables[table_idx],
+                    table_norm=table_norm,
+                    t_indep_table=t_indep_tables[table_idx],
+                    t_indep_table_norm=t_indep_table_norm
+                )
+                llh += sum_log_exp_at_hit_times - t_indep_exp
+
+            indexer_idx = 0
+            indexer_entry = hits_indexer[0]
+            indexer_sd_idx = indexer_entry['sd_idx']
+            for sd_idx in range(hit_sd_idx_start, hit_sd_idx_end + 1):
+                if indexer_idx < total_num_doms_hit and sd_idx == indexer_sd_idx:
+                    start = indexer_entry['offset']
+                    stop = start + indexer_entry['num']
+                    sd_hits = hits[start:stop]
+                    indexer_idx += 1
+                    if indexer_idx < total_num_doms_hit:
+                        indexer_entry = hits_indexer[indexer_idx]
+                        indexer_sd_idx = indexer_entry['sd_idx']
+                else:
+                    sd_hits = EMPTY_HITS
+
+                table_idx = sd_idx_table_indexer[sd_idx]
+                t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
+                    sources=sources,
+                    hits=sd_hits,
+                    dom_info=dom_info[sd_idx],
+                    time_window=time_window,
+                    table=tables[table_idx],
+                    table_norm=table_norm,
+                    t_indep_table=t_indep_tables[table_idx],
+                    t_indep_table_norm=t_indep_table_norm
+                )
+                llh += sum_log_exp_at_hit_times - t_indep_exp
             return llh
     else:
-        def get_llh(hypo_light_sources, hits, time_window, dom_info,
-                    sd_indices, tables, table_norms):
-            llh = np.float64(0)
-            for sd_idx in sd_indices:
-                exp_p_at_all_times, sum_log_at_hit_times = pexp_5d(
-                    hypo_light_sources,
-                    hits[sd_idx],
-                    dom_info[sd_idx],
-                    np.float32(time_window),
-                    tables[sd_idx],
-                    table_norms[sd_idx],
-                )
-                llh += sum_log_at_hit_times - exp_p_at_all_times
-            return llh
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def get_llh(
+                sources,
+                hits,
+                hits_indexer,
+                hits_summary,
+                dom_info,
+                tables,
+                table_norm,
+                t_indep_tables,
+                t_indep_table_norm,
+                sd_idx_table_indexer
+            ):
+            time_window = np.float32(
+                hits_summary['time_window_stop'] - hits_summary['time_window_start']
+            )
 
+            llh = np.float64(0)
+            for indexer_entry in hits_indexer:
+                sd_idx = indexer_entry['sd_idx']
+                start = indexer_entry['offset']
+                stop = start + indexer_entry['num']
+                sd_hits = hits[start:stop]
+                table_idx = sd_idx_table_indexer[sd_idx]
+
+                t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
+                    sources=sources,
+                    hits=sd_hits,
+                    dom_info=dom_info[sd_idx],
+                    time_window=time_window,
+                    table=tables[table_idx],
+                    table_norm=table_norm,
+                    t_indep_table=t_indep_tables[table_idx],
+                    t_indep_table_norm=t_indep_table_norm
+                )
+                llh += sum_log_exp_at_hit_times - t_indep_exp
+            return llh
 
     return pexp_5d, get_llh, meta

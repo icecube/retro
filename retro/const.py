@@ -37,7 +37,8 @@ __all__ = [
     'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
     'DC_ALL_STRS_DOMS',
 
-    'EMPTY_HITS',
+    'EMPTY_HITS', 'EMPTY_SOURCES',
+    'SRC_OMNI', 'SRC_CKV_BETA1',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -66,6 +67,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import FTYPE
+from retro import retro_types
 
 
 def get_sd_idx(string, dom):
@@ -217,4 +219,13 @@ ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(ALL_STRS, ALL_DOM
 DC_ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(DC_STRS, ALL_DOMS)])
 
 
-EMPTY_HITS = np.empty(shape=(2, 0), dtype=FTYPE)
+EMPTY_HITS = np.empty(shape=0, dtype=retro_types.HIT_T)
+
+EMPTY_SOURCES = np.empty(shape=0, dtype=retro_types.SRC_T)
+
+SRC_OMNI = np.uint32(0)
+"""Source kind designator for a point emitting omnidirectional light"""
+
+SRC_CKV_BETA1 = np.uint32(1)
+"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
+

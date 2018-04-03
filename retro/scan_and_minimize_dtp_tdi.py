@@ -120,7 +120,7 @@ MIN_DIMS = [] #('t x y z track_zenith track_azimuth track_energy'.split())
 """Which dimensions to plug into minimizer (dims not fixed to truth)"""
 
 SCAN_DIM_SETS = (
-    't',
+    'time',
     'x',
     'y',
     'z',
@@ -128,9 +128,9 @@ SCAN_DIM_SETS = (
     'track_azimuth',
     'track_energy',
     'cascade_energy',
-    #('t', 'x'),
-    #('t', 'y'),
-    #('t', 'z'),
+    #('time', 'x'),
+    #('time', 'y'),
+    #('time', 'z'),
     #('x', 'y'),
     #('x', 'z'),
     #('track_zenith', 'track_azimuth'),

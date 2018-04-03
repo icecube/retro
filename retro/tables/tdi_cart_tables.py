@@ -465,7 +465,7 @@ class TDICartTable(object):
 
         Parameters
         ----------
-        sources : shape (N,) numpy ndarray, dtype SRC_DTYPE
+        sources : shape (N,) numpy ndarray, dtype SRC_T
 
         Returns
         -------

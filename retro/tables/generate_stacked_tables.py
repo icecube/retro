@@ -67,24 +67,37 @@ def generate_stacked_tables(outdir, dom_tables_kw):
     outdir = expand(outdir)
     mkdir(outdir)
 
-    if dom_tables.compute_t_indep_exp:
-        stacked_t_indep_tables = np.stack(dom_tables.t_indep_tables)
-        np.save(
-            join(outdir, 'stacked_{}.npy'.format(dom_tables.t_indep_table_name)),
-            stacked_t_indep_tables
-        )
-
-    stacked_tables = np.stack(dom_tables.tables)
-    np.save(
-        join(outdir, 'stacked_{}.npy'.format(dom_tables.table_name)),
-        stacked_tables
-    )
-
+    fpath = join(outdir, 'stacked_{}_meta.pkl'.format(dom_tables.table_name))
+    sys.stdout.write('Writing metadata to "{}" ...'.format(fpath))
+    sys.stdout.flush()
     pickle.dump(
         table_meta,
-        file(join(outdir, 'stacked_{}_meta.pkl'.format(dom_tables.table_name)), 'wb'),
+        file(fpath, 'wb'),
         protocol=pickle.HIGHEST_PROTOCOL
     )
+    sys.stdout.write(' done.\n')
+    sys.stdout.flush()
+
+    if dom_tables.compute_t_indep_exp:
+        stacked_t_indep_tables = np.stack(dom_tables.t_indep_tables)
+        fpath = join(
+            outdir,
+            'stacked_{}.npy'.format(dom_tables.t_indep_table_name)
+        )
+        sys.stdout.write('Writing stacked t_indep tables to "{}" ...'
+                         .format(fpath))
+        sys.stdout.flush()
+        np.save(fpath, stacked_t_indep_tables)
+        sys.stdout.write(' done.\n')
+        sys.stdout.flush()
+
+    stacked_tables = np.stack(dom_tables.tables)
+    fpath = join(outdir, 'stacked_{}.npy'.format(dom_tables.table_name))
+    sys.stdout.write('Writing stacked tables to "{}" ...'.format(fpath))
+    sys.stdout.flush()
+    np.save(fpath, stacked_tables)
+    sys.stdout.write(' done.\n')
+    sys.stdout.flush()
 
 
 def main(description=__doc__):

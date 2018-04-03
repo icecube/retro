@@ -49,7 +49,7 @@ def pexp_t_r_theta(sources, hit_time, dom_coord, survival_prob,
 
     Parameters
     ----------
-    sources : shape (N,) numpy ndarray, dtype SRC_DTYPE
+    sources : shape (N,) numpy ndarray, dtype SRC_T
     hit_time : float
     dom_coord : shape (3,) numpy ndarray, dtype float64
     survival_prob
@@ -108,7 +108,7 @@ def pexp_t_r_theta(sources, hit_time, dom_coord, survival_prob,
         )
         exp_p_at_all_times += time_indep_count
 
-        t = source['t']
+        t = source['time']
 
         # causally impossible
         if hit_time < t:

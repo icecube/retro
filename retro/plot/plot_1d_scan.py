@@ -66,7 +66,7 @@ def plot_1d_scan(dir, event, uid): # pylint: disable=redefined-builtin
         llh = -scan['neg_llh']
         err_at_max_llh = scan_values[llh == llh.max()][0] - truth
 
-        if param == 't':
+        if param == 'time':
             units = 'ns'
         elif param in ['x', 'y', 'z']:
             units = 'm'
