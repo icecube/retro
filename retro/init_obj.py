@@ -100,6 +100,7 @@ def setup_dom_tables(
     print('Instantiating and loading single-DOM tables')
     t0 = time.time()
 
+    # TODO: set mmap based on memory?
     if force_no_mmap:
         mmap = False
     else:
@@ -180,7 +181,8 @@ def setup_dom_tables(
         dom_tables.load_stacked_tables(
             stacked_tables_meta_fpath=stacked_tables_meta_fpath,
             stacked_tables_fpath=stacked_tables_fpath,
-            stacked_t_indep_tables_fpath=stacked_t_indep_tables_fpath
+            stacked_t_indep_tables_fpath=stacked_t_indep_tables_fpath,
+            mmap_t_indep=mmap
         )
 
     print('  -> {:.3f} s\n'.format(time.time() - t0))

@@ -32,6 +32,7 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import OrderedDict
+from copy import deepcopy
 from itertools import product
 from os.path import abspath, dirname
 import cPickle as pickle
@@ -45,11 +46,11 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import FTYPE
 from retro.const import (
-    NUM_STRINGS, NUM_DOMS_PER_STRING, NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS,
-    PI, TWO_PI, get_sd_idx
+    ALL_STRS_DOMS, NUM_STRINGS, NUM_DOMS_PER_STRING, NUM_DOMS_TOT,
+    SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI, get_sd_idx
 )
 from retro.i3info.angsens_model import load_angsens_model
-from retro.retro_types import DOM_INFO
+from retro.retro_types import DOM_INFO_T, HIT_T
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
 from retro.utils.misc import expand
@@ -199,7 +200,7 @@ class Retro5DTables(object):
         self.noise_rate_hz = noise_rate_hz.astype(np.float32)
         self.noise_rate_per_ns = self.noise_rate_hz / 1e9
 
-        self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO)
+        self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO_T)
         for s_idx, d_idx in product(range(NUM_STRINGS), range(NUM_DOMS_PER_STRING)):
             sd_idx = get_sd_idx(string=s_idx + 1, dom=d_idx + 1)
             self.dom_info[sd_idx]['operational'] = self.operational_doms[s_idx, d_idx]
@@ -236,9 +237,44 @@ class Retro5DTables(object):
         self.pexp_meta = None
         self.is_stacked = None
 
-    def pexp(self, *args, **kwargs):
+    def pexp(self, sources, hit_times, time_window, include_noise=True,
+             force_quantum_efficiency=None, include_dead_doms=True):
         assert self._pexp is not None
-        return self._pexp(*args, **kwargs)
+        dom_info = deepcopy(self.dom_info)
+        if not include_noise:
+            time_window = 0
+            dom_info['noise_rate_per_ns'] = 0
+        if force_quantum_efficiency is not None:
+            dom_info['quantum_efficiency'] = force_quantum_efficiency
+        if include_dead_doms:
+            dom_info['operational'] = True
+
+        num_hit_times = len(hit_times)
+        hits = np.empty(shape=num_hit_times, dtype=HIT_T)
+        hits['time'] = hit_times
+        hits['charge'] = 1
+
+        t_indep_exp = np.zeros(shape=NUM_DOMS_TOT, dtype=np.float32)
+        exp_at_hit_times = np.zeros(shape=(NUM_DOMS_TOT, num_hit_times),
+                                    dtype=np.float32)
+
+        for sd_idx in ALL_STRS_DOMS:
+            table_idx = self.sd_idx_table_indexer[sd_idx]
+            for t_idx in range(num_hit_times):
+                this_t_indep_exp, sum_log_exp_at_hit_times = self._pexp(
+                    sources=sources,
+                    hits=hits[t_idx : t_idx + 1],
+                    dom_info=dom_info[sd_idx],
+                    time_window=time_window,
+                    table=self.tables[table_idx],
+                    table_norm=self.table_norms[table_idx],
+                    t_indep_table=self.t_indep_tables[table_idx],
+                    t_indep_table_norm=self.t_indep_table_norms[table_idx]
+                )
+                exp_at_hit_times[sd_idx, t_idx] = np.exp(sum_log_exp_at_hit_times)
+            t_indep_exp[sd_idx] = this_t_indep_exp
+
+        return t_indep_exp, exp_at_hit_times
 
     def get_llh(self, *args, **kwargs):
         assert self._get_llh is not None
@@ -246,20 +282,39 @@ class Retro5DTables(object):
 
     def load_stacked_tables(self, stacked_tables_meta_fpath,
                             stacked_tables_fpath,
-                            stacked_t_indep_tables_fpath):
+                            stacked_t_indep_tables_fpath,
+                            mmap_tables=False,
+                            mmap_t_indep=False):
         if self.is_stacked is not None:
             assert self.is_stacked
 
+        if mmap_tables:
+            tables_mmap_mode = 'r'
+        else:
+            tables_mmap_mode = None
+
+        if mmap_t_indep:
+            t_indep_mmap_mode = 'r'
+        else:
+            t_indep_mmap_mode = None
+
         self.table_meta = pickle.load(open(expand(stacked_tables_meta_fpath), 'rb'))
 
-        self.tables = np.load(expand(stacked_tables_fpath))
-        self.t_indep_tables = np.load(expand(stacked_t_indep_tables_fpath))
+        self.tables = np.load(
+            expand(stacked_tables_fpath),
+            mmap_mode=tables_mmap_mode
+        )
+        self.t_indep_tables = np.load(
+            expand(stacked_t_indep_tables_fpath),
+            mmap_mode=t_indep_mmap_mode
+        )
 
         if self._pexp is None:
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=self.table_meta,
                 table_kind=self.table_kind,
                 compute_t_indep_exp=self.compute_t_indep_exp,
+                compute_unhit_doms=True, # TODO: modify when TDI table works
                 use_directionality=self.use_directionality,
                 num_phi_samples=self.num_phi_samples,
                 ckv_sigma_deg=self.ckv_sigma_deg,
@@ -358,6 +413,7 @@ class Retro5DTables(object):
                 table_kind=self.table_kind,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 use_directionality=self.use_directionality,
+                compute_unhit_doms=True, # TODO: modify when TDI works
                 num_phi_samples=self.num_phi_samples,
                 ckv_sigma_deg=self.ckv_sigma_deg,
                 template_library=self.template_library

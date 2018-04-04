@@ -474,7 +474,7 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
 
 def parse_args(description=__doc__):
     """Parse command-line arguments.
-    
+
     Returns
     -------
     split_kwargs : dict of dicts

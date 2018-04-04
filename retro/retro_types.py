@@ -23,9 +23,9 @@ __all__ = [
     'TimeCart3DCoord',
     'TimePolCoord',
     'TimeSphCoord',
-    'DOM_INFO',
-    'LLHP8D',
-    'LLHP10D',
+    'DOM_INFO_T',
+    'LLHP8D_T',
+    'LLHP10D_T',
     'HIT_T',
     'SD_INDEXER_T',
     'HITS_SUMMARY_T',
@@ -161,7 +161,7 @@ TimeSphCoord = namedtuple( # pylint: disable=invalid-name
 )
 """Time and spherical coordinate: t, r, theta, phi."""
 
-DOM_INFO = np.dtype(
+DOM_INFO_T = np.dtype(
     [
         ('operational', np.bool),
         ('x', np.float32),
@@ -169,16 +169,15 @@ DOM_INFO = np.dtype(
         ('z', np.float32),
         ('quantum_efficiency', np.float32),
         ('noise_rate_per_ns', np.float32)
-    ],
-    align=True
+    ]
 )
 
-LLHP8D = np.dtype(
+LLHP8D_T = np.dtype(
     [('llh', np.float32)]
     + [(field, np.float32) for field in HypoParams8D._fields]
 )
 
-LLHP10D = np.dtype(
+LLHP10D_T = np.dtype(
     [('llh', np.float32)]
     + [(field, np.float32) for field in HypoParams10D._fields]
 )

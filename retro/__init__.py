@@ -71,7 +71,7 @@ RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.retro_types import HypoParams8D, HypoParams10D, LLHP8D, LLHP10D
+from retro.retro_types import HypoParams8D, HypoParams10D, LLHP8D_T, LLHP10D_T
 
 if 'RETRO_DATA_DIR' in environ:
     DATA_DIR = environ['RETRO_DATA_DIR']
@@ -90,7 +90,7 @@ UITYPE = np.int64
 HYPO_PARAMS_T = HypoParams8D
 """Global selection of which hypothesis to use throughout the code."""
 
-LLHP_T = LLHP8D if HYPO_PARAMS_T is HypoParams8D else LLHP10D
+LLHP_T = LLHP8D_T if HYPO_PARAMS_T is HypoParams8D else LLHP10D_T
 """Global selection of LLH/params dtype."""
 
 

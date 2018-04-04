@@ -140,7 +140,7 @@ def estimate_from_llhp(llhp, priors=None, percentile=0.95):
 
     Paranters
     ---------
-    llhp : shape (num_llh,) array of dtype retro_types.LLHP8D, LLHP10, etc.
+    llhp : shape (num_llh,) array of dtype retro_types.LLHP8D_T, LLHP10_T, etc.
         Fields of the structured array must contain 'llh' and any reconstructed
         quantities
 
