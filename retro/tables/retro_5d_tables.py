@@ -330,8 +330,17 @@ class Retro5DTables(object):
             table['step_length'] = step_length
 
         self.table_meta = OrderedDict()
-        for k in sorted(set(TABLE_NORM_KEYS + [k for k in table if 'bin_edges' in k.lower()])):
+        binning = OrderedDict()
+        for key, val in table.items():
+            if 'bin_edges' not in key:
+                continue
+            self.table_meta[key] = val
+            binning[key] = val
+
+        for k in TABLE_NORM_KEYS:
             self.table_meta[k] = table[k]
+
+        self.table_meta['binning'] = binning
 
         table_norm, t_indep_table_norm = get_table_norm(
             avg_angsens=self.avg_angsens,

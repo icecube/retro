@@ -24,12 +24,13 @@ importance_sampling="--importance-sampling"
 consteff=""
 
 
+#kernprof -l -v ~/src/retro/retro/reco.py \
 ~/src/retro/retro/reco.py \
     --outdir "$outdir" \
-    --spatial-prior ic \
+    --spatial-prior SPEFit2 \
     --temporal-prior uniform \
     --energy-prior log_uniform \
-    --energy-lims 0.1,1000  \
+    --energy-lims 1,1000  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -37,7 +38,7 @@ consteff=""
     --n-live 160 \
     --evidence-tol 0.5 \
     --sampling-eff 0.3 \
-    --max-iter 1000 \
+    --max-iter 10000 \
     --seed 0 \
     \
     --dom-tables-kind "ckv_templ_compr" \
@@ -49,13 +50,14 @@ consteff=""
     --step-length 1.0 \
     $noise \
     \
-    --cascade-kernel "point_ckv" \
+    --cascade-kernel "point" \
     --track-kernel "table_e_loss" \
     --track-time-step 1.0 \
     \
     --events-base "$events_base" \
     --start-idx "$start_idx" \
     --num-events 1 \
+    --truth \
     --pulses "OfflinePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \

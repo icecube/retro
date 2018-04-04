@@ -57,7 +57,7 @@ from retro.hypo.discrete_muon_kernels import (
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
 from retro.retro_types import (
-    HIT_T, SD_INDEXER_T, HITS_SUMMARY_T, TypeID, SourceID
+    HIT_T, SD_INDEXER_T, HITS_SUMMARY_T, ConfigID, TypeID, SourceID
 )
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
@@ -411,6 +411,21 @@ def iterate_file(fpath, start=0, stop=None, step=None):
 
 
 def get_path(event, path):
+    """Extract an item at `path` from an event which is usable as a nested
+    Python mapping (i.e., using `getitem` for each level in `path`).
+
+    Parameters
+    ----------
+    event : possibly-nested mapping
+    path : iterable of strings
+
+    Returns
+    -------
+    node
+        Whatever lives at the specified `path` (could be a scalar, array,
+        another mapping, etc.)
+
+    """
     if isinstance(path, basestring):
         path = [path]
     node = event
@@ -476,14 +491,15 @@ def get_hits(event, path, angsens_model=None):
             config_id = trigger['config_id']
             tr_time = trigger['time']
 
+            # TODO: rework to _only_ use ConfigID
             trigger_handled = False
             if tr_type == TypeID.SIMPLE_MULTIPLICITY:
                 if source == SourceID.IN_ICE:
-                    if config_id == 1011:
+                    if config_id == ConfigID.SMT8_IN_ICE:
                         trigger_handled = True
                         left_dt = -4e3
                         right_dt = 5e3 + 6e3
-                    elif config_id == 1006:
+                    elif config_id == ConfigID.SMT3_DeepCore:
                         trigger_handled = True
                         left_dt = -4e3
                         right_dt = 2.5e3 + 6e3
@@ -534,6 +550,7 @@ def get_hits(event, path, angsens_model=None):
         raise TypeError('got dtype {}'.format(hits.dtype))
 
     hits_indexer = np.array(hits_indexer, dtype=SD_INDEXER_T)
+    assert np.all(np.diff(hits_indexer['sd_idx']) > 0)
 
     hit_times = hits['time']
     hit_charges = hits['charge']
@@ -587,34 +604,41 @@ def extract_next_event(file_iterator_tree, event=None):
     return event
 
 
-def parse_args(description=None, dom_tables=True, hypo=True, events=True,
+def parse_args(dom_tables=False, hypo=False, events=False, description=None,
                parser=None):
     """Parse command line arguments.
 
     If `parser` is supplied, args are added to that; otherwise, a new parser is
-    generated.
+    generated. Defaults to _not_ include any of the command-line arguments.
 
     Parameters
     ----------
-    description : string, optional
-
-    dom_tables : bool
+    dom_tables : bool, optional
         Whether to include args for instantiating and loading single-DOM
-        tables.
+        tables. Default is False.
 
     hypo : bool
         Whether to include args for instantiating a DiscreteHypo and its hypo
-        kernels.
+        kernels. Default is False.
 
     events : bool
-        Whether to include args for loading events.
+        Whether to include args for loading events. Default is False.
+
+    description : string, optional
 
     parser : argparse.ArgumentParser, optional
         An existing parser onto which these arguments will be added.
 
     Returns
     -------
-    dom_tables_kw, hypo_kw, events_kw, other_kw
+    split_kwargs : OrderedDict
+        Optionally contains keys "dom_tables_kw", "hypo_kw", "events_kw",
+        and/or "other_kw", where each is included only if there are keyword
+        arguments for that grouping; values are dicts containing the keyword
+        arguments and values as specified by the user on the command line (with
+        some translation applied to convert arguments into a form usable
+        directly by functions in Retro). "other_kw" only shows up if there are
+        values that don't fall into one of the other categories.
 
     """
     if parser is None:
@@ -760,7 +784,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, events=True,
             multiple reconstructions.'''
         )
         group.add_argument(
-            '--hits',
+            '--hits', default=None,
             help='''Path to item to use as "hits", e.g.
             "pulses/OfflinePulses".'''
         )
@@ -814,4 +838,14 @@ def parse_args(description=None, dom_tables=True, hypo=True, events=True,
         if not taken:
             other_kw[key] = val
 
-    return dom_tables_kw, hypo_kw, events_kw, other_kw
+    split_kwargs = OrderedDict()
+    if dom_tables:
+        split_kwargs['dom_tables_kw'] = dom_tables_kw
+    if hypo:
+        split_kwargs['hypo_kw'] = hypo_kw
+    if events:
+        split_kwargs['events_kw'] = events_kw
+    if other_kw:
+        split_kwargs['other_kw'] = other_kw
+
+    return split_kwargs

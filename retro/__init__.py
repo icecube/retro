@@ -99,7 +99,7 @@ LLHP_T = LLHP8D if HYPO_PARAMS_T is HypoParams8D else LLHP10D
 DEBUG = 0
 """Level of debug messages to display"""
 
-DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, cache=True)
+DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, fastmath=True, cache=True)
 """kwargs to pass to numba.jit"""
 
 DFLT_PULSE_SERIES = 'SRTInIcePulses'

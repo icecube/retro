@@ -44,6 +44,20 @@ from retro.utils.misc import expand, mkdir
 
 
 def generate_stacked_tables(outdir, dom_tables_kw):
+    """Stack a set of tables into a single numpy array for use of all tables in
+    numba.
+
+    Currently, only ckv_templ_compr tables are supported.
+
+    Parameters
+    ----------
+    outdir : string
+        Path ot directory into which the three resulting files will be stored.
+
+    dom_tables_kw : mapping
+        As returned by retro.init_obj.parse_args
+
+    """
     if dom_tables_kw['dom_tables_kind'] != 'ckv_templ_compr':
         raise NotImplementedError(
             '"{}" tables not supported; only "ckv_templ_compr"'
@@ -62,7 +76,7 @@ def generate_stacked_tables(outdir, dom_tables_kw):
     table_meta['sd_idx_table_indexer'] = dom_tables.sd_idx_table_indexer
     table_meta.update(dom_tables.table_meta)
     table_meta['n_photons'] = 1.0
-    table_meta['n_photons_per_table'] = dom_tables.n_photons_per_table
+    table_meta['n_photons_per_table'] = np.array(dom_tables.n_photons_per_table)
 
     outdir = expand(outdir)
     mkdir(outdir)
@@ -79,7 +93,10 @@ def generate_stacked_tables(outdir, dom_tables_kw):
     sys.stdout.flush()
 
     if dom_tables.compute_t_indep_exp:
-        stacked_t_indep_tables = np.stack(dom_tables.t_indep_tables)
+        # Renormalize to 1 photon
+        stacked_t_indep_tables = np.stack(
+            [tbl/n for tbl, n in zip(dom_tables.t_indep_tables, dom_tables.n_photons_per_table)]
+        )
         fpath = join(
             outdir,
             'stacked_{}.npy'.format(dom_tables.t_indep_table_name)
@@ -91,6 +108,10 @@ def generate_stacked_tables(outdir, dom_tables_kw):
         sys.stdout.write(' done.\n')
         sys.stdout.flush()
 
+    # Renormalize to 1 photon
+    for template_map, n_photons in zip(dom_tables.tables, dom_tables.n_photons_per_table):
+        template_map['weight'] /= n_photons
+
     stacked_tables = np.stack(dom_tables.tables)
     fpath = join(outdir, 'stacked_{}.npy'.format(dom_tables.table_name))
     sys.stdout.write('Writing stacked tables to "{}" ...'.format(fpath))
@@ -101,14 +122,13 @@ def generate_stacked_tables(outdir, dom_tables_kw):
 
 
 def main(description=__doc__):
+    """Script main function"""
     parser = ArgumentParser(description=description)
-    parser.add_argument(
-        '--outdir',
-    )
-    dom_tables_kw, _, _, stacked_kw = init_obj.parse_args(
-        dom_tables=True, hypo=False, events=False, parser=parser
-    )
-    generate_stacked_tables(dom_tables_kw=dom_tables_kw, **stacked_kw)
+    parser.add_argument('--outdir', required=True)
+
+    split_kwargs = init_obj.parse_args(dom_tables=True, parser=parser)
+    generate_stacked_tables(dom_tables_kw=split_kwargs['dom_tables_kw'],
+                            **split_kwargs['other_kw'])
 
 
 if __name__ == '__main__':

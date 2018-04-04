@@ -88,7 +88,20 @@ def extract_metadata_from_filename(fname):
 
 
 def extract_reco(frame, reco):
-    raise NotImplementedError('extract_reco not implemented')
+    i3particle = frame[reco]
+    reco_dict = OrderedDict()
+
+    reco_dict['x'] = i3particle.pos.x
+    reco_dict['y'] = i3particle.pos.y
+    reco_dict['z'] = i3particle.pos.z
+    reco_dict['time'] = i3particle.time
+    reco_dict['energy'] = i3particle.energy
+    reco_dict['zenith'] = i3particle.dir.zenith
+    reco_dict['azimuth'] = i3particle.dir.azimuth
+
+    return reco_dict
+
+    #raise NotImplementedError('extract_reco not implemented')
     ## Get millipede LLH at "truth" from a run of HybridReco (if present)
     ## (Note that this requires ``from icecube import multinest_icetray``)
     #et['llh_mc_truth'] = np.nan

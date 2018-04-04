@@ -129,7 +129,7 @@ def run_multinest(
 
     Returns
     -------
-    llhp : shape (N_llh,) structured array of dtype retro.LLHP_T
+    llhp : shape (num_llh,) structured array of dtype retro.LLHP_T
         LLH and the corresponding parameter values.
 
     mn_meta : OrderedDict
@@ -144,12 +144,11 @@ def run_multinest(
 
     hits, hits_indexer, hits_summary = event['hits']
 
-    sorted_priors = OrderedDict()
+    priors_used = OrderedDict()
 
     prior_funcs = []
     for dim_num, dim_name in enumerate(CUBE_DIMS):
         prior_kind, prior_params = priors[dim_name]
-        sorted_priors[dim_name] = (prior_kind, prior_params)
         if prior_kind is PRI_UNIFORM:
             # Time is special since prior is relative to hits in the event
             if dim_name is T:
@@ -157,10 +156,12 @@ def run_multinest(
                     hits_summary['earliest_hit_time'] + prior_params[0],
                     hits_summary['latest_hit_time'] + prior_params[1]
                 )
+            priors_used[dim_name] = (prior_kind, prior_params)
 
             if prior_params == (0, 1):
-                def prior_func(cube): # pylint: disable=unused-argument
-                    pass
+                continue
+                #def prior_func(cube): # pylint: disable=unused-argument
+                #    pass
             elif np.min(prior_params[0]) == 0:
                 maxval = np.max(prior_params)
                 def prior_func(cube, n=dim_num, maxval=maxval):
@@ -172,18 +173,21 @@ def run_multinest(
                     cube[n] = cube[n] * width + minval
 
         elif prior_kind is PRI_LOG_UNIFORM:
+            priors_used[dim_name] = (prior_kind, prior_params)
             log_min = np.log(np.min(prior_params))
             log_width = np.log(np.max(prior_params) / np.min(prior_params))
             def prior_func(cube, n=dim_num, log_width=log_width, log_min=log_min):
                 cube[n] = exp(cube[n] * log_width + log_min)
 
         elif prior_kind is PRI_COSINE:
+            priors_used[dim_name] = (prior_kind, prior_params)
             cos_min = np.min(prior_params)
             cos_width = np.max(prior_params) - cos_min
             def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min):
                 cube[n] = acos(cube[n] * cos_width + cos_min)
 
         elif prior_kind is PRI_GAUSSIAN:
+            priors_used[dim_name] = (prior_kind, prior_params)
             mean, stddev = prior_params
             norm = 1 / (stddev * np.sqrt(TWO_PI))
             def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
@@ -193,12 +197,14 @@ def run_multinest(
             spe_fit_val = event['recos']['SPEFit2'][dim_name]
             loc = spe_fit_val + prior_params[0]
             scale = prior_params[1]
+            priors_used[dim_name] = (prior_kind, (loc, scale))
             cauchy = stats.cauchy(loc=loc, scale=scale)
             def prior_func(cube, cauchy=cauchy, n=dim_num):
                 cube[n] = cauchy.isf(cube[n])
 
         else:
-            raise NotImplementedError('Prior "{}" not implemented.'.format(prior_kind))
+            raise NotImplementedError('Prior "{}" not implemented.'
+                                      .format(prior_kind))
 
         prior_funcs.append(prior_func)
 
@@ -208,6 +214,7 @@ def run_multinest(
 
     report_after = 1000
 
+    #@profile
     def prior(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function for pymultinest to translate the hypercube MultiNest uses
         (each value is in [0, 1]) into the dimensions of the parameter space.
@@ -219,6 +226,22 @@ def run_multinest(
         for prior_func in prior_funcs:
             prior_func(cube)
 
+    llh_func = dom_tables._get_llh
+    dom_info = dom_tables.dom_info
+    tables = dom_tables.tables
+    table_norm = dom_tables.table_norm
+    t_indep_tables = dom_tables.t_indep_tables
+    t_indep_table_norm = dom_tables.t_indep_table_norm
+    sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
+    time_window = np.float32(
+        hits_summary['time_window_stop'] - hits_summary['time_window_start']
+    )
+    total_num_doms_hit = hits_summary['total_num_doms_hit']
+    hits_sd_idx = hits_indexer['sd_idx']
+    hit_sd_idx_start = np.min(hits_sd_idx)
+    hit_sd_idx_end = np.max(hits_sd_idx)
+
+    #@profile
     def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function pymultinest calls to get llh values.
 
@@ -246,17 +269,20 @@ def run_multinest(
             track_energy=total_energy * track_fraction
         )
         sources = hypo_handler.get_sources(hypo)
-        llh = dom_tables._get_llh(
+        llh = llh_func(
             sources=sources,
             hits=hits,
             hits_indexer=hits_indexer,
-            hits_summary=hits_summary,
-            dom_info=dom_tables.dom_info,
-            tables=dom_tables.tables,
-            table_norm=dom_tables.table_norm,
-            t_indep_tables=dom_tables.t_indep_tables,
-            t_indep_table_norm=dom_tables.t_indep_table_norm,
-            sd_idx_table_indexer=dom_tables.sd_idx_table_indexer
+            hit_sd_idx_start=hit_sd_idx_start,
+            hit_sd_idx_end=hit_sd_idx_end,
+            total_num_doms_hit=total_num_doms_hit,
+            time_window=time_window,
+            dom_info=dom_info,
+            tables=tables,
+            table_norm=table_norm,
+            t_indep_tables=t_indep_tables,
+            t_indep_table_norm=t_indep_table_norm,
+            sd_idx_table_indexer=sd_idx_table_indexer
         )
 
         t1 = time.time()
@@ -310,7 +336,8 @@ def run_multinest(
 
     mn_meta = OrderedDict([
         ('params', CUBE_DIMS),
-        ('priors', sorted_priors),
+        ('original_prior_specs', priors),
+        ('priors_used', priors_used),
         ('kwargs', sort_dict(mn_kw)),
     ])
 
@@ -325,10 +352,10 @@ def run_multinest(
     pymultinest.run(
         LogLikelihood=loglike,
         Prior=prior,
-        verbose=True,
-        outputfiles_basename=out_prefix,
+        verbose=False,
+        outputfiles_basename='/dev/null/xyz', #out_prefix,
         resume=False,
-        write_output=True,
+        write_output=False,
         n_iter_before_update=5000,
         **mn_kw
     )
@@ -427,6 +454,8 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
 
     for event_idx, event in events_iterator: # pylint: disable=unused-variable
         t1 = time.time()
+        if 'mc_truth' in event:
+            print(event['mc_truth'])
         llhp, _ = run_multinest(
             event_idx=event_idx,
             event=event,
@@ -444,7 +473,16 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
 
 
 def parse_args(description=__doc__):
-    """Parse command-line arguments"""
+    """Parse command-line arguments.
+    
+    Returns
+    -------
+    split_kwargs : dict of dicts
+        Contains keys "dom_tables_kw", "hypo_kw", "events_kw", and "reco_kw",
+        where values are kwargs dicts usable to instantiate or call each of the
+        corresponding objects or functions.
+
+    """
     parser = ArgumentParser(description=description)
 
     parser.add_argument(
@@ -525,9 +563,11 @@ def parse_args(description=__doc__):
         help='''Integer seed for MultiNest's random number generator.'''
     )
 
-    dom_tables_kw, hypo_kw, events_kw, reco_kw = (
-        init_obj.parse_args(parser=parser)
+    split_kwargs = init_obj.parse_args(
+        dom_tables=True, hypo=True, events=True, parser=parser
     )
+
+    split_kwargs['reco_kw'] = reco_kw = split_kwargs.pop('other_kw')
 
     if reco_kw['energy_prior'] in ['uniform', 'log_uniform']:
         assert reco_kw['energy_lims'] is not None
@@ -538,8 +578,8 @@ def parse_args(description=__doc__):
         raise ValueError('--energy-limits are not used with energy priors'
                          ' besides "uniform" and "log_uniform".')
 
-    return dom_tables_kw, hypo_kw, events_kw, reco_kw
+    return split_kwargs
 
 
 if __name__ == '__main__':
-    reco(*parse_args())
+    reco(**parse_args())

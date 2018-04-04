@@ -226,6 +226,34 @@ HITS_SUMMARY_T = np.dtype([
     ('time_window_stop', np.float32)
 ])
 
+
+class ConfigID(enum.IntEnum):
+    """Trigger common names mapped into ConfigID (or config_id) in i3 files.
+
+    Note that this seems to be a really unique ID for a trigger, subsuming
+    TypeID and SourceID.
+
+    See docs at
+      http://software.icecube.wisc.edu/documentation/projects/trigger-sim/trigger_config_ids.html
+
+    """
+    SMT8_IN_ICE = 1006
+    SMT3_DeepCore = 1011
+    SMT6_ICE_TOP = 102
+    SLOP = 24002
+    Cluster = 1007
+    Cylinder = 21001
+
+    # Added for 2016-2017
+    Cylinder_ICE_TOP = 21002
+
+    # Unique to 2011
+    SLOP_2011 = 22005
+
+    # Unique to IC79
+    SMT3_DeepCore_IC79 = 1010
+
+
 class TypeID(enum.IntEnum):
     SIMPLE_MULTIPLICITY = 0
     CALIBRATION = 10

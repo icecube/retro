@@ -101,8 +101,6 @@ cscdescan="0-100:1"
 
 ~/src/retro/retro/scan_llh.py \
 	--outdir="$base/zenith_${zenscan}_azimuth_${azscan}" \
-	--start-idx=$start_evt \
-	--num-events=$n_events \
 	--t="$ttru" \
 	--x="$xtru" \
 	--y="$ytru" \
@@ -111,10 +109,17 @@ cscdescan="0-100:1"
 	--track-azimuth="$azscan" \
 	--track-energy="$tetru" \
 	--cascade-energy="$cetru" \
-	--hits-file="$hits" \
-	--hits-are-photons \
+    \
+	--events-base="$hits" \
+	--start-idx=$start_evt \
+	--num-events=$n_events \
+    --photons "photons" \
+	--hits "photons/photons" \
+    \
 	--angsens-model="$angsens" \
+    \
 	--cascade-kernel="$ckernel" \
+    $cnumpts \
 	--track-kernel="$tkernel" \
 	--track-time-step="$tktimestep" \
 	--dom-tables-fname-proto="$proto" \

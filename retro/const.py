@@ -84,7 +84,8 @@ def get_sd_idx(string, dom):
     sd_idx : np.uint16 in [0, 5159]
 
     """
-    return np.uint16((string-1) * NUM_DOMS_PER_STRING + (dom-1))
+    #return np.uint16((string-1) * NUM_DOMS_PER_STRING + (dom-1))
+    return np.uint32((dom-1) * NUM_STRINGS + (string-1))
 
 
 # -- Physical / mathematical constants -- #
