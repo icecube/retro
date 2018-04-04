@@ -35,7 +35,7 @@ __all__ = [
     'IC_STRS', 'DC_STRS', 'DC_IC_STRS', 'DC_ALL_STRS', 'DC_SUBDUST_DOMS',
     'IC_SUBDUST_DOMS', 'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
     'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
-    'DC_ALL_STRS_DOMS',
+    'ALL_STRS_DOMS_SET', 'DC_ALL_STRS_DOMS',
 
     'EMPTY_HITS', 'EMPTY_SOURCES',
     'SRC_OMNI', 'SRC_CKV_BETA1',
@@ -217,6 +217,7 @@ DC_ALL_SUBDUST_STRS_DOMS = np.concatenate(
 ALL_STRS = list(range(1, 86+1))
 ALL_DOMS = list(range(1, 60+1))
 ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(ALL_STRS, ALL_DOMS)])
+ALL_STRS_DOMS_SET = set(ALL_STRS_DOMS)
 DC_ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(DC_STRS, ALL_DOMS)])
 
 
@@ -229,4 +230,3 @@ SRC_OMNI = np.uint32(0)
 
 SRC_CKV_BETA1 = np.uint32(1)
 """Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
-

@@ -41,7 +41,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import HYPO_PARAMS_T, init_obj
-from retro.likelihood import get_llh
+from retro import likelihood
+from retro.const import ALL_STRS_DOMS_SET
 from retro.scan import scan
 from retro.utils.misc import expand, mkdir, sort_dict
 
@@ -68,8 +69,8 @@ def parse_args(description=__doc__):
     split_kwargs['scan_kw'] = split_kwargs.pop('other_kw')
 
     if split_kwargs['events_kw']['hits'] is None:
-        raise ValueError('Must specify, using --hits, a path to a pulse series'
-                         ' or photon series.')
+        raise ValueError('Must specify a path to a pulse series or photon'
+                         ' series using --hits.')
 
     return split_kwargs
 
@@ -96,19 +97,55 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     print('Scanning paramters')
     t0 = time.time()
 
-    metric_kw = dict(
-        dom_tables=dom_tables,
-        tdi_table=None
-    )
+    fast_llh = True
 
-    def metric_wrapper(hypo, **metric_kw):
-        sources = hypo_handler.get_sources(hypo)
-        return get_llh(sources=sources, **metric_kw)
+    if fast_llh:
+        get_llh = dom_tables._get_llh
+        dom_info = dom_tables.dom_info
+        tables = dom_tables.tables
+        table_norm = dom_tables.table_norm
+        t_indep_tables = dom_tables.t_indep_tables
+        t_indep_table_norm = dom_tables.t_indep_table_norm
+        sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
+        metric_kw = {}
+        def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,
+                           time_window):
+            sources = hypo_handler.get_sources(hypo)
+            return get_llh(
+                sources=sources,
+                hits=hits,
+                hits_indexer=hits_indexer,
+                unhit_sd_indices=unhit_sd_indices,
+                sd_idx_table_indexer=sd_idx_table_indexer,
+                time_window=time_window,
+                dom_info=dom_info,
+                tables=tables,
+                table_norm=table_norm,
+                t_indep_tables=t_indep_tables,
+                t_indep_table_norm=t_indep_table_norm
+            )
+    else:
+        metric_kw = dict(dom_tables=dom_tables, tdi_table=None)
+        get_llh = likelihood.get_llh
+        def metric_wrapper(hypo, **metric_kw):
+            sources = hypo_handler.get_sources(hypo)
+            return get_llh(sources=sources, **metric_kw)
 
     n_points_total = 0
     metric_vals = []
     for _, event in events_generator:
-        metric_kw['hits'], metric_kw['hits_indexer'], metric_kw['hits_summary'] = event['hits']
+        hits, hits_indexer, hits_summary = event['hits']
+        metric_kw['hits'] = hits
+        metric_kw['hits_indexer'] = hits_indexer
+        hit_sd_indices = hits_indexer['sd_idx']
+        unhit_sd_indices = np.array(
+            sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
+            dtype=np.uint32
+        )
+        metric_kw['unhit_sd_indices'] = unhit_sd_indices
+        metric_kw['time_window'] = np.float32(
+            hits_summary['time_window_stop'] - hits_summary['time_window_start']
+        )
 
         t1 = time.time()
         metric_vals.append(scan(scan_values, metric_wrapper, metric_kw))

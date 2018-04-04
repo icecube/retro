@@ -37,8 +37,8 @@ if __name__ == '__main__' and __package__ is None:
 from retro.const import ALL_STRS_DOMS, EMPTY_HITS # pylint: disable=unused-import
 
 
-def get_llh(sources, hits, hits_indexer, hits_summary, dom_tables,
-            tdi_table=None):
+def get_llh(sources, hits, hits_indexer, unhit_sd_indices, time_window,
+            dom_tables, tdi_table=None):
     """Get the negative of the log likelihood of `event` having come from
     hypothesis `hypo` (whose light detection expectation is computed by
     `hypo_handler`).
@@ -47,10 +47,14 @@ def get_llh(sources, hits, hits_indexer, hits_summary, dom_tables,
     ----------
     sources
 
-    hits : sequence of length NUM_DOMS_TOT
+    hits : shape (n_hits_total,) array of dtype HIT_T
         Keys are (string, dom) tuples, values are `retro_types.Hits`
         namedtuples, where ``val.times`` and ``val.charges`` are arrays of
         shape (n_dom_hits_i,).
+
+    hits_indexer : shape (n_hit_dims,) array of dtype SD_INDEXER_T
+
+    unhit_sd_indices : shape (n_unhit_doms,) array of dtype uint32
 
     time_window : FTYPE
         Time window pertinent to the event's reconstruction. Used for
@@ -82,43 +86,42 @@ def get_llh(sources, hits, hits_indexer, hits_summary, dom_tables,
         #    sources=hypo_light_sources
         #)
 
-    pexp_func = dom_tables.pexp_func
+    pexp_func = dom_tables._pexp
     dom_info = dom_tables.dom_info
     tables = dom_tables.tables
     table_norms = dom_tables.table_norms
     t_indep_tables = dom_tables.t_indep_tables
     t_indep_table_norms = dom_tables.t_indep_table_norms
-
-    hit_sd_indices = hits_indexer['sd_idx']
-    unhit_sd_indices = sorted(set(ALL_STRS_DOMS).difference(hit_sd_indices))
-
-    time_window = np.float32(
-        hits_summary['time_window_stop'] - hits_summary['time_window_start']
-    )
+    sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
 
     for sd_idx in unhit_sd_indices:
+        table_idx = sd_idx_table_indexer[sd_idx]
         exp_p_at_all_times, sum_log_at_hit_times = pexp_func(
             sources=sources,
             hits=EMPTY_HITS,
             dom_info=dom_info[sd_idx],
             time_window=time_window,
-            *tables[sd_idx]
+            table=tables[table_idx],
+            table_norm=table_norms[table_idx],
+            t_indep_table=t_indep_tables[table_idx],
+            t_indep_table_norm=t_indep_table_norms[table_idx]
         )
         llh += sum_log_at_hit_times - exp_p_at_all_times
 
     for indexer_entry in hits_indexer:
         sd_idx = indexer_entry['sd_idx']
+        table_idx = sd_idx_table_indexer[sd_idx]
         start = indexer_entry['offset']
         stop = start + indexer_entry['num']
         exp_p_at_all_times, sum_log_at_hit_times = pexp_func(
             sources=sources,
-            hits=hits[start:stop],
+            hits=hits[start : stop],
             dom_info=dom_info[sd_idx],
             time_window=time_window,
-            table=tables[sd_idx],
-            table_norm=table_norms[sd_idx],
-            t_indep_table=t_indep_tables[sd_idx],
-            t_indep_table_norm=t_indep_table_norms[sd_idx]
+            table=tables[table_idx],
+            table_norm=table_norms[table_idx],
+            t_indep_table=t_indep_tables[table_idx],
+            t_indep_table_norm=t_indep_table_norms[table_idx]
         )
         llh += sum_log_at_hit_times - exp_p_at_all_times
 

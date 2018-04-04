@@ -239,6 +239,23 @@ class Retro5DTables(object):
 
     def pexp(self, sources, hit_times, time_window, include_noise=True,
              force_quantum_efficiency=None, include_dead_doms=True):
+        """Get expectation for photons arriving at DOMs at particular times.
+
+        Parameters
+        ----------
+        sources
+        hit_times : shape (n_hit_times,) array of floating-point dtype
+        time_window : float
+        include_noise : bool
+        force_quantum_efficiency : None or float
+        include_dead_doms : bool
+
+        Returns
+        -------
+        t_indep_exp : shape (n_doms,) array of float32
+        exp_at_hit_times : shape (n_doms, n_hit_times) array of float32
+
+        """
         assert self._pexp is not None
         dom_info = deepcopy(self.dom_info)
         if not include_noise:
@@ -339,6 +356,9 @@ class Retro5DTables(object):
 
         self.table_norm = table_norm.astype(FTYPE)
         self.t_indep_table_norm = t_indep_table_norm.astype(FTYPE)
+
+        self.table_norms = [self.table_norm]*self.tables.shape[0]
+        self.t_indep_table_norms = [self.t_indep_table_norm]*self.t_indep_tables.shape[0]
 
         self.is_stacked = True
 

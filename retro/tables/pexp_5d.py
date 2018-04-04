@@ -786,16 +786,14 @@ def generate_pexp_5d_function(
             sources,
             hits,
             hits_indexer,
-            hit_sd_idx_start,
-            hit_sd_idx_end,
-            total_num_doms_hit,
+            unhit_sd_indices,
+            sd_idx_table_indexer,
             time_window,
             dom_info,
             tables,
             table_norm,
             t_indep_tables,
-            t_indep_table_norm,
-            sd_idx_table_indexer
+            t_indep_table_norm
         ):
         """Compute log likelihood for hypothesis sources given an event.
 
@@ -809,44 +807,29 @@ def generate_pexp_5d_function(
         sources : shape (n_sources,) array of dtype SRC_T
         hits : shape (n_hits_total,) array of dtype HIT_T
         hits_indexer : shape (n_hit_doms,) array of dtype SD_INDEXER_T
-        hit_sd_idx_start : uint
-        hit_sd_idx_end : uint
-        total_num_doms_hit : uint
-        time_window : float32
+        unhit_sd_indices : shape (n_unhit_doms,) array of dtype uint32
+        sd_idx_table_indexer : shape (n_doms_tot,) array of dtype uint32
+        time_window : float64
         dom_info : shape (n_strings, n_doms_per_string) array of dtype DOM_INFO_T
         tables
+            Stacked tables
         table_norm
+            Single norm for all stacked tables
         t_indep_tables
+            Stacked time-independent tables
         t_indep_table_norm
-        sd_idx_table_indexer
+            Single norm for all stacked time-independent tables
 
         """
-        llh = np.float32(0)
+        llh = np.float64(0)
 
-        # Loop through all DOMs we know didn't receive hits (those that have
-        # sd_idx less than the smallest sd_idx that got a hit, and those after
-        # the largest sd_idx that got a hit)
-
-        for sd_idx in range(0, hit_sd_idx_start):
-            table_idx = sd_idx_table_indexer[sd_idx]
+        # Loop through all DOMs we know didn't receive hits
+        for sd_idx1 in unhit_sd_indices:
+            table_idx = sd_idx_table_indexer[sd_idx1]
             t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
                 sources=sources,
                 hits=EMPTY_HITS,
-                dom_info=dom_info[sd_idx],
-                time_window=time_window,
-                table=tables[table_idx],
-                table_norm=table_norm,
-                t_indep_table=t_indep_tables[table_idx],
-                t_indep_table_norm=t_indep_table_norm
-            )
-            llh += sum_log_exp_at_hit_times - t_indep_exp
-
-        for sd_idx in range(hit_sd_idx_end + 1, NUM_DOMS_TOT):
-            table_idx = sd_idx_table_indexer[sd_idx]
-            t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
-                sources=sources,
-                hits=EMPTY_HITS,
-                dom_info=dom_info[sd_idx],
+                dom_info=dom_info[sd_idx1],
                 time_window=time_window,
                 table=tables[table_idx],
                 table_norm=table_norm,
@@ -859,27 +842,15 @@ def generate_pexp_5d_function(
         # occurred, checking each for whether or not it was hit. We assume that
         # the DOMs in the hits_indexer are sorted in ascending sd_idx order to
         # decrease the amount of looping necessary.
-
-        indexer_idx = 0
-        indexer_entry = hits_indexer[0]
-        indexer_sd_idx = indexer_entry['sd_idx']
-        for sd_idx in range(hit_sd_idx_start, hit_sd_idx_end + 1):
-            if sd_idx == indexer_sd_idx:
-                start = indexer_entry['offset']
-                stop = start + indexer_entry['num']
-                sd_hits = hits[start:stop]
-                indexer_idx += 1
-                if indexer_idx < total_num_doms_hit:
-                    indexer_entry = hits_indexer[indexer_idx]
-                    indexer_sd_idx = indexer_entry['sd_idx']
-            else:
-                sd_hits = EMPTY_HITS
-
-            table_idx = sd_idx_table_indexer[sd_idx]
+        for indexer_entry in hits_indexer:
+            sd_idx2 = indexer_entry['sd_idx']
+            start = indexer_entry['offset']
+            stop = start + indexer_entry['num']
+            table_idx = sd_idx_table_indexer[sd_idx2]
             t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
                 sources=sources,
-                hits=sd_hits,
-                dom_info=dom_info[sd_idx],
+                hits=hits[start:stop],
+                dom_info=dom_info[sd_idx2],
                 time_window=time_window,
                 table=tables[table_idx],
                 table_norm=table_norm,
@@ -913,7 +884,7 @@ def generate_pexp_5d_function(
         sources : shape (n_sources,) array of dtype SRC_T
         hits : shape (n_hits_total,) array of dtype HIT_T
         hits_indexer : shape (n_hit_doms,) array of dtype SD_INDEXER_T
-        time_window : float32
+        time_window : float64
         dom_info : shape (n_strings, n_doms_per_string) array of dtype DOM_INFO_T
         tables
         table_norm
@@ -922,7 +893,7 @@ def generate_pexp_5d_function(
         sd_idx_table_indexer
 
         """
-        llh = np.float32(0)
+        llh = np.float64(0)
         for indexer_entry in hits_indexer:
             start = indexer_entry['offset']
             stop = start + indexer_entry['num']
