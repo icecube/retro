@@ -49,7 +49,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import HYPO_PARAMS_T, LLHP_T, init_obj
-from retro.const import TWO_PI
+from retro.const import TWO_PI, ALL_STRS_DOMS_SET
 from retro.utils.misc import expand, mkdir, sort_dict
 #from retro.likelihood import get_llh
 
@@ -236,10 +236,11 @@ def run_multinest(
     time_window = np.float32(
         hits_summary['time_window_stop'] - hits_summary['time_window_start']
     )
-    total_num_doms_hit = hits_summary['total_num_doms_hit']
-    hits_sd_idx = hits_indexer['sd_idx']
-    hit_sd_idx_start = np.min(hits_sd_idx)
-    hit_sd_idx_end = np.max(hits_sd_idx)
+    hit_sd_indices = hits_indexer['sd_idx']
+    unhit_sd_indices = np.array(
+        sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
+        dtype=np.uint32
+    )
 
     #@profile
     def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
@@ -273,16 +274,14 @@ def run_multinest(
             sources=sources,
             hits=hits,
             hits_indexer=hits_indexer,
-            hit_sd_idx_start=hit_sd_idx_start,
-            hit_sd_idx_end=hit_sd_idx_end,
-            total_num_doms_hit=total_num_doms_hit,
+            unhit_sd_indices=unhit_sd_indices,
+            sd_idx_table_indexer=sd_idx_table_indexer,
             time_window=time_window,
             dom_info=dom_info,
             tables=tables,
             table_norm=table_norm,
             t_indep_tables=t_indep_tables,
-            t_indep_table_norm=t_indep_table_norm,
-            sd_idx_table_indexer=sd_idx_table_indexer
+            t_indep_table_norm=t_indep_table_norm
         )
 
         t1 = time.time()

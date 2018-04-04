@@ -28,9 +28,9 @@ consteff=""
 ~/src/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
-    --temporal-prior uniform \
+    --temporal-prior SPEFit2 \
     --energy-prior log_uniform \
-    --energy-lims 1,1000  \
+    --energy-lims 0.1,1000  \
     \
     $importance_sampling \
     --max-modes 1 \
