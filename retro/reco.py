@@ -199,8 +199,22 @@ def run_multinest(
             scale = prior_params[1]
             priors_used[dim_name] = (prior_kind, (loc, scale))
             cauchy = stats.cauchy(loc=loc, scale=scale)
-            def prior_func(cube, cauchy=cauchy, n=dim_num):
-                cube[n] = cauchy.isf(cube[n])
+            if dim_name == T:
+                low = hits_summary['time_window_start'] - 4000
+                high = hits_summary['time_window_stop']
+            elif dim_name == X:
+                low = -800
+                high = 800
+            elif dim_name == Y:
+                low = -700
+                high = 700
+            elif dim_name == Z:
+                low = -600
+                high = 550
+            else:
+                raise NotImplementedError('SPEFit2 cannot be used for {}'.format(dim_name))
+            def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high):
+                cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
 
         else:
             raise NotImplementedError('Prior "{}" not implemented.'
@@ -225,6 +239,37 @@ def run_multinest(
         """
         for prior_func in prior_funcs:
             prior_func(cube)
+
+    # <DEBUG/>
+    #cube0 = np.zeros(len(CUBE_DIMS))
+    #cube0p5 = 0.5 * np.ones(len(CUBE_DIMS))
+    #cube1 = np.ones(len(CUBE_DIMS))
+
+    #prior(cube0, len(CUBE_DIMS), len(CUBE_DIMS))
+    #prior(cube0p5, len(CUBE_DIMS), len(CUBE_DIMS))
+    #prior(cube1, len(CUBE_DIMS), len(CUBE_DIMS))
+
+    #print('')
+    #print('SPEFit2:\n ')
+    #reco = event['recos']['SPEFit2']
+    #print(reco.keys())
+    #for dim in CUBE_DIMS:
+    #    if dim == 'track_zenith':
+    #        val = reco['zenith']
+    #    elif dim == 'track_azimuth':
+    #        val = reco['azimuth']
+    #    elif dim in 'x y z time'.split():
+    #        val = reco[dim]
+    #    else:
+    #        continue
+    #    print(' {} = {:.3f}'.format(dim, val))
+
+    #print('cube0:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube0)]))
+    #print('cube0p5:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube0p5)]))
+    #print('cube1:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube1)]))
+    #print('')
+    #raise Exception
+    # </DEBUG>
 
     llh_func = dom_tables._get_llh
     dom_info = dom_tables.dom_info
@@ -283,6 +328,12 @@ def run_multinest(
             t_indep_tables=t_indep_tables,
             t_indep_table_norm=t_indep_table_norm
         )
+        #print('')
+        #with open('/tmp/get_llh.asm', 'w') as f:
+        #print(llh_func.inspect_asm(llh_func.signatures[0]))
+        #print('number of signatures:', len(llh_func.signatures))
+        #print('')
+        #raise Exception()
 
         t1 = time.time()
 
@@ -351,10 +402,10 @@ def run_multinest(
     pymultinest.run(
         LogLikelihood=loglike,
         Prior=prior,
-        verbose=False,
-        outputfiles_basename='/dev/null/xyz', #out_prefix,
+        verbose=True,
+        outputfiles_basename=out_prefix,
         resume=False,
-        write_output=False,
+        write_output=True,
         n_iter_before_update=5000,
         **mn_kw
     )

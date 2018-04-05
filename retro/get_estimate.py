@@ -27,7 +27,6 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from os.path import abspath, dirname
-from pprint import pprint
 import sys
 
 import numpy as np
@@ -49,10 +48,10 @@ UNITS = {
     'track_energy': 'GeV',
     'cascade_energy': 'GeV',
     'energy': 'GeV',
-    'track_zenith': 'rad/pi',
-    'track_azimuth': 'rad/pi',
-    'cascade_zenith': 'rad/pi',
-    'cascade_azimuth': 'rad/pi',
+    'track_zenith': 'rad',
+    'track_azimuth': 'rad',
+    'cascade_zenith': 'rad',
+    'cascade_azimuth': 'rad',
 }
 
 
@@ -67,10 +66,6 @@ def main(description=__doc__):
     estimate = estimate_from_llhp(llhp)
     for dim, est  in estimate.items():
         mean, low, high = est['mean'], est['low'], est['high']
-        if 'azimuth' in dim or 'zenith' in dim:
-            mean /= np.pi
-            low /= np.pi
-            high /= np.pi
         print('{:s} : mean = {:9.3f} ; 95% interval = [{:9.3f}, {:9.3f}] {}'
               .format(dim.rjust(20), mean, low, high, UNITS[dim]))
 
