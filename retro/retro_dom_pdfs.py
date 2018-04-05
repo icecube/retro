@@ -167,7 +167,7 @@ run_info['sim'] = OrderedDict([
     ('fwd_sim_histo_file', sim['fwd_sim_histo_file']),
     ('fwd_sim_histo_file_md5', fwd_sim_histo_file_md5)
 ])
-
+run_info['sim_to_test'] = pdf_kw['sim_to_test']
 hit_times = (0.5 * (bin_edges[:-1] + bin_edges[1:])).astype(np.float32)
 
 sources = hypo_handler.get_sources(hypo_params=sim['mc_true_params'])
