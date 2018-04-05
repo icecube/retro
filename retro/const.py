@@ -84,6 +84,22 @@ def get_sd_idx(string, dom):
     """
     return np.uint16((string-1) * NUM_DOMS_PER_STRING + (dom-1))
 
+def get_string_dom_pair(sd_idx):
+    """Get an IceCube string number (1 to 86) and a DOM number(1 to 60) from single
+    uint16 index.
+
+    Parameters
+    ----------
+    sd_idx : np.uint16 in [0, 5159]
+
+    Returns
+    -------
+    string : int in [1, 60]
+    dom : int in [1, 60]
+    """
+    pair = divmod(sd_idx, NUM_DOMS_PER_STRING)
+    return pair[0] + 1, pair[1] + 1
+
 
 # -- Physical / mathematical constants -- #
 

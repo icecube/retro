@@ -186,6 +186,5 @@ def one_dim_cascade(hypo_params, num_samples):
     sources['ckv_theta'] = THETA_CKV
     sources['ckv_costheta'] = COS_CKV
     sources['ckv_sintheta'] = SIN_CKV
-
-
+    sources.sort()
     return sources    

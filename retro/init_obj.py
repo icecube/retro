@@ -193,7 +193,7 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
             #raise NotImplementedError('{} cascade not implemented yet.'
             #                          .format(cascade_kernel))
             hypo_kernels.append(one_dim_cascade)
-        kernel_kwargs.append(dict(num_samples=cascade_samples))
+            kernel_kwargs.append(dict(num_samples=cascade_samples))
 
     if track_kernel is not None:
         if track_kernel == 'const_e_loss':

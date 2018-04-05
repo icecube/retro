@@ -155,10 +155,10 @@ if sim['fwd_sim_histo_file'] is not None:
     fwd_sim_histo_file_md5 = hashlib.md5(contents).hexdigest()
     fwd_sim_histos = pickle.loads(contents)
     bin_edges = fwd_sim_histos['bin_edges']
-    print('bin_edges:', bin_edges)
+    #print('bin_edges:', bin_edges)
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
     del contents
-    print(' ', np.round(time.time() - t0, 3), 'sec\n')
+    #print(' ', np.round(time.time() - t0, 3), 'sec\n')
 else:
     bin_edges = np.linspace(0, 4000, 401)
 
@@ -179,13 +179,22 @@ run_info['time_window'] = time_window
 
 results = [None] * NUM_DOMS_TOT
 #t_start = time.time()
-
+string_counter = 0
 #for string, dom in product(unique_strings, unique_doms):
 for sd_idx in dom_tables.loaded_sd_indices:
     #TODO: ask justin what this line does
     #t00 = time.time()
     exp_p_at_hit_times = []
+
+    print('string_counter', string_counter)
+    string_counter += 1
+    hit_counter = 0
+
     for hit in hit_times: 
+
+        #print('hit_counter', hit_counter)
+        hit_counter += 1
+        
         exp_p_at_all_times, sum_log_at_hit_times = dom_tables.pexp_func(
             sources,
             np.array([[hit, 1]]).T,

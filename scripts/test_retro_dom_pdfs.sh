@@ -24,10 +24,10 @@ norm="binvol2"
 tkernel="const_e_loss"
 tktimestep="1.0"
 ckernel="one_dim"
-csamples="1000"
+csamples="100"
 
 ~/projects/retro/retro/retro_dom_pdfs.py \
-    --outdir="~/projects/misc_retro/dom_pdfs" \
+    --outdir="~/projects/misc_retro/dom_pdfs/sam100" \
     --sim-to-test="upgoing_em_cascade" \
     --angsens-model="$angsens" \
     --cascade-kernel="$ckernel" \
