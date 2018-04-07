@@ -88,31 +88,55 @@ def extract_metadata_from_filename(fname):
 
 
 def extract_reco(frame, reco):
-    i3particle = frame[reco]
+    """Extract a reconstruction from a frame."""
     reco_dict = OrderedDict()
 
-    reco_dict['x'] = i3particle.pos.x
-    reco_dict['y'] = i3particle.pos.y
-    reco_dict['z'] = i3particle.pos.z
-    reco_dict['time'] = i3particle.time
-    reco_dict['energy'] = i3particle.energy
-    reco_dict['zenith'] = i3particle.dir.zenith
-    reco_dict['azimuth'] = i3particle.dir.azimuth
+    if reco.startswith('Pegleg_Fit'):
+        hd_casc_name = reco + 'HDCasc'
+        track_name = reco + 'Track'
+        if reco in frame and hd_casc_name in frame and track_name in frame:
+            i3particle = frame[reco]
+            hd_casc = frame[hd_casc_name]
+            track = frame[track_name]
 
-    return reco_dict
+            reco_dict['x'] = i3particle.pos.x
+            reco_dict['y'] = i3particle.pos.y
+            reco_dict['z'] = i3particle.pos.z
+            reco_dict['time'] = i3particle.time
+            reco_dict['energy'] = i3particle.energy
+            reco_dict['zenith'] = i3particle.dir.zenith
+            reco_dict['azimuth'] = i3particle.dir.azimuth
+            reco_dict['track_energy'] = track.energy
+            reco_dict['track_zenith'] = track.dir.zenith
+            reco_dict['track_azimuth'] = track.dir.azimuth
+            reco_dict['cascade_energy'] = hd_casc.energy
+        else:
+            reco_dict['x'] = np.nan
+            reco_dict['y'] = np.nan
+            reco_dict['z'] = np.nan
+            reco_dict['time'] = np.nan
+            reco_dict['energy'] = np.nan
+            reco_dict['zenith'] = np.nan
+            reco_dict['azimuth'] = np.nan
+            reco_dict['track_energy'] = np.nan
+            reco_dict['cascade_energy'] = np.nan
 
-    #raise NotImplementedError('extract_reco not implemented')
-    ## Get millipede LLH at "truth" from a run of HybridReco (if present)
-    ## (Note that this requires ``from icecube import multinest_icetray``)
-    #et['llh_mc_truth'] = np.nan
-    #keys = frame.keys()
-    #for key in keys:
-    #    hr_re_dict = key_to_hybridreco_re_dict(key)
-    #    if hr_re_dict:
-    #        bname = HYBRIDRECO_NAME.format(**hr_re_dict)
-    #        fit_params = frame[bname + '_FitParams']
-    #        et['llh_mc_truth'] = fit_params.LLH.MC_truth
-    #        break
+    else:
+        i3particle = frame[reco]
+        reco_dict['x'] = i3particle.pos.x
+        reco_dict['y'] = i3particle.pos.y
+        reco_dict['z'] = i3particle.pos.z
+        reco_dict['time'] = i3particle.time
+        reco_dict['energy'] = i3particle.energy
+        reco_dict['zenith'] = i3particle.dir.zenith
+        reco_dict['azimuth'] = i3particle.dir.azimuth
+
+    reco = np.array(
+        tuple(reco_dict.values()),
+        dtype=np.dtype(list(zip(reco_dict.keys(), [np.float32]*len(reco_dict))))
+    )
+
+    return reco
 
 
 def extract_trigger_hierarchy(frame, path):
@@ -151,14 +175,22 @@ def extract_pulses(frame, pulse_series_name):
 
     Returns
     -------
-    pulses : list of (sd_idx, pulses) tuples
+    pulses_list : list of ((string, dom, pmt), pulses) tuples
         `sd_idx` is from get_sd_idx and each `pulses` object is a 1-D array of
         dtype retro_types.PULSE_T with length the number of pulses recorded in
         that DOM.
 
+    time_range : tuple of two floats
+
     """
     from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
     pulse_series = frame[pulse_series_name]
+    time_range_name = pulse_series_name + 'TimeRange'
+    if time_range_name in frame:
+        i3_time_range = frame[time_range_name]
+        time_range = i3_time_range.start, i3_time_range.stop
+    else:
+        time_range = np.nan
 
     if isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMapMask): # pylint: disable=no-member
         pulse_series = pulse_series.apply(frame)
@@ -166,19 +198,17 @@ def extract_pulses(frame, pulse_series_name):
     if not isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMap): # pylint: disable=no-member
         raise TypeError(type(pulse_series))
 
-    pulses = []
+    pulses_list = []
 
-    for (string, dom, _), pinfo in pulse_series:
-        sd_idx = const.get_sd_idx(string, dom)
-
+    for (string, dom, pmt), pinfo in pulse_series:
         pls = []
         for pulse in pinfo:
             pls.append((pulse.time, pulse.charge, pulse.width))
         pls = np.array(pls, dtype=PULSE_T)
 
-        pulses.append((sd_idx, pls))
+        pulses_list.append(((string, dom, pmt), pls))
 
-    return pulses
+    return pulses_list, time_range
 
 
 def extract_photons(frame, photon_key):
@@ -194,10 +224,10 @@ def extract_photons(frame, photon_key):
 
     Returns
     -------
-    photons : list of (sd_idx, phot) tuples
-        `sd_idx` is from get_sd_idx and each `phot` object is a 1D array of
-        dtype retro_types.PHOTON_T with length the number of photons recorded
-        in that DOM.
+    photons : list of ((string, dom, pmt), phot) tuples
+        string and dom are one-indexed, while pmt is zero-indexed. $ach `phot`
+        object is a 1D array of dtype retro_types.PHOTON_T with length the
+        number of photons recorded in that DOM.
 
     """
     from icecube import dataclasses, simclasses # pylint: disable=unused-variable
@@ -206,8 +236,12 @@ def extract_photons(frame, photon_key):
     photons = OrderedDict()
     photons = []
     #strs_doms = []
-    for (string, dom), pinfos in photon_series:
-        sd_idx = const.get_sd_idx(string, dom)
+    for omkey, pinfos in photon_series:
+        if len(omkey) == 2:
+            string, dom = omkey
+            pmt = 0
+        else:
+            string, dom, pmt = omkey
 
         phot = [] #Photon(*([] for _ in range(len(Photon._fields))))
         for pinfo in pinfos:
@@ -222,12 +256,12 @@ def extract_photons(frame, photon_key):
             ))
         phot = np.array(phot, dtype=PHOTON_T)
 
-        photons.append((sd_idx, phot))
+        photons.append(((string, dom, pmt), phot))
 
     return photons
 
 
-def extract_mc_truth(frame, run_id, event_id):
+def extract_truth(frame, run_id, event_id):
     """Get event truth information from a frame.
 
     Parameters
@@ -343,15 +377,20 @@ def extract_mc_truth(frame, run_id, event_id):
             li['%s_azimuth' % l_name] = longest_daughter.dir.azimuth
         et.update(longest_info)
 
-    # Extract info from trueCascade
-    try:
+    # Extract info from {MC,true}Cascade
+    has_mc_true_cascade = True
+    if 'trueCascade' in frame:
         true_cascade = frame['trueCascade']
+    elif 'MCCascade' in frame:
+        true_cascade = frame['MCCascade']
+    else:
+        has_mc_true_cascade = False
+
+    if has_mc_true_cascade:
         et['cascade_pdg'] = true_cascade.pdg_encoding
         et['cascade_energy'] = true_cascade.energy
         et['cascade_coszen'] = np.cos(true_cascade.dir.zenith)
         et['cascade_azimuth'] = true_cascade.dir.azimuth
-    except KeyError:
-        pass
 
     # Extract per-event info from I3MCWeightDict
     mcwd_copy_keys = '''
@@ -373,6 +412,14 @@ def extract_mc_truth(frame, run_id, event_id):
         except KeyError:
             print('Could not get "{}" from I3MCWeightDict'.format(key))
 
+    dt_spec = []
+    for key in et.keys():
+        if 'pdg' in key:
+            dt_spec.append((key, np.int64))
+        else:
+            dt_spec.append((key, np.float64))
+
+    event_truth = np.array(tuple(et.values()), dtype=np.dtype(dt_spec))
     return event_truth
 
 
@@ -387,11 +434,11 @@ def extract_metadata_from_frame(frame):
 def extract_events(
         fpath,
         outdir=None,
-        photon_names=tuple(),
-        pulse_names=tuple(),
-        reco_names=tuple(),
-        trigger_hierarchy_names=tuple(),
-        mc_truth=False
+        photons=tuple(),
+        pulses=tuple(),
+        recos=tuple(),
+        triggers=tuple(),
+        truth=False
     ):
     """Extract information from an i3 file.
 
@@ -401,19 +448,19 @@ def extract_events(
 
     outdir : str, optional
 
-    photon_names : None, str, or iterable of str
+    photons : None, str, or iterable of str
         Names of photons series' to extract from each event
 
-    pulse_names : None, str, or iterable of str
+    pulses : None, str, or iterable of str
         Names of pulse series' to extract from each event
 
-    reco_names : None, str, or iterable of str
+    recos : None, str, or iterable of str
         Names of reconstructions to extract from each event
 
-    trigger_hierarchy_names : None, str, or iterable of str
+    triggers : None, str, or iterable of str
         Names of trigger hierarchies to extract from each event
 
-    mc_truth : bool
+    truth : bool
         Whether or not Monte Carlo truth for the event should be extracted for
         each event
 
@@ -423,14 +470,14 @@ def extract_events(
         Each dict contains key "meta" with sub-dict containing file metadata.
         Depending on which arguments are provided, OrderedDicts for each named
         key passed will appear as a key within the OrderedDicts named "pulses",
-        "recos", "photons", and "mc_truth". E.g.:
+        "recos", "photons", and "truth". E.g.:
 
         .. python ::
 
             {
                 'i3_metadata': {...},
                 'events': [{...}, {...}, ...],
-                'mc_truth': [{'pdg': ..., 'daughters': [{...}, ...]}],
+                'truth': [{'pdg': ..., 'daughters': [{...}, ...]}],
                 'photons': {
                     'photons': [[...], [...], ...],
                     'other_photons': [[...], [...], ...]
@@ -461,22 +508,23 @@ def extract_events(
     i3file = dataio.I3File(fpath, 'r') # pylint: disable=no-member
 
     events = []
-    mc_truths = []
+    truths = []
 
-    photons = OrderedDict()
-    for name in photon_names:
-        photons[name] = []
+    photons_d = OrderedDict()
+    for name in photons:
+        photons_d[name] = []
 
-    pulses = OrderedDict()
-    for name in pulse_names:
-        pulses[name] = []
+    pulses_d = OrderedDict()
+    for name in pulses:
+        pulses_d[name] = []
+        pulses_d[name + 'TimeRange'] = []
 
-    recos = OrderedDict()
-    for name in reco_names:
-        recos[name] = []
+    recos_d = OrderedDict()
+    for name in recos:
+        recos_d[name] = []
 
     trigger_hierarchies = OrderedDict()
-    for name in trigger_hierarchy_names:
+    for name in triggers:
         trigger_hierarchies[name] = []
 
     if outdir is None:
@@ -508,23 +556,28 @@ def extract_events(
         event['start_time'] = i3header.start_time.utc_daq_time
         event['end_time'] = i3header.end_time.utc_daq_time
 
-        if mc_truth:
-            mc_truths.append(extract_mc_truth(frame, run_id=run_id,
+        if 'TimeShift' in frame:
+            event['TimeShift'] = frame['TimeShift'].value
+
+        if truth:
+            truths.append(extract_truth(frame, run_id=run_id,
                                               event_id=event_id))
-            event['unique_id'] = unique_id = mc_truths[-1]['unique_id']
+            event['unique_id'] = unique_id = truths[-1]['unique_id']
 
         events.append(event)
 
-        for photon_name in photon_names:
-            photons[photon_name].append(extract_photons(frame, photon_name))
+        for photon_name in photons:
+            photons_d[photon_name].append(extract_photons(frame, photon_name))
 
-        for pulse_series_name in pulse_names:
-            pulses[pulse_series_name].append(extract_pulses(frame, pulse_series_name))
+        for pulse_series_name in pulses:
+            pulses_list, time_range = extract_pulses(frame, pulse_series_name)
+            pulses_d[pulse_series_name].append(pulses_list)
+            pulses_d[pulse_series_name + 'TimeRange'].append(time_range)
 
-        for reco_name in reco_names:
-            recos[reco_name].append(extract_reco(frame, reco_name))
+        for reco_name in recos:
+            recos_d[reco_name].append(extract_reco(frame, reco_name))
 
-        for trigger_hierarchy_name in trigger_hierarchy_names:
+        for trigger_hierarchy_name in triggers:
             trigger_hierarchies[trigger_hierarchy_name].append(
                 extract_trigger_hierarchy(frame, trigger_hierarchy_name)
             )
@@ -537,40 +590,46 @@ def extract_events(
     recos_dir = join(outdir, 'recos')
     trigger_hierarchy_dir = join(outdir, 'triggers')
 
-    if photon_names:
+    if photons:
         mkdir(photon_series_dir)
-    if pulse_names:
+    if pulses:
         mkdir(pulse_series_dir)
-    if reco_names:
+    if recos:
         mkdir(recos_dir)
-    if trigger_hierarchy_names:
+    if triggers:
         mkdir(trigger_hierarchy_dir)
 
-    pickle.dump(events,
-                open(join(outdir, 'events.pkl'), 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL)
+    dt_spec = []
+    for key in event.keys():
+        if '_time' in key:
+            dt_spec.append((key, np.uint64))
+        elif '_id' in key:
+            dt_spec.append((key, np.int64))
+        else:
+            dt_spec.append((key, np.float64))
 
-    if mc_truth:
-        pickle.dump(mc_truths,
-                    open(join(outdir, 'mc_truth.pkl'), 'wb'),
-                    protocol=pickle.HIGHEST_PROTOCOL)
+    events = np.array([tuple(ev.values()) for ev in events], dtype=dt_spec)
+    np.save(join(outdir, 'events.npy'), events)
 
-    for name in photon_names:
-        pickle.dump(photons[name],
+    if truth:
+        np.save(join(outdir, 'truth.npy'), np.array(truths))
+
+    for name in photons:
+        pickle.dump(photons_d[name],
                     open(join(photon_series_dir, name + '.pkl'), 'wb'),
                     protocol=pickle.HIGHEST_PROTOCOL)
 
-    for name in pulse_names:
-        pickle.dump(pulses[name],
+    for name in pulses:
+        pickle.dump(pulses_d[name],
                     open(join(pulse_series_dir, name + '.pkl'), 'wb'),
                     protocol=pickle.HIGHEST_PROTOCOL)
+        np.save(join(pulse_series_dir, name + 'TimeRange' + '.npy'),
+                np.array(pulses_d[name + 'TimeRange'], dtype=np.float32))
 
-    for name in reco_names:
-        pickle.dump(recos[name],
-                    open(join(recos_dir, name + '.pkl'), 'wb'),
-                    protocol=pickle.HIGHEST_PROTOCOL)
+    for name in recos:
+        np.save(join(recos_dir, name + '.npy'), np.array(recos_d[name]))
 
-    for name in trigger_hierarchy_names:
+    for name in triggers:
         pickle.dump(trigger_hierarchies[name],
                     open(join(trigger_hierarchy_dir, name + '.pkl'), 'wb'),
                     protocol=pickle.HIGHEST_PROTOCOL)
@@ -587,23 +646,23 @@ def parse_args(description=__doc__):
         '--outdir'
     )
     parser.add_argument(
-        '--photon-names', nargs='+', default=[],
+        '--photons', nargs='+', default=[],
         help='''Photon series names to extract from each event'''
     )
     parser.add_argument(
-        '--pulse-names', nargs='+', default=[],
+        '--pulses', nargs='+', default=[],
         help='''Pulse series names to extract from each event'''
     )
     parser.add_argument(
-        '--reco-names', nargs='+', default=[],
+        '--recos', nargs='+', default=[],
         help='''Pulse series names to extract from each event'''
     )
     parser.add_argument(
-        '--trigger-hierarchy-names', nargs='+', default=[],
+        '--triggers', nargs='+', default=[],
         help='''Trigger hierarchy names to extract from each event'''
     )
     parser.add_argument(
-        '--mc-truth', action='store_true',
+        '--truth', action='store_true',
     )
     return parser.parse_args()
 
