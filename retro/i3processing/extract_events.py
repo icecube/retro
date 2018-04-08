@@ -37,7 +37,6 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const
 from retro.retro_types import PHOTON_T, PULSE_T, TRIGGER_T
 from retro.utils.misc import expand, mkdir
 
@@ -92,24 +91,24 @@ def extract_reco(frame, reco):
     reco_dict = OrderedDict()
 
     if reco.startswith('Pegleg_Fit'):
-        hd_casc_name = reco + 'HDCasc'
+        casc_name = reco + 'HDCasc'
         track_name = reco + 'Track'
-        if reco in frame and hd_casc_name in frame and track_name in frame:
-            i3particle = frame[reco]
-            hd_casc = frame[hd_casc_name]
+        if casc_name in frame and track_name in frame:
+            neutrino = frame[reco]
+            casc = frame[casc_name]
             track = frame[track_name]
 
-            reco_dict['x'] = i3particle.pos.x
-            reco_dict['y'] = i3particle.pos.y
-            reco_dict['z'] = i3particle.pos.z
-            reco_dict['time'] = i3particle.time
-            reco_dict['energy'] = i3particle.energy
-            reco_dict['zenith'] = i3particle.dir.zenith
-            reco_dict['azimuth'] = i3particle.dir.azimuth
+            reco_dict['x'] = neutrino.pos.x
+            reco_dict['y'] = neutrino.pos.y
+            reco_dict['z'] = neutrino.pos.z
+            reco_dict['time'] = neutrino.time
+            reco_dict['energy'] = neutrino.energy
+            reco_dict['zenith'] = neutrino.dir.zenith
+            reco_dict['azimuth'] = neutrino.dir.azimuth
             reco_dict['track_energy'] = track.energy
             reco_dict['track_zenith'] = track.dir.zenith
             reco_dict['track_azimuth'] = track.dir.azimuth
-            reco_dict['cascade_energy'] = hd_casc.energy
+            reco_dict['cascade_energy'] = casc.energy
         else:
             reco_dict['x'] = np.nan
             reco_dict['y'] = np.nan
@@ -119,7 +118,65 @@ def extract_reco(frame, reco):
             reco_dict['zenith'] = np.nan
             reco_dict['azimuth'] = np.nan
             reco_dict['track_energy'] = np.nan
+            reco_dict['track_zenith'] = np.nan
+            reco_dict['track_azimuth'] = np.nan
             reco_dict['cascade_energy'] = np.nan
+
+    # -- HybridReco, as seen in DRAGON 1{2,4,6}60 Monte Carlo -- #
+
+    # MultiNest7D is a cascade-only fit to the event
+    elif reco.endswith('MultiNest7D'):
+        neutrino = frame[reco + '_Neutrino']
+        casc = frame[reco + '_Cascade']
+
+        reco_dict['x'] = neutrino.pos.x
+        reco_dict['y'] = neutrino.pos.y
+        reco_dict['z'] = neutrino.pos.z
+        reco_dict['time'] = neutrino.time
+        reco_dict['energy'] = neutrino.energy
+        reco_dict['zenith'] = neutrino.dir.zenith
+        reco_dict['azimuth'] = neutrino.dir.azimuth
+        reco_dict['cascade_energy'] = casc.energy
+
+    # MultiNest8D fits a cascade & track, with casscade in the track direction
+    elif reco.endswith('MultiNest8D'):
+        neutrino = frame[reco + '_Neutrino']
+        casc = frame[reco + '_Cascade']
+        track = frame[reco + '_Track']
+
+        reco_dict['x'] = neutrino.pos.x
+        reco_dict['y'] = neutrino.pos.y
+        reco_dict['z'] = neutrino.pos.z
+        reco_dict['time'] = neutrino.time
+        reco_dict['energy'] = neutrino.energy
+        reco_dict['zenith'] = neutrino.dir.zenith
+        reco_dict['azimuth'] = neutrino.dir.azimuth
+        reco_dict['track_energy'] = track.energy
+        reco_dict['track_zenith'] = track.dir.zenith
+        reco_dict['track_azimuth'] = track.dir.azimuth
+        reco_dict['cascade_energy'] = casc.energy
+
+    # MultiNest8D fits a cascade & track with their directions independnent
+    elif reco.endswith('MultiNest10D'):
+        neutrino = frame[reco + '_Neutrino']
+        casc = frame[reco + '_Cascade']
+        track = frame[reco + '_Track']
+
+        reco_dict['x'] = neutrino.pos.x
+        reco_dict['y'] = neutrino.pos.y
+        reco_dict['z'] = neutrino.pos.z
+        reco_dict['time'] = neutrino.time
+        reco_dict['energy'] = neutrino.energy
+        reco_dict['zenith'] = neutrino.dir.zenith
+        reco_dict['azimuth'] = neutrino.dir.azimuth
+        reco_dict['track_energy'] = track.energy
+        reco_dict['track_zenith'] = track.dir.zenith
+        reco_dict['track_azimuth'] = track.dir.azimuth
+        reco_dict['cascade_energy'] = casc.energy
+        reco_dict['cascade_zenith'] = track.dir.zenith
+        reco_dict['cascade_azimuth'] = track.dir.azimuth
+
+    # -- Anything else -- #
 
     else:
         i3particle = frame[reco]
@@ -190,7 +247,7 @@ def extract_pulses(frame, pulse_series_name):
         i3_time_range = frame[time_range_name]
         time_range = i3_time_range.start, i3_time_range.stop
     else:
-        time_range = np.nan
+        time_range = np.nan, np.nan
 
     if isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMapMask): # pylint: disable=no-member
         pulse_series = pulse_series.apply(frame)
@@ -233,9 +290,7 @@ def extract_photons(frame, photon_key):
     from icecube import dataclasses, simclasses # pylint: disable=unused-variable
 
     photon_series = frame[photon_key]
-    photons = OrderedDict()
     photons = []
-    #strs_doms = []
     for omkey, pinfos in photon_series:
         if len(omkey) == 2:
             string, dom = omkey
@@ -535,7 +590,11 @@ def extract_events(
     finished = False
     while not finished:
         if i3file.more():
-            next_frame = i3file.pop_frame()
+            try:
+                next_frame = i3file.pop_frame()
+            except:
+                print('Failed to pop frame, source file "{}"'.format(fpath))
+                raise
         else:
             finished = True
 
@@ -545,6 +604,12 @@ def extract_events(
                 frame_buffer.append(next_frame)
             if not finished:
                 continue
+
+        if not frame_buffer:
+            raise ValueError(
+                'Empty frame buffer; possibly no Q fraomes in file "{}"'
+                .format(fpath)
+            )
 
         frame = frame_buffer[-1]
 
@@ -560,8 +625,15 @@ def extract_events(
             event['TimeShift'] = frame['TimeShift'].value
 
         if truth:
-            truths.append(extract_truth(frame, run_id=run_id,
-                                              event_id=event_id))
+            try:
+                event_truth = extract_truth(
+                    frame, run_id=run_id, event_id=event_id
+                )
+            except:
+                print('Failed to get truth form "{}" event_id {}'
+                      .format(fpath, event_id))
+                raise
+            truths.append(event_truth)
             event['unique_id'] = unique_id = truths[-1]['unique_id']
 
         events.append(event)

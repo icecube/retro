@@ -3,7 +3,8 @@
 start_evt=0
 n_events=1
 
-base="/data/justin/retro/scans/downgoing_muon_evtidx${start_evt}_stacked_numballh"
+#base="/data/justin/retro/scans/downgoing_muon_evtidx${start_evt}_stacked_numballh_reordered"
+base="/tmp/delme"
 mkdir -p "$base"
 
 #hits="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1/photon_series/photons.pkl"
@@ -21,11 +22,12 @@ events_base="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_
 #tblkind="ckv_templ_compr"
 
 proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
+#proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked_reordered"
 tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 tblkind="ckv_templ_compr"
 
-sdoms="dc_subdust"
-#sdoms="all"
+#use_doms="dc_subdust"
+use_doms="all"
 
 #noise="--no-noise"
 noise=""
@@ -74,7 +76,7 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
 #    $noise \
 #    --norm-version="$norm" &
@@ -100,7 +102,7 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
 #    $noise \
 #    --norm-version="$norm" &
@@ -126,7 +128,7 @@ cscdescan="0-100:1"
     \
     --dom-tables-kind "ckv_templ_compr" \
     --dom-tables-fname-proto "$proto" \
-    --strs-doms "all" \
+    --use-doms "$use_doms" \
     --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
     $noise \
     --norm-version "binvol2" \
@@ -159,7 +161,7 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
 #    $noise \
 #    --norm-version="$norm" &
@@ -185,7 +187,7 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
 #    $noise \
 #    --norm-version="$norm" &

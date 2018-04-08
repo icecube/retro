@@ -46,8 +46,8 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import FTYPE
 from retro.const import (
-    ALL_STRS_DOMS, NUM_STRINGS, NUM_DOMS_PER_STRING, NUM_DOMS_TOT,
-    SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI, get_sd_idx
+    ALL_STRS_DOMS, ALL_STRS_DOMS_SET, NUM_STRINGS, NUM_DOMS_PER_STRING,
+    NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI, get_sd_idx
 )
 from retro.i3info.angsens_model import load_angsens_model
 from retro.retro_types import DOM_INFO_T, HIT_T
@@ -123,16 +123,33 @@ class Retro5DTables(object):
     template_library : shape-(n_templates, n_dir_theta, n_dir_deltaphi) array
         Containing the directionality templates for compressed tables
 
+    use_sd_indices : sequence of int, optional
+        Only use a subset of DOMs. If not specified, all in-ice DOMs are used.
+
     """
     def __init__(
-            self, table_kind, geom, rde, noise_rate_hz, angsens_model,
-            compute_t_indep_exp, use_directionality, norm_version,
-            num_phi_samples=None, ckv_sigma_deg=None, template_library=None,
+            self,
+            table_kind,
+            geom,
+            rde,
+            noise_rate_hz,
+            angsens_model,
+            compute_t_indep_exp,
+            use_directionality,
+            norm_version,
+            num_phi_samples=None,
+            ckv_sigma_deg=None,
+            template_library=None,
+            use_sd_indices=ALL_STRS_DOMS
         ):
         self.angsens_poly, self.avg_angsens = load_angsens_model(angsens_model)
         self.angsens_model = angsens_model
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
+        self.use_sd_indices = np.asarray(use_sd_indices, dtype=np.uint32)
+        if not set(self.use_sd_indices) == ALL_STRS_DOMS_SET:
+            raise ValueError('Using fewer than all DOMs is not yet supported.')
+        self.use_sd_indices_set = set(use_sd_indices)
 
         self.loaded_sd_indices = np.empty(shape=(0,), dtype=np.uint32)
 
@@ -170,7 +187,6 @@ class Retro5DTables(object):
             self.table_name = 'ckv_template_map'
 
         assert len(geom.shape) == 3
-        self.geom = geom
         self.use_directionality = use_directionality
         self.num_phi_samples = num_phi_samples
         self.ckv_sigma_deg = ckv_sigma_deg
@@ -194,30 +210,24 @@ class Retro5DTables(object):
         mask = zero_mask | nan_mask | inf_mask
 
         operational_doms = ~mask
-        self.operational_doms = operational_doms
-        self.rde = rde.astype(np.float32)
-        self.quantum_efficiency = 0.25 * self.rde
-        self.noise_rate_hz = noise_rate_hz.astype(np.float32)
-        self.noise_rate_per_ns = self.noise_rate_hz / 1e9
+        rde = rde.astype(np.float32)
+        quantum_efficiency = 0.25 * rde
+        noise_rate_per_ns = noise_rate_hz.astype(np.float32) / 1e9
 
         self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO_T)
-        for s_idx, d_idx in product(range(NUM_STRINGS), range(NUM_DOMS_PER_STRING)):
+        for s_idx, d_idx in product(list(range(NUM_STRINGS)),
+                                    list(range(NUM_DOMS_PER_STRING))):
             sd_idx = get_sd_idx(string=s_idx + 1, dom=d_idx + 1)
-            self.dom_info[sd_idx]['operational'] = self.operational_doms[s_idx, d_idx]
-            self.dom_info[sd_idx]['x'] = self.geom[s_idx, d_idx, 0]
-            self.dom_info[sd_idx]['y'] = self.geom[s_idx, d_idx, 1]
-            self.dom_info[sd_idx]['z'] = self.geom[s_idx, d_idx, 2]
-            self.dom_info[sd_idx]['quantum_efficiency'] = self.quantum_efficiency[s_idx, d_idx]
-            self.dom_info[sd_idx]['noise_rate_per_ns'] = self.noise_rate_per_ns[s_idx, d_idx]
-
-        self._empty_tup = (
-            np.empty(shape=(0,)*5, dtype=np.float32),
-            np.empty(shape=(0,)*2, dtype=np.float32)
-        )
-        if self.compute_t_indep_exp:
-            self._empty_tup += (
-                np.empty(shape=(0,)*4, dtype=np.float32),
-                np.empty(shape=(0,), dtype=np.float32)
+            operational = (
+                operational_doms[s_idx, d_idx] and sd_idx in self.use_sd_indices
+            )
+            self.dom_info[sd_idx]['operational'] = operational
+            self.dom_info[sd_idx]['x'] = geom[s_idx, d_idx, 0]
+            self.dom_info[sd_idx]['y'] = geom[s_idx, d_idx, 1]
+            self.dom_info[sd_idx]['z'] = geom[s_idx, d_idx, 2]
+            self.dom_info[sd_idx]['quantum_efficiency'] = quantum_efficiency[s_idx, d_idx]
+            self.dom_info[sd_idx]['noise_rate_per_ns'] = (
+                operational * noise_rate_per_ns[s_idx, d_idx]
             )
 
         self.tables = []
@@ -256,15 +266,17 @@ class Retro5DTables(object):
         exp_at_hit_times : shape (n_doms, n_hit_times) array of float32
 
         """
-        assert self._pexp is not None
+        if self._pexp is None:
+            raise ValueError('No tables loaded?')
+
         dom_info = deepcopy(self.dom_info)
         if not include_noise:
             time_window = 0
-            dom_info['noise_rate_per_ns'] = 0
+            dom_info[self.use_sd_indices]['noise_rate_per_ns'] = 0
         if force_quantum_efficiency is not None:
-            dom_info['quantum_efficiency'] = force_quantum_efficiency
+            dom_info[self.use_sd_indices]['quantum_efficiency'] = force_quantum_efficiency
         if include_dead_doms:
-            dom_info['operational'] = True
+            dom_info[self.use_sd_indices]['operational'] = True
 
         num_hit_times = len(hit_times)
         hits = np.empty(shape=num_hit_times, dtype=HIT_T)
@@ -294,14 +306,11 @@ class Retro5DTables(object):
         return t_indep_exp, exp_at_hit_times
 
     def get_llh(self, *args, **kwargs):
-        assert self._get_llh is not None
         return self._get_llh(*args, **kwargs)
 
     def load_stacked_tables(self, stacked_tables_meta_fpath,
-                            stacked_tables_fpath,
-                            stacked_t_indep_tables_fpath,
-                            mmap_tables=False,
-                            mmap_t_indep=False):
+                            stacked_tables_fpath, stacked_t_indep_tables_fpath,
+                            mmap_tables=False, mmap_t_indep=False):
         if self.is_stacked is not None:
             assert self.is_stacked
 
@@ -321,10 +330,12 @@ class Retro5DTables(object):
             expand(stacked_tables_fpath),
             mmap_mode=tables_mmap_mode
         )
+        self.tables.setflags(write=False, align=True, uic=False)
         self.t_indep_tables = np.load(
             expand(stacked_t_indep_tables_fpath),
             mmap_mode=t_indep_mmap_mode
         )
+        self.t_indep_tables.setflags(write=False, align=True, uic=False)
 
         if self._pexp is None:
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
@@ -342,6 +353,7 @@ class Retro5DTables(object):
             self.pexp_meta = pexp_meta
 
         self.sd_idx_table_indexer[:] = self.table_meta['sd_idx_table_indexer']
+        self.sd_idx_table_indexer.setflags(write=False, align=True, uic=False)
         self.n_photons_per_table = self.table_meta['n_photons_per_table']
 
         # Note that in creating the stacked tables, each indiividual table
@@ -460,45 +472,6 @@ class Retro5DTables(object):
         ]))
 
         self.is_stacked = False
-
-    # TODO: make this working again
-    #def get_expected_det(self, sources, hits, sd_idx, time_window):
-    #    """Get the number of photons we expect the DOM to detect (which is the
-    #    same as saying the number of hits we expect in the DOM).
-
-    #    Parameters
-    #    ----------
-    #    sources : shape (num_sources,) array of dtype SRC_T
-    #        Info about photons generated photons by the event hypothesis.
-
-    #    hits : shape (2, num_hits) array of floats
-    #        Row 0 is hit times in units of ns and row 1 is hit multiplicity in
-    #        photoelectrons.
-
-    #    sd_idx : int32 in [0, 5159]
-    #        See utils.misc.get_sd_idx
-
-    #    time_window : float in units of ns
-    #        Time window for computing the "time-independent" noise expectation.
-    #        Used (and required) if `include_noise` is True.
-
-    #    Returns
-    #    -------
-    #    sum_at_all_times : float64
-
-    #    tot_sum_log_at_hit_times : float64
-
-    #    """
-    #    dom_info = self.dom_info[sd_idx]
-    #    table_tup = self.table_tups[sd_idx]
-    #    sum_at_all_times, tot_sum_log_at_hit_times = self._pexp(
-    #        sources,
-    #        hits,
-    #        dom_info,
-    #        time_window,
-    #        *table_tup
-    #    )
-    #    return sum_at_all_times, tot_sum_log_at_hit_times
 
 
 def get_table_norm(

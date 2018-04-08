@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating
+# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals
 
 """
 Instantiate Retro tables and find the max over the log-likelihood space.
@@ -142,7 +142,9 @@ def run_multinest(
     # functions / constants in this module will still be import-able w/o it.
     import pymultinest
 
-    hits, hits_indexer, hits_summary = event['hits']
+    hits = event['hits']
+    hits_indexer = event['hits_indexer']
+    hits_summary = event['hits_summary']
 
     priors_used = OrderedDict()
 
@@ -209,7 +211,7 @@ def run_multinest(
                 low = -700
                 high = 700
             elif dim_name == Z:
-                low = -600
+                low = -1200
                 high = 550
             else:
                 raise NotImplementedError('SPEFit2 cannot be used for {}'.format(dim_name))
@@ -228,7 +230,6 @@ def run_multinest(
 
     report_after = 1000
 
-    #@profile
     def prior(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function for pymultinest to translate the hypercube MultiNest uses
         (each value is in [0, 1]) into the dimensions of the parameter space.
@@ -240,38 +241,7 @@ def run_multinest(
         for prior_func in prior_funcs:
             prior_func(cube)
 
-    # <DEBUG/>
-    #cube0 = np.zeros(len(CUBE_DIMS))
-    #cube0p5 = 0.5 * np.ones(len(CUBE_DIMS))
-    #cube1 = np.ones(len(CUBE_DIMS))
-
-    #prior(cube0, len(CUBE_DIMS), len(CUBE_DIMS))
-    #prior(cube0p5, len(CUBE_DIMS), len(CUBE_DIMS))
-    #prior(cube1, len(CUBE_DIMS), len(CUBE_DIMS))
-
-    #print('')
-    #print('SPEFit2:\n ')
-    #reco = event['recos']['SPEFit2']
-    #print(reco.keys())
-    #for dim in CUBE_DIMS:
-    #    if dim == 'track_zenith':
-    #        val = reco['zenith']
-    #    elif dim == 'track_azimuth':
-    #        val = reco['azimuth']
-    #    elif dim in 'x y z time'.split():
-    #        val = reco[dim]
-    #    else:
-    #        continue
-    #    print(' {} = {:.3f}'.format(dim, val))
-
-    #print('cube0:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube0)]))
-    #print('cube0p5:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube0p5)]))
-    #print('cube1:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube1)]))
-    #print('')
-    #raise Exception
-    # </DEBUG>
-
-    llh_func = dom_tables._get_llh
+    get_llh = dom_tables._get_llh # pylint: disable=protected-access
     dom_info = dom_tables.dom_info
     tables = dom_tables.tables
     table_norm = dom_tables.table_norm
@@ -281,13 +251,21 @@ def run_multinest(
     time_window = np.float32(
         hits_summary['time_window_stop'] - hits_summary['time_window_start']
     )
+    # TODO: implement logic allowing for not all DOMs to be used
+    #hit_sd_indices = np.array(
+    #    sorted(dom_tables.use_sd_indices_set.union(hits_indexer['sd_idx'])),
+    #    dtype=np.uint32
+    #)
     hit_sd_indices = hits_indexer['sd_idx']
     unhit_sd_indices = np.array(
         sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
         dtype=np.uint32
     )
 
-    #@profile
+    # DEBUG
+    #table_indices = []
+    #t_indep_indices = []
+
     def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function pymultinest calls to get llh values.
 
@@ -315,7 +293,7 @@ def run_multinest(
             track_energy=total_energy * track_fraction
         )
         sources = hypo_handler.get_sources(hypo)
-        llh = llh_func(
+        llh = get_llh(
             sources=sources,
             hits=hits,
             hits_indexer=hits_indexer,
@@ -326,12 +304,16 @@ def run_multinest(
             tables=tables,
             table_norm=table_norm,
             t_indep_tables=t_indep_tables,
-            t_indep_table_norm=t_indep_table_norm
+            t_indep_table_norm=t_indep_table_norm,
+            # DEBUG
+            #table_indices=table_indices,
+            #t_indep_indices=t_indep_indices
         )
+        # DEBUG
         #print('')
         #with open('/tmp/get_llh.asm', 'w') as f:
-        #print(llh_func.inspect_asm(llh_func.signatures[0]))
-        #print('number of signatures:', len(llh_func.signatures))
+        #print(get_llh.inspect_asm(get_llh.signatures[0]))
+        #print('number of signatures:', len(get_llh.signatures))
         #print('')
         #raise Exception()
 
@@ -428,6 +410,14 @@ def run_multinest(
         open(mn_meta_outf, 'wb'),
         protocol=pickle.HIGHEST_PROTOCOL
     )
+
+    # DEBUG
+    #table_indices_outf = out_prefix + 'table_indices.pkl'
+    #pickle.dump(table_indices, open(table_indices_outf, 'wb'),
+    #            protocol=pickle.HIGHEST_PROTOCOL)
+    #t_indep_table_indices_outf = out_prefix + 't_indep_table_indices.pkl'
+    #pickle.dump(t_indep_indices, open(t_indep_table_indices_outf, 'wb'),
+    #            protocol=pickle.HIGHEST_PROTOCOL)
 
     return llhp, mn_meta
 

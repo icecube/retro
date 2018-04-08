@@ -17,8 +17,8 @@ mkdir -p "$outdir"
 proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
 tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-#noise="--no-noise"
-noise=""
+#no_noise="--no-noise"
+no_noise=""
 
 importance_sampling="--importance-sampling"
 consteff=""
@@ -38,19 +38,19 @@ consteff=""
     --n-live 160 \
     --evidence-tol 0.5 \
     --sampling-eff 0.3 \
-    --max-iter 10000 \
+    --max-iter 1000 \
     --seed 0 \
     \
     --dom-tables-kind "ckv_templ_compr" \
     --dom-tables-fname-proto "$proto" \
-    --strs-doms "all" \
+    --use-doms "all" \
     --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
     --norm-version "binvol2" \
     $tmpl_lib \
     --step-length 1.0 \
-    $noise \
+    $no_noise \
     \
-    --cascade-kernel "point" \
+    --cascade-kernel "point_ckv" \
     --track-kernel "table_e_loss" \
     --track-time-step 1.0 \
     \

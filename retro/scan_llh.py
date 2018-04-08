@@ -134,7 +134,9 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     n_points_total = 0
     metric_vals = []
     for _, event in events_generator:
-        hits, hits_indexer, hits_summary = event['hits']
+        hits = event['hits']
+        hits_indexer = event['hits_indexer']
+        hits_summary = event['hits_summary']
         metric_kw['hits'] = hits
         metric_kw['hits_indexer'] = hits_indexer
         hit_sd_indices = hits_indexer['sd_idx']

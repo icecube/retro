@@ -34,7 +34,8 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import Mapping, OrderedDict
 from operator import getitem
-from os.path import abspath, dirname, join, splitext
+from os import listdir
+from os.path import abspath, dirname, isdir, isfile, join, splitext
 import pickle
 import re
 import sys
@@ -84,7 +85,7 @@ def setup_dom_tables(
         gcd,
         angsens_model,
         norm_version,
-        sd_indices=const.ALL_STRS_DOMS,
+        use_sd_indices=const.ALL_STRS_DOMS,
         step_length=1.0,
         num_phi_samples=None,
         ckv_sigma_deg=None,
@@ -129,6 +130,7 @@ def setup_dom_tables(
         num_phi_samples=num_phi_samples,
         ckv_sigma_deg=ckv_sigma_deg,
         template_library=template_library,
+        use_sd_indices=use_sd_indices
     )
 
     if '{subdet' in dom_tables_fname_proto:
@@ -145,8 +147,8 @@ def setup_dom_tables(
                 )
                 shared_table_sd_indices = []
                 for string in strings:
-                    sd_idx = const.get_sd_idx(string, dom)
-                    if sd_idx not in sd_indices:
+                    sd_idx = const.get_sd_idx(string=string, dom=dom)
+                    if sd_idx not in use_sd_indices:
                         continue
                     shared_table_sd_indices.append(sd_idx)
 
@@ -246,7 +248,7 @@ def get_events(
         start=0,
         stop=None,
         step=None,
-        truth=False,
+        truth=True,
         photons=None,
         pulses=None,
         recos=None,
@@ -308,18 +310,73 @@ def get_events(
     event : nested OrderedDict
 
     """
+    if not (isdir(events_base) and isfile(join(events_base, 'events.npy'))):
+        raise ValueError(
+            '`events_base` does not appear to be a Retro event directory: "{}"'
+            ' is either not a directory or does not contain an "events.npy"'
+            ' file.'.format(events_base)
+        )
+
     slice_kw = dict(start=start, stop=stop, step=step)
     file_iterator_tree = OrderedDict()
-    file_iterator_tree['EventHeader'] = iterate_file(
-        join(events_base, 'events.pkl'), **slice_kw
+    file_iterator_tree['header'] = iterate_file(
+        join(events_base, 'events.npy'), **slice_kw
     )
+
+    if truth is None:
+        truth = isfile(join(events_base, 'truth.npy'))
+
+    if photons is None:
+        dpath = join(events_base, 'photons')
+        if isdir(dpath):
+            photons = [splitext(d)[0] for d in listdir(dpath)]
+        else:
+            photons = False
+    elif isinstance(photons, basestring):
+        photons = [photons]
+
+    if pulses is None:
+        dpath = join(events_base, 'pulses')
+        if isdir(dpath):
+            pulses = [splitext(d)[0] for d in listdir(dpath) if 'TimeRange' not in d]
+        else:
+            pulses = False
+    elif isinstance(pulses, basestring):
+        pulses = [pulses]
+
+    if recos is None:
+        dpath = join(events_base, 'recos')
+        if isdir(dpath):
+            recos = [splitext(d)[0] for d in listdir(dpath)]
+        else:
+            recos = False
+    elif isinstance(recos, basestring):
+        recos = [recos]
+
+    if triggers is None:
+        dpath = join(events_base, 'triggers')
+        if isdir(dpath):
+            triggers = [splitext(d)[0] for d in listdir(dpath)]
+        else:
+            triggers = False
+    elif isinstance(triggers, basestring):
+        triggers = [triggers]
+
+    if hits is None:
+        if pulses and len(pulses) == 1:
+            hits = ['pulses', pulses[0]]
+        elif photons and len(photons) == 1:
+            hits = ['photons', photons[0]]
+        else:
+            hits = False
+    elif isinstance(hits, basestring):
+        hits = hits.split('/')
+
     if truth:
-        file_iterator_tree['mc_truth'] = iterate_file(
-            fpath=join(events_base, 'mc_truth.pkl'), **slice_kw
+        file_iterator_tree['truth'] = iterate_file(
+            fpath=join(events_base, 'truth.npy'), **slice_kw
         )
     if photons:
-        if isinstance(photons, basestring):
-            photons = [photons]
         photons = sorted(photons)
         file_iterator_tree['photons'] = iterators = OrderedDict()
         for photon_series in photons:
@@ -327,32 +384,29 @@ def get_events(
                 fpath=join(events_base, 'photons', photon_series + '.pkl'), **slice_kw
             )
     if pulses:
-        if isinstance(pulses, basestring):
-            pulses = [pulses]
         file_iterator_tree['pulses'] = iterators = OrderedDict()
         for pulse_series in sorted(pulses):
             iterators[pulse_series] = iterate_file(
                 fpath=join(events_base, 'pulses', pulse_series + '.pkl'), **slice_kw
             )
+            iterators[pulse_series + 'TimeRange'] = iterate_file(
+                fpath=join(events_base,
+                           'pulses',
+                           pulse_series + 'TimeRange' + '.npy'),
+                **slice_kw
+            )
     if recos:
-        if isinstance(recos, basestring):
-            recos = [recos]
         file_iterator_tree['recos'] = iterators = OrderedDict()
         for reco in sorted(recos):
             iterators[reco] = iterate_file(
-                fpath=join(events_base, 'recos', reco + '.pkl'), **slice_kw
+                fpath=join(events_base, 'recos', reco + '.npy'), **slice_kw
             )
     if triggers:
-        if isinstance(triggers, basestring):
-            triggers = [triggers]
         file_iterator_tree['triggers'] = iterators = OrderedDict()
         for trigger_hier in sorted(triggers):
             iterators[trigger_hier] = iterate_file(
                 fpath=join(events_base, 'triggers', trigger_hier + '.pkl'), **slice_kw
             )
-
-    if isinstance(hits, basestring):
-        hits = hits.split('/')
 
     if hits and hits[0] == 'photons':
         angsens_model, _ = load_angsens_model(angsens_model)
@@ -370,10 +424,12 @@ def get_events(
             break
 
         if hits:
-            hits_tup = get_hits(
+            hits, hits_indexer, hits_summary = get_hits(
                 event=event, path=hits, angsens_model=angsens_model
             )
-            event['hits'] = hits_tup
+            event['hits'] = hits
+            event['hits_indexer'] = hits_indexer
+            event['hits_summary'] = hits_summary
 
         yield event_idx, event
 
@@ -404,7 +460,11 @@ def iterate_file(fpath, start=0, stop=None, step=None):
     if ext == '.pkl':
         events = pickle.load(open(fpath, 'rb'))
     elif ext == '.npy':
-        events = np.load(fpath, mmap_mode='r')
+        try:
+            events = np.load(fpath, mmap_mode='r')
+        except:
+            print(fpath)
+            raise
     else:
         raise ValueError(fpath)
 
@@ -532,7 +592,8 @@ def get_hits(event, path, angsens_model=None):
     hits_indexer = []
     offset = 0
 
-    for sd_idx, p in series:
+    for (string, dom, pmt), p in series:
+        sd_idx = const.get_sd_idx(string=string, dom=dom)
         num = len(p)
         sd_hits = np.empty(shape=num, dtype=HIT_T)
         sd_hits['time'] = p['time']
@@ -552,7 +613,6 @@ def get_hits(event, path, angsens_model=None):
         raise TypeError('got dtype {}'.format(hits.dtype))
 
     hits_indexer = np.array(hits_indexer, dtype=SD_INDEXER_T)
-    assert np.all(np.diff(hits_indexer['sd_idx']) > 0)
 
     hit_times = hits['time']
     hit_charges = hits['charge']
@@ -673,7 +733,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
             "my_tables_{subdet}_{depth_idx}"'''
         )
         group.add_argument(
-            '--strs-doms', required=True,
+            '--use-doms', required=True,
             choices='all dc dc_subdust'.split()
         )
 
@@ -753,7 +813,8 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         group.add_argument(
             '--events-base', type=str,
             required=True,
-            help='''i3 file or a directory contining Retro .pkl events files'''
+            help='''i3 file or a directory contining Retro .npy/.pkl events
+            files'''
         )
         group.add_argument(
             '--start-idx', type=int, default=0
@@ -816,17 +877,17 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         events_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
 
     if dom_tables:
-        strs_doms = kwargs.pop('strs_doms').strip().lower()
-        if strs_doms == 'all':
-            sd_indices = const.ALL_STRS_DOMS
-        elif strs_doms == 'dc':
-            sd_indices = const.DC_ALL_STRS_DOMS
-        elif strs_doms == 'dc_subdust':
-            sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
+        use_doms = kwargs.pop('use_doms').strip().lower()
+        if use_doms == 'all':
+            use_sd_indices = const.ALL_STRS_DOMS
+        elif use_doms == 'dc':
+            use_sd_indices = const.DC_ALL_STRS_DOMS
+        elif use_doms == 'dc_subdust':
+            use_sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
         else:
-            raise ValueError(strs_doms)
-        print('nubmer of doms = {}'.format(len(sd_indices)))
-        kwargs['sd_indices'] = sd_indices
+            raise ValueError(use_doms)
+        print('nubmer of doms = {}'.format(len(use_sd_indices)))
+        kwargs['use_sd_indices'] = use_sd_indices
         kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
         kwargs['use_directionality'] = not kwargs.pop('no_dir')
 
