@@ -16,6 +16,7 @@ __all__ = [
     'PRI_COSINE',
     'PRI_GAUSSIAN',
     'PRI_SPEFIT2',
+    'PRI_CAUCHY',
     'run_multinest',
     'reco',
     'parse_args'
@@ -69,6 +70,7 @@ CSCD_AZ = 'cascade_azimuth'
 ENERGY = 'energy'
 TRCK_FRAC = 'track_fraction'
 
+
 CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC]
 
 CUBE_T_IDX = CUBE_DIMS.index(T)
@@ -88,6 +90,7 @@ PRI_LOG_NORMAL = 'log_normal'
 PRI_COSINE = 'cosine'
 PRI_GAUSSIAN = 'gaussian'
 PRI_SPEFIT2 = 'spefit2'
+PRI_CAUCHY = 'cauchy'
 
 
 def run_multinest(
@@ -158,7 +161,7 @@ def run_multinest(
         prior_kind, prior_params = priors[dim_name]
         if prior_kind is PRI_UNIFORM:
             # Time is special since prior is relative to hits in the event
-            if dim_name is T:
+            if dim_name == T:
                 prior_params = (
                     hits_summary['earliest_hit_time'] + prior_params[0],
                     hits_summary['latest_hit_time'] + prior_params[1]
@@ -179,35 +182,35 @@ def run_multinest(
                 def prior_func(cube, n=dim_num, width=width, minval=minval):
                     cube[n] = cube[n] * width + minval
 
-        elif prior_kind is PRI_LOG_UNIFORM:
+        elif prior_kind == PRI_LOG_UNIFORM:
             priors_used[dim_name] = (prior_kind, prior_params)
             log_min = np.log(np.min(prior_params))
             log_width = np.log(np.max(prior_params) / np.min(prior_params))
             def prior_func(cube, n=dim_num, log_width=log_width, log_min=log_min):
                 cube[n] = exp(cube[n] * log_width + log_min)
 
-        elif prior_kind is PRI_COSINE:
+        elif prior_kind == PRI_COSINE:
             priors_used[dim_name] = (prior_kind, prior_params)
             cos_min = np.min(prior_params)
             cos_width = np.max(prior_params) - cos_min
             def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min):
                 cube[n] = acos(cube[n] * cos_width + cos_min)
 
-        elif prior_kind is PRI_GAUSSIAN:
+        elif prior_kind == PRI_GAUSSIAN:
             priors_used[dim_name] = (prior_kind, prior_params)
             mean, stddev = prior_params
             norm = 1 / (stddev * np.sqrt(TWO_PI))
             def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
                 cube[n] = norm * exp(-((cube[n] - mean) / stddev)**2)
 
-        elif prior_kind is PRI_LOG_NORMAL:
+        elif prior_kind == PRI_LOG_NORMAL:
             priors_used[dim_name] = (prior_kind, prior_params)
             shape, loc, scale, low, high = prior_params
             lognorm = stats.lognorm(shape, loc, scale)
             def prior_func(cube, lognorm=lognorm, n=dim_num, low=low, high=high):
                 cube[n] = np.clip(lognorm.isf(cube[n]), a_min=low, a_max=high)
 
-        elif prior_kind is PRI_SPEFIT2:
+        elif prior_kind == PRI_SPEFIT2:
             spe_fit_val = event['recos']['SPEFit2'][dim_name]
             rel_loc, scale, low, high = prior_params
             loc = spe_fit_val + rel_loc
@@ -215,7 +218,7 @@ def run_multinest(
             if dim_name == T:
                 low += hits_summary['time_window_start']
                 high += hits_summary['time_window_stop']
-            priors_used[dim_name] = (prior_kind, (loc, scale, low, high))
+            priors_used[dim_name] = (PRI_CAUCHY, (loc, scale, low, high))
             def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high):
                 cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
 
@@ -352,7 +355,7 @@ def run_multinest(
         ('n_dims', n_dims),
         ('n_params', n_dims),
         ('n_clustering_params', n_dims),
-        ('wrapped_params', [int('azimuth' in p) for p in HYPO_PARAMS_T._fields]),
+        ('wrapped_params', [int('azimuth' in p.lower()) for p in CUBE_DIMS]),
         ('importance_nested_sampling', importance_sampling),
         ('multimodal', max_modes > 1),
         ('const_efficiency_mode', const_eff),
