@@ -17,7 +17,7 @@ HOLE_ICE_MODEL="$I3_SRC/ice-models/resources/models/angsens/as.h2-50cm"
 
 USE_GEANT4=false
 
-PARTICLE="EMinus"
+PARTICLE="MuMinus"
 E=20
 X=0
 Y=0
@@ -25,7 +25,7 @@ Z=-400
 CZ=-1.0
 AZ=0
 
-NUM_EVENTS=1000000
+NUM_EVENTS=100
 
 #==============================================================================
 # Derive things from above
@@ -86,14 +86,14 @@ echo ""
         -o "${NAME}_step3.i3.bz2"
 echo ""
 
-# Step 4: SRT hit cleaning
-[ -e "${NAME}_step3.i3.bz2" -a ! -e "${NAME}_step4.i3.bz2" ] && \
-    echo "Running Step 4..." && \
-    time ${PROCDIR}/hit_cleaning.py \
-        -i "${NAME}_step3.i3.bz2" \
-        -g "$GCD" \
-        -o "${NAME}_step4.i3.bz2"
-echo ""
+## Step 4: SRT hit cleaning
+#[ -e "${NAME}_step3.i3.bz2" -a ! -e "${NAME}_step4.i3.bz2" ] && \
+#    echo "Running Step 4..." && \
+#    time ${PROCDIR}/hit_cleaning.py \
+#        -i "${NAME}_step3.i3.bz2" \
+#        -g "$GCD" \
+#        -o "${NAME}_step4.i3.bz2"
+#echo ""
 
 # shit that didn't work
 #${PROCDIR}/deepcoreL2example.py -s -i ${NAME}_step2.i3.bz2 -g $I3_TESTDATA/sim/GeoCalibDetectorStatus_IC86.55697_corrected_V2.i3.gz -o ${NAME}_step3.i3.bz2

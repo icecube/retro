@@ -32,8 +32,10 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import OrderedDict
+from copy import deepcopy
 from itertools import product
 from os.path import abspath, dirname
+import cPickle as pickle
 import sys
 
 import numpy as np
@@ -44,13 +46,15 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import FTYPE
 from retro.const import (
-    NUM_STRINGS, NUM_DOMS_PER_STRING, NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS,
-    PI, TWO_PI, get_sd_idx
+    ALL_STRS_DOMS, ALL_STRS_DOMS_SET, NUM_STRINGS, NUM_DOMS_PER_STRING,
+    NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI, get_sd_idx
 )
 from retro.i3info.angsens_model import load_angsens_model
-from retro.retro_types import DOM_INFO
+from retro.retro_types import DOM_INFO_T, HIT_T
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
+from retro.utils.misc import expand
+
 
 TABLE_NORM_KEYS = [
     'n_photons', 'group_refractive_index', 'step_length', 'r_bin_edges',
@@ -119,25 +123,45 @@ class Retro5DTables(object):
     template_library : shape-(n_templates, n_dir_theta, n_dir_deltaphi) array
         Containing the directionality templates for compressed tables
 
+    use_sd_indices : sequence of int, optional
+        Only use a subset of DOMs. If not specified, all in-ice DOMs are used.
+
     """
     def __init__(
-            self, table_kind, geom, rde, noise_rate_hz, angsens_model,
-            compute_t_indep_exp, use_directionality, norm_version,
-            num_phi_samples=None, ckv_sigma_deg=None, template_library=None,
+            self,
+            table_kind,
+            geom,
+            rde,
+            noise_rate_hz,
+            angsens_model,
+            compute_t_indep_exp,
+            use_directionality,
+            norm_version,
+            num_phi_samples=None,
+            ckv_sigma_deg=None,
+            template_library=None,
+            use_sd_indices=ALL_STRS_DOMS
         ):
         self.angsens_poly, self.avg_angsens = load_angsens_model(angsens_model)
         self.angsens_model = angsens_model
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
+        self.use_sd_indices = np.asarray(use_sd_indices, dtype=np.uint32)
+        if not set(self.use_sd_indices) == ALL_STRS_DOMS_SET:
+            raise ValueError('Using fewer than all DOMs is not yet supported.')
+        self.use_sd_indices_set = set(use_sd_indices)
 
-        self.loaded_sd_indices = np.empty(shape=(0,), dtype=np.uint8)
+        self.loaded_sd_indices = np.empty(shape=(0,), dtype=np.uint32)
 
         self.tbl_is_raw = table_kind in ['raw_uncompr']
         self.tbl_is_ckv = table_kind in ['ckv_uncompr']
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
 
         if self.tbl_is_templ_compr:
-            assert(template_library is not None), 'template library is needed to sue compressed table'
+            if template_library is None:
+                raise ValueError(
+                    'template library is needed to use compressed table'
+                )
         self.template_library = template_library
 
         if self.tbl_is_raw:
@@ -162,9 +186,7 @@ class Retro5DTables(object):
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_template_map'
 
-
         assert len(geom.shape) == 3
-        self.geom = geom
         self.use_directionality = use_directionality
         self.num_phi_samples = num_phi_samples
         self.ckv_sigma_deg = ckv_sigma_deg
@@ -188,40 +210,169 @@ class Retro5DTables(object):
         mask = zero_mask | nan_mask | inf_mask
 
         operational_doms = ~mask
-        self.operational_doms = operational_doms
-        self.rde = rde.astype(np.float32)
-        self.quantum_efficiency = 0.25 * self.rde
-        self.noise_rate_hz = noise_rate_hz.astype(np.float32)
-        self.noise_rate_per_ns = self.noise_rate_hz / 1e9
+        rde = rde.astype(np.float32)
+        quantum_efficiency = 0.25 * rde
+        noise_rate_per_ns = noise_rate_hz.astype(np.float32) / 1e9
 
-        # TODO: flatten the following loop using simple numpy operations
-        self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO)
-        for s_idx, d_idx in product(range(NUM_STRINGS), range(NUM_DOMS_PER_STRING)):
+        self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO_T)
+        for s_idx, d_idx in product(list(range(NUM_STRINGS)),
+                                    list(range(NUM_DOMS_PER_STRING))):
             sd_idx = get_sd_idx(string=s_idx + 1, dom=d_idx + 1)
-            self.dom_info[sd_idx]['operational'] = self.operational_doms[s_idx, d_idx]
-            self.dom_info[sd_idx]['x'] = self.geom[s_idx, d_idx, 0]
-            self.dom_info[sd_idx]['y'] = self.geom[s_idx, d_idx, 1]
-            self.dom_info[sd_idx]['z'] = self.geom[s_idx, d_idx, 2]
-            self.dom_info[sd_idx]['quantum_efficiency'] = self.quantum_efficiency[s_idx, d_idx]
-            self.dom_info[sd_idx]['noise_rate_per_ns'] = self.noise_rate_per_ns[s_idx, d_idx]
-
-        self._empty_tup = (
-            np.empty(shape=(0,)*5, dtype=np.float32),
-            np.empty(shape=(0,)*2, dtype=np.float32)
-        )
-        if self.compute_t_indep_exp:
-            self._empty_tup += (
-                np.empty(shape=(0,)*4, dtype=np.float32),
-                np.empty(shape=(0,), dtype=np.float32)
+            operational = (
+                operational_doms[s_idx, d_idx] and sd_idx in self.use_sd_indices
+            )
+            self.dom_info[sd_idx]['operational'] = operational
+            self.dom_info[sd_idx]['x'] = geom[s_idx, d_idx, 0]
+            self.dom_info[sd_idx]['y'] = geom[s_idx, d_idx, 1]
+            self.dom_info[sd_idx]['z'] = geom[s_idx, d_idx, 2]
+            self.dom_info[sd_idx]['quantum_efficiency'] = quantum_efficiency[s_idx, d_idx]
+            self.dom_info[sd_idx]['noise_rate_per_ns'] = (
+                operational * noise_rate_per_ns[s_idx, d_idx]
             )
 
-        self.tables = [self._empty_tup]*NUM_DOMS_TOT
-        self.string_aggregation = None
-        self.depth_aggregation = None
-        self.pexp_func = None
-        self.get_llh = None
+        self.tables = []
+        self.t_indep_tables = []
+        self.table_norms = []
+        self.t_indep_table_norms = []
+        self.n_photons_per_table = []
+        self.table_meta = None
+        self.table_norm = None
+        self.t_indep_table_norm = None
+        self.sd_idx_table_indexer = np.full(
+            shape=NUM_DOMS_TOT, fill_value=np.iinfo(np.int32).min, dtype=np.int32
+        )
+
+        self._pexp = None
+        self._get_llh = None
         self.pexp_meta = None
-        self.grouped_tuples = OrderedDict()
+        self.is_stacked = None
+
+    def pexp(self, sources, hit_times, time_window, include_noise=True,
+             force_quantum_efficiency=None, include_dead_doms=True):
+        """Get expectation for photons arriving at DOMs at particular times.
+
+        Parameters
+        ----------
+        sources
+        hit_times : shape (n_hit_times,) array of floating-point dtype
+        time_window : float
+        include_noise : bool
+        force_quantum_efficiency : None or float
+        include_dead_doms : bool
+
+        Returns
+        -------
+        t_indep_exp : shape (n_doms,) array of float32
+        exp_at_hit_times : shape (n_doms, n_hit_times) array of float32
+
+        """
+        if self._pexp is None:
+            raise ValueError('No tables loaded?')
+
+        dom_info = deepcopy(self.dom_info)
+        if not include_noise:
+            time_window = 0
+            dom_info[self.use_sd_indices]['noise_rate_per_ns'] = 0
+        if force_quantum_efficiency is not None:
+            dom_info[self.use_sd_indices]['quantum_efficiency'] = force_quantum_efficiency
+        if include_dead_doms:
+            dom_info[self.use_sd_indices]['operational'] = True
+
+        num_hit_times = len(hit_times)
+        hits = np.empty(shape=num_hit_times, dtype=HIT_T)
+        hits['time'] = hit_times
+        hits['charge'] = 1
+
+        t_indep_exp = np.zeros(shape=NUM_DOMS_TOT, dtype=np.float32)
+        exp_at_hit_times = np.zeros(shape=(NUM_DOMS_TOT, num_hit_times),
+                                    dtype=np.float32)
+
+        for sd_idx in ALL_STRS_DOMS:
+            table_idx = self.sd_idx_table_indexer[sd_idx]
+            for t_idx in range(num_hit_times):
+                this_t_indep_exp, sum_log_exp_at_hit_times = self._pexp(
+                    sources=sources,
+                    hits=hits[t_idx : t_idx + 1],
+                    dom_info=dom_info[sd_idx],
+                    time_window=time_window,
+                    table=self.tables[table_idx],
+                    table_norm=self.table_norms[table_idx],
+                    t_indep_table=self.t_indep_tables[table_idx],
+                    t_indep_table_norm=self.t_indep_table_norms[table_idx]
+                )
+                exp_at_hit_times[sd_idx, t_idx] = np.exp(sum_log_exp_at_hit_times)
+            t_indep_exp[sd_idx] = this_t_indep_exp
+
+        return t_indep_exp, exp_at_hit_times
+
+    def get_llh(self, *args, **kwargs):
+        return self._get_llh(*args, **kwargs)
+
+    def load_stacked_tables(self, stacked_tables_meta_fpath,
+                            stacked_tables_fpath, stacked_t_indep_tables_fpath,
+                            mmap_tables=False, mmap_t_indep=False):
+        if self.is_stacked is not None:
+            assert self.is_stacked
+
+        if mmap_tables:
+            tables_mmap_mode = 'r'
+        else:
+            tables_mmap_mode = None
+
+        if mmap_t_indep:
+            t_indep_mmap_mode = 'r'
+        else:
+            t_indep_mmap_mode = None
+
+        self.table_meta = pickle.load(open(expand(stacked_tables_meta_fpath), 'rb'))
+
+        self.tables = np.load(
+            expand(stacked_tables_fpath),
+            mmap_mode=tables_mmap_mode
+        )
+        self.tables.setflags(write=False, align=True, uic=False)
+        self.t_indep_tables = np.load(
+            expand(stacked_t_indep_tables_fpath),
+            mmap_mode=t_indep_mmap_mode
+        )
+        self.t_indep_tables.setflags(write=False, align=True, uic=False)
+
+        if self._pexp is None:
+            pexp, get_llh, pexp_meta = generate_pexp_5d_function(
+                table=self.table_meta,
+                table_kind=self.table_kind,
+                compute_t_indep_exp=self.compute_t_indep_exp,
+                compute_unhit_doms=True, # TODO: modify when TDI table works
+                use_directionality=self.use_directionality,
+                num_phi_samples=self.num_phi_samples,
+                ckv_sigma_deg=self.ckv_sigma_deg,
+                template_library=self.template_library
+            )
+            self._pexp = pexp
+            self._get_llh = get_llh
+            self.pexp_meta = pexp_meta
+
+        self.sd_idx_table_indexer[:] = self.table_meta['sd_idx_table_indexer']
+        self.sd_idx_table_indexer.setflags(write=False, align=True, uic=False)
+        self.n_photons_per_table = self.table_meta['n_photons_per_table']
+
+        # Note that in creating the stacked tables, each indiividual table
+        # is scaled such that the effective number of photons is one (to avoid
+        # different norms across the tables).
+        table_norm, t_indep_table_norm = get_table_norm(
+            avg_angsens=self.avg_angsens,
+            quantum_efficiency=1,
+            norm_version=self.norm_version,
+            **{k: self.table_meta[k] for k in TABLE_NORM_KEYS}
+        )
+
+        self.table_norm = table_norm.astype(FTYPE)
+        self.t_indep_table_norm = t_indep_table_norm.astype(FTYPE)
+
+        self.table_norms = [self.table_norm]*self.tables.shape[0]
+        self.t_indep_table_norms = [self.t_indep_table_norm]*self.t_indep_tables.shape[0]
+
+        self.is_stacked = True
 
     def load_table(self, fpath, sd_indices, mmap, step_length=None):
         """Load a table into the set of tables.
@@ -249,8 +400,11 @@ class Retro5DTables(object):
             parameter.
 
         """
+        if self.is_stacked is not None:
+            assert not self.is_stacked
+
         if isinstance(sd_indices, int):
-            sd_indices = [sd_indices]
+            sd_indices = (sd_indices,)
 
         table = self.table_loader_func(fpath=fpath, mmap=mmap)
         if 'step_length' in table:
@@ -262,112 +416,62 @@ class Retro5DTables(object):
             assert step_length is not None
             table['step_length'] = step_length
 
+        self.table_meta = OrderedDict()
+        binning = OrderedDict()
+        for key, val in table.items():
+            if 'bin_edges' not in key:
+                continue
+            self.table_meta[key] = val
+            binning[key] = val
+
+        for k in TABLE_NORM_KEYS:
+            self.table_meta[k] = table[k]
+
+        self.table_meta['binning'] = binning
+
         table_norm, t_indep_table_norm = get_table_norm(
             avg_angsens=self.avg_angsens,
             quantum_efficiency=1,
             norm_version=self.norm_version,
-            **{k: table[k] for k in TABLE_NORM_KEYS}
+            **{k: v for k, v in self.table_meta.items() if k in TABLE_NORM_KEYS}
         )
 
         table_norm = table_norm.astype(FTYPE)
         t_indep_table_norm = t_indep_table_norm.astype(FTYPE)
 
-        table['table_norm'] = table_norm
-        table['t_indep_table_norm'] = t_indep_table_norm
-
-        if self.pexp_func is None:
-            pexp_5d, get_llh, pexp_meta = generate_pexp_5d_function(
+        if self._pexp is None:
+            pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=table,
                 table_kind=self.table_kind,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 use_directionality=self.use_directionality,
+                compute_unhit_doms=True, # TODO: modify when TDI works
                 num_phi_samples=self.num_phi_samples,
                 ckv_sigma_deg=self.ckv_sigma_deg,
                 template_library=self.template_library
             )
-            self.pexp_func = pexp_5d
-            self.get_llh = get_llh
+            self._pexp = pexp
+            self._get_llh = get_llh
             self.pexp_meta = pexp_meta
 
-        #elif pexp_meta != self.pexp_meta:
-        #    raise ValueError(
-        #        'All binnings and table parameters currently must be equal to'
-        #        ' one another.'
-        #    )
-
-        table_tup = (
-            table[self.table_name], #[self.usable_table_slice],
-            table['table_norm'],
-        )
+        self.tables.append(table[self.table_name])
+        self.table_norms.append(table_norm)
+        self.n_photons_per_table.append(table['n_photons'])
 
         if self.compute_t_indep_exp:
-            table_tup += (
-                table[self.t_indep_table_name],
-                table['t_indep_table_norm']
-            )
+            t_indep_table = table[self.t_indep_table_name]
+            self.t_indep_tables.append(t_indep_table)
+            self.t_indep_table_norms.append(t_indep_table_norm)
 
-        for sd_idx in sd_indices:
-            self.tables[sd_idx] = table_tup
+        table_idx = len(self.tables) - 1
+        self.sd_idx_table_indexer[sd_indices] = table_idx
 
         self.loaded_sd_indices = np.sort(np.concatenate([
             self.loaded_sd_indices,
-            np.atleast_1d(sd_indices).astype(np.uint16)
+            np.atleast_1d(sd_indices).astype(np.uint32)
         ]))
 
-        self._generate_grouped_tuples()
-
-    def _generate_grouped_tuples(self):
-        grp_tup = [list() for _ in self._empty_tup]
-        #print('t0')
-        #if 'tables' in self.grouped_tuples:
-        #    print('len(self.grouped_tuples["tables"])', len(self.grouped_tuples['tables']))
-        for table_tup in self.tables:
-            for idx, item in enumerate(table_tup):
-                grp_tup[idx].append(item)
-        self.grouped_tuples['tables'] = tuple(grp_tup[0])
-        self.grouped_tuples['table_norms'] = tuple(grp_tup[1])
-        if self.compute_t_indep_exp:
-            self.grouped_tuples['t_indep_tables'] = tuple(grp_tup[2])
-            self.grouped_tuples['t_indep_table_norms'] = tuple(grp_tup[3])
-        #print('len(self.grouped_tuples["tables"])', len(self.grouped_tuples['tables']))
-
-    def get_expected_det(self, sources, hits, sd_idx, time_window):
-        """Get the number of photons we expect the DOM to detect (which is the
-        same as saying the number of hits we expect in the DOM).
-
-        Parameters
-        ----------
-        sources : shape (num_sources,) array of dtype SRC_DTYPE
-            Info about photons generated photons by the event hypothesis.
-
-        hits : shape (2, num_hits) array of floats
-            Row 0 is hit times in units of ns and row 1 is hit multiplicity in
-            photoelectrons.
-
-        sd_idx : uint16 in [0, 5159]
-            See utils.misc.get_sd_idx
-
-        time_window : float in units of ns
-            Time window for computing the "time-independent" noise expectation.
-            Used (and required) if `include_noise` is True.
-
-        Returns
-        -------
-        sum_at_all_times : float64
-
-        tot_sum_log_at_hit_times : float64
-
-        """
-        dom_info = self.dom_info[sd_idx]
-        table_tup = self.tables[sd_idx]
-        sum_at_all_times, tot_sum_log_at_hit_times = self.pexp_func(
-            sources,
-            hits,
-            dom_info,
-            time_window,
-            *table_tup
-        )
-        return sum_at_all_times, tot_sum_log_at_hit_times
+        self.is_stacked = False
 
 
 def get_table_norm(
@@ -565,8 +669,6 @@ def get_table_norm(
     # copied norm from Philipp / generate_t_r_theta_table :
     elif norm_version == 'pde':
         table_norm = np.outer(
-            # NOTE: pi factor needed to get agreement with old code (why?);
-            # 4 is needed for new clsim tables (why?)
             4 * PI / surf_area_at_midpoints,
             np.full(
                 shape=(len(t_bin_edges) - 1,),
@@ -597,8 +699,6 @@ def get_table_norm(
         )
 
         table_norm = np.outer(
-            # NOTE: pi factor needed to get agreement with old code (why?);
-            # 4 is needed for new clsim tables (why?)
             1 / not_really_volumes,
             np.full(shape=(len(t_bin_edges) - 1,), fill_value=(const_bit))
         )
@@ -609,8 +709,6 @@ def get_table_norm(
         not_really_volumes *= costheta_bin_width
 
         table_norm = np.outer(
-            # NOTE: pi factor needed to get agreement with old code (why?);
-            # 4 is needed for new clsim tables (why?)
             1/(7.677767105803*0.8566215612075752) / not_really_volumes,
             np.full(shape=(len(t_bin_edges) - 1,), fill_value=constant_part)
         )

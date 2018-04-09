@@ -118,7 +118,7 @@ def extract_photons(i3file, outfile=None, photons_key='photons'):
             primary = mct.get_primaries()[0]
             mc_truth = OrderedDict()
             mc_truth['pdg'] = int(primary.pdg_encoding)
-            mc_truth['t'] = float(primary.time)
+            mc_truth['time'] = float(primary.time)
             mc_truth['x'] = float(primary.pos.x)
             mc_truth['y'] = float(primary.pos.y)
             mc_truth['z'] = float(primary.pos.z)

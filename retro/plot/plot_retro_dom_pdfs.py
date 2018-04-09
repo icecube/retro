@@ -21,6 +21,7 @@ from os.path import expanduser, expandvars, isdir, join
 from os import makedirs
 import sys
 
+from retro.const import get_string_dom_pair, get_sd_idx
 import numpy as np
 import matplotlib as mpl
 mpl.use('agg')
@@ -110,7 +111,10 @@ def plot_run_info(
         with open(expanduser(expandvars(filepath)), 'rb') as fobj:
             run_info = pickle.load(fobj)
         run_infos.append(run_info)
-        all_string_dom_pairs.update(run_info['results'].keys())
+        pairs = []
+        for sd_idx in run_info['sd_indices']:
+            pairs.append(get_string_dom_pair(sd_idx))
+        all_string_dom_pairs.update(pairs)
         if data_or_sim_label is None:
             data_or_sim_label = (
                 'Simulation: '
@@ -228,8 +232,8 @@ def plot_run_info(
                 kss.append([])
 
             results = run_info['results']
-            if (string, dom) in results.keys():
-                rslt = results[(string, dom)]
+            if (string, dom) in pairs:
+                rslt = results[get_sd_idx(string, dom)]
                 if 'exp_p_at_hit_times' in rslt:
                     y = rslt['exp_p_at_hit_times']
                     y_ti = rslt['exp_p_at_all_times']
@@ -240,7 +244,7 @@ def plot_run_info(
                 nonzero_mask = y != y[0] #~np.isclose(y, 0)
                 if np.any(nonzero_mask):
                     all_zeros = False
-                    min_mask = y >= 0.01 * y.max()
+                    min_mask = y >= 0.01 * max(y)
                     xmin = min(xmin, sample_hit_times[min_mask].min())
                     xmax = max(xmax, sample_hit_times[min_mask].max())
             else:

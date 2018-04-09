@@ -35,9 +35,10 @@ __all__ = [
     'IC_STRS', 'DC_STRS', 'DC_IC_STRS', 'DC_ALL_STRS', 'DC_SUBDUST_DOMS',
     'IC_SUBDUST_DOMS', 'DC_SUBDUST_STRS_DOMS', 'DC_IC_SUBDUST_STRS_DOMS',
     'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
-    'DC_ALL_STRS_DOMS',
+    'ALL_STRS_DOMS_SET', 'DC_ALL_STRS_DOMS',
 
-    'EMPTY_HITS',
+    'EMPTY_HITS', 'EMPTY_SOURCES',
+    'SRC_OMNI', 'SRC_CKV_BETA1',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -66,6 +67,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import FTYPE
+from retro import retro_types
 
 
 def get_sd_idx(string, dom):
@@ -82,7 +84,25 @@ def get_sd_idx(string, dom):
     sd_idx : np.uint16 in [0, 5159]
 
     """
-    return np.uint16((string-1) * NUM_DOMS_PER_STRING + (dom-1))
+    #return np.uint16((string-1) * NUM_DOMS_PER_STRING + (dom-1))
+    return np.uint32((dom-1) * NUM_STRINGS + (string-1))
+
+
+def get_string_dom_pair(sd_idx):
+    """Get an IceCube string number (1 to 86) and a DOM number(1 to 60) from single
+    uint16 index.
+
+    Parameters
+    ----------
+    sd_idx : np.uint16 in [0, 5159]
+
+    Returns
+    -------
+    string : int in [1, 60]
+    dom : int in [1, 60]
+    """
+    pair = divmod(sd_idx, NUM_STRINGS)
+    return pair[1] + 1, pair[0] + 1
 
 
 # -- Physical / mathematical constants -- #
@@ -214,7 +234,16 @@ DC_ALL_SUBDUST_STRS_DOMS = np.concatenate(
 ALL_STRS = list(range(1, 86+1))
 ALL_DOMS = list(range(1, 60+1))
 ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(ALL_STRS, ALL_DOMS)])
+ALL_STRS_DOMS_SET = set(ALL_STRS_DOMS)
 DC_ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(DC_STRS, ALL_DOMS)])
 
 
-EMPTY_HITS = np.empty(shape=(2, 0), dtype=FTYPE)
+EMPTY_HITS = np.empty(shape=0, dtype=retro_types.HIT_T)
+
+EMPTY_SOURCES = np.empty(shape=0, dtype=retro_types.SRC_T)
+
+SRC_OMNI = np.uint32(0)
+"""Source kind designator for a point emitting omnidirectional light"""
+
+SRC_CKV_BETA1 = np.uint32(1)
+"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""

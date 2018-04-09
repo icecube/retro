@@ -29,7 +29,7 @@ import numpy as np
 from scipy import interpolate
 
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.hypo.discrete_muon_kernels import (
@@ -47,23 +47,26 @@ hypo_params = HypoParams8D(
         z=0,
         track_azimuth=0,
         track_zenith=np.pi / 2,
-        track_energy=10,
-        cascade_energy=5
+        track_energy= 20,
+        cascade_energy= 10
 )
 
-#dedx = table_energy_loss_muon(hypo_params, dt=1.0)
-#print('Time values for non-constant dedx function:')
-#print(dedx[:,0])
-#const = const_energy_loss_muon(hypo_params, dt=1.0)
-#print('Time values for constant dedx function:')
-#print(const[:,0])
-#
-#print('x values for non-constant dedx function:')
-#print(dedx[:,1])
-#print('x values for constant dedx function:')
-#print(const[:,1])
+dedx = table_energy_loss_muon(hypo_params, dt=1.0)
+#print('non-constant dedx')
+#print(dedx)
+print('Time values for non-constant dedx function:')
+print(dedx[:,0])
+const = const_energy_loss_muon(hypo_params, dt=1.0)
+#print('constant dedx')
+#print(const)
+print('Time values for constant dedx function:')
+print(const[:,0])
+print('x values for non-constant dedx function:')
+print(dedx[:,1])
+print('x values for constant dedx function:')
+print(const[:,1])
 
-for i in range(1, -4, -1):
-    dedx = table_energy_loss_muon(hypo_params, dt = 10 ** i)
-    print(dedx[-1, 0])
-    print(dedx[-1, 1])
+#for i in range(1, -2, -1):
+#    dedx = table_energy_loss_muon(hypo_params, dt = 10 ** i)
+#    print(dedx[-1, 0])
+#    print(dedx[-1, 1])

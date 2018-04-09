@@ -41,10 +41,11 @@ import sys
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-import retro
+from retro import DATA_DIR
+from retro.utils.misc import mkdir
 
 
 N_STRINGS = 86
@@ -79,12 +80,12 @@ def extract_gcd(gcd_file, outdir=None):
     src_gcd_stripped = src_gcd_basename.rstrip('.bz2').rstrip('.gz').rstrip('.i3').rstrip('.pkl')
 
     outfname = src_gcd_stripped + '.pkl'
-    data_dir_fpath = abspath(join(retro.DATA_DIR, outfname))
+    data_dir_fpath = abspath(join(DATA_DIR, outfname))
 
     outfpath = None
     if outdir is not None:
-        outdir = retro.utils.misc.expand(outdir)
-        retro.utils.misc.mkdir(outdir)
+        outdir = expanduser(expandvars(outdir))
+        mkdir(outdir)
         outfpath = join(outdir, outfname)
 
         if isfile(data_dir_fpath) and data_dir_fpath != abspath(outfpath):

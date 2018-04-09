@@ -460,7 +460,7 @@ def test_survival_prob():
         units='rad'
     )
     t_binning = OneDimBinning(
-        name='t',
+        name='time',
         domain=(0, 100),
         is_lin=True,
         num_bins=10,

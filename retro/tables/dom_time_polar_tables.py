@@ -339,7 +339,7 @@ class DOMTimePolarTables(object):
 
         Parameters
         ----------
-        sources : shape (N,) numpy ndarray, dtype SRC_DTYPE
+        sources : shape (N,) numpy ndarray, dtype SRC_T
 
         use_directionality : None or bool
             Whether to use photon directionality informatino in hypo / table to

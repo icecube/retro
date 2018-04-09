@@ -41,7 +41,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import HYPO_PARAMS_T, init_obj
-from retro.likelihood import get_llh
+from retro import likelihood
+from retro.const import ALL_STRS_DOMS_SET
 from retro.scan import scan
 from retro.utils.misc import expand, mkdir, sort_dict
 
@@ -50,13 +51,9 @@ def parse_args(description=__doc__):
     """Parse command-line arguments"""
     parser = ArgumentParser(description=description)
 
-    parser.add_argument(
-        '--outdir', required=True
-    )
+    parser.add_argument('--outdir', required=True)
 
-    group = parser.add_argument_group(
-        title='Scan parameters'
-    )
+    group = parser.add_argument_group(title='Scan parameters')
     for dim in HYPO_PARAMS_T._fields:
         group.add_argument(
             '--{}'.format(dim.replace('_', '-')), nargs='+', required=True,
@@ -67,14 +64,18 @@ def parse_args(description=__doc__):
             stepsize of 0.2.'''.format(dim_hr=dim.replace('_', ' '))
         )
 
-    dom_tables_kw, hypo_kw, hits_kw, scan_kw = (
-        init_obj.parse_args(parser=parser)
-    )
+    split_kwargs = init_obj.parse_args(dom_tables=True, hypo=True, events=True,
+                                       parser=parser)
+    split_kwargs['scan_kw'] = split_kwargs.pop('other_kw')
 
-    return dom_tables_kw, hypo_kw, hits_kw, scan_kw
+    if split_kwargs['events_kw']['hits'] is None:
+        raise ValueError('Must specify a path to a pulse series or photon'
+                         ' series using --hits.')
+
+    return split_kwargs
 
 
-def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
+def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     """Script "main" function"""
     t00 = time.time()
 
@@ -86,7 +87,7 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
 
     dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
     hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
-    hits_generator = init_obj.get_hits(**hits_kw)
+    events_generator = init_obj.get_events(**events_kw)
 
     # Pop 'outdir' from `scan_kw` since we don't want to store this info in
     # the metadata dict.
@@ -96,24 +97,60 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
     print('Scanning paramters')
     t0 = time.time()
 
-    metric_kw = dict(
-        sd_indices=dom_tables.loaded_sd_indices,
-        time_window=None,
-        hypo_handler=hypo_handler,
-        dom_tables=dom_tables,
-        tdi_table=None
-    )
+    fast_llh = True
+
+    if fast_llh:
+        get_llh = dom_tables._get_llh
+        dom_info = dom_tables.dom_info
+        tables = dom_tables.tables
+        table_norm = dom_tables.table_norm
+        t_indep_tables = dom_tables.t_indep_tables
+        t_indep_table_norm = dom_tables.t_indep_table_norm
+        sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
+        metric_kw = {}
+        def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,
+                           time_window):
+            sources = hypo_handler.get_sources(hypo)
+            return get_llh(
+                sources=sources,
+                hits=hits,
+                hits_indexer=hits_indexer,
+                unhit_sd_indices=unhit_sd_indices,
+                sd_idx_table_indexer=sd_idx_table_indexer,
+                time_window=time_window,
+                dom_info=dom_info,
+                tables=tables,
+                table_norm=table_norm,
+                t_indep_tables=t_indep_tables,
+                t_indep_table_norm=t_indep_table_norm
+            )
+    else:
+        metric_kw = dict(dom_tables=dom_tables, tdi_table=None)
+        get_llh = likelihood.get_llh
+        def metric_wrapper(hypo, **metric_kw):
+            sources = hypo_handler.get_sources(hypo)
+            return get_llh(sources=sources, **metric_kw)
 
     n_points_total = 0
     metric_vals = []
-    for event_idx, hits, time_window, _, _ in hits_generator: # pylint: disable=unused-variable
+    for _, event in events_generator:
+        hits = event['hits']
+        hits_indexer = event['hits_indexer']
+        hits_summary = event['hits_summary']
         metric_kw['hits'] = hits
-        metric_kw['time_window'] = time_window
+        metric_kw['hits_indexer'] = hits_indexer
+        hit_sd_indices = hits_indexer['sd_idx']
+        unhit_sd_indices = np.array(
+            sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
+            dtype=np.uint32
+        )
+        metric_kw['unhit_sd_indices'] = unhit_sd_indices
+        metric_kw['time_window'] = np.float32(
+            hits_summary['time_window_stop'] - hits_summary['time_window_start']
+        )
 
         t1 = time.time()
-        metric_vals.append(
-            scan(scan_values=scan_values, metric=get_llh, metric_kw=metric_kw)
-        )
+        metric_vals.append(scan(scan_values, metric_wrapper, metric_kw))
         dt = time.time() - t1
 
         n_points = metric_vals[-1].size
@@ -130,7 +167,7 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
         ('scan_kw', sort_dict(scan_kw)),
         ('dom_tables_kw', sort_dict(dom_tables_kw)),
         ('hypo_kw', sort_dict(hypo_kw)),
-        ('hits_kw', sort_dict(hits_kw)),
+        ('events_kw', sort_dict(events_kw)),
     ])
 
     outfpath = join(outdir, 'scan.pkl')
@@ -144,4 +181,4 @@ def scan_llh(dom_tables_kw, hypo_kw, hits_kw, scan_kw):
 
 
 if __name__ == '__main__':
-    metric_vals, info = scan_llh(*parse_args()) # pylint: disable=invalid-name
+    metric_vals, info = scan_llh(**parse_args()) # pylint: disable=invalid-name

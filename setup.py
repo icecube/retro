@@ -40,6 +40,7 @@ setup(
         'numpy>=1.11'
     ],
     install_requires=[
+        'enum34',
         'scipy>=0.17',
         'matplotlib>=2.0',
         'pyfits',

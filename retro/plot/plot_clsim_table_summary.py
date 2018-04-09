@@ -366,7 +366,7 @@ def plot_clsim_table_summary(
     units = dict(r='m', t='ns', deltaphidir=r'rad/$\pi$')
 
     logx_dims = []
-    logy_dims = ['r', 't', 'deltaphidir']
+    logy_dims = ['r', 'time', 'deltaphidir']
 
     flabel = ''
     same_flabel = formatter(same_items, fname=True)

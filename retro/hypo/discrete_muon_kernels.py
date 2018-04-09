@@ -11,6 +11,8 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     'ALL_REALS',
     'MULEN_INTERP',
+    'TABLE_LOWER_BOUND',
+    'TABLE_UPPER_BOUND',
     'const_energy_loss_muon',
     'table_energy_loss_muon'
 ]
@@ -40,14 +42,13 @@ from scipy import interpolate
 
 RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
     COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-    TRACK_PHOTONS_PER_M
+    TRACK_PHOTONS_PER_M, SRC_CKV_BETA1, EMPTY_SOURCES
 )
-from retro.hypo.discrete_hypo import SRC_DTYPE, SRC_CKV_BETA1
+from retro.retro_types import SRC_T
 
 
 ALL_REALS = (-np.inf, np.inf)
@@ -61,7 +62,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     Parameters
     ----------
     hypo_params : HypoParams*
-        Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
+        Must have vertex (`.time`, `.x`, `.y`, and `.z), `.track_energy`,
         `.track_azimuth`, and `.track_zenith` attributes.
 
     dt : float
@@ -69,13 +70,13 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_DTYPE
+    sources : shape (N,) numpy.ndarray, dtype SRC_T
 
     """
     track_energy = hypo_params.track_energy
 
     if track_energy == 0:
-        return np.empty((0,), dtype=SRC_DTYPE)
+        return EMPTY_SOURCES
 
     length = track_energy * TRACK_M_PER_GEV
     duration = length / SPEED_OF_LIGHT_M_PER_NS
@@ -103,12 +104,11 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
 
     sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
 
-    sources = np.empty(shape=int(n_segments), dtype=SRC_DTYPE)
+    sources = np.empty(shape=int(n_segments), dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
-    sources['t'] = hypo_params.t + sampled_dt
-    sources['x'] = hypo_params.x + sampled_dt * (dir_x *
-                                                 SPEED_OF_LIGHT_M_PER_NS)
+    sources['time'] = hypo_params.time + sampled_dt
+    sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
     sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
     sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)
     sources['photons'] = photons_per_segment
@@ -135,15 +135,20 @@ with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'rb') as csvfile:
         rows.append(row)
 
 energies = np.array([float(x) for x in rows[0][1:]])
+
+TABLE_UPPER_BOUND = np.max(energies)
+TABLE_LOWER_BOUND = np.min(energies)
+
 stopping_power = np.array([float(x) for x in rows[1][1:]])
 dxde = interpolate.UnivariateSpline(x=energies, y=1/stopping_power, s=0, k=3)
-esamps = np.logspace(-1, 5, int(1e4))
-dxde_samps = dxde(esamps)
+esamps = np.logspace(np.log10(TABLE_LOWER_BOUND), np.log10(TABLE_UPPER_BOUND), int(1e4))
+dxde_samps = np.clip(dxde(esamps), a_min=0, a_max=np.inf)
 
 lengths = [0]
 for idx, egy in enumerate(esamps[1:]):
     lengths.append(np.trapz(y=dxde_samps[:idx+1], x=esamps[:idx+1]))
 lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
+
 MULEN_INTERP = interpolate.UnivariateSpline(x=esamps, y=lengths, k=1, s=0)
 
 
@@ -156,7 +161,7 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
     Parameters
     ----------
     hypo_params : HypoParams*
-        Must have vertex (`.t`, `.x`, `.y`, and `.z), `.track_energy`,
+        Must have vertex (`.time`, `.x`, `.y`, and `.z), `.track_energy`,
         `.track_azimuth`, and `.track_zenith` attributes.
 
     dt : float
@@ -164,16 +169,25 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_DTYPE
+    sources : shape (N,) numpy.ndarray, dtype SRC_T
     """
     track_energy = hypo_params.track_energy
 
     # Check for no-track condition
     if track_energy == 0:
-        return np.array([], dtype=SRC_DTYPE)
+        return EMPTY_SOURCES
+
+    if track_energy > TABLE_UPPER_BOUND:
+        raise ValueError('Make sure to set energy bounds such that track_energy'
+                         ' cannot exceed table upper limit of {:.3f}'
+                         ' GeV'.format(TABLE_UPPER_BOUND))
 
     # Total expected length of muon from table
     muon_len = MULEN_INTERP(track_energy)
+
+    # Since table cuts off, this can be 0 even for track_energy != 0
+    if muon_len == 0:
+        return EMPTY_SOURCES
 
     # At least one segment
     n_segments = max(1.0, muon_len // (SPEED_OF_LIGHT_M_PER_NS * dt))
@@ -197,10 +211,10 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
 
     sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
 
-    sources = np.empty(shape=int(n_segments), dtype=SRC_DTYPE)
+    sources = np.empty(shape=int(n_segments), dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
-    sources['t'] = hypo_params.t + sampled_dt
+    sources['time'] = hypo_params.time + sampled_dt
     sources['x'] = hypo_params.x + sampled_dt * (dir_x * SPEED_OF_LIGHT_M_PER_NS)
     sources['y'] = hypo_params.y + sampled_dt * (dir_y * SPEED_OF_LIGHT_M_PER_NS)
     sources['z'] = hypo_params.z + sampled_dt * (dir_z * SPEED_OF_LIGHT_M_PER_NS)

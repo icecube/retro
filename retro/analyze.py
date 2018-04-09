@@ -56,16 +56,16 @@ for i in range(1000):
 llhs = np.array(llhs)
 bestfits = np.array(bestfits)
 
-names = ['t', 'x', 'y', 'z', 'zenith', 'azimuth', 'energy', 'track_fraction']
+names = ['time', 'x', 'y', 'z', 'zenith', 'azimuth', 'energy', 'track_fraction']
 units = ['ns', 'm', 'm', 'm', 'rad', 'rad', 'GeV', None]
 #event 1:
 #if event == 1:
-#    truth = {'t':0, 'x':70, 'y':-10, 'z':-250, 'zenith':1.27, 'azimuth':0.7, 'energy':20, 'track_fraction':1}
+#    truth = {'time':0, 'x':70, 'y':-10, 'z':-250, 'zenith':1.27, 'azimuth':0.7, 'energy':20, 'track_fraction':1}
 #event 2:
 #elif event == 2:
-#    truth = {'t':0, 'x':90, 'y':-90, 'z':-450, 'zenith':0.84, 'azimuth':0., 'energy':20, 'track_fraction':0}
+#    truth = {'time':0, 'x':90, 'y':-90, 'z':-450, 'zenith':0.84, 'azimuth':0., 'energy':20, 'track_fraction':0}
 truth = {}
-truth['t'] = 0
+truth['time'] = 0
 truth['x'] = 0
 truth['y'] = 0
 truth['z'] = -400
