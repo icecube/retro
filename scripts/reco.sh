@@ -20,8 +20,11 @@ tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined
 #no_noise="--no-noise"
 no_noise=""
 
-importance_sampling="--importance-sampling"
-consteff=""
+#importance_sampling="--importance-sampling"
+importance_sampling=""
+
+consteff="--const-eff"
+#consteff=""
 
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
@@ -29,22 +32,22 @@ consteff=""
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
-    --energy-prior log_uniform \
-    --energy-lims 0.1,1000  \
+    --energy-prior log_normal \
+    --energy-lims 0.2,2000  \
     \
     $importance_sampling \
-    --max-modes 1 \
+    --max-modes 4 \
     $consteff \
     --n-live 160 \
     --evidence-tol 0.5 \
     --sampling-eff 0.3 \
-    --max-iter 1000 \
+    --max-iter 10000 \
     --seed 0 \
     \
     --dom-tables-kind "ckv_templ_compr" \
     --dom-tables-fname-proto "$proto" \
     --use-doms "all" \
-    --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
+    --gcd "GeoCalibDetectorStatus_IC86.55697_corrected_V2.pkl" \
     --norm-version "binvol2" \
     $tmpl_lib \
     --step-length 1.0 \

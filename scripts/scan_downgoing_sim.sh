@@ -29,8 +29,8 @@ tblkind="ckv_templ_compr"
 #use_doms="dc_subdust"
 use_doms="all"
 
-#noise="--no-noise"
-noise=""
+#no_noise="--no-noise"
+no_noise=""
 
 gcd="GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.bz2"
 angsens="h2-50cm"
@@ -78,7 +78,7 @@ cscdescan="0-100:1"
 #    $tmpl_lib \
 #    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 #
 #~/src/retro/retro/scan_llh.py \
@@ -104,7 +104,7 @@ cscdescan="0-100:1"
 #    $tmpl_lib \
 #    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 
 ~/src/retro/retro/scan_llh.py \
@@ -130,7 +130,7 @@ cscdescan="0-100:1"
     --dom-tables-fname-proto "$proto" \
     --use-doms "$use_doms" \
     --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
-    $noise \
+    $no_noise \
     --norm-version "binvol2" \
     $tmpl_lib \
     --step-length 1.0 \
@@ -163,7 +163,7 @@ cscdescan="0-100:1"
 #    $tmpl_lib \
 #    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 #
 #~/src/retro/retro/scan_llh.py \
@@ -189,7 +189,7 @@ cscdescan="0-100:1"
 #    $tmpl_lib \
 #    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 
 wait
