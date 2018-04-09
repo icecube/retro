@@ -12,6 +12,10 @@ __all__ = [
     'CUBE_DIMS',
     'PRI_UNIFORM',
     'PRI_LOG_UNIFORM',
+    'PRI_LOG_NORMAL',
+    'PRI_COSINE',
+    'PRI_GAUSSIAN',
+    'PRI_SPEFIT2',
     'run_multinest',
     'reco',
     'parse_args'
@@ -80,6 +84,7 @@ CUBE_CSCD_AZ_IDX = None
 
 PRI_UNIFORM = 'uniform'
 PRI_LOG_UNIFORM = 'log_uniform'
+PRI_LOG_NORMAL = 'log_normal'
 PRI_COSINE = 'cosine'
 PRI_GAUSSIAN = 'gaussian'
 PRI_SPEFIT2 = 'spefit2'
@@ -195,26 +200,22 @@ def run_multinest(
             def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
                 cube[n] = norm * exp(-((cube[n] - mean) / stddev)**2)
 
+        elif prior_kind is PRI_LOG_NORMAL:
+            priors_used[dim_name] = (prior_kind, prior_params)
+            shape, loc, scale, low, high = prior_params
+            lognorm = stats.lognorm(shape, loc, scale)
+            def prior_func(cube, lognorm=lognorm, n=dim_num, low=low, high=high):
+                cube[n] = np.clip(lognorm.isf(cube[n]), a_min=low, a_max=high)
+
         elif prior_kind is PRI_SPEFIT2:
             spe_fit_val = event['recos']['SPEFit2'][dim_name]
-            loc = spe_fit_val + prior_params[0]
-            scale = prior_params[1]
-            priors_used[dim_name] = (prior_kind, (loc, scale))
+            rel_loc, scale, low, high = prior_params
+            loc = spe_fit_val + rel_loc
             cauchy = stats.cauchy(loc=loc, scale=scale)
             if dim_name == T:
-                low = hits_summary['time_window_start'] - 4000
-                high = hits_summary['time_window_stop']
-            elif dim_name == X:
-                low = -800
-                high = 800
-            elif dim_name == Y:
-                low = -700
-                high = 700
-            elif dim_name == Z:
-                low = -1200
-                high = 550
-            else:
-                raise NotImplementedError('SPEFit2 cannot be used for {}'.format(dim_name))
+                low += hits_summary['time_window_start']
+                high += hits_summary['time_window_stop']
+            priors_used[dim_name] = (prior_kind, (loc, scale, low, high))
             def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high):
                 cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
 
@@ -432,14 +433,6 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
 
     print('Running reconstructions...')
 
-    #llh_kw = dict(
-    #    tables=dom_tables.tables,
-    #    table_norm=dom_tables.table_norm,
-    #    t_indep_tables=dom_tables.t_indep_tables,
-    #    t_indep_table_norm=dom_tables.t_indep_table_norm,
-    #    sd_idx_table_indexer=dom_tables.sd_idx_table_indexer
-    #)
-
     spatial_prior_orig = reco_kw.pop('spatial_prior').strip()
     spatial_prior_name = spatial_prior_orig.lower()
     if spatial_prior_name == 'ic':
@@ -455,29 +448,72 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
         y_prior = (PRI_UNIFORM, (-210, 150))
         z_prior = (PRI_UNIFORM, (-610, -60))
     elif spatial_prior_name == 'spefit2':
-        x_prior = (PRI_SPEFIT2, (-0.19687812829978152, 14.282171566308806))
-        y_prior = (PRI_SPEFIT2, (-0.2393645701205161, 15.049528023495354))
-        z_prior = (PRI_SPEFIT2, (-5.9170661027492546, 12.089399308036718))
+        x_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc, scale parameters
+                -0.19687812829978152, 14.282171566308806,
+                # Hard limits
+                -600, 750
+            )
+        )
+        y_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc, scale parameters
+                -0.2393645701205161, 15.049528023495354,
+                # Hard limits
+                -750, 650
+            )
+        )
+        z_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc, scale parameters
+                -5.9170661027492546, 12.089399308036718,
+                # Hard limits
+                -1200, 200
+            )
+        )
     else:
         raise ValueError('Spatial prior "{}" not recognized'
                          .format(spatial_prior_orig))
 
     temporal_prior_orig = reco_kw.pop('temporal_prior').strip()
     temporal_prior_name = temporal_prior_orig.lower()
-    if temporal_prior_name == 'uniform':
-        time_prior = (PRI_UNIFORM, (-4000, 0))
-    elif temporal_prior_name == 'spefit2':
-        time_prior = (PRI_SPEFIT2, (-82.631395081663754, 75.619895703067343))
+    if temporal_prior_name == PRI_UNIFORM:
+        time_prior = (PRI_UNIFORM, (-4e3, 0.0))
+    elif temporal_prior_name == PRI_SPEFIT2:
+        time_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc (rel to SPEFit2 time), scale
+                -82.631395081663754, 75.619895703067343,
+                # Hard limits (relative to left, right edges of window,
+                # respectively)
+                -4e3, 0.0
+            )
+        )
     else:
         raise ValueError('Temporal prior "{}" not recognized'
                          .format(temporal_prior_orig))
 
     energy_prior_name = reco_kw.pop('energy_prior')
     energy_lims = reco_kw.pop('energy_lims')
-    if energy_prior_name == 'uniform':
-        energy_prior = (PRI_UNIFORM, tuple(energy_lims))
-    elif energy_prior_name == 'log_uniform':
-        energy_prior = (PRI_LOG_UNIFORM, tuple(energy_lims))
+    if energy_prior_name == PRI_UNIFORM:
+        energy_prior = (PRI_UNIFORM, (np.min(energy_lims), np.max(energy_lims)))
+    elif energy_prior_name == PRI_LOG_UNIFORM:
+        energy_prior = (PRI_LOG_UNIFORM, (np.min(energy_lims), np.max(energy_lims)))
+    elif energy_prior_name == PRI_LOG_NORMAL:
+        energy_prior = (
+            PRI_LOG_NORMAL,
+            (
+                # scipy.stats.lognorm 3 paramters
+                0.96251341305506233, 0.4175592980195757, 17.543915051586644,
+                # hard limits
+                np.min(energy_lims), np.max(energy_lims)
+            )
+        )
     else:
         raise ValueError(str(energy_prior_name))
 
@@ -553,14 +589,17 @@ def parse_args(description=__doc__):
     )
     group.add_argument(
         '--energy-prior',
-        choices='uniform log_uniform'.split(),
+        choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
+        required=True,
         help='''Prior to put on _total_ event energy. Must specify
-        --energy-lims if using either "uniform" or "log_uniform" priors.'''
+        --energy-lims.'''
     )
     group.add_argument(
-        '--energy-lims', nargs='+', default=None,
+        '--energy-lims', nargs='+',
+        required=True,
         help='''Lower and upper energy limits, in GeV. E.g.: --energy-lims=1,100
-        Required if --energy-prior is "log_uniform" or "uniform"'''
+        Required if --energy-prior is {}, {}, or {}'''
+        .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
     )
 
     group = parser.add_argument_group(
@@ -573,7 +612,7 @@ def parse_args(description=__doc__):
         but also can be unstable. Does not work with multimodal.'''
     )
     group.add_argument(
-        '--max-modes', type=int,
+        '--max-modes', type=int, required=True,
         help='''Set to 1 to disable multi-modal search. Must be 1 if --importance-sampling is
         specified.'''
     )
@@ -582,16 +621,16 @@ def parse_args(description=__doc__):
         help='''Constant efficiency mode.'''
     )
     group.add_argument(
-        '--n-live', type=int,
+        '--n-live', type=int, required=True
     )
     group.add_argument(
-        '--evidence-tol', type=float,
+        '--evidence-tol', type=float, required=True
     )
     group.add_argument(
-        '--sampling-eff', type=float,
+        '--sampling-eff', type=float, required=True
     )
     group.add_argument(
-        '--max-iter', type=int,
+        '--max-iter', type=int, required=True,
         help='''Note that iterations of the MultiNest algorithm are _not_ the
         number of likelihood evaluations. An iteration comes when one live
         point is discarded by finding a sample with higher likelihood than at
@@ -599,7 +638,7 @@ def parse_args(description=__doc__):
         evaluatsions to find.'''
     )
     group.add_argument(
-        '--seed', type=int,
+        '--seed', type=int, required=True,
         help='''Integer seed for MultiNest's random number generator.'''
     )
 
@@ -609,14 +648,14 @@ def parse_args(description=__doc__):
 
     split_kwargs['reco_kw'] = reco_kw = split_kwargs.pop('other_kw')
 
-    if reco_kw['energy_prior'] in ['uniform', 'log_uniform']:
+    if reco_kw['energy_prior'] in [PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL]:
         assert reco_kw['energy_lims'] is not None
         elims = ''.join(reco_kw['energy_lims'])
         elims = [float(l) for l in elims.split(',')]
         reco_kw['energy_lims'] = elims
     elif reco_kw['energy_lims'] is not None:
-        raise ValueError('--energy-limits are not used with energy priors'
-                         ' besides "uniform" and "log_uniform".')
+        raise ValueError('--energy-limits not used with energy prior {}'
+                         .format(reco_kw['energy_prior']))
 
     return split_kwargs
 
