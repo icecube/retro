@@ -28,22 +28,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+import math
 from os.path import abspath, dirname
 import sys
 
-import math
 import numpy as np
+from scipy.stats import gamma, pareto
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
+from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS, HYPO_PARAMS_T
 from retro.const import (
     PI, COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES,
-    SRC_OMNI, SRC_CKV_BETA1
+    SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 )
-from retro.retro_types import SRC_T
+from retro.retro_types import SRC_T, HypoParams8D
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -75,7 +76,6 @@ def point_cascade(hypo_params):
     return sources
 
 
-#@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def point_ckv_cascade(hypo_params):
     """Single-point Cherenkov-emitting cascade with axis collinear with the
     track.
@@ -120,5 +120,125 @@ def point_ckv_cascade(hypo_params):
     sources[0]['ckv_theta'] = THETA_CKV
     sources[0]['ckv_costheta'] = COS_CKV
     sources[0]['ckv_sintheta'] = SIN_CKV
+
+    return sources
+
+
+# TODO: use quasi-random (low discrepancy) numbers instead of pseudo-random
+#       (e.g., Sobol sequence)
+
+# Create angular zenith distribution
+np.random.seed(0)
+
+MAX_NUM_SAMPLES = int(1e5)
+
+ZEN_DIST = pareto(b=1.91833423, loc=-22.82924369, scale=22.82924369)
+ZEN_SAMPLES = np.deg2rad(np.clip(ZEN_DIST.rvs(size=MAX_NUM_SAMPLES), a_min=0, a_max=180))
+
+# Create angular azimuth distribution
+AZI_SAMPLES = np.random.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
+
+
+def one_dim_cascade(hypo_params, num_samples):
+    """
+    Cascade with both longitudinal and angular distributions
+
+    Use as a hypo_kernel with the DiscreteHypo class.
+
+    Parameters
+    ----------
+    hypo_params : HYPO_PARAMS_T
+    num_samples : integer
+        Number of times to sample the distributions
+
+    Returns
+    -------
+    sources
+
+    """
+    # Assign vertex
+    t = hypo_params.t
+    x = hypo_params.x
+    y = hypo_params.y
+    z = hypo_params.z
+
+    # Assign cascade axis direction, works with 8D or 10D
+    if HYPO_PARAMS_T is HypoParams8D:
+        zenith = np.pi - hypo_params.track_zenith
+        azimuth = np.pi + hypo_params.track_azimuth
+    else:
+        zenith = np.pi - hypo_params.cascade_zenith
+        azimuth = np.pi + hypo_params.cascade_azimuth
+
+    sin_zen = math.sin(zenith)
+    cos_zen = math.cos(zenith)
+    sin_azi = math.sin(azimuth)
+    cos_azi = math.cos(azimuth)
+    dir_x = sin_zen * cos_azi
+    dir_y = sin_zen * sin_azi
+    dir_z = cos_zen
+
+    # Create rotation matrix
+    rot_mat = np.array(
+        [[cos_azi * cos_zen, -sin_azi, cos_azi * sin_zen],
+         [sin_azi * cos_zen, cos_zen, sin_azi * sin_zen],
+         [-sin_zen, 0, cos_zen]]
+    )
+
+    # Define photons per sample
+    photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / num_samples
+
+    # Create longitudinal distribution (from arXiv:1210.5140v2)
+    alpha = 2.01849
+    beta = 1.45469
+    a = alpha + beta * np.log10(hypo_params.cascade_energy)
+    b = 0.63207
+    rad_length = 0.3975
+
+    np.random.seed(1)
+    long_dist = gamma(a, scale=rad_length/b)
+    long_samples = long_dist.rvs(size=num_samples)
+
+    # Grab samples from angular zenith distribution
+    zen_samples = ZEN_SAMPLES[:num_samples]
+
+    # Grab samples from angular azimuth distribution
+    azi_samples = AZI_SAMPLES[:num_samples]
+
+    # Create angular vectors distribution
+    sin_zen = np.sin(zen_samples)
+    x_ang_dist = sin_zen * np.cos(azi_samples)
+    y_ang_dist = sin_zen * np.sin(azi_samples)
+    z_ang_dist = np.cos(zen_samples)
+    ang_dist = np.concatenate(
+        (x_ang_dist[np.newaxis, :],
+         y_ang_dist[np.newaxis, :],
+         z_ang_dist[np.newaxis, :]),
+        axis=0
+    )
+
+    final_ang_dist = np.dot(rot_mat, ang_dist)
+    final_phi_dist = np.arctan2(final_ang_dist[1], final_ang_dist[0])
+    final_theta_dist = np.arccos(final_ang_dist[2])
+
+    # Create photon matrix
+    sources = np.empty(shape=num_samples, dtype=SRC_T)
+
+    sources['kind'] = SRC_CKV_BETA1
+    sources['t'] = t + long_samples / SPEED_OF_LIGHT_M_PER_NS
+    sources['x'] = x + long_samples * dir_x
+    sources['y'] = y + long_samples * dir_y
+    sources['z'] = z + long_samples * dir_z
+    sources['photons'] = photons_per_sample
+
+    sources['dir_costheta'] = final_ang_dist[2]
+    sources['dir_sintheta'] = np.sin(final_theta_dist)
+
+    sources['dir_cosphi'] = np.cos(final_phi_dist)
+    sources['dir_sinphi'] = np.sin(final_phi_dist)
+
+    sources['ckv_theta'] = THETA_CKV
+    sources['ckv_costheta'] = COS_CKV
+    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
