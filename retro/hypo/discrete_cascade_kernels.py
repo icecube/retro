@@ -28,7 +28,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-import math
+from math import cos, sin, log10
 from os.path import abspath, dirname
 import sys
 
@@ -62,7 +62,8 @@ def point_cascade(hypo_params):
     sources
 
     """
-    if hypo_params.cascade_energy == 0:
+    cascade_energy = hypo_params.cascade_energy
+    if cascade_energy == 0:
         return EMPTY_SOURCES
 
     sources = np.empty(shape=(1,), dtype=SRC_T)
@@ -71,7 +72,7 @@ def point_cascade(hypo_params):
     sources[0]['x'] = hypo_params.x
     sources[0]['y'] = hypo_params.y
     sources[0]['z'] = hypo_params.z
-    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy
+    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * cascade_energy
 
     return sources
 
@@ -91,17 +92,22 @@ def point_ckv_cascade(hypo_params):
     sources : shape (1,) array of dtype retro_types.SRC_T
 
     """
-    if hypo_params.cascade_energy == 0:
+    cascade_energy = hypo_params.cascade_energy
+    if cascade_energy == 0:
         return EMPTY_SOURCES
 
-    opposite_zenith = PI - hypo_params.track_zenith
-    opposite_azimuth = PI + hypo_params.track_azimuth
+    if HYPO_PARAMS_T is HypoParams8D:
+        opposite_zenith = PI - hypo_params.track_zenith
+        opposite_azimuth = PI + hypo_params.track_azimuth
+    else:
+        opposite_zenith = PI - hypo_params.cascade_zenith
+        opposite_azimuth = PI + hypo_params.cascade_azimuth
 
-    dir_costheta = math.cos(opposite_zenith)
-    dir_sintheta = math.sin(opposite_zenith)
+    dir_costheta = cos(opposite_zenith)
+    dir_sintheta = sin(opposite_zenith)
 
-    dir_cosphi = math.cos(opposite_azimuth)
-    dir_sinphi = math.sin(opposite_azimuth)
+    dir_cosphi = cos(opposite_azimuth)
+    dir_sinphi = sin(opposite_azimuth)
 
     sources = np.empty(shape=(1,), dtype=SRC_T)
     sources[0]['kind'] = SRC_CKV_BETA1
@@ -109,7 +115,7 @@ def point_ckv_cascade(hypo_params):
     sources[0]['x'] = hypo_params.x
     sources[0]['y'] = hypo_params.y
     sources[0]['z'] = hypo_params.z
-    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy
+    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * cascade_energy
 
     sources[0]['dir_costheta'] = dir_costheta
     sources[0]['dir_sintheta'] = dir_sintheta
@@ -130,13 +136,23 @@ def point_ckv_cascade(hypo_params):
 # Create angular zenith distribution
 np.random.seed(0)
 
-MAX_NUM_SAMPLES = int(1e5)
+MAX_NUM_SAMPLES = int(1e5) - 1
 
 ZEN_DIST = pareto(b=1.91833423, loc=-22.82924369, scale=22.82924369)
-ZEN_SAMPLES = np.deg2rad(np.clip(ZEN_DIST.rvs(size=MAX_NUM_SAMPLES), a_min=0, a_max=180))
+ZEN_SAMPLES = np.concatenate([
+    [0],
+    np.deg2rad(np.clip(ZEN_DIST.rvs(size=MAX_NUM_SAMPLES), a_min=0, a_max=180))
+])
 
 # Create angular azimuth distribution
 AZI_SAMPLES = np.random.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
+
+MIN_CASCADE_ENERGY = 0.1
+
+ALPHA = 2.01849
+BETA = 1.45469
+
+RAD_LEN_OVER_B = 0.3975 / 0.63207
 
 
 def one_dim_cascade(hypo_params, num_samples):
@@ -156,24 +172,30 @@ def one_dim_cascade(hypo_params, num_samples):
     sources
 
     """
+    cascade_energy = hypo_params.cascade_energy
+    if cascade_energy == 0:
+        return EMPTY_SOURCES
+
+    cascade_energy = max(MIN_CASCADE_ENERGY, cascade_energy)
+
     # Assign vertex
-    t = hypo_params.t
+    time = hypo_params.time
     x = hypo_params.x
     y = hypo_params.y
     z = hypo_params.z
 
     # Assign cascade axis direction, works with 8D or 10D
     if HYPO_PARAMS_T is HypoParams8D:
-        zenith = np.pi - hypo_params.track_zenith
-        azimuth = np.pi + hypo_params.track_azimuth
+        zenith = PI - hypo_params.track_zenith
+        azimuth = PI + hypo_params.track_azimuth
     else:
-        zenith = np.pi - hypo_params.cascade_zenith
-        azimuth = np.pi + hypo_params.cascade_azimuth
+        zenith = PI - hypo_params.cascade_zenith
+        azimuth = PI + hypo_params.cascade_azimuth
 
-    sin_zen = math.sin(zenith)
-    cos_zen = math.cos(zenith)
-    sin_azi = math.sin(azimuth)
-    cos_azi = math.cos(azimuth)
+    sin_zen = sin(zenith)
+    cos_zen = cos(zenith)
+    sin_azi = sin(azimuth)
+    cos_azi = cos(azimuth)
     dir_x = sin_zen * cos_azi
     dir_y = sin_zen * sin_azi
     dir_z = cos_zen
@@ -186,18 +208,17 @@ def one_dim_cascade(hypo_params, num_samples):
     )
 
     # Define photons per sample
-    photons_per_sample = CASCADE_PHOTONS_PER_GEV * hypo_params.cascade_energy / num_samples
+    photons_per_sample = CASCADE_PHOTONS_PER_GEV * cascade_energy / num_samples
 
-    # Create longitudinal distribution (from arXiv:1210.5140v2)
-    alpha = 2.01849
-    beta = 1.45469
-    a = alpha + beta * np.log10(hypo_params.cascade_energy)
-    b = 0.63207
-    rad_length = 0.3975
+    if num_samples == 1:
+        long_samples = 1
+    else:
+        # Create longitudinal distribution (from arXiv:1210.5140v2)
+        a = ALPHA + BETA * log10(cascade_energy)
 
-    np.random.seed(1)
-    long_dist = gamma(a, scale=rad_length/b)
-    long_samples = long_dist.rvs(size=num_samples)
+        np.random.seed(1)
+        long_dist = gamma(a, scale=RAD_LEN_OVER_B)
+        long_samples = long_dist.rvs(size=num_samples)
 
     # Grab samples from angular zenith distribution
     zen_samples = ZEN_SAMPLES[:num_samples]
@@ -211,9 +232,9 @@ def one_dim_cascade(hypo_params, num_samples):
     y_ang_dist = sin_zen * np.sin(azi_samples)
     z_ang_dist = np.cos(zen_samples)
     ang_dist = np.concatenate(
-        (x_ang_dist[np.newaxis, :],
-         y_ang_dist[np.newaxis, :],
-         z_ang_dist[np.newaxis, :]),
+        (x_ang_dist[None, :],
+         y_ang_dist[None, :],
+         z_ang_dist[None, :]),
         axis=0
     )
 
@@ -225,7 +246,7 @@ def one_dim_cascade(hypo_params, num_samples):
     sources = np.empty(shape=num_samples, dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
-    sources['t'] = t + long_samples / SPEED_OF_LIGHT_M_PER_NS
+    sources['time'] = time + long_samples / SPEED_OF_LIGHT_M_PER_NS
     sources['x'] = x + long_samples * dir_x
     sources['y'] = y + long_samples * dir_y
     sources['z'] = z + long_samples * dir_z

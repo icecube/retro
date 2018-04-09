@@ -26,6 +26,10 @@ importance_sampling=""
 consteff="--const-eff"
 #consteff=""
 
+cascade_kernel="one_dim"
+cascade_samples="--cascade-samples 100"
+#cascade_samples=""
+
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
 ~/src/retro/retro/reco.py \
@@ -41,7 +45,7 @@ consteff="--const-eff"
     --n-live 160 \
     --evidence-tol 0.5 \
     --sampling-eff 0.3 \
-    --max-iter 10000 \
+    --max-iter 5000 \
     --seed 0 \
     \
     --dom-tables-kind "ckv_templ_compr" \
@@ -53,7 +57,8 @@ consteff="--const-eff"
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "point_ckv" \
+    --cascade-kernel "$cascade_kernel" \
+    $cascade_samples \
     --track-kernel "table_e_loss" \
     --track-time-step 1.0 \
     \

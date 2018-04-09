@@ -55,6 +55,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import HYPO_PARAMS_T, LLHP_T, init_obj
 from retro.const import TWO_PI, ALL_STRS_DOMS_SET
+from retro.retro_types import HypoParams8D, HypoParams10D
 from retro.utils.misc import expand, mkdir, sort_dict
 #from retro.likelihood import get_llh
 
@@ -71,7 +72,13 @@ ENERGY = 'energy'
 TRCK_FRAC = 'track_fraction'
 
 
-CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC]
+if HYPO_PARAMS_T is HypoParams8D:
+    CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC]
+elif HYPO_PARAMS_T is HypoParams10D:
+    CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC, CSCD_ZEN, CSCD_AZ]
+else:
+    raise NotImplementedError(str(HYPO_PARAMS_T))
+
 
 CUBE_T_IDX = CUBE_DIMS.index(T)
 CUBE_X_IDX = CUBE_DIMS.index(X)
@@ -81,8 +88,13 @@ CUBE_TRACK_ZEN_IDX = CUBE_DIMS.index(TRCK_ZEN)
 CUBE_TRACK_AZ_IDX = CUBE_DIMS.index(TRCK_AZ)
 CUBE_ENERGY_IDX = CUBE_DIMS.index(ENERGY)
 CUBE_TRACK_FRAC_IDX = CUBE_DIMS.index(TRCK_FRAC)
-CUBE_CSCD_ZEN_IDX = None
-CUBE_CSCD_AZ_IDX = None
+if HYPO_PARAMS_T is HypoParams8D:
+    CUBE_CSCD_ZEN_IDX = None
+    CUBE_CSCD_AZ_IDX = None
+else:
+    CUBE_CSCD_ZEN_IDX = CUBE_DIMS.index(CSCD_ZEN)
+    CUBE_CSCD_AZ_IDX = CUBE_DIMS.index(CSCD_AZ)
+
 
 PRI_UNIFORM = 'uniform'
 PRI_LOG_UNIFORM = 'log_uniform'
@@ -286,16 +298,30 @@ def run_multinest(
         total_energy = cube[CUBE_ENERGY_IDX]
         track_fraction = cube[CUBE_TRACK_FRAC_IDX]
 
-        hypo = HYPO_PARAMS_T(
-            time=cube[CUBE_T_IDX],
-            x=cube[CUBE_X_IDX],
-            y=cube[CUBE_Y_IDX],
-            z=cube[CUBE_Z_IDX],
-            track_zenith=cube[CUBE_TRACK_ZEN_IDX],
-            track_azimuth=cube[CUBE_TRACK_AZ_IDX],
-            cascade_energy=total_energy * (1 - track_fraction),
-            track_energy=total_energy * track_fraction
-        )
+        if HYPO_PARAMS_T is HypoParams8D:
+            hypo = HYPO_PARAMS_T(
+                time=cube[CUBE_T_IDX],
+                x=cube[CUBE_X_IDX],
+                y=cube[CUBE_Y_IDX],
+                z=cube[CUBE_Z_IDX],
+                track_zenith=cube[CUBE_TRACK_ZEN_IDX],
+                track_azimuth=cube[CUBE_TRACK_AZ_IDX],
+                cascade_energy=total_energy * (1 - track_fraction),
+                track_energy=total_energy * track_fraction
+            )
+        else:
+            hypo = HYPO_PARAMS_T(
+                time=cube[CUBE_T_IDX],
+                x=cube[CUBE_X_IDX],
+                y=cube[CUBE_Y_IDX],
+                z=cube[CUBE_Z_IDX],
+                track_zenith=cube[CUBE_TRACK_ZEN_IDX],
+                track_azimuth=cube[CUBE_TRACK_AZ_IDX],
+                cascade_energy=total_energy * (1 - track_fraction),
+                track_energy=total_energy * track_fraction,
+                cascade_zenith=cube[CUBE_CSCD_ZEN_IDX],
+                cascade_azimuth=cube[CUBE_CSCD_AZ_IDX]
+            )
         sources = hypo_handler.get_sources(hypo)
         llh = get_llh(
             sources=sources,
@@ -334,15 +360,28 @@ def run_multinest(
             best_llh = log_likelihoods[best_idx]
             best_p = param_values[best_idx]
             print('')
-            print(('best llh = {:.3f} @ '
-                   '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
-                   ' zen={:.1f} deg, az={:.1f} deg, Etrk={:.1f}, Ecscd={:.1f})')
-                  .format(
-                      best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
-                      np.rad2deg(best_p.track_zenith),
-                      np.rad2deg(best_p.track_azimuth),
-                      best_p.track_energy,
-                      best_p.cascade_energy))
+            if HYPO_PARAMS_T is HypoParams8D:
+                print(('best llh = {:.3f} @ '
+                       '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
+                       ' zen={:.1f} deg, az={:.1f} deg, Etrk={:.1f}, Ecscd={:.1f})')
+                      .format(
+                          best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
+                          np.rad2deg(best_p.track_zenith),
+                          np.rad2deg(best_p.track_azimuth),
+                          best_p.track_energy,
+                          best_p.cascade_energy))
+            else:
+                print(('best llh = {:.3f} @ '
+                       '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
+                       ' zen_trk={:.1f} deg, az_trk={:.1f} deg, zen_csc={:.1f}, az_csc={:.1f}, Etrk={:.1f}, Ecscd={:.1f})')
+                      .format(
+                          best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
+                          np.rad2deg(best_p.track_zenith),
+                          np.rad2deg(best_p.track_azimuth),
+                          np.rad2deg(best_p.cascade_zenith),
+                          np.rad2deg(best_p.cascade_azimuth),
+                          best_p.track_energy,
+                          best_p.cascade_energy))
             print('{} LLH computed'.format(n_calls))
             print('avg time per llh: {:.3f} ms'.format((t_now - t_start[0])/n_calls*1000))
             print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
@@ -530,6 +569,9 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
         ('energy', energy_prior),
         ('track_fraction', (PRI_UNIFORM, (0, 1)))
     ])
+    if HYPO_PARAMS_T is HypoParams10D:
+        priors['cascade_zenith'] = (PRI_COSINE, (-1, 1))
+        priors['cascade_azimuth'] = (PRI_UNIFORM, (0, TWO_PI))
 
     for event_idx, event in events_iterator: # pylint: disable=unused-variable
         t1 = time.time()

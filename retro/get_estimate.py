@@ -78,4 +78,4 @@ def parse_args(description=__doc__):
 
 
 if __name__ == '__main__':
-    llhp, estimate = get_estimate(*parse_args()) # pylint: disable=invalid-name
+    llhp, estimate = get_estimate(**vars(parse_args())) # pylint: disable=invalid-name

@@ -222,11 +222,13 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
         elif cascade_kernel == 'point_ckv':
             hypo_kernels.append(point_ckv_cascade)
             kernel_kwargs.append(dict())
-        else:
-            #raise NotImplementedError('{} cascade not implemented yet.'
-            #                          .format(cascade_kernel))
+        elif cascade_kernel == 'one_dim':
+            assert cascade_samples is not None
             hypo_kernels.append(one_dim_cascade)
             kernel_kwargs.append(dict(num_samples=cascade_samples))
+        else:
+            raise NotImplementedError('{} cascade not implemented yet.'
+                                      .format(cascade_kernel))
 
     if track_kernel is not None:
         if track_kernel == 'const_e_loss':
