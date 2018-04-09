@@ -23,15 +23,15 @@ angsens="h2-50cm"
 norm="binvol2"
 tkernel="const_e_loss"
 tktimestep="1.0"
-ckernel="one_dim"
-csamples="100"
+ckernel="point_ckv"
+csamples="1000"
 
+    #--cascade-samples="$csamples" \
 ~/projects/retro/retro/retro_dom_pdfs.py \
-    --outdir="~/projects/misc_retro/dom_pdfs/sam100" \
+    --outdir="~/projects/misc_retro/dom_pdfs/point_ckv" \
     --sim-to-test="upgoing_em_cascade" \
     --angsens-model="$angsens" \
     --cascade-kernel="$ckernel" \
-    --cascade-samples="$csamples" \
     --track-kernel="$tkernel" \
     --track-time-step="$tktimestep" \
     --dom-tables-fname-proto="$proto" \

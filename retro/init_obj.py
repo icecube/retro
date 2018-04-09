@@ -48,7 +48,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import FTYPE, const
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
-    point_cascade, one_dim_cascade
+    point_cascade, point_ckv_cascade, one_dim_cascade
 )
 from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon
@@ -170,7 +170,7 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
     Parameters
     ----------
     cascade_kernel : string or None
-        One of {"point" or "one_dim_cascade"}
+        One of {"point" or "point_ckv" or "one_dim_cascade"}
 
     cascade_samples : int or None
         Required if `cascade_kernel` is "one_dim_cascade"
@@ -188,6 +188,9 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
     if cascade_kernel is not None:
         if cascade_kernel == 'point':
             hypo_kernels.append(point_cascade)
+            kernel_kwargs.append(dict())
+        elif cascade_kernel == 'point_ckv':
+            hypo_kernels.append(point_ckv_cascade)
             kernel_kwargs.append(dict())
         else:
             #raise NotImplementedError('{} cascade not implemented yet.'
@@ -498,7 +501,7 @@ def parse_args(description=None, dom_tables=True, hypo=True, hits=True,
         )
 
         group.add_argument(
-            '--cascade-kernel', choices=['point', 'one_dim'], required=True,
+            '--cascade-kernel', choices=['point', 'point_ckv', 'one_dim'], required=True,
         )
         group.add_argument(
             '--cascade-samples', type=int, default=None,

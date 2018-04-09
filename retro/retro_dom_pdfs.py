@@ -46,7 +46,7 @@ if __name__ == '__main__' and __package__ is None:
 import retro
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon
-from retro.hypo.discrete_cascade_kernels import point_cascade, one_dim_cascade
+from retro.hypo.discrete_cascade_kernels import point_cascade, one_dim_cascade, point_ckv_cascade
 from retro.i3info.extract_gcd import extract_gcd
 from retro.tables.dom_time_polar_tables import DOMTimePolarTables
 #from retro.tables.tdi_cart_tables import TDICartTable
