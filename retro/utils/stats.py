@@ -133,7 +133,7 @@ def weighted_percentile(data, percentile, weights=None):
     return np.interp(percentile, p, d)
 
 
-def estimate_from_llhp(llhp, meta=None, percentilei_nd=0.95):
+def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
     """Evaluate estimate for reconstruction quantities given the MultiNest
     points of LLH space exploration.
 
@@ -166,7 +166,7 @@ def estimate_from_llhp(llhp, meta=None, percentilei_nd=0.95):
     num_dims = len(columns)
 
     # cut away upper and lower 13.35% to arrive at 1 sigma
-    cut = llhp['llh'] >= np.nanmax(llhp['llh']) - stats.chi2.ppf(percentile, num_dims)
+    cut = llhp['llh'] >= np.nanmax(llhp['llh']) - stats.chi2.ppf(percentile_nd, num_dims)
     if np.sum(cut) == 0:
         raise IndexError('no points')
 
@@ -202,7 +202,7 @@ def estimate_from_llhp(llhp, meta=None, percentilei_nd=0.95):
     estimate['median'] = OrderedDict()
     estimate['low'] = OrderedDict()
     estimate['high'] = OrderedDict()
-    if weight is not None:
+    if weights is not None:
         estimate['weighted_mean'] = OrderedDict()
         estimate['weighted_median'] = OrderedDict()
 
