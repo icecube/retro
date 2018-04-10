@@ -20,15 +20,11 @@ tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined
 #no_noise="--no-noise"
 no_noise=""
 
-#importance_sampling="--importance-sampling"
-importance_sampling=""
+importance_sampling="--importance-sampling"
+#importance_sampling=""
 
 consteff="--const-eff"
 #consteff=""
-
-cascade_kernel="one_dim"
-cascade_samples="--cascade-samples 100"
-#cascade_samples=""
 
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
@@ -40,7 +36,7 @@ cascade_samples="--cascade-samples 100"
     --energy-lims 0.2,2000  \
     \
     $importance_sampling \
-    --max-modes 4 \
+    --max-modes 1 \
     $consteff \
     --n-live 160 \
     --evidence-tol 0.5 \
@@ -57,8 +53,7 @@ cascade_samples="--cascade-samples 100"
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "$cascade_kernel" \
-    $cascade_samples \
+    --cascade-kernel "one_dim" \
     --track-kernel "table_e_loss" \
     --track-time-step 1.0 \
     \

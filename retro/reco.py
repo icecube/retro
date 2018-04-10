@@ -371,14 +371,16 @@ def run_multinest(
                           best_p.track_energy,
                           best_p.cascade_energy))
             else:
-                print(('best llh = {:.3f} @ '
-                       '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
-                       ' zen_trk={:.1f} deg, az_trk={:.1f} deg, zen_csc={:.1f}, az_csc={:.1f}, Etrk={:.1f}, Ecscd={:.1f})')
+                print(('best llh = {:.3f} @'
+                       ' (t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
+                       ' zen_trk={:.1f} deg, zen_csc={:.1f} deg,'
+                       ' az_trk={:.1f}, az_csc={:.1f},'
+                       ' Etrk={:.1f}, Ecscd={:.1f})')
                       .format(
                           best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
                           np.rad2deg(best_p.track_zenith),
-                          np.rad2deg(best_p.track_azimuth),
                           np.rad2deg(best_p.cascade_zenith),
+                          np.rad2deg(best_p.track_azimuth),
                           np.rad2deg(best_p.cascade_azimuth),
                           best_p.track_energy,
                           best_p.cascade_energy))
