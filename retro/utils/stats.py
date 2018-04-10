@@ -185,10 +185,10 @@ def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
                 prior = priors[dim]
                 if prior[0] == 'uniform':
                     continue
-                elif prior[0] == 'spefit2':
-                    weights /= stats.cauchy.pdf(llhp[dim], *prior[1])
-                elif prior[0] == 'lognorm' and dim == 'energy':
-                    weights /= stats.lognorm.pdf(llhp['track_energy'] + llhp['cascade_energy'], *prior[1])
+                elif prior[0] == 'cauchy':
+                    weights /= stats.cauchy.pdf(llhp[dim], *prior[1][:2])
+                elif prior[0] == 'log_normal' and dim == 'energy':
+                    weights /= stats.lognorm.pdf(llhp['track_energy'] + llhp['cascade_energy'], *prior[1][:3])
                 elif prior[0] == 'log_uniform' and dim == 'energy':
                     weights *= llhp['track_energy'] + llhp['cascade_energy']
                 elif prior[0] == 'cosine':
