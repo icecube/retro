@@ -17,8 +17,8 @@ mkdir -p "$outdir"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
-tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+proto="/fastio/icecube/retro/tables/large_5d_notilt_combined/stacked"
+tmpl_lib="--template-library /fastio/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
 #no_noise="--no-noise"
 no_noise=""
@@ -26,8 +26,8 @@ no_noise=""
 importance_sampling="--importance-sampling"
 #importance_sampling=""
 
-consteff="--const-eff"
-#consteff=""
+#consteff="--const-eff"
+consteff=""
 
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
@@ -44,7 +44,7 @@ consteff="--const-eff"
     --n-live 160 \
     --evidence-tol 0.5 \
     --sampling-eff 0.3 \
-    --max-iter 5000 \
+    --max-iter 10000 \
     --seed 0 \
     \
     --dom-tables-kind "ckv_templ_compr" \
@@ -63,7 +63,6 @@ consteff="--const-eff"
     --events-base "$events_base" \
     --start-idx "$start_idx" \
     --num-events 1 \
-    --truth \
     --pulses "OfflinePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \

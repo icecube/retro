@@ -21,9 +21,9 @@ events_base="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_
 #tmpl_lib="--template-library /data/icecube/retro_tables/ckv_dir_templates.npy"
 #tblkind="ckv_templ_compr"
 
-proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
+proto="/fastio/icecube/retro/tables/large_5d_notilt_combined/stacked"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked_reordered"
-tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+tmpl_lib="--template-library /fastio/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 tblkind="ckv_templ_compr"
 
 #use_doms="dc_subdust"
@@ -136,7 +136,6 @@ cscdescan="0-100:1"
     --step-length 1.0 \
     \
     --cascade-kernel="$ckernel" \
-    $cnumpts \
     --track-kernel="$tkernel" \
     --track-time-step="$tktimestep"
 
