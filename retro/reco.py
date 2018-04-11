@@ -415,6 +415,7 @@ def run_multinest(
         ('params', CUBE_DIMS),
         ('original_prior_specs', priors),
         ('priors_used', priors_used),
+        ('time_window', time_window),
         ('kwargs', sort_dict(mn_kw)),
     ])
 
