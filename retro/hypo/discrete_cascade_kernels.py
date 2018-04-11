@@ -177,10 +177,10 @@ def one_dim_cascade(hypo_params):
     if cascade_energy == 0:
         return EMPTY_SOURCES
 
-    # Note that num_samples _must_ be 1 for
-    # cascade_energy <= MIN_CASCADE_ENERGY (param_a goes negative below this
-    # value)
-    if cascade_energy < MIN_CASCADE_ENERGY:
+    # Note that num_samples must be 1 for cascade_energy <= MIN_CASCADE_ENERGY
+    # (param_a goes <= 0 at this value and below, causing an exception from
+    # gamma distribution)
+    if cascade_energy <= MIN_CASCADE_ENERGY:
         num_samples = 1
     else:
         # See `retro/notebooks/energy_dependent_cascade_num_samples.ipynb`
