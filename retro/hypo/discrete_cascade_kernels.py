@@ -148,11 +148,11 @@ AZI_SAMPLES = np.random.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
 PARAM_ALPHA = 2.01849
 PARAM_BETA = 1.45469
 
-MIN_CASCADE_ENERGY = np.ceil(10**(-PARAM_ALPHA - PARAM_BETA) / 100) * 100
+MIN_CASCADE_ENERGY = np.ceil(10**(-PARAM_ALPHA / PARAM_BETA) * 100) / 100
 
 RAD_LEN = 0.3975
-B_PARAM = 0.63207
-RAD_LEN_OVER_B = RAD_LEN / B_PARAM
+PARAM_B = 0.63207
+RAD_LEN_OVER_B = RAD_LEN / PARAM_B
 
 
 def one_dim_cascade(hypo_params):
@@ -242,9 +242,9 @@ def one_dim_cascade(hypo_params):
     y_ang_dist = sin_zen * np.sin(azi_samples)
     z_ang_dist = np.cos(zen_samples)
     ang_dist = np.concatenate(
-        (x_ang_dist[None, :],
-         y_ang_dist[None, :],
-         z_ang_dist[None, :]),
+        (x_ang_dist[np.newaxis, :],
+         y_ang_dist[np.newaxis, :],
+         z_ang_dist[np.newaxis, :]),
         axis=0
     )
 

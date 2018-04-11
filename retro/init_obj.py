@@ -423,10 +423,10 @@ def get_events(
             break
 
         if hits:
-            hits, hits_indexer, hits_summary = get_hits(
+            hits_, hits_indexer, hits_summary = get_hits(
                 event=event, path=hits, angsens_model=angsens_model
             )
-            event['hits'] = hits
+            event['hits'] = hits_
             event['hits_indexer'] = hits_indexer
             event['hits_summary'] = hits_summary
 

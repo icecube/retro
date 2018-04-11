@@ -11,6 +11,9 @@ mkdir -p "$outdir"
 #proto="/fastio2/icecube/retro/tables/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib=""
 
+#proto="/gpfs/scratch/jll1062/retro_tables/stacked"
+#tmpl_lib="--template-library /gpfs/scratch/jll1062/retro_tables/ckv_dir_templates.npy"
+
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
