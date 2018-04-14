@@ -172,7 +172,7 @@ def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
 
     # can throw rest of points away
     llhp = llhp[cut]
-    
+
     # calculate the weights from the used priors
     if meta is None:
         weights = None
@@ -185,7 +185,7 @@ def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
                 prior = priors[dim]
                 if prior[0] == 'uniform':
                     continue
-                elif prior[0] == 'cauchy':
+                elif prior[0] in ['cauchy', 'spefit2']:
                     weights /= stats.cauchy.pdf(llhp[dim], *prior[1][:2])
                 elif prior[0] == 'log_normal' and dim == 'energy':
                     weights /= stats.lognorm.pdf(llhp['track_energy'] + llhp['cascade_energy'], *prior[1][:3])
