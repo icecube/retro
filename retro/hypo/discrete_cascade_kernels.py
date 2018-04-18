@@ -28,7 +28,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from math import cos, sin, log10
+from math import cos, sin, exp, log, log10
 from os.path import abspath, dirname
 import sys
 
@@ -136,36 +136,37 @@ def point_ckv_cascade(hypo_params):
 # Create angular zenith distribution
 np.random.seed(0)
 
-MAX_NUM_SAMPLES = int(1e5) - 1
+MAX_NUM_SAMPLES = int(1e5)
 
+# Parameterizations from arXiv:1210.5140v2
 ZEN_DIST = pareto(b=1.91833423, loc=-22.82924369, scale=22.82924369)
-ZEN_SAMPLES = np.concatenate([
-    [0],
-    np.deg2rad(np.clip(ZEN_DIST.rvs(size=MAX_NUM_SAMPLES), a_min=0, a_max=180))
-])
+ZEN_SAMPLES = np.deg2rad(np.clip(ZEN_DIST.rvs(size=MAX_NUM_SAMPLES), a_min=0, a_max=180))
 
 # Create angular azimuth distribution
 AZI_SAMPLES = np.random.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
 
-MIN_CASCADE_ENERGY = 0.1
+PARAM_ALPHA = 2.01849
+PARAM_BETA = 1.45469
 
-ALPHA = 2.01849
-BETA = 1.45469
+MIN_CASCADE_ENERGY = np.ceil(10**(-PARAM_ALPHA / PARAM_BETA) * 100) / 100
 
-RAD_LEN_OVER_B = 0.3975 / 0.63207
+RAD_LEN = 0.3975
+PARAM_B = 0.63207
+RAD_LEN_OVER_B = RAD_LEN / PARAM_B
 
 
-def one_dim_cascade(hypo_params, num_samples):
-    """
-    Cascade with both longitudinal and angular distributions
+def one_dim_cascade(hypo_params):
+    """Cascade with both longitudinal and angular distributions. All emitters
+    are located on the shower axis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
+
+    Note that the nubmer of samples is proportional to the energy of the
+    cascade.
 
     Parameters
     ----------
     hypo_params : HYPO_PARAMS_T
-    num_samples : integer
-        Number of times to sample the distributions
 
     Returns
     -------
@@ -176,7 +177,19 @@ def one_dim_cascade(hypo_params, num_samples):
     if cascade_energy == 0:
         return EMPTY_SOURCES
 
-    cascade_energy = max(MIN_CASCADE_ENERGY, cascade_energy)
+    # Note that num_samples must be 1 for cascade_energy <= MIN_CASCADE_ENERGY
+    # (param_a goes <= 0 at this value and below, causing an exception from
+    # gamma distribution)
+    if cascade_energy <= MIN_CASCADE_ENERGY:
+        num_samples = 1
+    else:
+        # See `retro/notebooks/energy_dependent_cascade_num_samples.ipynb`
+        num_samples = int(np.round(
+            np.clip(exp(0.77 * log(cascade_energy) + 2.3), a_min=1, a_max=None)
+        ))
+
+    if num_samples == 1:
+        return point_ckv_cascade(hypo_params)
 
     # Assign vertex
     time = hypo_params.time
@@ -207,18 +220,15 @@ def one_dim_cascade(hypo_params, num_samples):
          [-sin_zen, 0, cos_zen]]
     )
 
-    # Define photons per sample
-    photons_per_sample = CASCADE_PHOTONS_PER_GEV * cascade_energy / num_samples
+    # Create longitudinal distribution (from arXiv:1210.5140v2)
+    param_a = (
+        PARAM_ALPHA
+        + PARAM_BETA * log10(max(MIN_CASCADE_ENERGY, cascade_energy))
+    )
 
-    if num_samples == 1:
-        long_samples = 1
-    else:
-        # Create longitudinal distribution (from arXiv:1210.5140v2)
-        a = ALPHA + BETA * log10(cascade_energy)
-
-        np.random.seed(1)
-        long_dist = gamma(a, scale=RAD_LEN_OVER_B)
-        long_samples = long_dist.rvs(size=num_samples)
+    np.random.seed(1)
+    long_dist = gamma(param_a, scale=RAD_LEN_OVER_B)
+    long_samples = long_dist.rvs(size=num_samples)
 
     # Grab samples from angular zenith distribution
     zen_samples = ZEN_SAMPLES[:num_samples]
@@ -232,9 +242,9 @@ def one_dim_cascade(hypo_params, num_samples):
     y_ang_dist = sin_zen * np.sin(azi_samples)
     z_ang_dist = np.cos(zen_samples)
     ang_dist = np.concatenate(
-        (x_ang_dist[None, :],
-         y_ang_dist[None, :],
-         z_ang_dist[None, :]),
+        (x_ang_dist[np.newaxis, :],
+         y_ang_dist[np.newaxis, :],
+         z_ang_dist[np.newaxis, :]),
         axis=0
     )
 
@@ -242,14 +252,19 @@ def one_dim_cascade(hypo_params, num_samples):
     final_phi_dist = np.arctan2(final_ang_dist[1], final_ang_dist[0])
     final_theta_dist = np.arccos(final_ang_dist[2])
 
-    # Create photon matrix
+    # Define photons per sample
+    photons_per_sample = CASCADE_PHOTONS_PER_GEV * cascade_energy / num_samples
+
+    # Create photon array
     sources = np.empty(shape=num_samples, dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
+
     sources['time'] = time + long_samples / SPEED_OF_LIGHT_M_PER_NS
     sources['x'] = x + long_samples * dir_x
     sources['y'] = y + long_samples * dir_y
     sources['z'] = z + long_samples * dir_z
+
     sources['photons'] = photons_per_sample
 
     sources['dir_costheta'] = final_ang_dist[2]

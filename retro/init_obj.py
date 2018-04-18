@@ -192,8 +192,9 @@ def setup_dom_tables(
     return dom_tables
 
 
-def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
-                        track_kernel=None, track_time_step=None):
+def setup_discrete_hypo(
+        cascade_kernel=None, track_kernel=None, track_time_step=None
+    ):
     """Convenience function for instantiating a discrete hypothesis with
     specified kernel(s).
 
@@ -201,9 +202,6 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
     ----------
     cascade_kernel : string or None
         One of {"point", "point_ckv", or "one_dim"}
-
-    cascade_samples : int or None
-        Required if `cascade_kernel` is "one_dim"
 
     track_kernel : string or None
     track_time_step : float or None
@@ -223,9 +221,8 @@ def setup_discrete_hypo(cascade_kernel=None, cascade_samples=None,
             hypo_kernels.append(point_ckv_cascade)
             kernel_kwargs.append(dict())
         elif cascade_kernel == 'one_dim':
-            assert cascade_samples is not None
             hypo_kernels.append(one_dim_cascade)
-            kernel_kwargs.append(dict(num_samples=cascade_samples))
+            kernel_kwargs.append(dict())
         else:
             raise NotImplementedError('{} cascade not implemented yet.'
                                       .format(cascade_kernel))
@@ -426,10 +423,10 @@ def get_events(
             break
 
         if hits:
-            hits, hits_indexer, hits_summary = get_hits(
+            hits_, hits_indexer, hits_summary = get_hits(
                 event=event, path=hits, angsens_model=angsens_model
             )
-            event['hits'] = hits
+            event['hits'] = hits_
             event['hits_indexer'] = hits_indexer
             event['hits_summary'] = hits_summary
 
@@ -793,9 +790,6 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
             '--cascade-kernel',
             required=True,
             choices='point point_ckv one_dim'.split(),
-        )
-        group.add_argument(
-            '--cascade-samples', type=int, default=None,
         )
         group.add_argument(
             '--track-kernel',
