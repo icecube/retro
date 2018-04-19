@@ -345,6 +345,7 @@ def generate_pexp_5d_function(
                 continue
 
             r = math.sqrt(rsquared)
+            r = max(r, MACHINE_EPS)
             r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
@@ -366,6 +367,7 @@ def generate_pexp_5d_function(
                 pdir_costheta = source['dir_costheta']
 
                 rho = math.sqrt(rhosquared)
+                #rho = max(rho, MACHINE_EPS)
 
                 # \Delta\phi depends on photon position relative to the DOM...
 
@@ -845,6 +847,7 @@ def generate_pexp_5d_function(
                 continue
 
             r = math.sqrt(rsquared)
+            r = max(r, MACHINE_EPS)
             r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
@@ -973,8 +976,10 @@ def generate_pexp_5d_function(
         for hit_idx in range(num_hits):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             hit_mult = hits[hit_idx]['charge']
+            log_expr = quantum_efficiency * exp_at_hit_time + noise_rate_per_ns
+            log_expr = max(MACHINE_EPS, log_expr)
             sum_log_exp_at_hit_times += (
-                hit_mult * math.log(quantum_efficiency * exp_at_hit_time + noise_rate_per_ns)
+                hit_mult * math.log(log_expr)
             )
 
         t_indep_exp = (
