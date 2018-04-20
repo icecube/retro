@@ -100,12 +100,12 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     fast_llh = True
 
     if fast_llh:
-        get_llh = dom_tables._get_llh
+        get_llh = dom_tables._get_llh # pylint: disable=protected-access
         dom_info = dom_tables.dom_info
         tables = dom_tables.tables
-        table_norm = dom_tables.table_norm
+        table_norm = dom_tables.table_norm.astype(np.float32)
         t_indep_tables = dom_tables.t_indep_tables
-        t_indep_table_norm = dom_tables.t_indep_table_norm
+        t_indep_table_norm = dom_tables.t_indep_table_norm.astype(np.float32)
         sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
         metric_kw = {}
         def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,

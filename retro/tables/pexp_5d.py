@@ -8,10 +8,7 @@ survive from a 5D CLSim table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    MACHINE_EPS
-    generate_pexp_5d_function
-'''.split()
+__all__ = ['MACHINE_EPS', 'generate_pexp_5d_function']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -47,8 +44,8 @@ from retro.utils.ckv import (
 from retro.utils.geom import infer_power
 
 
-MACHINE_EPS = 1e-16
-
+FTYPE = np.float32
+MACHINE_EPS = FTYPE(1e-16)
 
 def generate_pexp_5d_function(
         table,
@@ -194,8 +191,8 @@ def generate_pexp_5d_function(
             size=num_phi_samples
         )
 
-    empty_1d_array = np.array([], dtype=np.float64).reshape((0,))
-    empty_4d_array = np.array([], dtype=np.float64).reshape((0,)*4)
+    empty_1d_array = np.array([], dtype=FTYPE).reshape((0,))
+    empty_4d_array = np.array([], dtype=FTYPE).reshape((0,)*4)
 
     if tbl_is_templ_compr:
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -318,14 +315,14 @@ def generate_pexp_5d_function(
 
         """
         if not dom_info['operational']:
-            return np.float64(0), np.float64(0)
+            return FTYPE(0), FTYPE(0)
 
         num_hits = len(hits)
 
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
-        t_indep_exp = np.float64(0)
-        exp_at_hit_times = np.zeros(num_hits, dtype=np.float64)
+        t_indep_exp = FTYPE(0)
+        exp_at_hit_times = np.zeros(num_hits, dtype=FTYPE)
 
         # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
@@ -344,8 +341,7 @@ def generate_pexp_5d_function(
             if rsquared >= rsquared_max:
                 continue
 
-            r = math.sqrt(rsquared)
-            r = max(r, MACHINE_EPS)
+            r = max(MACHINE_EPS, math.sqrt(rsquared))
             r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
@@ -367,7 +363,6 @@ def generate_pexp_5d_function(
                 pdir_costheta = source['dir_costheta']
 
                 rho = math.sqrt(rhosquared)
-                #rho = max(rho, MACHINE_EPS)
 
                 # \Delta\phi depends on photon position relative to the DOM...
 
@@ -380,8 +375,8 @@ def generate_pexp_5d_function(
                 # projections of the aforementioned vectors onto the xy-plane.
 
                 if rho <= MACHINE_EPS:
-                    pdir_cosdeltaphi = np.float64(1)
-                    pdir_sindeltaphi = np.float64(0)
+                    pdir_cosdeltaphi = FTYPE(1)
+                    pdir_sindeltaphi = FTYPE(0)
                 else:
                     pdir_cosdeltaphi = (
                         source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
@@ -437,7 +432,7 @@ def generate_pexp_5d_function(
                             )
 
                 else: # tbl_is_ckv
-                    costhetadir_bin_idx = int((pdir_costheta + np.float64(1)) / table_dcosthetadir)
+                    costhetadir_bin_idx = int((pdir_costheta + FTYPE(1)) / table_dcosthetadir)
 
                     # Make upper edge inclusive
                     if costhetadir_bin_idx > last_costhetadir_bin_idx:
@@ -548,13 +543,12 @@ def generate_pexp_5d_function(
         quantum_efficiency = dom_info['quantum_efficiency']
         noise_rate_per_ns = dom_info['noise_rate_per_ns']
 
-        sum_log_exp_at_hit_times = np.float64(0)
+        sum_log_exp_at_hit_times = FTYPE(0)
         for hit_idx in range(num_hits):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             hit_mult = hits[hit_idx]['charge']
-            sum_log_exp_at_hit_times += (
-                hit_mult * math.log(quantum_efficiency * exp_at_hit_time + noise_rate_per_ns)
-            )
+            log_expr = max(MACHINE_EPS, quantum_efficiency * exp_at_hit_time + noise_rate_per_ns)
+            sum_log_exp_at_hit_times += hit_mult * math.log(log_expr)
 
         if compute_t_indep_exp:
             t_indep_exp = (
@@ -581,14 +575,14 @@ def generate_pexp_5d_function(
         """Use instead of pexp_5d_ckv_compute_t_indep for debugging speed"""
         # pylint: disable=unused-variable, unused-argument, line-too-long
         if not dom_info['operational']:
-            return np.float64(0), np.float64(0)
+            return FTYPE(0), FTYPE(0)
 
         num_hits = len(hits)
 
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
-        t_indep_exp = np.float64(0)
-        exp_at_hit_times = np.zeros(num_hits, dtype=np.float64)
+        t_indep_exp = FTYPE(0)
+        exp_at_hit_times = np.zeros(num_hits, dtype=FTYPE)
 
         # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
@@ -615,7 +609,7 @@ def generate_pexp_5d_function(
 
             if source_kind == SRC_OMNI:
                 #t_indep_indices.append((r_bin_idx, costheta_bin_idx))
-                t_indep_surv_prob = 1.0 / np.float64(r_bin_idx + costheta_bin_idx) #np.mean(
+                t_indep_surv_prob = 1.0 / FTYPE(r_bin_idx + costheta_bin_idx) #np.mean(
                 #    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
                 #)
 
@@ -642,7 +636,7 @@ def generate_pexp_5d_function(
                 # projections of the aforementioned vectors onto the xy-plane.
 
                 if rho <= MACHINE_EPS:
-                    pdir_cosdeltaphi = np.float64(1)
+                    pdir_cosdeltaphi = FTYPE(1)
                 else:
                     pdir_cosdeltaphi = (
                         source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
@@ -651,7 +645,7 @@ def generate_pexp_5d_function(
                     # precision issues cause the dot product to blow up.
                     pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
 
-                costhetadir_bin_idx = int((pdir_costheta + np.float64(1)) / table_dcosthetadir)
+                costhetadir_bin_idx = int((pdir_costheta + FTYPE(1)) / table_dcosthetadir)
 
                 # Make upper edge inclusive
                 if costhetadir_bin_idx > last_costhetadir_bin_idx:
@@ -665,7 +659,7 @@ def generate_pexp_5d_function(
                     deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
                 #t_indep_indices.append((r_bin_idx, costheta_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx))
-                t_indep_surv_prob = 1.0 / np.float64(r_bin_idx + costheta_bin_idx + costhetadir_bin_idx + deltaphidir_bin_idx)
+                t_indep_surv_prob = 1.0 / FTYPE(r_bin_idx + costheta_bin_idx + costhetadir_bin_idx + deltaphidir_bin_idx)
                 t_indep_surv_prob = 1 #t_indep_table[
                 #    r_bin_idx,
                 #    costheta_bin_idx,
@@ -708,14 +702,14 @@ def generate_pexp_5d_function(
                 if source_kind == SRC_OMNI:
                     # DEBUG
                     #table_indices.append((r_bin_idx, costheta_bin_idx, t_bin_idx))
-                    surv_prob_at_hit_t = 1.0 / np.float64(r_bin_idx + costheta_bin_idx + t_bin_idx) #table_lookup_mean(
+                    surv_prob_at_hit_t = 1.0 / FTYPE(r_bin_idx + costheta_bin_idx + t_bin_idx) #table_lookup_mean(
                     #    table, r_bin_idx, costheta_bin_idx, t_bin_idx
                     #)
 
                 else: #elif source_kind == SRC_CKV_BETA1:
                     # DEBUG
                     #table_indices.append((r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx))
-                    surv_prob_at_hit_t = 1.0 / np.float64(r_bin_idx + costheta_bin_idx + t_bin_idx + costhetadir_bin_idx + deltaphidir_bin_idx) #table_lookup(
+                    surv_prob_at_hit_t = 1.0 / FTYPE(r_bin_idx + costheta_bin_idx + t_bin_idx + costhetadir_bin_idx + deltaphidir_bin_idx) #table_lookup(
                     #    table,
                     #    r_bin_idx,
                     #    costheta_bin_idx,
@@ -731,13 +725,12 @@ def generate_pexp_5d_function(
         quantum_efficiency = dom_info['quantum_efficiency']
         noise_rate_per_ns = dom_info['noise_rate_per_ns']
 
-        sum_log_exp_at_hit_times = np.float64(0)
+        sum_log_exp_at_hit_times = FTYPE(0)
         for hit_idx in range(num_hits):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             hit_mult = hits[hit_idx]['charge']
-            sum_log_exp_at_hit_times += (
-                hit_mult * math.log(quantum_efficiency * exp_at_hit_time + noise_rate_per_ns)
-            )
+            log_expr = max(MACHINE_EPS, quantum_efficiency * exp_at_hit_time + noise_rate_per_ns)
+            sum_log_exp_at_hit_times += hit_mult * math.log(log_expr)
 
         t_indep_exp = (
             quantum_efficiency * t_indep_exp + noise_rate_per_ns * time_window
@@ -818,14 +811,14 @@ def generate_pexp_5d_function(
 
         """
         if not dom_info['operational']:
-            return np.float64(0), np.float64(0)
+            return FTYPE(0), FTYPE(0)
 
         num_hits = len(hits)
 
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
-        t_indep_exp = np.float64(0)
-        exp_at_hit_times = np.zeros(num_hits, dtype=np.float64)
+        t_indep_exp = FTYPE(0)
+        exp_at_hit_times = np.zeros(num_hits, dtype=FTYPE)
 
         # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
@@ -846,8 +839,7 @@ def generate_pexp_5d_function(
             if rsquared >= rsquared_max:
                 continue
 
-            r = math.sqrt(rsquared)
-            r = max(r, MACHINE_EPS)
+            r = max(MACHINE_EPS, math.sqrt(rsquared))
             r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
@@ -886,7 +878,7 @@ def generate_pexp_5d_function(
                 # projections of the aforementioned vectors onto the xy-plane.
 
                 if rho <= MACHINE_EPS:
-                    pdir_cosdeltaphi = np.float64(1)
+                    pdir_cosdeltaphi = FTYPE(1)
                 else:
                     pdir_cosdeltaphi = (
                         source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
@@ -895,7 +887,7 @@ def generate_pexp_5d_function(
                     # precision issues cause the dot product to blow up.
                     pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
 
-                costhetadir_bin_idx = int((pdir_costheta + np.float64(1)) / table_dcosthetadir)
+                costhetadir_bin_idx = int((pdir_costheta + FTYPE(1)) / table_dcosthetadir)
 
                 # Make upper edge inclusive
                 if costhetadir_bin_idx > last_costhetadir_bin_idx:
@@ -972,15 +964,12 @@ def generate_pexp_5d_function(
                     source_photons * r_t_bin_norm * surv_prob_at_hit_t
                 )
 
-        sum_log_exp_at_hit_times = np.float64(0)
+        sum_log_exp_at_hit_times = FTYPE(0)
         for hit_idx in range(num_hits):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             hit_mult = hits[hit_idx]['charge']
-            log_expr = quantum_efficiency * exp_at_hit_time + noise_rate_per_ns
-            log_expr = max(MACHINE_EPS, log_expr)
-            sum_log_exp_at_hit_times += (
-                hit_mult * math.log(log_expr)
-            )
+            log_expr = max(MACHINE_EPS, quantum_efficiency * exp_at_hit_time + noise_rate_per_ns)
+            sum_log_exp_at_hit_times += hit_mult * math.log(log_expr)
 
         t_indep_exp = (
             quantum_efficiency * t_indep_exp + noise_rate_per_ns * time_window
@@ -1036,7 +1025,7 @@ def generate_pexp_5d_function(
             Single norm for all stacked time-independent tables
 
         """
-        llh = np.float64(0)
+        llh = FTYPE(0)
 
         # Loop through all DOMs we know didn't receive hits
         for sd_idx1 in unhit_sd_indices:
@@ -1108,7 +1097,7 @@ def generate_pexp_5d_function(
         sd_idx_table_indexer
 
         """
-        llh = np.float64(0)
+        llh = FTYPE(0)
         for indexer_entry in hits_indexer:
             start = indexer_entry['offset']
             stop = start + indexer_entry['num']

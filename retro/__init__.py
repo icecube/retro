@@ -87,7 +87,7 @@ FTYPE = np.float64
 UITYPE = np.int64
 """Datatype to use for explicitly-typed unsigned integers"""
 
-HYPO_PARAMS_T = HypoParams10D
+HYPO_PARAMS_T = HypoParams8D
 """Global selection of which hypothesis to use throughout the code."""
 
 LLHP_T = LLHP8D_T if HYPO_PARAMS_T is HypoParams8D else LLHP10D_T
@@ -114,5 +114,7 @@ DFLT_SPE_RECO_NAME = 'SPEFit2'
 DETECTOR_GEOM_FILE = join(RETRO_DIR, 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
-DETECTOR_GCD_DICT_FILE = join(dirname(dirname(abspath(__file__))), 'data', 'gcd_dict.pkl')
+DETECTOR_GCD_DICT_FILE = join(
+    dirname(dirname(abspath(__file__))), 'data', 'gcd_dict.pkl'
+)
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
