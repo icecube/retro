@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, too-many-locals
 
 """
 Function to generate the funciton for finding expected number of photons to
@@ -40,7 +40,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
-from retro.const import PI, EMPTY_HITS, NUM_DOMS_TOT, SRC_CKV_BETA1, SRC_OMNI
+from retro.const import PI, EMPTY_HITS, SRC_OMNI
 from retro.utils.ckv import (
     survival_prob_from_cone, survival_prob_from_smeared_cone
 )
@@ -143,6 +143,7 @@ def generate_pexp_5d_function(
     r_max = np.max(table['r_bin_edges'])
     rsquared_max = r_max*r_max
     r_power = infer_power(table['r_bin_edges'])
+    assert r_power == 2
     inv_r_power = 1 / r_power
     n_r_bins = len(table['r_bin_edges']) - 1
     table_dr_pwr = (r_max - r_min)**inv_r_power / n_r_bins
@@ -193,21 +194,31 @@ def generate_pexp_5d_function(
             size=num_phi_samples
         )
 
-    empty_1d_array = np.array([], dtype=np.float32).reshape((0,))
-    empty_4d_array = np.array([], dtype=np.float32).reshape((0,)*4)
+    empty_1d_array = np.array([], dtype=np.float64).reshape((0,))
+    empty_4d_array = np.array([], dtype=np.float64).reshape((0,)*4)
 
     if tbl_is_templ_compr:
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
             """Helper function for directionality-averaged table lookup"""
+            # Original axes ordering
             templ = table[r_bin_idx, costheta_bin_idx, t_bin_idx]
+
+            # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
+            #templ = table[costheta_bin_idx, r_bin_idx, t_bin_idx]
+
             return templ['weight'] / template_library[templ['index']].size
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx):
             """Helper function for table lookup"""
+            # Original axes ordering
             templ = table[r_bin_idx, costheta_bin_idx, t_bin_idx]
+
+            # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
+            #templ = table[costheta_bin_idx, r_bin_idx, t_bin_idx]
+
             return (
                 templ['weight']
                 * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
@@ -293,7 +304,7 @@ def generate_pexp_5d_function(
         t_indep_exp : float64
             If `compute_t_indep_exp` is True, return the total photons due to
             the hypothesis expected to arrive at the specified DOM for _all_
-            times. If `compute_t_indep_exp` is False, return value is 0.0.
+            times. If `compute_t_indep_exp` is False, return value is 0.
 
         sum_log_exp_at_hit_times : float64
             .. math::
@@ -313,7 +324,7 @@ def generate_pexp_5d_function(
 
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
-        t_indep_exp = np.float64(0.0)
+        t_indep_exp = np.float64(0)
         exp_at_hit_times = np.zeros(num_hits, dtype=np.float64)
 
         # Extract the components of the DOM coordinate just once, here
@@ -334,17 +345,18 @@ def generate_pexp_5d_function(
                 continue
 
             r = math.sqrt(rsquared)
-            r_bin_idx = int(r**inv_r_power / table_dr_pwr)
+            r = max(r, MACHINE_EPS)
+            r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
             source_kind = source['kind']
 
-            if source_kind == SRC_OMNI and compute_t_indep_exp:
+            if compute_t_indep_exp and source_kind == SRC_OMNI:
                 t_indep_surv_prob = np.mean(
                     t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
                 )
 
-            else: #elif source_kind == SRC_CKV_BETA1:
+            else: # (not compute_t_indep_exp) or (source_kind == SRC_CKV_BETA1):
                 # Note that for these tables, we have to invert the photon
                 # direction relative to the vector from the DOM to the photon's
                 # vertex since simulation has photons going _away_ from the DOM
@@ -355,6 +367,7 @@ def generate_pexp_5d_function(
                 pdir_costheta = source['dir_costheta']
 
                 rho = math.sqrt(rhosquared)
+                #rho = max(rho, MACHINE_EPS)
 
                 # \Delta\phi depends on photon position relative to the DOM...
 
@@ -367,8 +380,8 @@ def generate_pexp_5d_function(
                 # projections of the aforementioned vectors onto the xy-plane.
 
                 if rho <= MACHINE_EPS:
-                    pdir_cosdeltaphi = 1.0
-                    pdir_sindeltaphi = 0.0
+                    pdir_cosdeltaphi = np.float64(1)
+                    pdir_sindeltaphi = np.float64(0)
                 else:
                     pdir_cosdeltaphi = (
                         source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
@@ -424,7 +437,7 @@ def generate_pexp_5d_function(
                             )
 
                 else: # tbl_is_ckv
-                    costhetadir_bin_idx = int((pdir_costheta + 1.0) / table_dcosthetadir)
+                    costhetadir_bin_idx = int((pdir_costheta + np.float64(1)) / table_dcosthetadir)
 
                     # Make upper edge inclusive
                     if costhetadir_bin_idx > last_costhetadir_bin_idx:
@@ -535,7 +548,7 @@ def generate_pexp_5d_function(
         quantum_efficiency = dom_info['quantum_efficiency']
         noise_rate_per_ns = dom_info['noise_rate_per_ns']
 
-        sum_log_exp_at_hit_times = np.float64(0.0)
+        sum_log_exp_at_hit_times = np.float64(0)
         for hit_idx in range(num_hits):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             hit_mult = hits[hit_idx]['charge']
@@ -550,8 +563,9 @@ def generate_pexp_5d_function(
 
         return t_indep_exp, sum_log_exp_at_hit_times
 
+    # DEBUG
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d_ckv_compute_t_indep_noop( # pylint: disable=missing-docstring, too-many-locals
+    def pexp_5d_ckv_templ_compr_compute_t_indep_noop(
             sources,
             hits,
             dom_info,
@@ -560,17 +574,21 @@ def generate_pexp_5d_function(
             table_norm,
             t_indep_table,
             t_indep_table_norm,
+            # DEBUG: add two args
+            #table_indices,
+            #t_indep_indices
         ):
         """Use instead of pexp_5d_ckv_compute_t_indep for debugging speed"""
+        # pylint: disable=unused-variable, unused-argument, line-too-long
         if not dom_info['operational']:
-            return np.float32(0), np.float32(0)
+            return np.float64(0), np.float64(0)
 
         num_hits = len(hits)
 
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
-        t_indep_exp = np.float32(0.0)
-        exp_at_hit_times = np.zeros(num_hits, dtype=np.float32)
+        t_indep_exp = np.float64(0)
+        exp_at_hit_times = np.zeros(num_hits, dtype=np.float64)
 
         # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
@@ -590,13 +608,14 @@ def generate_pexp_5d_function(
                 continue
 
             r = math.sqrt(rsquared)
-            r_bin_idx = int(r**inv_r_power / table_dr_pwr)
+            r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
             source_kind = source['kind']
 
             if source_kind == SRC_OMNI:
-                t_indep_surv_prob = 1 #np.mean(
+                #t_indep_indices.append((r_bin_idx, costheta_bin_idx))
+                t_indep_surv_prob = 1.0 / np.float64(r_bin_idx + costheta_bin_idx) #np.mean(
                 #    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
                 #)
 
@@ -623,7 +642,7 @@ def generate_pexp_5d_function(
                 # projections of the aforementioned vectors onto the xy-plane.
 
                 if rho <= MACHINE_EPS:
-                    pdir_cosdeltaphi = 1.0
+                    pdir_cosdeltaphi = np.float64(1)
                 else:
                     pdir_cosdeltaphi = (
                         source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
@@ -632,7 +651,7 @@ def generate_pexp_5d_function(
                     # precision issues cause the dot product to blow up.
                     pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
 
-                costhetadir_bin_idx = int((pdir_costheta + 1.0) / table_dcosthetadir)
+                costhetadir_bin_idx = int((pdir_costheta + np.float64(1)) / table_dcosthetadir)
 
                 # Make upper edge inclusive
                 if costhetadir_bin_idx > last_costhetadir_bin_idx:
@@ -645,6 +664,8 @@ def generate_pexp_5d_function(
                 if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
                     deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
+                #t_indep_indices.append((r_bin_idx, costheta_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx))
+                t_indep_surv_prob = 1.0 / np.float64(r_bin_idx + costheta_bin_idx + costhetadir_bin_idx + deltaphidir_bin_idx)
                 t_indep_surv_prob = 1 #t_indep_table[
                 #    r_bin_idx,
                 #    costheta_bin_idx,
@@ -685,12 +706,16 @@ def generate_pexp_5d_function(
                 t_bin_idx = int(dt / table_dt)
 
                 if source_kind == SRC_OMNI:
-                    surv_prob_at_hit_t = 1 #table_lookup_mean(
+                    # DEBUG
+                    #table_indices.append((r_bin_idx, costheta_bin_idx, t_bin_idx))
+                    surv_prob_at_hit_t = 1.0 / np.float64(r_bin_idx + costheta_bin_idx + t_bin_idx) #table_lookup_mean(
                     #    table, r_bin_idx, costheta_bin_idx, t_bin_idx
                     #)
 
                 else: #elif source_kind == SRC_CKV_BETA1:
-                    surv_prob_at_hit_t = 1 #table_lookup(
+                    # DEBUG
+                    #table_indices.append((r_bin_idx, costheta_bin_idx, t_bin_idx, costhetadir_bin_idx, deltaphidir_bin_idx))
+                    surv_prob_at_hit_t = 1.0 / np.float64(r_bin_idx + costheta_bin_idx + t_bin_idx + costhetadir_bin_idx + deltaphidir_bin_idx) #table_lookup(
                     #    table,
                     #    r_bin_idx,
                     #    costheta_bin_idx,
@@ -706,7 +731,7 @@ def generate_pexp_5d_function(
         quantum_efficiency = dom_info['quantum_efficiency']
         noise_rate_per_ns = dom_info['noise_rate_per_ns']
 
-        sum_log_exp_at_hit_times = np.float32(0.0)
+        sum_log_exp_at_hit_times = np.float64(0)
         for hit_idx in range(num_hits):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             hit_mult = hits[hit_idx]['charge']
@@ -721,7 +746,7 @@ def generate_pexp_5d_function(
         return t_indep_exp, sum_log_exp_at_hit_times
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d_ckv_compute_t_indep( # pylint: disable=missing-docstring, too-many-locals
+    def pexp_5d_ckv_compute_t_indep(
             sources,
             hits,
             dom_info,
@@ -779,7 +804,7 @@ def generate_pexp_5d_function(
         t_indep_exp : float64
             If `compute_t_indep_exp` is True, return the total photons due to
             the hypothesis expected to arrive at the specified DOM for _all_
-            times. If `compute_t_indep_exp` is False, return value is 0.0.
+            times. If `compute_t_indep_exp` is False, return value is 0.
 
         sum_log_exp_at_hit_times : float64
             .. math::
@@ -793,19 +818,21 @@ def generate_pexp_5d_function(
 
         """
         if not dom_info['operational']:
-            return np.float32(0), np.float32(0)
+            return np.float64(0), np.float64(0)
 
         num_hits = len(hits)
 
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
-        t_indep_exp = np.float32(0.0)
-        exp_at_hit_times = np.zeros(num_hits, dtype=np.float32)
+        t_indep_exp = np.float64(0)
+        exp_at_hit_times = np.zeros(num_hits, dtype=np.float64)
 
         # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
         dom_y = dom_info['y']
         dom_z = dom_info['z']
+        quantum_efficiency = dom_info['quantum_efficiency']
+        noise_rate_per_ns = dom_info['noise_rate_per_ns']
 
         for source in sources:
             dx = dom_x - source['x']
@@ -820,17 +847,23 @@ def generate_pexp_5d_function(
                 continue
 
             r = math.sqrt(rsquared)
-            r_bin_idx = int(r**inv_r_power / table_dr_pwr)
+            r = max(r, MACHINE_EPS)
+            r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
             costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
             source_kind = source['kind']
 
             if source_kind == SRC_OMNI:
+                # Original axes ordering
                 t_indep_surv_prob = np.mean(
                     t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
                 )
+                # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
+                #t_indep_surv_prob = np.mean(
+                #    t_indep_table[:, costheta_bin_idx, r_bin_idx, :]
+                #)
 
-            else: #elif source_kind == SRC_CKV_BETA1:
+            else: # source_kind == SRC_CKV_BETA1:
                 # Note that for these tables, we have to invert the photon
                 # direction relative to the vector from the DOM to the photon's
                 # vertex since simulation has photons going _away_ from the DOM
@@ -853,7 +886,7 @@ def generate_pexp_5d_function(
                 # projections of the aforementioned vectors onto the xy-plane.
 
                 if rho <= MACHINE_EPS:
-                    pdir_cosdeltaphi = 1.0
+                    pdir_cosdeltaphi = np.float64(1)
                 else:
                     pdir_cosdeltaphi = (
                         source['dir_cosphi'] * dx/rho + source['dir_sinphi'] * dy/rho
@@ -862,7 +895,7 @@ def generate_pexp_5d_function(
                     # precision issues cause the dot product to blow up.
                     pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
 
-                costhetadir_bin_idx = int((pdir_costheta + 1.0) / table_dcosthetadir)
+                costhetadir_bin_idx = int((pdir_costheta + np.float64(1)) / table_dcosthetadir)
 
                 # Make upper edge inclusive
                 if costhetadir_bin_idx > last_costhetadir_bin_idx:
@@ -875,12 +908,21 @@ def generate_pexp_5d_function(
                 if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
                     deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
+                # Original axes ordering
                 t_indep_surv_prob = t_indep_table[
                     r_bin_idx,
                     costheta_bin_idx,
                     costhetadir_bin_idx,
                     deltaphidir_bin_idx
                 ]
+
+                # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
+                #t_indep_surv_prob = t_indep_table[
+                #    costhetadir_bin_idx,
+                #    costheta_bin_idx,
+                #    r_bin_idx,
+                #    deltaphidir_bin_idx
+                #]
 
             source_photons = source['photons']
 
@@ -915,7 +957,7 @@ def generate_pexp_5d_function(
                         table, r_bin_idx, costheta_bin_idx, t_bin_idx
                     )
 
-                else: #elif source_kind == SRC_CKV_BETA1:
+                else: # source_kind == SRC_CKV_BETA1
                     surv_prob_at_hit_t = table_lookup(
                         table,
                         r_bin_idx,
@@ -926,17 +968,18 @@ def generate_pexp_5d_function(
                     )
 
                 r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
-                exp_at_hit_times[hit_t_idx] += source_photons * r_t_bin_norm * surv_prob_at_hit_t
+                exp_at_hit_times[hit_t_idx] += (
+                    source_photons * r_t_bin_norm * surv_prob_at_hit_t
+                )
 
-        quantum_efficiency = dom_info['quantum_efficiency']
-        noise_rate_per_ns = dom_info['noise_rate_per_ns']
-
-        sum_log_exp_at_hit_times = np.float32(0.0)
+        sum_log_exp_at_hit_times = np.float64(0)
         for hit_idx in range(num_hits):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             hit_mult = hits[hit_idx]['charge']
+            log_expr = quantum_efficiency * exp_at_hit_time + noise_rate_per_ns
+            log_expr = max(MACHINE_EPS, log_expr)
             sum_log_exp_at_hit_times += (
-                hit_mult * math.log(quantum_efficiency * exp_at_hit_time + noise_rate_per_ns)
+                hit_mult * math.log(log_expr)
             )
 
         t_indep_exp = (
@@ -951,7 +994,7 @@ def generate_pexp_5d_function(
         pexp_5d = pexp_5d_generic
 
     # DEBUG
-    #pexp_5d = pexp_5d_ckv_compute_t_indep_noop
+    #pexp_5d = pexp_5d_ckv_templ_compr_compute_t_indep_noop
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh_all_doms(
@@ -965,7 +1008,7 @@ def generate_pexp_5d_function(
             tables,
             table_norm,
             t_indep_tables,
-            t_indep_table_norm
+            t_indep_table_norm,
         ):
         """Compute log likelihood for hypothesis sources given an event.
 
@@ -1006,7 +1049,7 @@ def generate_pexp_5d_function(
                 table=tables[table_idx],
                 table_norm=table_norm,
                 t_indep_table=t_indep_tables[table_idx],
-                t_indep_table_norm=t_indep_table_norm
+                t_indep_table_norm=t_indep_table_norm,
             )
             llh += sum_log_exp_at_hit_times - t_indep_exp
 
@@ -1027,7 +1070,7 @@ def generate_pexp_5d_function(
                 table=tables[table_idx],
                 table_norm=table_norm,
                 t_indep_table=t_indep_tables[table_idx],
-                t_indep_table_norm=t_indep_table_norm
+                t_indep_table_norm=t_indep_table_norm,
             )
             llh += sum_log_exp_at_hit_times - t_indep_exp
         return llh

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating
+# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals
 
 """
 Instantiate Retro tables and find the max over the log-likelihood space.
@@ -12,6 +12,11 @@ __all__ = [
     'CUBE_DIMS',
     'PRI_UNIFORM',
     'PRI_LOG_UNIFORM',
+    'PRI_LOG_NORMAL',
+    'PRI_COSINE',
+    'PRI_GAUSSIAN',
+    'PRI_SPEFIT2',
+    'PRI_CAUCHY',
     'run_multinest',
     'reco',
     'parse_args'
@@ -50,6 +55,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import HYPO_PARAMS_T, LLHP_T, init_obj
 from retro.const import TWO_PI, ALL_STRS_DOMS_SET
+from retro.retro_types import HypoParams8D, HypoParams10D
 from retro.utils.misc import expand, mkdir, sort_dict
 #from retro.likelihood import get_llh
 
@@ -65,7 +71,14 @@ CSCD_AZ = 'cascade_azimuth'
 ENERGY = 'energy'
 TRCK_FRAC = 'track_fraction'
 
-CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC]
+
+if HYPO_PARAMS_T is HypoParams8D:
+    CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC]
+elif HYPO_PARAMS_T is HypoParams10D:
+    CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC, CSCD_ZEN, CSCD_AZ]
+else:
+    raise NotImplementedError(str(HYPO_PARAMS_T))
+
 
 CUBE_T_IDX = CUBE_DIMS.index(T)
 CUBE_X_IDX = CUBE_DIMS.index(X)
@@ -75,14 +88,21 @@ CUBE_TRACK_ZEN_IDX = CUBE_DIMS.index(TRCK_ZEN)
 CUBE_TRACK_AZ_IDX = CUBE_DIMS.index(TRCK_AZ)
 CUBE_ENERGY_IDX = CUBE_DIMS.index(ENERGY)
 CUBE_TRACK_FRAC_IDX = CUBE_DIMS.index(TRCK_FRAC)
-CUBE_CSCD_ZEN_IDX = None
-CUBE_CSCD_AZ_IDX = None
+if HYPO_PARAMS_T is HypoParams8D:
+    CUBE_CSCD_ZEN_IDX = None
+    CUBE_CSCD_AZ_IDX = None
+else:
+    CUBE_CSCD_ZEN_IDX = CUBE_DIMS.index(CSCD_ZEN)
+    CUBE_CSCD_AZ_IDX = CUBE_DIMS.index(CSCD_AZ)
+
 
 PRI_UNIFORM = 'uniform'
 PRI_LOG_UNIFORM = 'log_uniform'
+PRI_LOG_NORMAL = 'log_normal'
 PRI_COSINE = 'cosine'
 PRI_GAUSSIAN = 'gaussian'
 PRI_SPEFIT2 = 'spefit2'
+PRI_CAUCHY = 'cauchy'
 
 
 def run_multinest(
@@ -142,7 +162,9 @@ def run_multinest(
     # functions / constants in this module will still be import-able w/o it.
     import pymultinest
 
-    hits, hits_indexer, hits_summary = event['hits']
+    hits = event['hits']
+    hits_indexer = event['hits_indexer']
+    hits_summary = event['hits_summary']
 
     priors_used = OrderedDict()
 
@@ -151,7 +173,7 @@ def run_multinest(
         prior_kind, prior_params = priors[dim_name]
         if prior_kind is PRI_UNIFORM:
             # Time is special since prior is relative to hits in the event
-            if dim_name is T:
+            if dim_name == T:
                 prior_params = (
                     hits_summary['earliest_hit_time'] + prior_params[0],
                     hits_summary['latest_hit_time'] + prior_params[1]
@@ -172,47 +194,43 @@ def run_multinest(
                 def prior_func(cube, n=dim_num, width=width, minval=minval):
                     cube[n] = cube[n] * width + minval
 
-        elif prior_kind is PRI_LOG_UNIFORM:
+        elif prior_kind == PRI_LOG_UNIFORM:
             priors_used[dim_name] = (prior_kind, prior_params)
             log_min = np.log(np.min(prior_params))
             log_width = np.log(np.max(prior_params) / np.min(prior_params))
             def prior_func(cube, n=dim_num, log_width=log_width, log_min=log_min):
                 cube[n] = exp(cube[n] * log_width + log_min)
 
-        elif prior_kind is PRI_COSINE:
+        elif prior_kind == PRI_COSINE:
             priors_used[dim_name] = (prior_kind, prior_params)
             cos_min = np.min(prior_params)
             cos_width = np.max(prior_params) - cos_min
             def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min):
                 cube[n] = acos(cube[n] * cos_width + cos_min)
 
-        elif prior_kind is PRI_GAUSSIAN:
+        elif prior_kind == PRI_GAUSSIAN:
             priors_used[dim_name] = (prior_kind, prior_params)
             mean, stddev = prior_params
             norm = 1 / (stddev * np.sqrt(TWO_PI))
             def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
                 cube[n] = norm * exp(-((cube[n] - mean) / stddev)**2)
 
-        elif prior_kind is PRI_SPEFIT2:
+        elif prior_kind == PRI_LOG_NORMAL:
+            priors_used[dim_name] = (prior_kind, prior_params)
+            shape, loc, scale, low, high = prior_params
+            lognorm = stats.lognorm(shape, loc, scale)
+            def prior_func(cube, lognorm=lognorm, n=dim_num, low=low, high=high):
+                cube[n] = np.clip(lognorm.isf(cube[n]), a_min=low, a_max=high)
+
+        elif prior_kind == PRI_SPEFIT2:
             spe_fit_val = event['recos']['SPEFit2'][dim_name]
-            loc = spe_fit_val + prior_params[0]
-            scale = prior_params[1]
-            priors_used[dim_name] = (prior_kind, (loc, scale))
+            rel_loc, scale, low, high = prior_params
+            loc = spe_fit_val + rel_loc
             cauchy = stats.cauchy(loc=loc, scale=scale)
             if dim_name == T:
-                low = hits_summary['time_window_start'] - 4000
-                high = hits_summary['time_window_stop']
-            elif dim_name == X:
-                low = -800
-                high = 800
-            elif dim_name == Y:
-                low = -700
-                high = 700
-            elif dim_name == Z:
-                low = -600
-                high = 550
-            else:
-                raise NotImplementedError('SPEFit2 cannot be used for {}'.format(dim_name))
+                low += hits_summary['time_window_start']
+                high += hits_summary['time_window_stop']
+            priors_used[dim_name] = (PRI_CAUCHY, (loc, scale, low, high))
             def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high):
                 cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
 
@@ -228,7 +246,6 @@ def run_multinest(
 
     report_after = 1000
 
-    #@profile
     def prior(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function for pymultinest to translate the hypercube MultiNest uses
         (each value is in [0, 1]) into the dimensions of the parameter space.
@@ -240,38 +257,7 @@ def run_multinest(
         for prior_func in prior_funcs:
             prior_func(cube)
 
-    # <DEBUG/>
-    #cube0 = np.zeros(len(CUBE_DIMS))
-    #cube0p5 = 0.5 * np.ones(len(CUBE_DIMS))
-    #cube1 = np.ones(len(CUBE_DIMS))
-
-    #prior(cube0, len(CUBE_DIMS), len(CUBE_DIMS))
-    #prior(cube0p5, len(CUBE_DIMS), len(CUBE_DIMS))
-    #prior(cube1, len(CUBE_DIMS), len(CUBE_DIMS))
-
-    #print('')
-    #print('SPEFit2:\n ')
-    #reco = event['recos']['SPEFit2']
-    #print(reco.keys())
-    #for dim in CUBE_DIMS:
-    #    if dim == 'track_zenith':
-    #        val = reco['zenith']
-    #    elif dim == 'track_azimuth':
-    #        val = reco['azimuth']
-    #    elif dim in 'x y z time'.split():
-    #        val = reco[dim]
-    #    else:
-    #        continue
-    #    print(' {} = {:.3f}'.format(dim, val))
-
-    #print('cube0:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube0)]))
-    #print('cube0p5:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube0p5)]))
-    #print('cube1:\n ' + '\n '.join(['{} = {:.3f}'.format(d, x) for d, x in zip(CUBE_DIMS, cube1)]))
-    #print('')
-    #raise Exception
-    # </DEBUG>
-
-    llh_func = dom_tables._get_llh
+    get_llh = dom_tables._get_llh # pylint: disable=protected-access
     dom_info = dom_tables.dom_info
     tables = dom_tables.tables
     table_norm = dom_tables.table_norm
@@ -281,13 +267,21 @@ def run_multinest(
     time_window = np.float32(
         hits_summary['time_window_stop'] - hits_summary['time_window_start']
     )
+    # TODO: implement logic allowing for not all DOMs to be used
+    #hit_sd_indices = np.array(
+    #    sorted(dom_tables.use_sd_indices_set.union(hits_indexer['sd_idx'])),
+    #    dtype=np.uint32
+    #)
     hit_sd_indices = hits_indexer['sd_idx']
     unhit_sd_indices = np.array(
         sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
         dtype=np.uint32
     )
 
-    #@profile
+    # DEBUG
+    #table_indices = []
+    #t_indep_indices = []
+
     def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
         """Function pymultinest calls to get llh values.
 
@@ -304,18 +298,32 @@ def run_multinest(
         total_energy = cube[CUBE_ENERGY_IDX]
         track_fraction = cube[CUBE_TRACK_FRAC_IDX]
 
-        hypo = HYPO_PARAMS_T(
-            time=cube[CUBE_T_IDX],
-            x=cube[CUBE_X_IDX],
-            y=cube[CUBE_Y_IDX],
-            z=cube[CUBE_Z_IDX],
-            track_zenith=cube[CUBE_TRACK_ZEN_IDX],
-            track_azimuth=cube[CUBE_TRACK_AZ_IDX],
-            cascade_energy=total_energy * (1 - track_fraction),
-            track_energy=total_energy * track_fraction
-        )
+        if HYPO_PARAMS_T is HypoParams8D:
+            hypo = HYPO_PARAMS_T(
+                time=cube[CUBE_T_IDX],
+                x=cube[CUBE_X_IDX],
+                y=cube[CUBE_Y_IDX],
+                z=cube[CUBE_Z_IDX],
+                track_zenith=cube[CUBE_TRACK_ZEN_IDX],
+                track_azimuth=cube[CUBE_TRACK_AZ_IDX],
+                cascade_energy=total_energy * (1 - track_fraction),
+                track_energy=total_energy * track_fraction
+            )
+        else:
+            hypo = HYPO_PARAMS_T(
+                time=cube[CUBE_T_IDX],
+                x=cube[CUBE_X_IDX],
+                y=cube[CUBE_Y_IDX],
+                z=cube[CUBE_Z_IDX],
+                track_zenith=cube[CUBE_TRACK_ZEN_IDX],
+                track_azimuth=cube[CUBE_TRACK_AZ_IDX],
+                cascade_energy=total_energy * (1 - track_fraction),
+                track_energy=total_energy * track_fraction,
+                cascade_zenith=cube[CUBE_CSCD_ZEN_IDX],
+                cascade_azimuth=cube[CUBE_CSCD_AZ_IDX]
+            )
         sources = hypo_handler.get_sources(hypo)
-        llh = llh_func(
+        llh = get_llh(
             sources=sources,
             hits=hits,
             hits_indexer=hits_indexer,
@@ -326,12 +334,16 @@ def run_multinest(
             tables=tables,
             table_norm=table_norm,
             t_indep_tables=t_indep_tables,
-            t_indep_table_norm=t_indep_table_norm
+            t_indep_table_norm=t_indep_table_norm,
+            # DEBUG
+            #table_indices=table_indices,
+            #t_indep_indices=t_indep_indices
         )
+        # DEBUG
         #print('')
         #with open('/tmp/get_llh.asm', 'w') as f:
-        #print(llh_func.inspect_asm(llh_func.signatures[0]))
-        #print('number of signatures:', len(llh_func.signatures))
+        #print(get_llh.inspect_asm(get_llh.signatures[0]))
+        #print('number of signatures:', len(get_llh.signatures))
         #print('')
         #raise Exception()
 
@@ -348,15 +360,30 @@ def run_multinest(
             best_llh = log_likelihoods[best_idx]
             best_p = param_values[best_idx]
             print('')
-            print(('best llh = {:.3f} @ '
-                   '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
-                   ' zen={:.1f} deg, az={:.1f} deg, Etrk={:.1f}, Ecscd={:.1f})')
-                  .format(
-                      best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
-                      np.rad2deg(best_p.track_zenith),
-                      np.rad2deg(best_p.track_azimuth),
-                      best_p.track_energy,
-                      best_p.cascade_energy))
+            if HYPO_PARAMS_T is HypoParams8D:
+                print(('best llh = {:.3f} @ '
+                       '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
+                       ' zen={:.1f} deg, az={:.1f} deg, Etrk={:.1f}, Ecscd={:.1f})')
+                      .format(
+                          best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
+                          np.rad2deg(best_p.track_zenith),
+                          np.rad2deg(best_p.track_azimuth),
+                          best_p.track_energy,
+                          best_p.cascade_energy))
+            else:
+                print(('best llh = {:.3f} @'
+                       ' (t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
+                       ' zen_trk={:.1f} deg, zen_csc={:.1f} deg,'
+                       ' az_trk={:.1f}, az_csc={:.1f},'
+                       ' Etrk={:.1f}, Ecscd={:.1f})')
+                      .format(
+                          best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
+                          np.rad2deg(best_p.track_zenith),
+                          np.rad2deg(best_p.cascade_zenith),
+                          np.rad2deg(best_p.track_azimuth),
+                          np.rad2deg(best_p.cascade_azimuth),
+                          best_p.track_energy,
+                          best_p.cascade_energy))
             print('{} LLH computed'.format(n_calls))
             print('avg time per llh: {:.3f} ms'.format((t_now - t_start[0])/n_calls*1000))
             print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
@@ -369,7 +396,7 @@ def run_multinest(
         ('n_dims', n_dims),
         ('n_params', n_dims),
         ('n_clustering_params', n_dims),
-        ('wrapped_params', [int('azimuth' in p) for p in HYPO_PARAMS_T._fields]),
+        ('wrapped_params', [int('azimuth' in p.lower()) for p in CUBE_DIMS]),
         ('importance_nested_sampling', importance_sampling),
         ('multimodal', max_modes > 1),
         ('const_efficiency_mode', const_eff),
@@ -388,6 +415,7 @@ def run_multinest(
         ('params', CUBE_DIMS),
         ('original_prior_specs', priors),
         ('priors_used', priors_used),
+        ('time_window', time_window),
         ('kwargs', sort_dict(mn_kw)),
     ])
 
@@ -429,6 +457,14 @@ def run_multinest(
         protocol=pickle.HIGHEST_PROTOCOL
     )
 
+    # DEBUG
+    #table_indices_outf = out_prefix + 'table_indices.pkl'
+    #pickle.dump(table_indices, open(table_indices_outf, 'wb'),
+    #            protocol=pickle.HIGHEST_PROTOCOL)
+    #t_indep_table_indices_outf = out_prefix + 't_indep_table_indices.pkl'
+    #pickle.dump(t_indep_indices, open(t_indep_table_indices_outf, 'wb'),
+    #            protocol=pickle.HIGHEST_PROTOCOL)
+
     return llhp, mn_meta
 
 
@@ -441,14 +477,6 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
     events_iterator = init_obj.get_events(**events_kw)
 
     print('Running reconstructions...')
-
-    #llh_kw = dict(
-    #    tables=dom_tables.tables,
-    #    table_norm=dom_tables.table_norm,
-    #    t_indep_tables=dom_tables.t_indep_tables,
-    #    t_indep_table_norm=dom_tables.t_indep_table_norm,
-    #    sd_idx_table_indexer=dom_tables.sd_idx_table_indexer
-    #)
 
     spatial_prior_orig = reco_kw.pop('spatial_prior').strip()
     spatial_prior_name = spatial_prior_orig.lower()
@@ -465,29 +493,72 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
         y_prior = (PRI_UNIFORM, (-210, 150))
         z_prior = (PRI_UNIFORM, (-610, -60))
     elif spatial_prior_name == 'spefit2':
-        x_prior = (PRI_SPEFIT2, (-0.19687812829978152, 14.282171566308806))
-        y_prior = (PRI_SPEFIT2, (-0.2393645701205161, 15.049528023495354))
-        z_prior = (PRI_SPEFIT2, (-5.9170661027492546, 12.089399308036718))
+        x_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc, scale parameters
+                -0.19687812829978152, 14.282171566308806,
+                # Hard limits
+                -600, 750
+            )
+        )
+        y_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc, scale parameters
+                -0.2393645701205161, 15.049528023495354,
+                # Hard limits
+                -750, 650
+            )
+        )
+        z_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc, scale parameters
+                -5.9170661027492546, 12.089399308036718,
+                # Hard limits
+                -1200, 200
+            )
+        )
     else:
         raise ValueError('Spatial prior "{}" not recognized'
                          .format(spatial_prior_orig))
 
     temporal_prior_orig = reco_kw.pop('temporal_prior').strip()
     temporal_prior_name = temporal_prior_orig.lower()
-    if temporal_prior_name == 'uniform':
-        time_prior = (PRI_UNIFORM, (-4000, 0))
-    elif temporal_prior_name == 'spefit2':
-        time_prior = (PRI_SPEFIT2, (-82.631395081663754, 75.619895703067343))
+    if temporal_prior_name == PRI_UNIFORM:
+        time_prior = (PRI_UNIFORM, (-4e3, 0.0))
+    elif temporal_prior_name == PRI_SPEFIT2:
+        time_prior = (
+            PRI_SPEFIT2,
+            (
+                # scipy.stats.cauchy loc (rel to SPEFit2 time), scale
+                -82.631395081663754, 75.619895703067343,
+                # Hard limits (relative to left, right edges of window,
+                # respectively)
+                -4e3, 0.0
+            )
+        )
     else:
         raise ValueError('Temporal prior "{}" not recognized'
                          .format(temporal_prior_orig))
 
     energy_prior_name = reco_kw.pop('energy_prior')
     energy_lims = reco_kw.pop('energy_lims')
-    if energy_prior_name == 'uniform':
-        energy_prior = (PRI_UNIFORM, tuple(energy_lims))
-    elif energy_prior_name == 'log_uniform':
-        energy_prior = (PRI_LOG_UNIFORM, tuple(energy_lims))
+    if energy_prior_name == PRI_UNIFORM:
+        energy_prior = (PRI_UNIFORM, (np.min(energy_lims), np.max(energy_lims)))
+    elif energy_prior_name == PRI_LOG_UNIFORM:
+        energy_prior = (PRI_LOG_UNIFORM, (np.min(energy_lims), np.max(energy_lims)))
+    elif energy_prior_name == PRI_LOG_NORMAL:
+        energy_prior = (
+            PRI_LOG_NORMAL,
+            (
+                # scipy.stats.lognorm 3 paramters
+                0.96251341305506233, 0.4175592980195757, 17.543915051586644,
+                # hard limits
+                np.min(energy_lims), np.max(energy_lims)
+            )
+        )
     else:
         raise ValueError(str(energy_prior_name))
 
@@ -501,6 +572,9 @@ def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
         ('energy', energy_prior),
         ('track_fraction', (PRI_UNIFORM, (0, 1)))
     ])
+    if HYPO_PARAMS_T is HypoParams10D:
+        priors['cascade_zenith'] = (PRI_COSINE, (-1, 1))
+        priors['cascade_azimuth'] = (PRI_UNIFORM, (0, TWO_PI))
 
     for event_idx, event in events_iterator: # pylint: disable=unused-variable
         t1 = time.time()
@@ -563,14 +637,17 @@ def parse_args(description=__doc__):
     )
     group.add_argument(
         '--energy-prior',
-        choices='uniform log_uniform'.split(),
+        choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
+        required=True,
         help='''Prior to put on _total_ event energy. Must specify
-        --energy-lims if using either "uniform" or "log_uniform" priors.'''
+        --energy-lims.'''
     )
     group.add_argument(
-        '--energy-lims', nargs='+', default=None,
+        '--energy-lims', nargs='+',
+        required=True,
         help='''Lower and upper energy limits, in GeV. E.g.: --energy-lims=1,100
-        Required if --energy-prior is "log_uniform" or "uniform"'''
+        Required if --energy-prior is {}, {}, or {}'''
+        .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
     )
 
     group = parser.add_argument_group(
@@ -583,7 +660,7 @@ def parse_args(description=__doc__):
         but also can be unstable. Does not work with multimodal.'''
     )
     group.add_argument(
-        '--max-modes', type=int,
+        '--max-modes', type=int, required=True,
         help='''Set to 1 to disable multi-modal search. Must be 1 if --importance-sampling is
         specified.'''
     )
@@ -592,16 +669,16 @@ def parse_args(description=__doc__):
         help='''Constant efficiency mode.'''
     )
     group.add_argument(
-        '--n-live', type=int,
+        '--n-live', type=int, required=True
     )
     group.add_argument(
-        '--evidence-tol', type=float,
+        '--evidence-tol', type=float, required=True
     )
     group.add_argument(
-        '--sampling-eff', type=float,
+        '--sampling-eff', type=float, required=True
     )
     group.add_argument(
-        '--max-iter', type=int,
+        '--max-iter', type=int, required=True,
         help='''Note that iterations of the MultiNest algorithm are _not_ the
         number of likelihood evaluations. An iteration comes when one live
         point is discarded by finding a sample with higher likelihood than at
@@ -609,7 +686,7 @@ def parse_args(description=__doc__):
         evaluatsions to find.'''
     )
     group.add_argument(
-        '--seed', type=int,
+        '--seed', type=int, required=True,
         help='''Integer seed for MultiNest's random number generator.'''
     )
 
@@ -619,14 +696,14 @@ def parse_args(description=__doc__):
 
     split_kwargs['reco_kw'] = reco_kw = split_kwargs.pop('other_kw')
 
-    if reco_kw['energy_prior'] in ['uniform', 'log_uniform']:
+    if reco_kw['energy_prior'] in [PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL]:
         assert reco_kw['energy_lims'] is not None
         elims = ''.join(reco_kw['energy_lims'])
         elims = [float(l) for l in elims.split(',')]
         reco_kw['energy_lims'] = elims
     elif reco_kw['energy_lims'] is not None:
-        raise ValueError('--energy-limits are not used with energy priors'
-                         ' besides "uniform" and "log_uniform".')
+        raise ValueError('--energy-limits not used with energy prior {}'
+                         .format(reco_kw['energy_prior']))
 
     return split_kwargs
 

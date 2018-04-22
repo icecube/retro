@@ -3,7 +3,8 @@
 start_evt=0
 n_events=1
 
-base="/data/justin/retro/scans/downgoing_muon_evtidx${start_evt}_stacked_numballh"
+#base="/data/justin/retro/scans/downgoing_muon_evtidx${start_evt}_stacked_numballh_reordered"
+base="/tmp/delme"
 mkdir -p "$base"
 
 #hits="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1/photon_series/photons.pkl"
@@ -20,15 +21,16 @@ events_base="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_
 #tmpl_lib="--template-library /data/icecube/retro_tables/ckv_dir_templates.npy"
 #tblkind="ckv_templ_compr"
 
-proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
-tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+proto="/fastio/icecube/retro/tables/large_5d_notilt_combined/stacked"
+#proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked_reordered"
+tmpl_lib="--template-library /fastio/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 tblkind="ckv_templ_compr"
 
-sdoms="dc_subdust"
-#sdoms="all"
+#use_doms="dc_subdust"
+use_doms="all"
 
-#noise="--no-noise"
-noise=""
+#no_noise="--no-noise"
+no_noise=""
 
 gcd="GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.bz2"
 angsens="h2-50cm"
@@ -74,9 +76,9 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 #
 #~/src/retro/retro/scan_llh.py \
@@ -100,9 +102,9 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 
 ~/src/retro/retro/scan_llh.py \
@@ -126,15 +128,14 @@ cscdescan="0-100:1"
     \
     --dom-tables-kind "ckv_templ_compr" \
     --dom-tables-fname-proto "$proto" \
-    --strs-doms "all" \
+    --use-doms "$use_doms" \
     --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
-    $noise \
+    $no_noise \
     --norm-version "binvol2" \
     $tmpl_lib \
     --step-length 1.0 \
     \
     --cascade-kernel="$ckernel" \
-    $cnumpts \
     --track-kernel="$tkernel" \
     --track-time-step="$tktimestep"
 
@@ -159,9 +160,9 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 #
 #~/src/retro/retro/scan_llh.py \
@@ -185,9 +186,9 @@ cscdescan="0-100:1"
 #    --dom-tables-fname-proto="$proto" \
 #    --dom-tables-kind="$tblkind" \
 #    $tmpl_lib \
-#    --strs-doms="$sdoms" \
+#    --use-doms="$use_doms" \
 #    --gcd="$gcd" \
-#    $noise \
+#    $no_noise \
 #    --norm-version="$norm" &
 
 wait

@@ -11,6 +11,9 @@ mkdir -p "$outdir"
 #proto="/fastio2/icecube/retro/tables/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib=""
 
+#proto="/gpfs/scratch/jll1062/retro_tables/stacked"
+#tmpl_lib="--template-library /gpfs/scratch/jll1062/retro_tables/ckv_dir_templates.npy"
+
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
@@ -20,10 +23,13 @@ tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_not
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-#noise="--no-noise"
-noise=""
+#no_noise="--no-noise"
+no_noise=""
 
 importance_sampling="--importance-sampling"
+#importance_sampling=""
+
+#consteff="--const-eff"
 consteff=""
 
 
@@ -32,8 +38,8 @@ consteff=""
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
-    --energy-prior log_uniform \
-    --energy-lims 0.1,1000  \
+    --energy-prior log_normal \
+    --energy-lims 0.2,2000  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -46,12 +52,12 @@ consteff=""
     \
     --dom-tables-kind "ckv_templ_compr" \
     --dom-tables-fname-proto "$proto" \
-    --strs-doms "all" \
-    --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
+    --use-doms "all" \
+    --gcd "GeoCalibDetectorStatus_IC86.55697_corrected_V2.pkl" \
     --norm-version "binvol2" \
     $tmpl_lib \
     --step-length 1.0 \
-    $noise \
+    $no_noise \
     \
     --cascade-kernel "point_ckv" \
     --track-kernel "table_e_loss" \
@@ -60,7 +66,6 @@ consteff=""
     --events-base "$events_base" \
     --start-idx "$start_idx" \
     --num-events 1 \
-    --truth \
     --pulses "OfflinePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
