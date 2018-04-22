@@ -38,8 +38,8 @@ consteff=""
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
-    --energy-prior log_normal \
-    --energy-lims 0.2,2000  \
+    --energy-prior log_uniform \
+    --energy-lims 0.1,1000  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -53,7 +53,7 @@ consteff=""
     --dom-tables-kind "ckv_templ_compr" \
     --dom-tables-fname-proto "$proto" \
     --use-doms "all" \
-    --gcd "GeoCalibDetectorStatus_IC86.55697_corrected_V2.pkl" \
+    --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
     --norm-version "binvol2" \
     $tmpl_lib \
     --step-length 1.0 \
@@ -65,7 +65,7 @@ consteff=""
     \
     --events-base "$events_base" \
     --start-idx "$start_idx" \
-    --num-events 1 \
+    --num-events 100 \
     --pulses "OfflinePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \

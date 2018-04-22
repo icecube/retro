@@ -87,7 +87,8 @@ FTYPE = np.float64
 UITYPE = np.int64
 """Datatype to use for explicitly-typed unsigned integers"""
 
-HYPO_PARAMS_T = HypoParams10D
+#HYPO_PARAMS_T = HypoParams10D
+HYPO_PARAMS_T = HypoParams8D
 """Global selection of which hypothesis to use throughout the code."""
 
 LLHP_T = LLHP8D_T if HYPO_PARAMS_T is HypoParams8D else LLHP10D_T

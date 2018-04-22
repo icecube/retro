@@ -433,7 +433,7 @@ def run_multinest(
         verbose=True,
         outputfiles_basename=out_prefix,
         resume=False,
-        write_output=True,
+        write_output=False,
         n_iter_before_update=5000,
         **mn_kw
     )
