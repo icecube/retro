@@ -14,8 +14,11 @@ mkdir -p "$outdir"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
-tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
+tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+
+#proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
+#tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
 #noise="--no-noise"
 noise=""
@@ -25,7 +28,7 @@ consteff=""
 
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
-~/src/retro/retro/reco.py \
+~/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
@@ -50,7 +53,7 @@ consteff=""
     --step-length 1.0 \
     $noise \
     \
-    --cascade-kernel "point" \
+    --cascade-kernel "point_ckv" \
     --track-kernel "table_e_loss" \
     --track-time-step 1.0 \
     \
