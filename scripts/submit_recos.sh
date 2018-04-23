@@ -1,6 +1,6 @@
-for file in {0..0}
+for file in {35..39}
 do
-for dir in {0..9}
+for dir in {0..59}
 do
 #    echo "/storage/home/pde3/retro/scripts/reco_file.sh $dir $file" | qsub -A open \
 #    echo "/storage/home/pde3/retro/scripts/reco_file.sh $dir $file" | qsub -A cyberlamp \
