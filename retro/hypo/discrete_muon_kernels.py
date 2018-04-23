@@ -79,10 +79,13 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
         return EMPTY_SOURCES
 
     length = track_energy * TRACK_M_PER_GEV
-    duration = length / SPEED_OF_LIGHT_M_PER_NS
-    n_segments = max(1.0, duration // dt)
-    segment_length = length / n_segments
-    dt = segment_length / SPEED_OF_LIGHT_M_PER_NS
+
+    sampled_dt = np.arange(dt*0.5, length/SPEED_OF_LIGHT_M_PER_NS, dt)
+    # At least one segment
+    if len(sampled_dt) == 0:
+        sampled_dt = np.array([length/2./SPEED_OF_LIGHT_M_PER_NS])
+
+    segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
     # NOTE: add pi to make dir vector go in "math-standard" vector notation
@@ -102,9 +105,7 @@ def const_energy_loss_muon(hypo_params, dt=1.0):
     dir_y = dir_sintheta * dir_sinphi
     dir_z = dir_costheta
 
-    sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
-
-    sources = np.empty(shape=int(n_segments), dtype=SRC_T)
+    sources = np.empty(shape=sampled_dt.shape, dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
     sources['time'] = hypo_params.time + sampled_dt
@@ -183,16 +184,18 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
                          ' GeV'.format(TABLE_UPPER_BOUND))
 
     # Total expected length of muon from table
-    muon_len = MULEN_INTERP(track_energy)
+    length = MULEN_INTERP(track_energy)
 
     # Since table cuts off, this can be 0 even for track_energy != 0
-    if muon_len == 0:
+    if length == 0:
         return EMPTY_SOURCES
 
+    sampled_dt = np.arange(dt*0.5, length/SPEED_OF_LIGHT_M_PER_NS, dt)
     # At least one segment
-    n_segments = max(1.0, muon_len // (SPEED_OF_LIGHT_M_PER_NS * dt))
-    segment_length = muon_len / n_segments
-    dt = segment_length / SPEED_OF_LIGHT_M_PER_NS
+    if len(sampled_dt) == 0:
+        sampled_dt = np.array([length/2./SPEED_OF_LIGHT_M_PER_NS])
+
+    segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
     # Assign dir_x, dir_y, dir_z for the track
@@ -209,9 +212,7 @@ def table_energy_loss_muon(hypo_params, dt=1.0):
     dir_y = dir_sintheta * dir_sinphi
     dir_z = dir_costheta
 
-    sampled_dt = np.linspace(dt*0.5, dt * (n_segments - 0.5), int(n_segments))
-
-    sources = np.empty(shape=int(n_segments), dtype=SRC_T)
+    sources = np.empty(shape=sampled_dt.shape, dtype=SRC_T)
 
     sources['kind'] = SRC_CKV_BETA1
     sources['time'] = hypo_params.time + sampled_dt

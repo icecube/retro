@@ -133,7 +133,7 @@ def weighted_percentile(data, percentile, weights=None):
     return np.interp(percentile, p, d)
 
 
-def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
+def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
     """Evaluate estimate for reconstruction quantities given the MultiNest
     points of LLH space exploration.
 
@@ -147,8 +147,11 @@ def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
         meta information from the minimization, including priors
         If specified, "no_prior_*" estimates will also be returned.
 
-    percentile_nd : float
-        On what percentile of llh values to base the calculation
+    per_dim : boolean
+        treat each dimension individually (not yet sure how much sense that makes)
+
+    prob_weights : boolean
+        use LLH weights
 
     Returns
     -------
@@ -165,67 +168,129 @@ def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
 
     num_dims = len(columns)
 
-    # cut away upper and lower 13.35% to arrive at 1 sigma
-    cut = llhp['llh'] >= np.nanmax(llhp['llh']) - stats.chi2.ppf(percentile_nd, num_dims)
+    # cut away extremely low llh (30 or more below best point)
+    cut = llhp['llh'] >= np.nanmax(llhp['llh']) - 30
     if np.sum(cut) == 0:
         raise IndexError('no points')
 
     # can throw rest of points away
     llhp = llhp[cut]
-
-    # calculate the weights from the used priors
-    if meta is None:
-        weights = None
+    #print(llhp)
+    
+    # calculate weights from probabilities
+    if prob_weights:
+        prob_weights = np.exp(llhp['llh'] - np.max(llhp['llh']))
+        #prob_weights = 1./np.square((1. + np.max(llhp['llh']) - llhp['llh']))
     else:
-        weights = np.ones(len(llhp))
+        prob_weights = None
+
+
+    # calculate the prior weights from the used priors
+    if meta is None:
+        prior_weights = None
+    else:
+        if per_dim:
+            prior_weights = {}
+        else:
+            prior_weights = np.ones(len(llhp))
         if not meta is None:
             priors = meta['priors_used']
-
             for dim in priors.keys():
                 prior = priors[dim]
                 if prior[0] == 'uniform':
-                    continue
+                    w = np.ones(len(llhp))
                 elif prior[0] in ['cauchy', 'spefit2']:
-                    weights /= stats.cauchy.pdf(llhp[dim], *prior[1][:2])
+                    w = 1./stats.cauchy.pdf(llhp[dim], *prior[1][:2])
+                    #w = np.ones(len(llhp))
                 elif prior[0] == 'log_normal' and dim == 'energy':
-                    weights /= stats.lognorm.pdf(llhp['track_energy'] + llhp['cascade_energy'], *prior[1][:3])
+                    w = 1./stats.lognorm.pdf(llhp['track_energy'] + llhp['cascade_energy'], *prior[1][:3])
+                    #w = np.ones(len(llhp))
                 elif prior[0] == 'log_uniform' and dim == 'energy':
-                    weights *= llhp['track_energy'] + llhp['cascade_energy']
+                    w = llhp['track_energy'] + llhp['cascade_energy']
+                    #w = np.ones(len(llhp))
+                elif prior[0] == 'log_uniform' and dim == 'cascade_energy':
+                    w = llhp['cascade_energy']
+                elif prior[0] == 'log_uniform' and dim == 'track_energy':
+                    w = llhp['track_energy']
                 elif prior[0] == 'cosine':
-                    weights /= np.clip(np.sin(llhp[dim]), 0.01, None)
+                    w = 1./np.clip(np.sin(llhp[dim]), 0.01, None)
+                    #w = np.ones(len(llhp))
                 else:
                     raise NotImplementedError('prior %s for dimension %s unknown'%(prior[0], dim))
+
+                if per_dim:
+                    prior_weights[dim] = w
+                else:
+                    prior_weights *= w
+
+    if per_dim:
+        prior_weights['track_energy'] = llhp['track_energy'] / (llhp['track_energy'] + llhp['cascade_energy']) * prior_weights['energy']
+        prior_weights['cascade_energy'] = llhp['cascade_energy'] / (llhp['track_energy'] + llhp['cascade_energy']) * prior_weights['energy']
+
 
     estimate = OrderedDict()
 
     estimate['mean'] = OrderedDict()
+    estimate['best'] = OrderedDict()
     estimate['median'] = OrderedDict()
     estimate['low'] = OrderedDict()
     estimate['high'] = OrderedDict()
-    if weights is not None:
+    if prior_weights is not None or prob_weights is not None:
         estimate['weighted_mean'] = OrderedDict()
         estimate['weighted_median'] = OrderedDict()
+        estimate['weighted_best'] = OrderedDict()
 
     # cut away upper and lower 13.35% to arrive at 1 sigma
-    percentile = (percentile_nd - 0.682689492137086) / 2. * 100.
+    percentile = (1 - 0.682689492137086) / 2. * 100.
+    #print(percentile)
+    #percentile = 13
 
     for col in columns:
+        if prob_weights is None and prior_weights is None:
+            weights = None
+        else:
+            if prob_weights is None:
+                weights = np.ones(len(llhp))
+            else:
+                weights = np.copy(prob_weights)
+        if prior_weights is not None:
+            if per_dim:
+                weights *= prior_weights[col]
+            else:
+                weights *= prior_weights
+
         var = llhp[col]
+        post_llh = np.log(weights)
+        sigma = post_llh > np.max(post_llh) - 15.5
+        #weights = weights ** 1./8.
+        #s_idx = np.argsort(weights)[::-1]
+        #print(col, weights[s_idx][:10], var[s_idx][:10], post_llh[s_idx][:10])
+        #print('low %s, high %s'%(np.min(var[sigma]), np.max(var[sigma])))
+        sigma_vals = var[sigma]
+        #sigma_weights = None
+        sigma_weights = weights[sigma]
         if 'azimuth' in col:
             # azimuth is a cyclic function, so need some special treatement to get correct mean
             mean = stats.circmean(var)
-            shifted = (var - mean + np.pi)%(2*np.pi)
-            median = (np.median(shifted) + mean - np.pi)%(2*np.pi)
-            low = (weighted_percentile(shifted, percentile, weights) + mean - np.pi)%(2*np.pi)
-            high = (weighted_percentile(shifted, 100-percentile, weights) + mean - np.pi)%(2*np.pi)
+            shift_mean = stats.circmean(sigma_vals)
+            shifted = (var - shift_mean + np.pi)%(2*np.pi)
+            median = (np.median(shifted) + shift_mean - np.pi)%(2*np.pi)
+            sigma_shifted = (sigma_vals - shift_mean + np.pi)%(2*np.pi)
+            low = (weighted_percentile(sigma_shifted, 13.35, sigma_weights) + shift_mean - np.pi)%(2*np.pi)
+            high = (weighted_percentile(sigma_shifted, 86.65, sigma_weights) + shift_mean - np.pi)%(2*np.pi)
+
+            #low = (weighted_percentile(shifted, percentile, weights) + shift_mean - np.pi)%(2*np.pi)
+            #high = (weighted_percentile(shifted, 100-percentile, weights) + shift_mean - np.pi)%(2*np.pi)
             if weights is not None:
-                weighted_mean = (np.average(shifted, weights=weights) + mean - np.pi)%(2*np.pi)
-                weighted_median = (weighted_percentile(shifted, 50, weights) + mean - np.pi)%(2*np.pi)
+                weighted_mean = (np.average(shifted, weights=weights) + shift_mean - np.pi)%(2*np.pi)
+                weighted_median = (weighted_percentile(shifted, 50, weights) + shift_mean - np.pi)%(2*np.pi)
         else:
             mean = np.mean(var)
             median = np.median(var)
-            low = weighted_percentile(var, percentile, weights)
-            high = weighted_percentile(var, 100-percentile, weights)
+            low = weighted_percentile(sigma_vals, 13.35, sigma_weights)
+            high = weighted_percentile(sigma_vals, 86.65, sigma_weights)
+            #low = weighted_percentile(var, percentile, weights)
+            #high = weighted_percentile(var, 100-percentile, weights)
             if weights is not None:
                 weighted_mean = np.average(var, weights=weights)
                 weighted_median = weighted_percentile(var, 50, weights)
@@ -233,8 +298,14 @@ def estimate_from_llhp(llhp, meta=None, percentile_nd=0.95):
         estimate['median'][col] = median
         estimate['low'][col] = low
         estimate['high'][col] = high
+
+        best_idx = np.argmax(llhp['llh'])
+        estimate['best'][col] = var[best_idx] 
+
         if weights is not None:
             estimate['weighted_mean'][col] = weighted_mean
             estimate['weighted_median'][col] = weighted_median
+            best_idx = np.argmax(post_llh)
+            estimate['weighted_best'][col] = var[best_idx] 
 
     return estimate
