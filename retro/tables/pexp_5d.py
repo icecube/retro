@@ -575,11 +575,13 @@ def generate_pexp_5d_function(
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             t_indep_exp_hit = t_indep_exp_hits[hit_idx]
             hit_mult = hits[hit_idx]['charge']
-            # add back hits part of poisson
-            llh += hit_mult * math.log(t_indep_exp_hit + noise_at_hits[hit_idx] * time_window)
+            # add back hits part of poisson.
+            llh += hit_mult * math.log(t_indep_exp_hit + (noise_at_hits[hit_idx] * time_window))
             if t_indep_exp_hit > 0:
                 # norm to get probability
                 normed_p = exp_at_hit_time / t_indep_exp_hit
+            else:
+                normed_p = 0.
             # two independent probabilities
             log_expr = normed_p * (1 - 1./time_window) + 1./time_window
             llh += hit_mult * math.log(log_expr)
