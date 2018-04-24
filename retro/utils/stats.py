@@ -260,35 +260,45 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
                 weights *= prior_weights
 
         var = llhp[col]
+
+        # post llh here means including the correction from prior weights in the llh
+        best_idx = np.argmax(llhp['llh'])
+        estimate['best'][col] = var[best_idx] 
         post_llh = np.log(weights)
-        sigma = post_llh > np.max(post_llh) - 15.5
-        #weights = weights ** 1./8.
-        #s_idx = np.argsort(weights)[::-1]
-        #print(col, weights[s_idx][:10], var[s_idx][:10], post_llh[s_idx][:10])
-        #print('low %s, high %s'%(np.min(var[sigma]), np.max(var[sigma])))
-        sigma_vals = var[sigma]
-        #sigma_weights = None
-        sigma_weights = weights[sigma]
+        if weights is not None:
+            best_idx = np.argmax(post_llh)
+            estimate['weighted_best'][col] = var[best_idx] 
+
+        postllh_cut = post_llh > np.max(post_llh) - 15.5
+        postllh_vals = var[postllh_cut]
+        postllh_weights = weights[postllh_cut]
+
+        # now that we calculated the postllh stuff we can cut tighter
+        llh_cut = llhp['llh'] > np.max(llhp['llh']) - 15.5
+        var = var[llh_cut]
+        weights = weights[llh_cut]
+
         if 'azimuth' in col:
             # azimuth is a cyclic function, so need some special treatement to get correct mean
-            mean = stats.circmean(var)
-            shift_mean = stats.circmean(sigma_vals)
-            shifted = (var - shift_mean + np.pi)%(2*np.pi)
-            median = (np.median(shifted) + shift_mean - np.pi)%(2*np.pi)
-            sigma_shifted = (sigma_vals - shift_mean + np.pi)%(2*np.pi)
-            low = (weighted_percentile(sigma_shifted, 13.35, sigma_weights) + shift_mean - np.pi)%(2*np.pi)
-            high = (weighted_percentile(sigma_shifted, 86.65, sigma_weights) + shift_mean - np.pi)%(2*np.pi)
+            # shift everything such that the bestfit point is in the middle (pi)
+            shift = estimate['best'][col]
+            var_shifted = (var - shift + np.pi)%(2*np.pi)
+            postllh_shifted = (postllh_vals - shift + np.pi)%(2*np.pi)
 
-            #low = (weighted_percentile(shifted, percentile, weights) + shift_mean - np.pi)%(2*np.pi)
-            #high = (weighted_percentile(shifted, 100-percentile, weights) + shift_mean - np.pi)%(2*np.pi)
+            median = (np.median(var_shifted) + shift - np.pi)%(2*np.pi)
+            mean = (stats.circmean(var_shifted) + shift - np.pi)%(2*np.pi)
+            low = (weighted_percentile(postllh_shifted, 13.35, postllh_weights) + shift - np.pi)%(2*np.pi)
+            high = (weighted_percentile(postllh_shifted, 86.65, postllh_weights) + shift - np.pi)%(2*np.pi)
+            #low = (weighted_percentile(var_shifted, percentile, weights) + shift - np.pi)%(2*np.pi)
+            #high = (weighted_percentile(var_shifted, 100-percentile, weights) + shift - np.pi)%(2*np.pi)
             if weights is not None:
-                weighted_mean = (np.average(shifted, weights=weights) + shift_mean - np.pi)%(2*np.pi)
-                weighted_median = (weighted_percentile(shifted, 50, weights) + shift_mean - np.pi)%(2*np.pi)
+                weighted_mean = (np.average(var_shifted, weights=weights) + shift - np.pi)%(2*np.pi)
+                weighted_median = (weighted_percentile(var_shifted, 50, weights) + shift - np.pi)%(2*np.pi)
         else:
             mean = np.mean(var)
             median = np.median(var)
-            low = weighted_percentile(sigma_vals, 13.35, sigma_weights)
-            high = weighted_percentile(sigma_vals, 86.65, sigma_weights)
+            low = weighted_percentile(postllh_vals, 13.35, postllh_weights)
+            high = weighted_percentile(postllh_vals, 86.65, postllh_weights)
             #low = weighted_percentile(var, percentile, weights)
             #high = weighted_percentile(var, 100-percentile, weights)
             if weights is not None:
@@ -299,13 +309,8 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
         estimate['low'][col] = low
         estimate['high'][col] = high
 
-        best_idx = np.argmax(llhp['llh'])
-        estimate['best'][col] = var[best_idx] 
-
         if weights is not None:
             estimate['weighted_mean'][col] = weighted_mean
             estimate['weighted_median'][col] = weighted_median
-            best_idx = np.argmax(post_llh)
-            estimate['weighted_best'][col] = var[best_idx] 
 
     return estimate
