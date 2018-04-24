@@ -417,7 +417,7 @@ def generate_pexp_5d_function(
 
             ti_norm = t_indep_table_norm[r_bin_idx]
             this_t_indep_exp += (
-                source_photons * ti_norm * t_indep_surv_prob
+                source_photons * ti_norm * t_indep_surv_prob * quantum_efficiency
             )
 
             for hit_t_idx in range(num_hits):
@@ -458,17 +458,12 @@ def generate_pexp_5d_function(
 
                 r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
                 exp_at_hit_times[hit_t_idx] += (
-                    source_photons * r_t_bin_norm * surv_prob_at_hit_t
+                    source_photons * r_t_bin_norm * surv_prob_at_hit_t * quantum_efficiency
                 )
 
+        t_indep_exp[0] += this_t_indep_exp 
         for hit_t_idx in range(num_hits):
             t_indep_exp_hits[hit_t_idx] += this_t_indep_exp
-        t_indep_exp[0] += this_t_indep_exp * quantum_efficiency
-
-        # add back hits part of poisson
-        if num_hits > 0 and this_t_indep_exp > 0:
-            tot_charge = np.sum(hits['charge'])
-            t_indep_exp[0] -= tot_charge * math.log(this_t_indep_exp * quantum_efficiency)
 
 
     if tbl_is_ckv and compute_t_indep_exp:
@@ -521,6 +516,8 @@ def generate_pexp_5d_function(
 
         """
 
+        llh = np.float64(0)
+
         # Initialize accumulators (use double precision, as accumulation
         # compounds finite-precision errors)
         t_indep_exp = np.empty(1, dtype=np.float64)
@@ -529,10 +526,10 @@ def generate_pexp_5d_function(
 
         exp_at_hit_times = np.zeros(shape=hits.shape, dtype=np.float64)
         t_indep_exp_hits = np.zeros(shape=hits.shape, dtype=np.float64)
+        noise_at_hits = np.zeros(shape=hits.shape, dtype=np.float64)
 
         # Loop through all DOMs we know didn't receive hits
         for sd_idx1 in unhit_sd_indices:
-
             table_idx = sd_idx_table_indexer[sd_idx1]
             pexp_5d(
                 sources=sources,
@@ -557,6 +554,7 @@ def generate_pexp_5d_function(
             start = indexer_entry['offset']
             stop = start + indexer_entry['num']
             table_idx = sd_idx_table_indexer[sd_idx2]
+            noise_at_hits[start:stop] = dom_info[sd_idx2]['noise_rate_per_ns']
             pexp_5d(
                 sources=sources,
                 hits=hits[start:stop],
@@ -571,22 +569,22 @@ def generate_pexp_5d_function(
                 t_indep_exp_hits=t_indep_exp_hits[start:stop],
             )
             
-
-        sum_log_exp_at_hit_times = np.float64(0)
+        llh -= t_indep_exp[0]
 
         for hit_idx in range(len(hits)):
             exp_at_hit_time = exp_at_hit_times[hit_idx]
             t_indep_exp_hit = t_indep_exp_hits[hit_idx]
             hit_mult = hits[hit_idx]['charge']
-            # two normalized, independent probabilities
-            normed_p = np.float64(0)
+            # add back hits part of poisson
+            llh += hit_mult * math.log(t_indep_exp_hit + noise_at_hits[hit_idx] * time_window)
             if t_indep_exp_hit > 0:
+                # norm to get probability
                 normed_p = exp_at_hit_time / t_indep_exp_hit
+            # two independent probabilities
             log_expr = normed_p * (1 - 1./time_window) + 1./time_window
-            sum_log_exp_at_hit_times += hit_mult * math.log(log_expr)
+            llh += hit_mult * math.log(log_expr)
 
-
-        return sum_log_exp_at_hit_times - t_indep_exp[0]
+        return llh
 
     #@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     #def get_llh_hit_doms(
