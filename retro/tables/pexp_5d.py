@@ -564,6 +564,7 @@ def generate_pexp_5d_function(
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh_all_doms(
             sources,
+            pegleg_sources,
             hits,
             hits_indexer,
             unhit_sd_indices,
@@ -585,6 +586,8 @@ def generate_pexp_5d_function(
         Parameters
         ----------
         sources : shape (n_sources,) array of dtype SRC_T
+        pegleg_sources : shape (n_sources,) array of dtype SRC_T
+            over these sources will be maximized in order
         hits : shape (n_hits_total,) array of dtype HIT_T
         hits_indexer : shape (n_hit_doms,) array of dtype SD_INDEXER_T
         unhit_sd_indices : shape (n_unhit_doms,) array of dtype uint32
@@ -661,64 +664,7 @@ def generate_pexp_5d_function(
             log_expr = normed_p * (1 - 1./time_window) + 1./time_window
             llh += hit_mult * math.log(log_expr)
 
-        return llh
-
-    #@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    #def get_llh_hit_doms(
-    #        sources,
-    #        hits,
-    #        hits_indexer,
-    #        time_window,
-    #        dom_info,
-    #        tables,
-    #        table_norm,
-    #        t_indep_tables,
-    #        t_indep_table_norm,
-    #        sd_idx_table_indexer
-    #    ):
-    #    """Compute log likelihood for hypothesis sources given an event.
-
-    #    This version of get_llh is specialized to compute log-likelihoods only
-    #    for DOMs that were hit. Use this e.g. if you use a TDI table to get the
-    #    other parts of the likelihood function.
-
-    #    Parameters
-    #    ----------
-    #    sources : shape (n_sources,) array of dtype SRC_T
-    #    hits : shape (n_hits_total,) array of dtype HIT_T
-    #    hits_indexer : shape (n_hit_doms,) array of dtype SD_INDEXER_T
-    #    time_window : float64
-    #    dom_info : shape (n_strings, n_doms_per_string) array of dtype DOM_INFO_T
-    #    tables
-    #    table_norm
-    #    t_indep_tables
-    #    t_indep_table_norm
-    #    sd_idx_table_indexer
-
-    #    """
-    #    llh = np.float64(0)
-    #    for indexer_entry in hits_indexer:
-    #        start = indexer_entry['offset']
-    #        stop = start + indexer_entry['num']
-    #        sd_idx = indexer_entry['sd_idx']
-    #        table_idx = sd_idx_table_indexer[sd_idx]
-    #        t_indep_exp, sum_log_exp_at_hit_times = pexp_5d(
-    #            sources=sources,
-    #            hits=hits[start:stop],
-    #            dom_info=dom_info[sd_idx],
-    #            time_window=time_window,
-    #            table=tables[table_idx],
-    #            table_norm=table_norm,
-    #            t_indep_table=t_indep_tables[table_idx],
-    #            t_indep_table_norm=t_indep_table_norm
-    #        )
-    #        llh += sum_log_exp_at_hit_times - t_indep_exp
-    #    return llh
-
-    #if compute_t_indep_exp:
-    #    get_llh = get_llh_all_doms
-    #else:
-    #    get_llh = get_llh_hit_doms
+        return llh, 0
 
     get_llh = get_llh_all_doms
 

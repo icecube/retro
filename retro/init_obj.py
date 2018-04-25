@@ -50,10 +50,10 @@ if __name__ == '__main__' and __package__ is None:
 from retro import const
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
-    point_cascade, point_ckv_cascade, one_dim_cascade
+    point_cascade, point_ckv_cascade, one_dim_cascade, aligned_point_ckv_cascade, aligned_one_dim_cascade
 )
 from retro.hypo.discrete_muon_kernels import (
-    const_energy_loss_muon, table_energy_loss_muon
+    const_energy_loss_muon, table_energy_loss_muon, pegleg_muon
 )
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
@@ -213,6 +213,8 @@ def setup_discrete_hypo(
     """
     hypo_kernels = []
     kernel_kwargs = []
+    pegleg_kernel = None
+    pegleg_kernel_kwargs = None
     if cascade_kernel is not None:
         if cascade_kernel == 'point':
             hypo_kernels.append(point_cascade)
@@ -220,8 +222,14 @@ def setup_discrete_hypo(
         elif cascade_kernel == 'point_ckv':
             hypo_kernels.append(point_ckv_cascade)
             kernel_kwargs.append(dict())
+        elif cascade_kernel == 'aligned_point_ckv':
+            hypo_kernels.append(aligned_point_ckv_cascade)
+            kernel_kwargs.append(dict())
         elif cascade_kernel == 'one_dim':
             hypo_kernels.append(one_dim_cascade)
+            kernel_kwargs.append(dict())
+        elif cascade_kernel == 'aligned_one_dim':
+            hypo_kernels.append(aligned_one_dim_cascade)
             kernel_kwargs.append(dict())
         else:
             raise NotImplementedError('{} cascade not implemented yet.'
@@ -230,13 +238,22 @@ def setup_discrete_hypo(
     if track_kernel is not None:
         if track_kernel == 'const_e_loss':
             hypo_kernels.append(const_energy_loss_muon)
-        else:
+            kernel_kwargs.append(dict(dt=track_time_step))
+        elif track_kernel == 'pegleg':
+            pegleg_kernel = pegleg_muon
+            pegleg_kernel_kwargs = dict(dt=track_time_step)
+        elif track_kernel == 'table_e_loss':
             hypo_kernels.append(table_energy_loss_muon)
-        kernel_kwargs.append(dict(dt=track_time_step))
+            kernel_kwargs.append(dict(dt=track_time_step))
+        else:
+            raise NotImplementedError('{} track not implemented yet.'
+                                      .format(track_kernel))
 
     hypo_handler = DiscreteHypo(
         hypo_kernels=hypo_kernels,
-        kernel_kwargs=kernel_kwargs
+        kernel_kwargs=kernel_kwargs,
+        pegleg_kernel=pegleg_kernel,
+        pegleg_kernel_kwargs=pegleg_kernel_kwargs,
     )
 
     return hypo_handler
@@ -789,7 +806,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         group.add_argument(
             '--cascade-kernel',
             required=True,
-            choices='point point_ckv one_dim'.split(),
+            choices=['point','point_ckv','one_dim', 'aligned_point_ckv', 'aligned_one_dim'],
         )
         group.add_argument(
             '--track-kernel',

@@ -8,9 +8,7 @@ namedtuples for interface simplicity and consistency
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'HypoParams8D',
-    'HypoParams10D',
-    'TrackParams',
+    'PARAM_NAMES',
     'Hit',
     'Photon',
     'Event',
@@ -24,8 +22,6 @@ __all__ = [
     'TimePolCoord',
     'TimeSphCoord',
     'DOM_INFO_T',
-    'LLHP8D_T',
-    'LLHP10D_T',
     'HIT_T',
     'SD_INDEXER_T',
     'HITS_SUMMARY_T',
@@ -56,30 +52,9 @@ import enum
 
 import numpy as np
 
+# all possible params
+PARAM_NAMES = ['time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth', 'cascade_zenith', 'track_energy', 'cascade_energy']
 
-HypoParams8D = namedtuple( # pylint: disable=invalid-name
-    typename='HypoParams8D',
-    field_names=('time', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
-                 'track_energy', 'cascade_energy')
-)
-"""Hypothesis in 8 dimensions (parameters). Units are: t/ns, {x,y,z}/m,
-{track_zenith,track_azimuth}/rad, {track_energy,cascade_energy}/GeV"""
-
-HypoParams10D = namedtuple( # pylint: disable=invalid-name
-    typename='HypoParams10D',
-    field_names=(HypoParams8D._fields + ('cascade_zenith', 'cascade_azimuth'))
-)
-"""Hypothesis in 10 dimensions (parameters). Units are: t/ns, {x,y,z}/m,
-{track_zenith,track_azimuth}/rad, {track_energy,cascade_energy}/GeV,
-{cascade_zenith,cascade_azimuth}/rad"""
-
-TrackParams = namedtuple( # pylint: disable=invalid-name
-    typename='TrackParams',
-    field_names=('time', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
-                 'track_energy')
-)
-"""Hypothesis for just the track (7 dimensions / parameters). Units are: t/ns,
-{x,y,z}/m, {track_zenith,track_azimuth}/rad, track_energy/GeV"""
 
 Event = namedtuple( # pylint: disable=invalid-name
     typename='Event',
@@ -170,16 +145,6 @@ DOM_INFO_T = np.dtype(
         ('quantum_efficiency', np.float32),
         ('noise_rate_per_ns', np.float32)
     ]
-)
-
-LLHP8D_T = np.dtype(
-    [('llh', np.float32)]
-    + [(field, np.float32) for field in HypoParams8D._fields]
-)
-
-LLHP10D_T = np.dtype(
-    [('llh', np.float32)]
-    + [(field, np.float32) for field in HypoParams10D._fields]
 )
 
 PULSE_T = np.dtype([
