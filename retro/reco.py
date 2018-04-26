@@ -51,9 +51,9 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import LLHP_T, init_obj
+from retro import init_obj
 from retro.const import TWO_PI, ALL_STRS_DOMS_SET, EMPTY_SOURCES
-from retro.retro_types import HypoParams8D, HypoParams10D
+from retro.retro_types import PARAM_NAMES
 from retro.utils.misc import expand, mkdir, sort_dict
 
 
@@ -66,19 +66,20 @@ PRI_SPEFIT2 = 'spefit2'
 PRI_CAUCHY = 'cauchy'
 
 
-class reco(object):
+class retro_reco(object):
 
-    def init(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
+    def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
         """Script "main" function"""
         t00 = time.time()
 
         self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
         self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
         self.events_iterator = init_obj.get_events(**events_kw)
+        self.reco_kw = reco_kw
 
         print('Running reconstructions...')
 
-        spatial_prior_orig = reco_kw.pop('spatial_prior').strip()
+        spatial_prior_orig = self.reco_kw.pop('spatial_prior').strip()
         spatial_prior_name = spatial_prior_orig.lower()
         if spatial_prior_name == 'ic':
             x_prior = (PRI_UNIFORM, (-860, 870))
@@ -124,7 +125,7 @@ class reco(object):
             raise ValueError('Spatial prior "{}" not recognized'
                              .format(spatial_prior_orig))
 
-        temporal_prior_orig = reco_kw.pop('temporal_prior').strip()
+        temporal_prior_orig = self.reco_kw.pop('temporal_prior').strip()
         temporal_prior_name = temporal_prior_orig.lower()
         if temporal_prior_name == PRI_UNIFORM:
             time_prior = (PRI_UNIFORM, (-4e3, 0.0))
@@ -143,8 +144,8 @@ class reco(object):
             raise ValueError('Temporal prior "{}" not recognized'
                              .format(temporal_prior_orig))
 
-        cascade_energy_prior_name = reco_kw.pop('cascade_energy_prior')
-        cascade_energy_lims = reco_kw.pop('cascade_energy_lims')
+        cascade_energy_prior_name = self.reco_kw.pop('cascade_energy_prior')
+        cascade_energy_lims = self.reco_kw.pop('cascade_energy_lims')
         if cascade_energy_prior_name == PRI_UNIFORM:
             cascade_energy_prior = (PRI_UNIFORM, (np.min(cascade_energy_lims), np.max(cascade_energy_lims)))
         elif cascade_energy_prior_name == PRI_LOG_UNIFORM:
@@ -162,8 +163,8 @@ class reco(object):
         else:
             raise ValueError(str(cascade_energy_prior_name))
 
-        track_energy_prior_name = reco_kw.pop('track_energy_prior')
-        track_energy_lims = reco_kw.pop('track_energy_lims')
+        track_energy_prior_name = self.reco_kw.pop('track_energy_prior')
+        track_energy_lims = self.reco_kw.pop('track_energy_lims')
         if track_energy_prior_name == PRI_UNIFORM:
             track_energy_prior = (PRI_UNIFORM, (np.min(track_energy_lims), np.max(track_energy_lims)))
         elif track_energy_prior_name == PRI_LOG_UNIFORM:
@@ -183,7 +184,7 @@ class reco(object):
 
 
         self.priors = OrderedDict()
-        for param in hypo_params:
+        for param in self.hypo_handler.params:
             if param == 'time': self.priors[param] = time_prior
             elif param == 'x': self.priors[param] = x_prior
             elif param == 'y': self.priors[param] = y_prior
@@ -201,7 +202,7 @@ class reco(object):
             llhp, _ = self.run_multinest(
                 event_idx=event_idx,
                 event=event,
-                **reco_kw
+                **self.reco_kw
             )
             dt = time.time() - t1
             n_points = llhp.size
@@ -268,6 +269,10 @@ class reco(object):
 
         hypo_params = self.hypo_handler.params
 
+        #setup LLHP dtype
+        hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
+        LLHP_T = np.dtype([(n, np.float32) for n in hypo_params_sorted])
+
         priors_used = OrderedDict()
 
         prior_funcs = []
@@ -275,7 +280,7 @@ class reco(object):
             prior_kind, prior_params = self.priors[dim_name]
             if prior_kind is PRI_UNIFORM:
                 # Time is special since prior is relative to hits in the event
-                if dim_name == T:
+                if dim_name == 'time':
                     prior_params = (
                         hits_summary['earliest_hit_time'] + prior_params[0],
                         hits_summary['latest_hit_time'] + prior_params[1]
@@ -329,7 +334,7 @@ class reco(object):
                 rel_loc, scale, low, high = prior_params
                 loc = spe_fit_val + rel_loc
                 cauchy = stats.cauchy(loc=loc, scale=scale)
-                if dim_name == T:
+                if dim_name == 'time':
                     low += hits_summary['time_window_start']
                     high += hits_summary['time_window_stop']
                 priors_used[dim_name] = (PRI_CAUCHY, (loc, scale, low, high))
@@ -380,6 +385,10 @@ class reco(object):
             dtype=np.uint32
         )
 
+
+        # define here for closure
+        hypo_handler = self.hypo_handler
+
         def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function pymultinest calls to get llh values.
 
@@ -392,9 +401,6 @@ class reco(object):
                 t_start.append(time.time())
 
             t0 = time.time()
-
-            total_energy = cube[CUBE_ENERGY_IDX]
-            track_fraction = cube[CUBE_TRACK_FRAC_IDX]
 
             hypo = dict(zip(hypo_params, cube))
 
@@ -428,10 +434,10 @@ class reco(object):
                 best_llh = log_likelihoods[best_idx]
                 best_p = param_values[best_idx]
                 print('')
-                    msg = 'best llh = {:.3f} @ '.format(best_llh)
-                    for key, val in zip(hypo_params, best_p):
-                        msg += ' %s=%.1f'%(key, val)
-                    print(msg)
+                msg = 'best llh = {:.3f} @ '.format(best_llh)
+                for key, val in zip(hypo_params, best_p):
+                    msg += ' %s=%.1f'%(key, val)
+                print(msg)
                 print('{} LLH computed'.format(n_calls))
                 print('avg time per llh: {:.3f} ms'.format((t_now - t_start[0])/n_calls*1000))
                 print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
@@ -549,32 +555,32 @@ def parse_args(description=__doc__):
         bias) the SPEFit2 time best-fit value.'''
     )
     group.add_argument(
-        '--cascade_energy-prior',
+        '--cascade-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
         required=True,
-        help='''Prior to put on _total_ event cascade_energy. Must specify
-        --cascade_energy-lims.'''
+        help='''Prior to put on _total_ event cascade-energy. Must specify
+        --cascade-energy-lims.'''
     )
     group.add_argument(
-        '--cascade_energy-lims', nargs='+',
+        '--cascade-energy-lims', nargs='+',
         required=True,
-        help='''Lower and upper cascade_energy limits, in GeV. E.g.: --cascade_energy-lims=1,100
-        Required if --cascade_energy-prior is {}, {}, or {}'''
+        help='''Lower and upper cascade-energy limits, in GeV. E.g.: --cascade-energy-lims=1,100
+        Required if --cascade-energy-prior is {}, {}, or {}'''
         .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
     )
 
     group.add_argument(
-        '--track_energy-prior',
+        '--track-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
         required=True,
-        help='''Prior to put on _total_ event track_energy. Must specify
-        --track_energy-lims.'''
+        help='''Prior to put on _total_ event track-energy. Must specify
+        --track-energy-lims.'''
     )
     group.add_argument(
-        '--track_energy-lims', nargs='+',
+        '--track-energy-lims', nargs='+',
         required=True,
-        help='''Lower and upper track_energy limits, in GeV. E.g.: --track_energy-lims=1,100
-        Required if --track_energy-prior is {}, {}, or {}'''
+        help='''Lower and upper track-energy limits, in GeV. E.g.: --track-energy-lims=1,100
+        Required if --track-energy-prior is {}, {}, or {}'''
         .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
     )
 
@@ -630,7 +636,7 @@ def parse_args(description=__doc__):
         elims = [float(l) for l in elims.split(',')]
         reco_kw['cascade_energy_lims'] = elims
     elif reco_kw['cascade_energy_lims'] is not None:
-        raise ValueError('--cascade_energy-limits not used with cascade_energy prior {}'
+        raise ValueError('--cascade-energy-lims not used with cascade_energy prior {}'
                          .format(reco_kw['cascade_energy_prior']))
 
     if reco_kw['track_energy_prior'] in [PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL]:
@@ -639,7 +645,7 @@ def parse_args(description=__doc__):
         elims = [float(l) for l in elims.split(',')]
         reco_kw['track_energy_lims'] = elims
     elif reco_kw['track_energy_lims'] is not None:
-        raise ValueError('--track_energy-limits not used with track_energy prior {}'
+        raise ValueError('--track-energy-lims not used with track_energy prior {}'
                          .format(reco_kw['track_energy_prior']))
 
 
@@ -647,5 +653,5 @@ def parse_args(description=__doc__):
 
 
 if __name__ == '__main__':
-    my_reco = reco(**parse_args())
+    my_reco = retro_reco(**parse_args())
     my_reco.run()

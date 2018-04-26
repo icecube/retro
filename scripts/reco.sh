@@ -17,11 +17,13 @@ mkdir -p "$outdir"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
-tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+# ACI:
+#proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
+#tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-#proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
-#tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+# ET:
+proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
+tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
 #no_noise="--no-noise"
 no_noise=""
@@ -38,8 +40,10 @@ consteff=""
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
-    --energy-prior log_uniform \
-    --energy-lims 0.1,1000  \
+    --cascade-energy-prior log_uniform \
+    --cascade-energy-lims 0.1,1000  \
+    --track-energy-prior log_uniform \
+    --track-energy-lims 0.1,1000  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -59,7 +63,7 @@ consteff=""
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "point_ckv" \
+    --cascade-kernel "aligned_point_ckv" \
     --track-kernel "table_e_loss" \
     --track-time-step 1.0 \
     \
