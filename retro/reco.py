@@ -9,13 +9,6 @@ Instantiate Retro tables and find the max over the log-likelihood space.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'PRI_UNIFORM',
-    'PRI_LOG_UNIFORM',
-    'PRI_LOG_NORMAL',
-    'PRI_COSINE',
-    'PRI_GAUSSIAN',
-    'PRI_SPEFIT2',
-    'PRI_CAUCHY',
     'reco',
     'parse_args'
 ]
