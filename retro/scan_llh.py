@@ -40,11 +40,12 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T, init_obj
+from retro import init_obj
 from retro import likelihood
-from retro.const import ALL_STRS_DOMS_SET
+from retro.const import ALL_STRS_DOMS_SET, EMPTY_SOURCES
 from retro.scan import scan
 from retro.utils.misc import expand, mkdir, sort_dict
+from retro.retro_types import PARAM_NAMES
 
 
 def parse_args(description=__doc__):
@@ -54,9 +55,9 @@ def parse_args(description=__doc__):
     parser.add_argument('--outdir', required=True)
 
     group = parser.add_argument_group(title='Scan parameters')
-    for dim in HYPO_PARAMS_T._fields:
+    for dim in PARAM_NAMES:
         group.add_argument(
-            '--{}'.format(dim.replace('_', '-')), nargs='+', required=True,
+            '--{}'.format(dim.replace('_', '-')), nargs='+', required=False, default=None,
             help='''Hypothses will take this(these) value(s) for dimension
             {dim_hr}. Specify a single value to not scan over this dimension;
             specify a human-readable string of values, e.g. '0, 0.5, 1-10:0.2'
@@ -79,15 +80,17 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     """Script "main" function"""
     t00 = time.time()
 
-    scan_values = []
-    for dim in HYPO_PARAMS_T._fields:
-        val_str = ''.join(scan_kw.pop(dim))
-        val_str = val_str.lower().replace('pi', format(np.pi, '.17e'))
-        scan_values.append(hrlist2list(val_str))
-
     dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
     hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
     events_generator = init_obj.get_events(**events_kw)
+
+    hypo_params = hypo_handler.params
+
+    scan_values = []
+    for dim in hypo_params:
+        val_str = ''.join(scan_kw.pop(dim))
+        val_str = val_str.lower().replace('pi', format(np.pi, '.17e'))
+        scan_values.append(hrlist2list(val_str))
 
     # Pop 'outdir' from `scan_kw` since we don't want to store this info in
     # the metadata dict.
@@ -99,37 +102,33 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
 
     fast_llh = True
 
-    if fast_llh:
-        get_llh = dom_tables._get_llh
-        dom_info = dom_tables.dom_info
-        tables = dom_tables.tables
-        table_norm = dom_tables.table_norm
-        t_indep_tables = dom_tables.t_indep_tables
-        t_indep_table_norm = dom_tables.t_indep_table_norm
-        sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
-        metric_kw = {}
-        def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,
-                           time_window):
-            sources = hypo_handler.get_sources(hypo)
-            return get_llh(
-                sources=sources,
-                hits=hits,
-                hits_indexer=hits_indexer,
-                unhit_sd_indices=unhit_sd_indices,
-                sd_idx_table_indexer=sd_idx_table_indexer,
-                time_window=time_window,
-                dom_info=dom_info,
-                tables=tables,
-                table_norm=table_norm,
-                t_indep_tables=t_indep_tables,
-                t_indep_table_norm=t_indep_table_norm
-            )
-    else:
-        metric_kw = dict(dom_tables=dom_tables, tdi_table=None)
-        get_llh = likelihood.get_llh
-        def metric_wrapper(hypo, **metric_kw):
-            sources = hypo_handler.get_sources(hypo)
-            return get_llh(sources=sources, **metric_kw)
+    get_llh = dom_tables._get_llh
+    dom_info = dom_tables.dom_info
+    tables = dom_tables.tables
+    table_norm = dom_tables.table_norm
+    t_indep_tables = dom_tables.t_indep_tables
+    t_indep_table_norm = dom_tables.t_indep_table_norm
+    sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
+    metric_kw = {}
+    def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,
+                       time_window):
+        sources = hypo_handler.get_sources(hypo)
+        pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
+        llh, pegleg_idx = get_llh(
+            sources=sources,
+            pegleg_sources=pegleg_sources,
+            hits=hits,
+            hits_indexer=hits_indexer,
+            unhit_sd_indices=unhit_sd_indices,
+            sd_idx_table_indexer=sd_idx_table_indexer,
+            time_window=time_window,
+            dom_info=dom_info,
+            tables=tables,
+            table_norm=table_norm,
+            t_indep_tables=t_indep_tables,
+            t_indep_table_norm=t_indep_table_norm
+        )
+        return llh
 
     n_points_total = 0
     metric_vals = []
@@ -150,7 +149,7 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
         )
 
         t1 = time.time()
-        metric_vals.append(scan(scan_values, metric_wrapper, metric_kw))
+        metric_vals.append(scan(hypo_params, scan_values, metric_wrapper, metric_kw))
         dt = time.time() - t1
 
         n_points = metric_vals[-1].size
@@ -160,7 +159,7 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     dt = time.time() - t0
 
     info = OrderedDict([
-        ('hypo_params', HYPO_PARAMS_T._fields),
+        ('hypo_params', hypo_params),
         ('scan_values', scan_values),
         ('metric_name', 'llh'),
         ('metric_vals', metric_vals),

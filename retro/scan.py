@@ -37,23 +37,23 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import FTYPE, HYPO_PARAMS_T
+from retro import FTYPE
 
 
-def scan(scan_values, metric, metric_kw=None):
+def scan(hypo_params, scan_values, metric, metric_kw=None):
     """Scan a metric (e.g., neg_llh) for hypotheses with a set of parameter
     values.
 
     Note that `metric` is called via::
 
-        metric(HYPO_PARAMS_T(*hypo_params), **metric_kw)
+        metric(hypo_params, **metric_kw)
 
     and the actual values used as `hypo_params` are the _outer_ product of the
     values specified in `scan_values`.
 
     Parameters
     ----------
-    scan_values : sequence of len(HYPO_PARAMS_T) of floats or iterables
+    scan_values : dict of floats or iterables
         Values used in the scan are the _outer_ product of the items in
         `scan_values`. Specify a single value for a dimension to disable
         scanning in that dimension.
@@ -77,14 +77,6 @@ def scan(scan_values, metric, metric_kw=None):
     if metric_kw is None:
         metric_kw = {}
 
-    all_params = HYPO_PARAMS_T._fields
-    num_params = len(all_params)
-
-    if len(scan_values) != num_params:
-        raise ValueError(
-            'Must specify as many `scan_values` as there are HYPO_PARAMS_T ({}'
-            ' dimensions, coming from {})'.format(num_params, HYPO_PARAMS_T)
-        )
 
     # Need iterable-of-iterables-of-floats. If we have just an iterable of
     # floats (e.g. for 1D scan), then make it the first element of a
@@ -109,8 +101,7 @@ def scan(scan_values, metric, metric_kw=None):
     metric_vals = []
     report_after = 500
     for n, param_values in enumerate(product(*scan_sequences)):
-        param_values = HYPO_PARAMS_T(*param_values)
-        metric_val = metric(param_values, **metric_kw)
+        metric_val = metric(dict(zip(hypo_params, param_values)), **metric_kw)
         metric_vals.append(metric_val)
         if n > 0 and n % report_after == 0:
             times.append(time.time())

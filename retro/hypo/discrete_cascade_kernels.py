@@ -11,6 +11,9 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     'point_cascade',
     'point_ckv_cascade'
+    'aligned_point_ckv_cascade',
+    'one_dim_cascade',
+    'aligned_one_dim_cascade',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -39,45 +42,44 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS, HYPO_PARAMS_T
+from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
     PI, COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES,
     SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 )
-from retro.retro_types import SRC_T, HypoParams8D
+from retro.retro_types import SRC_T
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def point_cascade(hypo_params):
+def point_cascade(time, x, y, z, cascade_energy):
     """Point-like cascade.
 
     Use as a hypo_kernel with the DiscreteHypo class.
 
     Parameters
     ----------
-    hypo_params : HypoParams8D or HypoParams10D
-
+    time, x, y, z, cascade_energy
+    
     Returns
     -------
     sources
 
     """
-    cascade_energy = hypo_params.cascade_energy
     if cascade_energy == 0:
         return EMPTY_SOURCES
 
     sources = np.empty(shape=(1,), dtype=SRC_T)
     sources[0]['kind'] = SRC_OMNI
-    sources[0]['time'] = hypo_params.time
-    sources[0]['x'] = hypo_params.x
-    sources[0]['y'] = hypo_params.y
-    sources[0]['z'] = hypo_params.z
+    sources[0]['time'] = time
+    sources[0]['x'] = x
+    sources[0]['y'] = y
+    sources[0]['z'] = z
     sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * cascade_energy
 
     return sources
 
 
-def point_ckv_cascade(hypo_params):
+def point_ckv_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith):
     """Single-point Cherenkov-emitting cascade with axis collinear with the
     track.
 
@@ -85,23 +87,18 @@ def point_ckv_cascade(hypo_params):
 
     Parameters
     ----------
-    hypo_params : HypoParams8D or HypoParams10D
+    time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith
 
     Returns
     -------
     sources : shape (1,) array of dtype retro_types.SRC_T
 
     """
-    cascade_energy = hypo_params.cascade_energy
     if cascade_energy == 0:
         return EMPTY_SOURCES
 
-    if HYPO_PARAMS_T is HypoParams8D:
-        opposite_zenith = PI - hypo_params.track_zenith
-        opposite_azimuth = PI + hypo_params.track_azimuth
-    else:
-        opposite_zenith = PI - hypo_params.cascade_zenith
-        opposite_azimuth = PI + hypo_params.cascade_azimuth
+    opposite_zenith = PI - cascade_zenith
+    opposite_azimuth = PI + cascade_azimuth
 
     dir_costheta = cos(opposite_zenith)
     dir_sintheta = sin(opposite_zenith)
@@ -111,10 +108,10 @@ def point_ckv_cascade(hypo_params):
 
     sources = np.empty(shape=(1,), dtype=SRC_T)
     sources[0]['kind'] = SRC_CKV_BETA1
-    sources[0]['time'] = hypo_params.time
-    sources[0]['x'] = hypo_params.x
-    sources[0]['y'] = hypo_params.y
-    sources[0]['z'] = hypo_params.z
+    sources[0]['time'] = time
+    sources[0]['x'] = x
+    sources[0]['y'] = y
+    sources[0]['z'] = z
     sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * cascade_energy
 
     sources[0]['dir_costheta'] = dir_costheta
@@ -128,6 +125,17 @@ def point_ckv_cascade(hypo_params):
     sources[0]['ckv_sintheta'] = SIN_CKV
 
     return sources
+
+def aligned_point_ckv_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith):
+    '''
+    same as point_ckv_cascade, but using track directionality
+    '''
+    return point_ckv_cascade(
+            time=time,
+            x=x, y=y, z=z, 
+            cascade_energy=cascade_energy,
+            cascade_azimuth=track_azimuth,
+            cascade_zenith=track_zenith)
 
 
 # TODO: use quasi-random (low discrepancy) numbers instead of pseudo-random
@@ -155,7 +163,7 @@ PARAM_B = 0.63207
 RAD_LEN_OVER_B = RAD_LEN / PARAM_B
 
 
-def one_dim_cascade(hypo_params):
+def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith):
     """Cascade with both longitudinal and angular distributions. All emitters
     are located on the shower axis.
 
@@ -166,14 +174,13 @@ def one_dim_cascade(hypo_params):
 
     Parameters
     ----------
-    hypo_params : HYPO_PARAMS_T
+    time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith
 
     Returns
     -------
     sources
 
     """
-    cascade_energy = hypo_params.cascade_energy
     if cascade_energy == 0:
         return EMPTY_SOURCES
 
@@ -189,21 +196,15 @@ def one_dim_cascade(hypo_params):
         ))
 
     if num_samples == 1:
-        return point_ckv_cascade(hypo_params)
+        return point_ckv_cascade(
+                time=time,
+                x=x, y=y, z=z, 
+                cascade_energy=cascade_energy,
+                cascade_azimuth=cascade_azimuth,
+                cascade_zenith=cascade_zenith)
 
-    # Assign vertex
-    time = hypo_params.time
-    x = hypo_params.x
-    y = hypo_params.y
-    z = hypo_params.z
-
-    # Assign cascade axis direction, works with 8D or 10D
-    if HYPO_PARAMS_T is HypoParams8D:
-        zenith = PI - hypo_params.track_zenith
-        azimuth = PI + hypo_params.track_azimuth
-    else:
-        zenith = PI - hypo_params.cascade_zenith
-        azimuth = PI + hypo_params.cascade_azimuth
+    zenith = PI - cascade_zenith
+    azimuth = PI + cascade_azimuth
 
     sin_zen = sin(zenith)
     cos_zen = cos(zenith)
@@ -278,3 +279,15 @@ def one_dim_cascade(hypo_params):
     sources['ckv_sintheta'] = SIN_CKV
 
     return sources
+
+def aligned_one_dim_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith):
+    '''
+    same as one_dim_cascade, but using track directionality
+    '''
+    return one_dim_cascade(
+            time=time,
+            x=x, y=y, z=z, 
+            cascade_energy=cascade_energy,
+            cascade_azimuth=track_azimuth,
+            cascade_zenith=track_zenith)
+

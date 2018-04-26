@@ -64,7 +64,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T, const, retro_types
+from retro import const, retro_types
 
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
@@ -347,72 +347,6 @@ def convert_to_namedtuple(val, nt_type):
 
 
 # -- Retro-specific functions -- #
-
-
-def event_to_hypo_params(event, hypo_params_t=HYPO_PARAMS_T):
-    """Convert an event to hypothesis params, for purposes of defining "truth"
-    hypothesis.
-
-    For now, only works with HypoParams8D.
-
-    Parameters
-    ----------
-    event : likelihood.Event namedtuple
-
-    hypo_params_t : retro_types.HypoParams8D or retro_types.HypoParams8D
-
-    Returns
-    -------
-    params : hypo_params_t namedtuple
-
-    """
-    assert hypo_params_t is retro_types.HypoParams8D
-
-    track_energy = event.track.energy
-    cascade_energy = event.cascade.energy
-    #if event.interaction == 1: # charged current
-    #    track_energy = event.neutrino.energy
-    #    cascade_energy = 0
-    #else: # neutral current (2)
-    #    track_energy = 0
-    #    cascade_energy = event.neutrino.energy
-
-    hypo_params = hypo_params_t(
-        t=event.neutrino.t,
-        x=event.neutrino.x,
-        y=event.neutrino.y,
-        z=event.neutrino.z,
-        track_azimuth=event.neutrino.azimuth,
-        track_zenith=event.neutrino.zenith,
-        track_energy=track_energy,
-        cascade_energy=cascade_energy
-    )
-
-    return hypo_params
-
-
-def hypo_to_track_params(hypo_params):
-    """Extract track params from hypo params.
-
-    Parameters
-    ----------
-    hypo_params : HYPO_PARAMS_T namedtuple
-
-    Returns
-    -------
-    track_params : retro.types.TrackParams namedtuple
-
-    """
-    track_params = retro_types.TrackParams(
-        t=hypo_params.t,
-        x=hypo_params.x,
-        y=hypo_params.y,
-        z=hypo_params.z,
-        zenith=hypo_params.track_zenith,
-        azimuth=hypo_params.track_azimuth,
-        energy=hypo_params.track_energy
-    )
-    return track_params
 
 
 def generate_anisotropy_str(anisotropy):

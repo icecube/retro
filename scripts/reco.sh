@@ -17,8 +17,13 @@ mkdir -p "$outdir"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-proto="/fastio/icecube/retro/tables/large_5d_notilt_combined/stacked"
-tmpl_lib="--template-library /fastio/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+# ACI:
+#proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
+#tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+
+# ET:
+proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
+tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
 #no_noise="--no-noise"
 no_noise=""
@@ -31,12 +36,12 @@ consteff=""
 
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
-~/src/retro/retro/reco.py \
+~/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
-    --energy-prior log_normal \
-    --energy-lims 0.2,2000  \
+    --cascade-energy-prior log_uniform \
+    --cascade-energy-lims 0.1,1000  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -50,19 +55,19 @@ consteff=""
     --dom-tables-kind "ckv_templ_compr" \
     --dom-tables-fname-proto "$proto" \
     --use-doms "all" \
-    --gcd "GeoCalibDetectorStatus_IC86.55697_corrected_V2.pkl" \
+    --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
     --norm-version "binvol2" \
     $tmpl_lib \
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "one_dim" \
-    --track-kernel "table_e_loss" \
+    --cascade-kernel "aligned_point_ckv" \
+    --track-kernel "pegleg" \
     --track-time-step 1.0 \
     \
     --events-base "$events_base" \
     --start-idx "$start_idx" \
-    --num-events 1 \
+    --num-events 100 \
     --pulses "OfflinePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \

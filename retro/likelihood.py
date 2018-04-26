@@ -37,7 +37,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro.const import ALL_STRS_DOMS, EMPTY_HITS # pylint: disable=unused-import
 
 
-def get_llh(sources, hits, hits_indexer, unhit_sd_indices, time_window,
+def get_llh(sources, pegleg_sources, hits, hits_indexer, unhit_sd_indices, time_window,
             dom_tables, tdi_table=None):
     """Get the negative of the log likelihood of `event` having come from
     hypothesis `hypo` (whose light detection expectation is computed by
@@ -46,6 +46,7 @@ def get_llh(sources, hits, hits_indexer, unhit_sd_indices, time_window,
     Parameters
     ----------
     sources
+    pegleg_sources
 
     hits : shape (n_hits_total,) array of dtype HIT_T
         Keys are (string, dom) tuples, values are `retro_types.Hits`
@@ -79,6 +80,10 @@ def get_llh(sources, hits, hits_indexer, unhit_sd_indices, time_window,
         Log likelihood
 
     """
+
+    if not len(pegleg_sources) == 0:
+        raise NotImplementedError()
+
     llh = 0.0
     if tdi_table is not None:
         raise NotImplementedError()
