@@ -66,35 +66,29 @@ PRI_SPEFIT2 = 'spefit2'
 PRI_CAUCHY = 'cauchy'
 
 
-class retro_reco(object):
+def get_prior_fun(param, reco_kw):
+    '''
+    Function to generate prior definitions from kw_args
+    Should go into its own module
+    '''
 
-    def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
-        """Script "main" function"""
-        t00 = time.time()
+    if 'zenith' in param:
+        return (PRI_COSINE, (-1, 1))
 
-        self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
-        self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
-        self.events_iterator = init_obj.get_events(**events_kw)
-        self.reco_kw = reco_kw
+    elif 'azimuth' in param:
+        return (PRI_UNIFORM, (0, TWO_PI))
 
-        print('Running reconstructions...')
-
-        spatial_prior_orig = self.reco_kw.pop('spatial_prior').strip()
+    elif param == 'x':
+        spatial_prior_orig = reco_kw.get('spatial_prior').strip()
         spatial_prior_name = spatial_prior_orig.lower()
         if spatial_prior_name == 'ic':
-            x_prior = (PRI_UNIFORM, (-860, 870))
-            y_prior = (PRI_UNIFORM, (-780, 770))
-            z_prior = (PRI_UNIFORM, (-780, 790))
+            return (PRI_UNIFORM, (-860, 870))
         elif spatial_prior_name == 'dc':
-            x_prior = (PRI_UNIFORM, (-150, 270))
-            y_prior = (PRI_UNIFORM, (-210, 150))
-            z_prior = (PRI_UNIFORM, (-770, 760))
+            return (PRI_UNIFORM, (-150, 270))
         elif spatial_prior_name == 'dc_subdust':
-            x_prior = (PRI_UNIFORM, (-150, 270))
-            y_prior = (PRI_UNIFORM, (-210, 150))
-            z_prior = (PRI_UNIFORM, (-610, -60))
+            return (PRI_UNIFORM, (-150, 270))
         elif spatial_prior_name == 'spefit2':
-            x_prior = (
+            return (
                 PRI_SPEFIT2,
                 (
                     # scipy.stats.cauchy loc, scale parameters
@@ -103,7 +97,21 @@ class retro_reco(object):
                     -600, 750
                 )
             )
-            y_prior = (
+        else:
+            raise ValueError('Spatial prior "{}" not recognized'
+                             .format(spatial_prior_orig))
+
+    elif param == 'y':
+        spatial_prior_orig = reco_kw.get('spatial_prior').strip()
+        spatial_prior_name = spatial_prior_orig.lower()
+        if spatial_prior_name == 'ic':
+            return (PRI_UNIFORM, (-780, 770))
+        elif spatial_prior_name == 'dc':
+            return (PRI_UNIFORM, (-210, 150))
+        elif spatial_prior_name == 'dc_subdust':
+            return (PRI_UNIFORM, (-210, 150))
+        elif spatial_prior_name == 'spefit2':
+            return (
                 PRI_SPEFIT2,
                 (
                     # scipy.stats.cauchy loc, scale parameters
@@ -112,7 +120,22 @@ class retro_reco(object):
                     -750, 650
                 )
             )
-            z_prior = (
+        else:
+            raise ValueError('Spatial prior "{}" not recognized'
+                             .format(spatial_prior_orig))
+
+
+    elif param == 'z':
+        spatial_prior_orig = reco_kw.get('spatial_prior').strip()
+        spatial_prior_name = spatial_prior_orig.lower()
+        if spatial_prior_name == 'ic':
+            return (PRI_UNIFORM, (-780, 790))
+        elif spatial_prior_name == 'dc':
+            return (PRI_UNIFORM, (-770, 760))
+        elif spatial_prior_name == 'dc_subdust':
+            return (PRI_UNIFORM, (-610, -60))
+        elif spatial_prior_name == 'spefit2':
+            return (
                 PRI_SPEFIT2,
                 (
                     # scipy.stats.cauchy loc, scale parameters
@@ -125,12 +148,15 @@ class retro_reco(object):
             raise ValueError('Spatial prior "{}" not recognized'
                              .format(spatial_prior_orig))
 
-        temporal_prior_orig = self.reco_kw.pop('temporal_prior').strip()
+
+
+    elif param == 'time':
+        temporal_prior_orig = reco_kw.pop('temporal_prior').strip()
         temporal_prior_name = temporal_prior_orig.lower()
         if temporal_prior_name == PRI_UNIFORM:
-            time_prior = (PRI_UNIFORM, (-4e3, 0.0))
+            return (PRI_UNIFORM, (-4e3, 0.0))
         elif temporal_prior_name == PRI_SPEFIT2:
-            time_prior = (
+            return (
                 PRI_SPEFIT2,
                 (
                     # scipy.stats.cauchy loc (rel to SPEFit2 time), scale
@@ -144,14 +170,15 @@ class retro_reco(object):
             raise ValueError('Temporal prior "{}" not recognized'
                              .format(temporal_prior_orig))
 
-        cascade_energy_prior_name = self.reco_kw.pop('cascade_energy_prior')
-        cascade_energy_lims = self.reco_kw.pop('cascade_energy_lims')
+    elif param == 'cascade_energy':
+        cascade_energy_prior_name = reco_kw.pop('cascade_energy_prior')
+        cascade_energy_lims = reco_kw.pop('cascade_energy_lims')
         if cascade_energy_prior_name == PRI_UNIFORM:
-            cascade_energy_prior = (PRI_UNIFORM, (np.min(cascade_energy_lims), np.max(cascade_energy_lims)))
+            return (PRI_UNIFORM, (np.min(cascade_energy_lims), np.max(cascade_energy_lims)))
         elif cascade_energy_prior_name == PRI_LOG_UNIFORM:
-            cascade_energy_prior = (PRI_LOG_UNIFORM, (np.min(cascade_energy_lims), np.max(cascade_energy_lims)))
+            return (PRI_LOG_UNIFORM, (np.min(cascade_energy_lims), np.max(cascade_energy_lims)))
         elif cascade_energy_prior_name == PRI_LOG_NORMAL:
-            cascade_energy_prior = (
+            return (
                 PRI_LOG_NORMAL,
                 (
                     # scipy.stats.lognorm 3 paramters
@@ -163,14 +190,15 @@ class retro_reco(object):
         else:
             raise ValueError(str(cascade_energy_prior_name))
 
-        track_energy_prior_name = self.reco_kw.pop('track_energy_prior')
-        track_energy_lims = self.reco_kw.pop('track_energy_lims')
+    elif param == 'track_energy':
+        track_energy_prior_name = reco_kw.pop('track_energy_prior')
+        track_energy_lims = reco_kw.pop('track_energy_lims')
         if track_energy_prior_name == PRI_UNIFORM:
-            track_energy_prior = (PRI_UNIFORM, (np.min(track_energy_lims), np.max(track_energy_lims)))
+            return (PRI_UNIFORM, (np.min(track_energy_lims), np.max(track_energy_lims)))
         elif track_energy_prior_name == PRI_LOG_UNIFORM:
-            track_energy_prior = (PRI_LOG_UNIFORM, (np.min(track_energy_lims), np.max(track_energy_lims)))
+            return (PRI_LOG_UNIFORM, (np.min(track_energy_lims), np.max(track_energy_lims)))
         elif track_energy_prior_name == PRI_LOG_NORMAL:
-            track_energy_prior = (
+            return (
                 PRI_LOG_NORMAL,
                 (
                     # scipy.stats.lognorm 3 paramters
@@ -182,17 +210,35 @@ class retro_reco(object):
         else:
             raise ValueError(str(track_energy_prior_name))
 
+    else:
+        raise ValueError('Dimension %s unknown for priors'%param)
 
+
+
+
+
+
+class retro_reco(object):
+
+    def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
+        """Script "main" function"""
+        t00 = time.time()
+
+        self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+        self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
+        self.events_iterator = init_obj.get_events(**events_kw)
+        self.reco_kw = reco_kw
+
+        print('Running reconstructions...')
+
+
+        # setup priors
         self.priors = OrderedDict()
         for param in self.hypo_handler.params:
-            if param == 'time': self.priors[param] = time_prior
-            elif param == 'x': self.priors[param] = x_prior
-            elif param == 'y': self.priors[param] = y_prior
-            elif param == 'z': self.priors[param] = z_prior
-            elif 'zenith' in param: self.priors[param] = (PRI_COSINE, (-1, 1))
-            elif 'azimuth' in param: self.priors[param] = (PRI_UNIFORM, (0, TWO_PI))
-            elif param == 'track_energy': self.priors[param] = track_energy_prior
-            elif param == 'cascade_energy': self.priors[param] = cascade_energy_prior
+            self.priors[param] = get_prior_fun(param, reco_kw)
+        # keyword fuckery
+        reco_kw.pop('spatial_prior')
+
 
     def run(self):
         for event_idx, event in self.events_iterator: # pylint: disable=unused-variable
