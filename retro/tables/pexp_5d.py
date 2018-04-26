@@ -560,6 +560,36 @@ def generate_pexp_5d_function(
                 t_indep_exp_hits=t_indep_exp_hits[start:stop],
             )
             
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def llh(hits,
+            t_indep_exp,
+            exp_at_hit_times,
+            t_indep_exp_hits,
+            noise_at_hits,
+            time_window):
+        '''
+        helper function to calculate llh value
+        '''
+
+        llh = np.float64(0)
+        llh = -t_indep_exp[0] #+ (tot_charge * math.log(t_indep_exp[0]))
+
+        for hit_idx in range(len(hits)):
+            exp_at_hit_time = exp_at_hit_times[hit_idx]
+            t_indep_exp_hit = t_indep_exp_hits[hit_idx]
+            hit_mult = hits[hit_idx]['charge']
+            # add back hits part of poisson.
+            # ToDo: try out including also a total poisson term
+            llh += hit_mult * math.log(t_indep_exp_hit + (noise_at_hits[hit_idx] * time_window))
+            if t_indep_exp_hit > 0:
+                # norm to get probability
+                normed_p = exp_at_hit_time / t_indep_exp_hit
+            else:
+                normed_p = 0.
+            # two independent probabilities
+            log_expr = normed_p * (1 - 1./time_window) + 1./time_window
+            llh += hit_mult * math.log(log_expr)
+        return llh
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh_all_doms(
@@ -641,30 +671,62 @@ def generate_pexp_5d_function(
             start = indexer_entry['offset']
             stop = start + indexer_entry['num']
             noise_at_hits[start:stop] = dom_info[sd_idx2]['noise_rate_per_ns']
+
+        n_llhs = 1 + len(pegleg_sources)
+        llhs = np.zeros(n_llhs, dtype=np.float64)
             
-        # compute LLH
-        llh = np.float64(0)
+        # compute initial LLH
         # total poisson term (?)
         #tot_charge = np.sum(hits['charge'])
-        llh = -t_indep_exp[0] #+ (tot_charge * math.log(t_indep_exp[0]))
+        # set all to start llh
+        llhs += llh(hits=hits,
+                      t_indep_exp=t_indep_exp,
+                      exp_at_hit_times=exp_at_hit_times,
+                      t_indep_exp_hits=t_indep_exp_hits,
+                      noise_at_hits=noise_at_hits,
+                      time_window=time_window,
+                      )
 
-        for hit_idx in range(len(hits)):
-            exp_at_hit_time = exp_at_hit_times[hit_idx]
-            t_indep_exp_hit = t_indep_exp_hits[hit_idx]
-            hit_mult = hits[hit_idx]['charge']
-            # add back hits part of poisson.
-            # ToDo: try out including also a total poisson term
-            llh += hit_mult * math.log(t_indep_exp_hit + (noise_at_hits[hit_idx] * time_window))
-            if t_indep_exp_hit > 0:
-                # norm to get probability
-                normed_p = exp_at_hit_time / t_indep_exp_hit
-            else:
-                normed_p = 0.
-            # two independent probabilities
-            log_expr = normed_p * (1 - 1./time_window) + 1./time_window
-            llh += hit_mult * math.log(log_expr)
-
-        return llh, 0
+        for pegleg_idx in range(len(pegleg_sources)):
+            # update with additional source
+            get_exp_all_doms(
+                sources=pegleg_sources[pegleg_idx:pegleg_idx+1],
+                hits=hits,
+                hits_indexer=hits_indexer,
+                unhit_sd_indices=unhit_sd_indices,
+                sd_idx_table_indexer=sd_idx_table_indexer,
+                time_window=time_window,
+                dom_info=dom_info,
+                tables=tables,
+                table_norm=table_norm,
+                t_indep_tables=t_indep_tables,
+                t_indep_table_norm=t_indep_table_norm,
+                t_indep_exp=t_indep_exp,
+                t_indep_exp_hits=t_indep_exp_hits,
+                exp_at_hit_times=exp_at_hit_times,
+            )
+            llhs[pegleg_idx+1] = llh(hits=hits,
+                          t_indep_exp=t_indep_exp,
+                          exp_at_hit_times=exp_at_hit_times,
+                          t_indep_exp_hits=t_indep_exp_hits,
+                          noise_at_hits=noise_at_hits,
+                          time_window=time_window,
+                          )
+            #still improving?
+            best_idx = np.argmax(llhs)
+            best_llh = llhs[best_idx]
+            # if we weren't improving for the last 20 steps, break
+            if pegleg_idx > best_idx + 20:
+                print('no improvement')
+                break
+            # if improvements were small, break:
+            if pegleg_idx > 30:
+                delta_llh = llhs[pegleg_idx+1] - llhs[pegleg_idx - 30]
+                if delta_llh < 1:
+                    print('little improvement')
+                    break
+            
+        return best_llh, best_idx
 
     get_llh = get_llh_all_doms
 

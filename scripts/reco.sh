@@ -42,8 +42,6 @@ consteff=""
     --temporal-prior SPEFit2 \
     --cascade-energy-prior log_uniform \
     --cascade-energy-lims 0.1,1000  \
-    --track-energy-prior log_uniform \
-    --track-energy-lims 0.1,1000  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -64,7 +62,7 @@ consteff=""
     $no_noise \
     \
     --cascade-kernel "aligned_point_ckv" \
-    --track-kernel "table_e_loss" \
+    --track-kernel "pegleg" \
     --track-time-step 1.0 \
     \
     --events-base "$events_base" \

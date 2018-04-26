@@ -45,7 +45,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
-from retro.const import TWO_PI, ALL_STRS_DOMS_SET, EMPTY_SOURCES
+from retro.const import TWO_PI, ALL_STRS_DOMS_SET, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV
 from retro.retro_types import PARAM_NAMES
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.priors import *
@@ -54,17 +54,13 @@ from retro.priors import *
 class retro_reco(object):
 
     def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
-        """Script "main" function"""
-        t00 = time.time()
 
         self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
         self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
         self.events_iterator = init_obj.get_events(**events_kw)
         self.reco_kw = reco_kw
 
-        print('Running reconstructions...')
-
-
+        
         # setup priors
         self.prior_defs = OrderedDict()
         for param in self.hypo_handler.params:
@@ -74,6 +70,8 @@ class retro_reco(object):
 
 
     def run(self):
+        print('Running reconstructions...')
+        t00 = time.time()
         for event_idx, event in self.events_iterator: # pylint: disable=unused-variable
             t1 = time.time()
             if 'mc_truth' in event:
@@ -142,31 +140,25 @@ class retro_reco(object):
         # functions / constants in this module will still be import-able w/o it.
         import pymultinest
 
-        hits = event['hits']
-        hits_indexer = event['hits_indexer']
-        hits_summary = event['hits_summary']
-
-        hypo_params = self.hypo_handler.params
+        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params
+        mn_hypo_params = self.hypo_handler.params
 
         #setup LLHP dtype
         hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
         LLHP_T = np.dtype([(n, np.float32) for n in hypo_params_sorted])
 
         priors_used = OrderedDict()
-
         prior_funcs = []
-        for dim_num, dim_name in enumerate(hypo_params):
-
+        for dim_num, dim_name in enumerate(mn_hypo_params):
             prior_fun, prior_def = get_prior_fun(dim_num, dim_name, self.prior_defs[dim_name], event)
             prior_funcs.append(prior_fun)
             priors_used[dim_name] = prior_def
-
 
         param_values = []
         log_likelihoods = []
         t_start = []
 
-        report_after = 1000
+        report_after = 1
 
         def prior(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function for pymultinest to translate the hypercube MultiNest uses
@@ -174,11 +166,14 @@ class retro_reco(object):
 
             Note that the cube dimension names are defined in module variable
             `CUBE_DIMS` for reference elsewhere.
-
             """
             for prior_func in prior_funcs:
                 prior_func(cube)
 
+        # --- define here stuff for closure ---
+        hits = event['hits']
+        hits_indexer = event['hits_indexer']
+        hypo_handler = self.hypo_handler
         get_llh = self.dom_tables._get_llh # pylint: disable=protected-access
         dom_info = self.dom_tables.dom_info
         tables = self.dom_tables.tables
@@ -187,22 +182,19 @@ class retro_reco(object):
         t_indep_table_norm = self.dom_tables.t_indep_table_norm
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
         time_window = np.float32(
-            hits_summary['time_window_stop'] - hits_summary['time_window_start']
+            event['hits_summary']['time_window_stop'] - event['hits_summary']['time_window_start']
         )
         # TODO: implement logic allowing for not all DOMs to be used
         #hit_sd_indices = np.array(
         #    sorted(dom_tables.use_sd_indices_set.union(hits_indexer['sd_idx'])),
         #    dtype=np.uint32
         #)
-        hit_sd_indices = hits_indexer['sd_idx']
+        hit_sd_indices = event['hits_indexer']['sd_idx']
         unhit_sd_indices = np.array(
             sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
             dtype=np.uint32
         )
-
-
-        # define here for closure
-        hypo_handler = self.hypo_handler
+        # --------------------------------------------
 
         def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function pymultinest calls to get llh values.
@@ -217,7 +209,7 @@ class retro_reco(object):
 
             t0 = time.time()
 
-            hypo = dict(zip(hypo_params, cube))
+            hypo = dict(zip(mn_hypo_params, cube))
 
             sources = hypo_handler.get_sources(hypo)
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
@@ -238,7 +230,11 @@ class retro_reco(object):
 
             t1 = time.time()
 
-            param_values.append(cube)
+            # ToDo, this is just for testing
+            pegleg_result = [float(pegleg_idx) * SPEED_OF_LIGHT_M_PER_NS / TRACK_M_PER_GEV ]
+            result = [float(cube[i]) for i in range(len(mn_hypo_params))] + pegleg_result
+
+            param_values.append(result)
             log_likelihoods.append(llh)
 
             n_calls = len(log_likelihoods)
@@ -251,6 +247,10 @@ class retro_reco(object):
                 print('')
                 msg = 'best llh = {:.3f} @ '.format(best_llh)
                 for key, val in zip(hypo_params, best_p):
+                    msg += ' %s=%.1f'%(key, val)
+                print(msg)
+                msg = 'this llh = {:.3f} @ '.format(llh)
+                for key, val in zip(hypo_params, result):
                     msg += ' %s=%.1f'%(key, val)
                 print(msg)
                 print('{} LLH computed'.format(n_calls))
@@ -387,13 +387,13 @@ def parse_args(description=__doc__):
     group.add_argument(
         '--track-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
-        required=True,
+        required=False,
         help='''Prior to put on _total_ event track-energy. Must specify
         --track-energy-lims.'''
     )
     group.add_argument(
         '--track-energy-lims', nargs='+',
-        required=True,
+        required=False,
         help='''Lower and upper track-energy limits, in GeV. E.g.: --track-energy-lims=1,100
         Required if --track-energy-prior is {}, {}, or {}'''
         .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
@@ -459,10 +459,12 @@ def parse_args(description=__doc__):
         elims = ''.join(reco_kw['track_energy_lims'])
         elims = [float(l) for l in elims.split(',')]
         reco_kw['track_energy_lims'] = elims
+    elif reco_kw['track_energy_prior'] is None:
+        reco_kw.pop('track_energy_prior')
+        reco_kw.pop('track_energy_lims')
     elif reco_kw['track_energy_lims'] is not None:
         raise ValueError('--track-energy-lims not used with track_energy prior {}'
                          .format(reco_kw['track_energy_prior']))
-
 
     return split_kwargs
 

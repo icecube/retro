@@ -811,7 +811,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         group.add_argument(
             '--track-kernel',
             required=True,
-            choices='const_e_loss table_e_loss'.split(),
+            choices=['const_e_loss', 'table_e_loss', 'pegleg'],
         )
         group.add_argument(
             '--track-time-step', type=float,

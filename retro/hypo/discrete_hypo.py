@@ -164,9 +164,16 @@ class DiscreteHypo(object):
         '''
         return all used hypo parameter dimensions
         '''
-        params = self.pegleg_kernel_args
+        params = []
+        params.extend(self.pegleg_kernel_args)
         for kernel_args in self.kernel_args:
             params.extend(kernel_args)
         params = set(params)
         return list(params)
 
+    @property
+    def pegleg_params(self):
+        if self.pegleg_kernel is None:
+            return []
+        else:
+            return ['track_energy']
