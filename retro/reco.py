@@ -158,7 +158,7 @@ class retro_reco(object):
         log_likelihoods = []
         t_start = []
 
-        report_after = 1
+        report_after = 500
 
         def prior(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function for pymultinest to translate the hypercube MultiNest uses
@@ -232,7 +232,7 @@ class retro_reco(object):
 
             # ToDo, this is just for testing
             pegleg_result = [float(pegleg_idx) * SPEED_OF_LIGHT_M_PER_NS / TRACK_M_PER_GEV ]
-            result = [float(cube[i]) for i in range(len(mn_hypo_params))] + pegleg_result
+            result = tuple([float(cube[i]) for i in range(len(mn_hypo_params))] + pegleg_result)
 
             param_values.append(result)
             log_likelihoods.append(llh)

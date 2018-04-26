@@ -1,4 +1,4 @@
-for file in {35..39}
+for file in {0..29}
 do
 for dir in {0..59}
 do

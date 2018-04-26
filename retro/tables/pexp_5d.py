@@ -717,13 +717,13 @@ def generate_pexp_5d_function(
             best_llh = llhs[best_idx]
             # if we weren't improving for the last 20 steps, break
             if pegleg_idx > best_idx + 20:
-                print('no improvement')
+                #print('no improvement')
                 break
             # if improvements were small, break:
             if pegleg_idx > 30:
                 delta_llh = llhs[pegleg_idx+1] - llhs[pegleg_idx - 30]
                 if delta_llh < 1:
-                    print('little improvement')
+                    #print('little improvement')
                     break
             
         return best_llh, best_idx
