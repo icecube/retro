@@ -200,10 +200,10 @@ def generate_pexp_5d_function(
 
     if tbl_is_templ_compr:
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
+        def table_lookup_mean(tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx):
             """Helper function for directionality-averaged table lookup"""
             # Original axes ordering
-            templ = table[r_bin_idx, costheta_bin_idx, t_bin_idx]
+            templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
 
             # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
             #templ = table[costheta_bin_idx, r_bin_idx, t_bin_idx]
@@ -211,11 +211,11 @@ def generate_pexp_5d_function(
             return templ['weight'] / template_library[templ['index']].size
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
+        def table_lookup(tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx):
             """Helper function for table lookup"""
             # Original axes ordering
-            templ = table[r_bin_idx, costheta_bin_idx, t_bin_idx]
+            templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
 
             # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
             #templ = table[costheta_bin_idx, r_bin_idx, t_bin_idx]
@@ -242,12 +242,17 @@ def generate_pexp_5d_function(
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d_ckv_compute_t_indep(
             sources,
+            sources_start,
+            sources_stop,
             hits,
+            hits_start,
+            hits_stop,
             dom_info,
             time_window,
-            table,
+            tables,
+            table_idx,
             table_norm,
-            t_indep_table,
+            t_indep_tables,
             t_indep_table_norm,
             t_indep_exp,
             exp_at_hit_times,
@@ -271,7 +276,13 @@ def generate_pexp_5d_function(
             A discrete sequence of points describing expected sources of
             photons that result from a hypothesized event.
 
+        sources_start, sources_stop : int, int
+            starting and stopping index for part of the array on which to work on
+
         hits
+
+        hits_start, hits_stop : int, int
+            starting and stopping index for part of the array on which to work on
 
         dom_info
 
@@ -313,7 +324,9 @@ def generate_pexp_5d_function(
         if not dom_info['operational']:
             return
 
-        num_hits = len(hits)
+
+        num_hits = hits_stop - hits_start
+
 
         # Extract the components of the DOM coordinate just once, here
         dom_x = dom_info['x']
@@ -323,10 +336,12 @@ def generate_pexp_5d_function(
 
         this_t_indep_exp = np.float64(0.)
 
-        for source in sources:
+        for source_idx in range(sources_start, sources_stop):
+            source = sources[source_idx]
             dx = dom_x - source['x']
             dy = dom_y - source['y']
             dz = dom_z - source['z']
+            source_t = source['time']
 
             rhosquared = dx*dx + dy*dy
             rsquared = rhosquared + dz*dz
@@ -345,7 +360,7 @@ def generate_pexp_5d_function(
             if source_kind == SRC_OMNI:
                 # Original axes ordering
                 t_indep_surv_prob = np.mean(
-                    t_indep_table[r_bin_idx, costheta_bin_idx, :, :]
+                    t_indep_tables[table_idx, r_bin_idx, costheta_bin_idx, :, :]
                 )
                 # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
                 #t_indep_surv_prob = np.mean(
@@ -398,7 +413,8 @@ def generate_pexp_5d_function(
                     deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
                 # Original axes ordering
-                t_indep_surv_prob = t_indep_table[
+                t_indep_surv_prob = t_indep_tables[
+                    table_idx,
                     r_bin_idx,
                     costheta_bin_idx,
                     costhetadir_bin_idx,
@@ -419,13 +435,14 @@ def generate_pexp_5d_function(
             this_t_indep_exp += (
                 source_photons * ti_norm * t_indep_surv_prob * quantum_efficiency
             )
+            if num_hits == 0:
+                continue
 
-            for hit_t_idx in range(num_hits):
-                hit_time = hits[hit_t_idx]['time']
+            for hit_idx in range(hits_start, hits_stop):
+                hit_time = hits[hit_idx]['time']
 
                 # Causally impossible? (Note the comparison is written such that it
                 # will evaluate to True if hit_time is NaN.)
-                source_t = source['time']
                 if not source_t <= hit_time:
                     continue
 
@@ -443,12 +460,13 @@ def generate_pexp_5d_function(
 
                 if source_kind == SRC_OMNI:
                     surv_prob_at_hit_t = table_lookup_mean(
-                        table, r_bin_idx, costheta_bin_idx, t_bin_idx
+                        tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx
                     )
 
                 else: # source_kind == SRC_CKV_BETA1
                     surv_prob_at_hit_t = table_lookup(
-                        table,
+                        tables,
+                        table_idx,
                         r_bin_idx,
                         costheta_bin_idx,
                         t_bin_idx,
@@ -457,13 +475,15 @@ def generate_pexp_5d_function(
                     )
 
                 r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
-                exp_at_hit_times[hit_t_idx] += (
+                exp_at_hit_times[hit_idx] += (
                     source_photons * r_t_bin_norm * surv_prob_at_hit_t * quantum_efficiency
                 )
 
         t_indep_exp[0] += this_t_indep_exp 
-        for hit_t_idx in range(num_hits):
-            t_indep_exp_hits[hit_t_idx] += this_t_indep_exp
+        if num_hits == 0:
+            return
+        for hit_idx in range(hits_start, hits_stop):
+            t_indep_exp_hits[hit_idx] += this_t_indep_exp
 
 
     if tbl_is_ckv and compute_t_indep_exp:
@@ -475,6 +495,8 @@ def generate_pexp_5d_function(
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_exp_all_doms(
             sources,
+            sources_start,
+            sources_stop,
             hits,
             hits_indexer,
             unhit_sd_indices,
@@ -519,22 +541,27 @@ def generate_pexp_5d_function(
         t_indep_exp_hits : array
 
         """
-
         # Loop through all DOMs we know didn't receive hits
         for sd_idx1 in unhit_sd_indices:
             table_idx = sd_idx_table_indexer[sd_idx1]
+
             pexp_5d(
                 sources=sources,
-                hits=hits[0:0],
+                sources_start=sources_start,
+                sources_stop=sources_stop,
+                hits=hits,
+                hits_start=0,
+                hits_stop=0,
                 dom_info=dom_info[sd_idx1],
                 time_window=time_window,
-                table=tables[table_idx],
+                tables=tables,
+                table_idx=table_idx,
                 table_norm=table_norm,
-                t_indep_table=t_indep_tables[table_idx],
+                t_indep_tables=t_indep_tables,
                 t_indep_table_norm=t_indep_table_norm,
                 t_indep_exp=t_indep_exp,
-                exp_at_hit_times=exp_at_hit_times[0:0],
-                t_indep_exp_hits=t_indep_exp_hits[0:0],
+                exp_at_hit_times=exp_at_hit_times,
+                t_indep_exp_hits=t_indep_exp_hits,
             )
 
         # Loop through all DOMs that are in the sd_idx range where hits
@@ -548,16 +575,21 @@ def generate_pexp_5d_function(
             table_idx = sd_idx_table_indexer[sd_idx2]
             pexp_5d(
                 sources=sources,
-                hits=hits[start:stop],
+                sources_start=sources_start,
+                sources_stop=sources_stop,
+                hits=hits,
+                hits_start=start,
+                hits_stop=stop,
                 dom_info=dom_info[sd_idx2],
                 time_window=time_window,
-                table=tables[table_idx],
+                tables=tables,
+                table_idx=table_idx,
                 table_norm=table_norm,
-                t_indep_table=t_indep_tables[table_idx],
+                t_indep_tables=t_indep_tables,
                 t_indep_table_norm=t_indep_table_norm,
                 t_indep_exp=t_indep_exp,
-                exp_at_hit_times=exp_at_hit_times[start:stop],
-                t_indep_exp_hits=t_indep_exp_hits[start:stop],
+                exp_at_hit_times=exp_at_hit_times,
+                t_indep_exp_hits=t_indep_exp_hits,
             )
             
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -649,6 +681,8 @@ def generate_pexp_5d_function(
         # get expectations
         get_exp_all_doms(
             sources=sources,
+            sources_start=0,
+            sources_stop=len(sources),
             hits=hits,
             hits_indexer=hits_indexer,
             unhit_sd_indices=unhit_sd_indices,
@@ -690,7 +724,9 @@ def generate_pexp_5d_function(
         for pegleg_idx in range(len(pegleg_sources)):
             # update with additional source
             get_exp_all_doms(
-                sources=pegleg_sources[pegleg_idx:pegleg_idx+1],
+                sources=pegleg_sources,
+                sources_start=pegleg_idx,
+                sources_stop=pegleg_idx+1,
                 hits=hits,
                 hits_indexer=hits_indexer,
                 unhit_sd_indices=unhit_sd_indices,
@@ -716,15 +752,15 @@ def generate_pexp_5d_function(
             best_idx = np.argmax(llhs)
             best_llh = llhs[best_idx]
             # if we weren't improving for the last 20 steps, break
-            if pegleg_idx > best_idx + 20:
-                #print('no improvement')
-                break
-            # if improvements were small, break:
-            if pegleg_idx > 30:
-                delta_llh = llhs[pegleg_idx+1] - llhs[pegleg_idx - 30]
-                if delta_llh < 1:
-                    #print('little improvement')
-                    break
+            #if pegleg_idx > best_idx + 20:
+            #    #print('no improvement')
+            #    break
+            ## if improvements were small, break:
+            #if pegleg_idx > 30:
+            #    delta_llh = llhs[pegleg_idx+1] - llhs[pegleg_idx - 30]
+            #    if delta_llh < 1:
+            #        #print('little improvement')
+            #        break
             
         return best_llh, best_idx
 

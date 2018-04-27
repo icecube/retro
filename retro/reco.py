@@ -158,7 +158,7 @@ class retro_reco(object):
         log_likelihoods = []
         t_start = []
 
-        report_after = 500
+        report_after = 1
 
         def prior(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function for pymultinest to translate the hypercube MultiNest uses
