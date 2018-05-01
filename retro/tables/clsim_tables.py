@@ -72,6 +72,15 @@ CLSIM_TABLE_FNAME_PROTO = [
         '_depth_{depth_idx:d}'
         '_seed_{seed}'
         '.fits'
+    ),
+    (
+        'clsim_table'
+        '_set_{hash_val:s}'
+        '_string_{string}'
+        '_dom_{dom:d}'
+        '_seed_{seed:d}'
+        '_n_{n_events:d}'
+        '.fits'
     )
 ]
 """String templates for CLSim ("raw") retro tables. Note that `string` can
@@ -100,11 +109,31 @@ CLSIM_TABLE_FNAME_RE = [
         _seed_(?P<seed>[0-9]+)
         \.fits
         ''', re.IGNORECASE | re.VERBOSE
+    ),
+    re.compile(
+        r'''
+        clsim_table
+        _set_(?P<hash_val>[0-9a-f]+)
+        _string_(?P<string>[0-9a-z]+)
+        _dom_(?P<dom>[0-9]+)
+        _seed_(?P<seed>[0-9]+)
+        _n_(?P<n_events>[0-9]+)
+        \.fits
+        ''', re.IGNORECASE | re.VERBOSE
     )
 ]
 
 CLSIM_TABLE_METANAME_PROTO = [
-    'clsim_table_set_{hash_val:s}_meta.json'
+    'clsim_table_set_{hash_val:s}_meta.json',
+    (
+        'clsim_table'
+        '_set_{hash_val:s}'
+        '_string_{string}'
+        '_dom_{dom:d}'
+        '_seed_{seed:d}'
+        '_n_{n_events:d}'
+        '_meta.json'
+    )
 ]
 
 CLSIM_TABLE_METANAME_RE = [
@@ -114,6 +143,17 @@ CLSIM_TABLE_METANAME_RE = [
         _set_(?P<hash_val>[0-9a-f]+)
         _meta
         \.json
+        ''', re.IGNORECASE | re.VERBOSE
+    ),
+    re.compile(
+        r'''
+        clsim_table
+        _set_(?P<hash_val>[0-9a-f]+)
+        _string_(?P<string>[0-9a-z]+)
+        _dom_(?P<dom>[0-9]+)
+        _seed_(?P<seed>[0-9]+)
+        _n_(?P<n_events>[0-9]+)
+        _meta\.json
         ''', re.IGNORECASE | re.VERBOSE
     )
 ]

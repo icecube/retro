@@ -40,9 +40,9 @@ from time import time
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 from retro.const import SPEED_OF_LIGHT_M_PER_NS
 from retro.utils.misc import expand, mkdir, wstderr
 from retro.tables.clsim_tables import (

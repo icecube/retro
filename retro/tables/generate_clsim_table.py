@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, invalid-name
+# pylint: disable=wrong-import-position, invalid-name, no-member, no-name-in-module, import-error
 
 """
-Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
+Create a Retro table: Prpagate light outwards from a DOM and tabulate the
+photons. Uses CLSim (tabulator) to do the work of photon propagation.
 """
 
 # TODO: add angular sensitivity model to the values used to produce a hash
@@ -17,13 +18,11 @@ Tabulate the retro light flux in (theta, r, t, theta_dir, deltaphi_dir) bins.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    IC_AVG_Z
-    DC_AVG_Z
-    generate_clsim_table_meta
-    generate_clsim_table
-    parse_args
-'''.split()
+__all__ = [
+    'get_average_dom_z_coords',
+    'generate_clsim_table',
+    'parse_args'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller, Justin L. Lanfranchi
@@ -41,162 +40,458 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from argparse import ArgumentParser
-from os import access, environ, pathsep, remove, X_OK
-from os.path import abspath, dirname, isfile, join
+from collections import OrderedDict
+from os import (
+    access, environ, getpid, pathsep, remove, X_OK
+)
+from os.path import (
+    abspath, dirname, exists, expanduser, expandvars, isfile, join, split
+)
 import json
 from numbers import Integral
-from subprocess import check_call
+import subprocess
 import sys
+import threading
+import time
 
 import numpy as np
 
-#from icecube import *
-from icecube import icetray # pylint: disable=import-error
-from icecube.icetray import I3Units # pylint: disable=import-error
-from icecube.clsim.tabulator import LinearAxis, PowerAxis, SphericalAxes # pylint: disable=import-error
-from icecube.clsim.tablemaker.tabulator import TabulatePhotonsFromSource # pylint: disable=import-error
-from I3Tray import I3Tray # pylint: disable=import-error
+from I3Tray import I3Tray
+from icecube.clsim import (
+    AutoSetGeant4Environment,
+    GetDefaultParameterizationList,
+    GetFlasherParameterizationList,
+    I3CLSimFunctionConstant,
+    I3CLSimFlasherPulse,
+    I3CLSimFlasherPulseSeries,
+    I3CLSimLightSourceToStepConverterGeant4,
+    I3CLSimLightSourceToStepConverterPPC,
+    I3CLSimSpectrumTable
+)
+from icecube.clsim.tabulator import (
+    LinearAxis,
+    PowerAxis,
+    SphericalAxes
+)
+from icecube.clsim.traysegments.common import (
+    configureOpenCLDevices,
+    parseIceModel
+)
+from icecube import dataclasses
+from icecube.dataclasses import (
+    I3Direction,
+    I3Particle,
+    I3Position
+)
+from icecube.icetray import I3Frame, I3Module, I3Units, logging, traysegment
+from icecube.photospline.photonics import FITSTable
+from icecube.phys_services import I3GSLRandomService
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro.i3info.extract_gcd import extract_gcd
 from retro.utils.misc import expand, hash_obj, mkdir
 from retro.tables.clsim_tables import (
     CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_METANAME_PROTO
 )
 
 
-IC_AVG_Z = [
-    501.58615386180389, 484.56641094501202, 467.53781871306592,
-    450.52576974722058, 433.49294848319812, 416.48833328638324,
-    399.45294854579828, 382.44884667029748, 365.4128210605719,
-    348.40564121344153, 331.37281916691705, 314.36564088479065,
-    297.3325641338642, 280.31782062237079, 263.28397310697113,
-    246.27871821476862, 229.24294809194711, 212.23987227219803,
-    195.20448733598758, 178.20051300831329, 161.16448681171124,
-    144.15717980800531, 127.12435913085938, 110.11717947935446,
-    93.085897103334091, 76.078589904002655, 59.045128015371468,
-    42.029999953049881, 24.996410223153923, 7.9888461460001192,
-    -9.0439743934533539, -26.049487190368847, -43.080769441066643,
-    -60.087948872492866, -77.120897733248199, -94.128076993502106,
-    -111.15923103919395, -128.16641000600961, -145.19935891567133,
-    -162.20371852776944, -179.24769259721805, -196.25589713072165,
-    -213.2888457469451, -230.29628186348157, -247.32910332312952,
-    -264.33628121400488, -281.36910384740582, -298.34910231370191,
-    -315.40756421211438, -332.38756502591644, -349.44602457682294,
-    -366.45320559770636, -383.48474355844348, -400.49948746118793,
-    -417.53371801131811, -434.51192259177185, -451.56307592147436,
-    -468.54307634402545, -485.64474565554889, -502.7208975767478
-]
+DOM_RADIUS = 0.16510*I3Units.m # 13" diameter
+DOM_SURFACE_AREA = np.pi * DOM_RADIUS**2
 
-DC_AVG_Z = [
-    188.22000122070312, 178.20999799455916, 168.2000013078962,
-    158.19000026157923, 148.17000034877233, 138.16000148228235,
-    128.14999934605189, 118.14000047956195, 108.12571498325893,
-    98.110001700265073, -159.19999912806921, -166.21000017438615,
-    -173.2199990408761, -180.22999790736608, -187.23428562709265,
-    -194.23999895368303, -201.25, -208.26000322614397,
-    -215.26999991280692, -222.27999877929688, -229.29000200544084,
-    -236.29428536551339, -243.2999986921038, -250.30999973842077,
-    -257.31999860491072, -264.33000401088168, -271.34000069754467,
-    -278.3499973842076, -285.35428728376115, -292.36000279017856,
-    -299.36999947684154, -306.37999616350447, -313.39000156947543,
-    -320.39999825613842, -327.40999494280135, -334.4142848423549,
-    -341.42000034877231, -348.43000139508928, -355.44000244140625,
-    -362.44999912806918, -369.46000017438615, -376.47000122070312,
-    -383.47428676060269, -390.47999790736606, -397.49000331333707,
-    -404.5, -411.51000104631697, -418.52000209263394,
-    -425.52857317243303, -432.53428431919644, -439.53999982561385,
-    -446.55000087193082, -453.55999755859375, -460.56999860491072,
-    -467.58000401088168, -474.58857509068082, -481.59286063058033,
-    -488.5999973842076, -495.57714407784596, -502.65428379603793
+BINNING_ORDER = [
+    'r', 'costheta', 'phi', 't', 'costhetadir', 'deltaphidir'
 ]
 
 
-def generate_clsim_table_meta(r_binning_kw, t_binning_kw, costheta_binning_kw,
-                              costhetadir_binning_kw, deltaphidir_binning_kw,
-                              tray_kw_to_hash):
-    """
+def get_average_dom_z_coords(geo):
+    """Find average z coordinates for IceCube (non-DeepCore) and DeepCore
+    "z-layers" of DOMs.
+
+    A "z-layer" of DOMs is defined by all DOMs on all strings of a given string
+    type with shared DOM (OM) indices.
+
+    Parameters
+    ----------
+    geo : (n_strings, n_doms_per_string, 3) array
+        (x, y, z) coordinate for string 1 (string index 0) DOM 1 (dom index 0) is found at geo[0, 0]
+
     Returns
     -------
-    hash_val : string
-        8 hex characters indicating hash value for the table
-
-    metaname : string
-        Filename for file that will contain the complete metadata used to
-        define this set of tables
+    ic_avg_z : shape (n_doms_per_string) array
+    dc_avg_z : shape (n_doms_per_string) array
 
     """
-    linear_binning_keys = sorted(['min', 'max', 'n_bins'])
-    power_binning_keys = sorted(['min', 'max', 'power', 'n_bins'])
-    for binning_kw in [t_binning_kw, costheta_binning_kw,
-                       costhetadir_binning_kw, deltaphidir_binning_kw]:
-        assert sorted(binning_kw.keys()) == linear_binning_keys
-    assert sorted(r_binning_kw.keys()) == power_binning_keys
+    ic_avg_z = geo[:78, :, 2].mean(axis=0)
+    dc_avg_z = geo[78:, :, 2].mean(axis=0)
+    return ic_avg_z, dc_avg_z
 
-    tray_keys = sorted(['PhotonSource', 'Zenith', 'Azimuth', 'NEvents',
-                        'IceModel', 'DisableTilt', 'PhotonPrescale', 'Sensor'])
-    assert sorted(tray_kw_to_hash.keys()) == tray_keys
 
-    hashable_params = dict(
-        r_binning_kw=r_binning_kw,
-        t_binning_kw=t_binning_kw,
-        costheta_binning_kw=costheta_binning_kw,
-        costhetadir_binning_kw=costhetadir_binning_kw,
-        deltaphidir_binning_kw=deltaphidir_binning_kw,
-        tray_kw_to_hash=tray_kw_to_hash
+def make_retro_pulse(x, y, z, zenith, azimuth):
+    """Retro pulses originate from a DOM with an (x, y, z) coordinate and
+    (potentially) a zenith and azimuth orientation (though for now the latter
+    are ignored).
+
+    """
+    pulse = I3CLSimFlasherPulse()
+    pulse.type = I3CLSimFlasherPulse.FlasherPulseType.retro
+    pulse.pos = I3Position(x, y, z)
+    pulse.dir = I3Direction(zenith, azimuth)
+    pulse.time = 0.0
+    pulse.numberOfPhotonsNoBias = 10000.
+
+    # Following values don't make a difference
+    pulse.pulseWidth = 1.0 * I3Units.ns
+    pulse.angularEmissionSigmaPolar = 360.0 * I3Units.deg
+    pulse.angularEmissionSigmaAzimuthal = 360.0 * I3Units.deg
+
+    return pulse
+
+
+def unpin_threads(delay=60):
+    """
+    When AMD OpenCL fissions the CPU device, it pins each sub-device to a
+    a physical core. Since we always use sub-device 0, this means that multiple
+    instances of the tabulator on a single machine will compete for core 0.
+    Reset thread affinity after *delay* seconds to prevent this from happening.
+    """
+    def which(program):
+        def is_exe(fpath):
+            return exists(fpath) and access(fpath, X_OK)
+
+        def ext_candidates(fpath):
+            yield fpath
+            for ext in environ.get('PATHEXT', '').split(pathsep):
+                yield fpath + ext
+
+        fpath, _ = split(program)
+        if fpath:
+            if is_exe(program):
+                return program
+        else:
+            for path in environ['PATH'].split(pathsep):
+                exe_file = join(path, program)
+                for candidate in ext_candidates(exe_file):
+                    if is_exe(candidate):
+                        return candidate
+
+    def taskset(pid, tt=None):
+        # get/set the taskset affinity for pid
+        # uses a binary number string for the core affinity
+        l = [which('taskset'), '-p']
+        if tt:
+            l.append(hex(int(tt, 2))[2:])
+        l.append(str(pid))
+        p = subprocess.Popen(l, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output = p.communicate()[0].split(':')[-1].strip()
+        if not tt:
+            return bin(int(output, 16))[2:]
+
+    def resetTasksetThreads(main_pid):
+        # reset thread taskset affinity
+        time.sleep(delay)
+        num_cpus = reduce(
+            lambda b, a: b + int('processor' in a), open('/proc/cpuinfo').readlines(),
+            0
+        )
+        tt = '1'*num_cpus
+        #tt = taskset(main_pid)
+        p = subprocess.Popen(
+            [which('ps'), '-Lo', 'tid', '--no-headers', '%d'%main_pid],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        for tid in p.communicate()[0].split():
+            tid = tid.strip()
+            if tid:
+                taskset(tid, tt)
+    # only do this on linux
+    try:
+        open('/proc/cpuinfo')
+    except IOError:
+        return
+    # and only if taskset exists
+    if not which('taskset'):
+        return
+    threading.Thread(target=resetTasksetThreads, args=(getpid(),)).start()
+
+
+@traysegment
+def TabulateRetroSources(
+        tray,
+        name,
+        source_gcd_i3_md5,
+        binning_kw,
+        axes,
+        ice_model,
+        hole_ice_model,
+        disable_tilt,
+        disable_anisotropy,
+        hash_val,
+        dom_spec,
+        dom_x,
+        dom_y,
+        dom_z,
+        dom_zenith,
+        dom_azimuth,
+        seed,
+        n_events,
+        tablepath,
+        record_errors=False
+    ):
+    dom_x = dom_x * I3Units.m
+    dom_y = dom_y * I3Units.m
+    dom_z = dom_z * I3Units.m
+    dom_zenith = dom_zenith * I3Units.rad
+    dom_azimuth = dom_azimuth * I3Units.rad
+
+    tablepath = expanduser(expandvars(tablepath))
+
+    random_service = I3GSLRandomService(seed)
+
+    tray.AddModule(
+        'I3InfiniteSource', name + 'streams',
+        Stream=I3Frame.DAQ
     )
 
-    hash_val = hash_obj(hashable_params, fmt='hex')[:8]
-    metaname = CLSIM_TABLE_METANAME_PROTO[-1].format(hash_val=hash_val)
+    tray.AddModule(
+        'I3MCEventHeaderGenerator',
+        name + 'gen_header',
+        Year=2009,
+        DAQTime=158100000000000000,
+        RunNumber=1,
+        EventID=1,
+        IncrementEventID=True
+    )
 
-    return hash_val, metaname
+    flasher_pulse_series_name = 'I3FlasherPulseSeriesMap'
+
+    def reference_source(x, y, z, zenith, azimuth, scale):
+        source = I3Particle()
+        source.pos = I3Position(x, y, z)
+        source.dir = I3Direction(zenith, azimuth)
+        source.time = 0.0
+        # Following are not used (at least not yet)
+        source.type = I3Particle.ParticleType.EMinus
+        source.energy = 1.0*scale
+        source.length = 0.0
+        source.location_type = I3Particle.LocationType.InIce
+
+        return source
+
+    class MakeParticle(I3Module):
+        def __init__(self, ctx):
+            super(MakeParticle, self).__init__(ctx)
+            self.AddOutBox('OutBox')
+            self.AddParameter('source_function', '', lambda: None)
+            self.AddParameter('n_events', '', 100)
+
+        def Configure(self):
+            self.reference_source = self.GetParameter('source_function')
+            self.n_events = self.GetParameter('n_events')
+            self.emitted_events = 0
+
+        def DAQ(self, frame):
+            pulseseries = I3CLSimFlasherPulseSeries()
+            pulse = make_retro_pulse(
+                x=dom_x,
+                y=dom_y,
+                z=dom_z,
+                zenith=dom_zenith,
+                azimuth=dom_azimuth
+            )
+            pulseseries.append(pulse)
+            frame[flasher_pulse_series_name] = pulseseries
+            frame['ReferenceParticle'] = self.reference_source(
+                x=dom_x,
+                y=dom_y,
+                z=dom_z,
+                zenith=dom_zenith,
+                azimuth=dom_azimuth,
+                scale=1.0
+            )
+            self.PushFrame(frame)
+            self.emitted_events += 1
+            if self.emitted_events >= self.n_events:
+                self.RequestSuspension()
+
+    tray.AddModule(
+        MakeParticle,
+        source_function=reference_source,
+        n_events=n_events
+    )
+
+    header = OrderedDict(FITSTable.empty_header)
+    header['type'] = 'Retro DOM table'
+    header['source_gcd_i3_md5'] = source_gcd_i3_md5
+    #header['axes'] = ','.join(binning_kw.keys())
+    #for n, axname in enumerate(binning_kw.keys()):
+    #    header['axis{:d}'.format(n)] = axname
+    header['ice_model'] = ice_model
+    header['hole_ice_model'] = hole_ice_model
+    header['disable_tilt'] = disable_tilt
+    header['disable_anisotropy'] = disable_anisotropy
+    header['hash_val'] = hash_val
+    for key, value in dom_spec.items():
+        header[key] = value
+    header['dom_x'] = dom_x
+    header['dom_y'] = dom_y
+    header['dom_z'] = dom_z
+    header['dom_zenith'] = dom_zenith
+    header['dom_azimuth'] = dom_azimuth
+    header['seed'] = seed
+    header['n_events'] = n_events
+
+    if hasattr(dataclasses, 'I3ModuleGeo'):
+        tray.AddModule(
+            'I3GeometryDecomposer',
+            name + '_decomposeGeometry',
+            If=lambda frame: 'I3OMGeoMap' not in frame
+        )
+
+    # at the moment the Geant4 paths need to be set, even if it isn't used
+    # TODO: fix this
+    if I3CLSimLightSourceToStepConverterGeant4.can_use_geant4:
+        AutoSetGeant4Environment()
+
+    ppc_converter = I3CLSimLightSourceToStepConverterPPC(photonsPerStep=200)
+    # Is this even necessary?
+    ppc_converter.SetUseCascadeExtension(False)
+    particle_parameterizations = GetDefaultParameterizationList(ppc_converter,
+                                                                muonOnly=False)
+
+    # need a spectrum table in order to pass spectra to OpenCL
+    spectrum_table = I3CLSimSpectrumTable()
+    particle_parameterizations += GetFlasherParameterizationList(spectrum_table)
+
+    logging.log_debug(
+        'number of spectra (1x Cherenkov + Nx flasher): %d'
+        % len(spectrum_table), unit='clsim'
+    )
+
+    opencl_devices = configureOpenCLDevices(
+        UseGPUs=False,
+        UseCPUs=True,
+        OverrideApproximateNumberOfWorkItems=None,
+        DoNotParallelize=True,
+        UseOnlyDeviceNumber=None
+    )
+
+    medium_properties = parseIceModel(
+        expandvars('$I3_SRC/clsim/resources/ice/' + ice_model),
+        disableTilt=disable_tilt,
+        disableAnisotropy=disable_anisotropy
+
+    )
+
+    tray.AddModule(
+        'I3CLSimTabulatorModule',
+        name + '_clsim',
+        MCTreeName='', # doesn't apply since we use pulse series
+        FlasherPulseSeriesName=flasher_pulse_series_name,
+        RandomService=random_service,
+        Area=DOM_SURFACE_AREA,
+        WavelengthAcceptance=I3CLSimFunctionConstant(1.0),
+        AngularAcceptance=I3CLSimFunctionConstant(1.0),
+        MediumProperties=medium_properties,
+        ParameterizationList=particle_parameterizations,
+        SpectrumTable=spectrum_table,
+        OpenCLDeviceList=opencl_devices,
+        PhotonsPerBunch=200,
+        EntriesPerPhoton=5000,
+        Filename=tablepath,
+        RecordErrors=record_errors,
+        TableHeader=header,
+        Axes=axes,
+        SensorNormalize=False
+    )
+
+    unpin_threads()
 
 
 # TODO: add parmeters for detector geometry, bulk ice model, hole ice model
 # (i.e. this means angular sensitivity curve in its current implementation,
 # though more advanced hole ice models could mean different things), and
 # whether to use time difference from direct time
-def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
-                         r_max, r_power, n_r_bins,
-                         t_max, n_t_bins,
-                         n_costheta_bins, n_costhetadir_bins,
-                         n_deltaphidir_bins,
-                         outdir, overwrite=False, compress=True):
+def generate_clsim_table(
+        outdir,
+        gcd,
+        ice_model,
+        hole_ice_model,
+        disable_tilt,
+        disable_anisotropy,
+        string,
+        dom,
+        n_events,
+        seed,
+        n_r_bins,
+        n_t_bins,
+        n_costheta_bins,
+        n_phi_bins,
+        n_costhetadir_bins,
+        n_deltaphidir_bins,
+        r_max=None,
+        r_power=None,
+        t_max=None,
+        t_power=None,
+        deltaphidir_power=None,
+        overwrite=False,
+        compress=False
+    ):
     """Generate a CLSim table.
+
+    See wiki.icecube.wisc.edu/index.php/Ice for information about ice models.
 
     Parameters
     ----------
-    subdet : string, {'ic', 'dc'}
+    outdir : string
 
-    depth_idx : int in [0, 59]
+    gcd : string
 
-    nevts : int > 0
+    string : int in [1, 86]
+
+    dom : int in [1, 60]
+
+    n_events : int > 0
         Note that the number of photons is much larger than the number of
-        events (related to the "brightness" of the defined source)
+        events (related to the "brightness" of the defined source).
 
     seed : int in [0, 2**32)
         Seed for CLSim's random number generator
 
-    tilt : bool
-        Whether to enable ice layer tilt in simulation
+    ice_model : str
+        E.g. "spice_mie", "spice_lea", ...
+
+    hole_ice_model : str
+        E.g. "h2-50cm", "9" (which is equivalent to "new25" because, like, duh)
+
+    disable_tilt : bool
+        Whether to force no layer tilt in simulation (if tilt is present in
+        bulk ice model; otherwise, this has no effect)
+
+    disable_anisotropy : bool
+        Whether to force no bulk ice anisotropy (if anisotropy is present in
+        bulk ice model; otherwise, this has no effect)
+
+    n_t_bins, n_r_bins, n_costheta_bins, n_phi_bins, n_costhetadir_bins, n_deltaphidir_bins : int >= 0
+        Any number of bins set to 0 disables binning in that dimension.
 
     r_max : float > 0
+        Must specify if n_r_bins > 0
 
     r_power : int > 0
+        Must specify if n_r_bins > 0
 
     t_max : float > 0
+        Must specify if n_t_bins > 0
 
-    n_t_bins : int > 0
+    t_power : int > 0
+        Must specify if n_t_bins > 0
 
-    n_costheta_bins : int > 0
-
-    n_costhetadir_bins : int > 0
-
-    n_deltaphidir_bins : int > 0
-
-    outdir : string
+    deltaphidir_power : int > 0
+        Must specify if n_deltaphidir_bins > 0
 
     overwrite : bool, optional
         Whether to overwrite an existing table (default: False)
@@ -208,7 +503,7 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
     Raises
     ------
     ValueError
-        If `compress` but `zstd` command-line utility cannot be found
+        If `compress` is True but `zstd` command-line utility cannot be found
 
     AssertionError, ValueError
         If illegal argument values are passed
@@ -220,42 +515,52 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
     -----
     Binnings are as follows:
         * Radial binning is regular in the space of r**(1/r_power), with
-          `n_r_bins` spanning from `r_min` to `r_max`.
-        * Time binning is linearly spaced with `n_t_bins` spanning from `t_min`
-          to `t_max`
+          `n_r_bins` spanning from 0 to `r_max` meters.
+        * Time binning is regular in the space of t**(1/t_power), with
+          `n_t_bins` spanning from 0 to `t_max` nanoseconds.
         * Position zenith angle is binned regularly in the cosine of the zenith
-          angle with `n_costhetadir_bins` spanning from `costheta_min` to
-          `costheta_max`.
-        * Position azimuth angle is _not_ binned
-        * Photon directionality zenith angle is binned regularly in
-          cosine-zenith space, with `n_costhetadir_bins` spanning from
-          `costhetadir_min` to `costhetadir_max`
-        * Photon directionality azimuth angle, since position azimuth angle is
-          not binned, is translated into the absolute value of the azimuth
-          angle relative to the azimuth position of the photon; this is called
-          `deltaphidir`. There are `n_deltaphidir_bins` from `deltaphidir_min`
-          to `deltaphidir_max`.
+          angle with `n_costhetadir_bins` spanning from -1 to +1.
+        * Position azimuth angle is binned regularly, with `n_phi_bins`
+          spanning from -pi to pi radians.
+        * Photon directionality zenith angle (relative to IcedCube coordinate
+          system) is binned regularly in cosine-zenith space, with
+          `n_costhetadir_bins` spanning from `costhetadir_min` to
+          `costhetadir_max`
+        * Photon directionality azimuth angle, assumed to be symmetric about
+          line from DOM to the center of the bin, so is binned as an absolute
+          value, i.e., from 0 to pi radians.
 
     The following are forced upon the above binning specifications (and
     remaining parameters are specified as arguments to the function)
-        * t_min = 0
-        * r_min = 0
+        * t_min = 0 (ns)
+        * r_min = 0 (m)
         * costheta_min = -1
         * costheta_max = 1
+        * phi_min = -pi (rad)
+        * phi_max = pi (rad)
         * costhetadir_min = -1
         * costhetadir_max = 1
-        * deltaphidir_min = 0
+        * deltaphidir_min = 0 (rad)
         * deltaphidir_min = pi (rad)
 
     """
-    assert isinstance(nevts, Integral) and nevts > 0
+    assert isinstance(n_events, Integral) and n_events > 0
     assert isinstance(seed, Integral) and 0 <= seed < 2**32
-    assert isinstance(r_power, Integral) and r_power > 0
-    assert isinstance(n_r_bins, Integral) and n_r_bins > 0
-    assert isinstance(n_t_bins, Integral) and n_t_bins > 0
-    assert isinstance(n_costheta_bins, Integral) and n_costheta_bins > 0
-    assert isinstance(n_costhetadir_bins, Integral) and n_costhetadir_bins > 0
-    assert isinstance(n_deltaphidir_bins, Integral) and n_deltaphidir_bins > 0
+    assert isinstance(n_r_bins, Integral) and n_r_bins >= 0
+    assert isinstance(n_t_bins, Integral) and n_t_bins >= 0
+    assert isinstance(n_costheta_bins, Integral) and n_costheta_bins >= 0
+    assert isinstance(n_phi_bins, Integral) and n_phi_bins >= 0
+    assert isinstance(n_costhetadir_bins, Integral) and n_costhetadir_bins >= 0
+    assert isinstance(n_deltaphidir_bins, Integral) and n_deltaphidir_bins >= 0
+
+    # For now, hole ice model is hard coded to "9" (i.e., as.9 aka new25)
+    assert hole_ice_model == '9'
+
+    ice_model = ice_model.strip()
+    hole_ice_model = hole_ice_model.strip()
+    assert hole_ice_model in ['9', 'new25']
+
+    gcd_info = extract_gcd(gcd)
 
     if compress and not any(access(join(path, 'zstd'), X_OK)
                             for path in environ['PATH'].split(pathsep)):
@@ -264,12 +569,19 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
     outdir = expand(outdir)
     mkdir(outdir)
 
+    each_n_bins = (
+        n_r_bins,
+        n_costheta_bins,
+        n_phi_bins,
+        n_t_bins,
+        n_costhetadir_bins,
+        n_deltaphidir_bins
+    )
+
     # Note: + 2 accounts for under/overflow bins in each dimension
-    n_bins = np.product([n_bins + 2 for n_bins in (n_r_bins,
-                                                   n_costheta_bins,
-                                                   n_t_bins,
-                                                   n_costhetadir_bins,
-                                                   n_deltaphidir_bins)])
+    n_bins = np.product([n + 2 for n in each_n_bins if n > 0])
+
+    assert n_bins > 0
 
     if n_bins > 2**32:
         raise ValueError(
@@ -279,121 +591,197 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
             .format(n_bins, n_bins / 2**32)
         )
 
-    # Average Z coordinate (depth) for each layer of DOMs (see
-    # `average_z_position.py`)
-    # TODO: make these command-line arguments
-
     t_min = 0 # ns
     r_min = 0 # meters
     costheta_min, costheta_max = -1.0, 1.0
+    phi_min, phi_max = -np.pi, np.pi # rad
     costhetadir_min, costhetadir_max = -1.0, 1.0
     deltaphidir_min, deltaphidir_max = 0.0, np.pi # rad
 
-    r_binning_kw = dict(
-        min=float(r_min),
-        max=float(r_max),
-        n_bins=int(n_r_bins),
-        power=int(r_power)
-    )
-    costheta_binning_kw = dict(
-        min=float(costheta_min),
-        max=float(costheta_max),
-        n_bins=int(n_costheta_bins)
-    )
-    t_binning_kw = dict(
-        min=float(t_min),
-        max=float(t_max),
-        n_bins=int(n_t_bins)
-    )
-    costhetadir_binning_kw = dict(
-        min=float(costhetadir_min),
-        max=float(costhetadir_max),
-        n_bins=int(n_costhetadir_bins)
-    )
-    deltaphidir_binning_kw = dict(
-        min=float(deltaphidir_min),
-        max=float(deltaphidir_max),
-        n_bins=int(n_deltaphidir_bins)
-    )
+    binning = OrderedDict()
+    binning_kw = OrderedDict()
 
-    axes = SphericalAxes([
-        # r: photon location, radius (m)
-        PowerAxis(**r_binning_kw),
-        # costheta: photon location, coszenith
-        LinearAxis(**costheta_binning_kw),
-        # t: photon location, time (ns)
-        LinearAxis(**t_binning_kw),
-        # costhetadir: photon direction, coszenith
-        LinearAxis(**costhetadir_binning_kw),
-        # deltaphidir: photon direction, (impact) azimuth angle (rad)
-        LinearAxis(**deltaphidir_binning_kw)
-    ]) # yapf: disable
+    if n_r_bins > 0:
+        assert isinstance(r_power, Integral) and r_power > 0
+        r_binning_kw = OrderedDict([
+            ('min', float(r_min)),
+            ('max', float(r_max)),
+            ('n_bins', int(n_r_bins))
+        ])
+        if r_power == 1:
+            binning['r'] = LinearAxis(**r_binning_kw)
+        else:
+            r_binning_kw['power'] = int(r_power)
+            binning['r'] = PowerAxis(**r_binning_kw)
+        binning_kw['r'] = r_binning_kw
 
-    if subdet.lower() == 'ic':
-        z_pos = IC_AVG_Z[depth_idx]
-    elif subdet.lower() == 'dc':
-        z_pos = DC_AVG_Z[depth_idx]
+    if n_costheta_bins > 0:
+        costheta_binning_kw = OrderedDict([
+            ('min', float(costheta_min)),
+            ('max', float(costheta_max)),
+            ('n_bins', int(n_costheta_bins))
+        ])
+        binning['costheta'] = LinearAxis(**costheta_binning_kw)
+        binning_kw['costheta'] = costheta_binning_kw
 
-    print('Subdetector {}, depth index {} (z_avg = {} m)'
-          .format(subdet, depth_idx, z_pos))
+    if n_phi_bins > 0:
+        phi_binning_kw = OrderedDict([
+            ('min', float(phi_min)),
+            ('max', float(phi_max)),
+            ('n_bins', int(n_phi_bins))
+        ])
+        binning['phi'] = LinearAxis(**phi_binning_kw)
+        binning_kw['phi'] = phi_binning_kw
 
-    # Parameters that will (or can be foreseen to) cause the tables to vary
-    # depending on their values. These define what we will call a "set" of
-    # tables.
-    tray_kw_to_hash = dict(
-        PhotonSource='retro',
-        Zenith=180 * I3Units.degree, # orientation of source
-        Azimuth=0 * I3Units.degree, # orientation of source
-        # Number of events will affect the tables, but n=999 and n=1000 will be
-        # very similar (and not statistically independent if the seed is the
-        # same). But a user is likely to want to test out same settings but
-        # different statistics, so these sets need different hashes (unless we
-        # want the user to also specify the nevts when identifying a set...)
-        # Therefore, this is included in the hash to indicate a common set of
-        # tables
-        NEvents=nevts,
-        IceModel='spice_mie',
-        DisableTilt=not tilt,
-        PhotonPrescale=1,
-        Sensor='none'
-    )
+    if n_t_bins > 0:
+        assert isinstance(t_power, Integral) and t_power > 0
+        t_binning_kw = OrderedDict([
+            ('min', float(t_min)),
+            ('max', float(t_max)),
+            ('n_bins', int(n_t_bins))
+        ])
+        if t_power == 1:
+            binning['t'] = LinearAxis(**t_binning_kw)
+        else:
+            t_binning_kw['power'] = int(t_power)
+            binning['t'] = PowerAxis(**t_binning_kw)
+        binning_kw['t'] = t_binning_kw
 
-    hashable_params = dict(
-        r_binning_kw=r_binning_kw,
-        t_binning_kw=t_binning_kw,
-        costheta_binning_kw=costheta_binning_kw,
-        costhetadir_binning_kw=costhetadir_binning_kw,
-        deltaphidir_binning_kw=deltaphidir_binning_kw,
-        tray_kw_to_hash=tray_kw_to_hash
-    )
+    if n_costhetadir_bins > 0:
+        costhetadir_binning_kw = OrderedDict([
+            ('min', float(costhetadir_min)),
+            ('max', float(costhetadir_max)),
+            ('n_bins', int(n_costhetadir_bins))
+        ])
+        binning['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
+        binning_kw['costhetadir'] = costheta_binning_kw
 
-    hash_val, metaname = generate_clsim_table_meta(**hashable_params)
-    metapath = join(outdir, metaname)
+    if n_deltaphidir_bins > 0:
+        assert isinstance(deltaphidir_power, Integral) and deltaphidir_power > 0
+        deltaphidir_binning_kw = OrderedDict([
+            ('min', float(deltaphidir_min)),
+            ('max', float(deltaphidir_max)),
+            ('n_bins', int(n_deltaphidir_bins))
+        ])
+        if deltaphidir_power == 1:
+            binning['deltaphidir'] = LinearAxis(**deltaphidir_binning_kw)
+        else:
+            deltaphidir_binning_kw['power'] = int(deltaphidir_power)
+            binning['deltaphidir'] = PowerAxis(**deltaphidir_binning_kw)
+        binning_kw['deltaphidir'] = deltaphidir_binning_kw
 
-    filename = CLSIM_TABLE_FNAME_PROTO[-1].format(
-        hash_val=hash_val, string=subdet, depth_idx=depth_idx, seed=seed
-    )
-    filepath = abspath(join(outdir, filename))
+    binning_order = BINNING_ORDER
 
-    #if isfile(metapath):
-    #    if overwrite:
-    #        print('WARNING! Overwriting table metadata file at "{}"'
-    #              .format(metapath))
-    #    else:
-    #        raise ValueError(
-    #            'Table metadata file already exists at "{}",'
-    #            ' assuming table already generated or in process; not'
-    #            ' overwriting.'.format(metapath)
-    #        )
-    json.dump(hashable_params, file(metapath, 'w'), sort_keys=True, indent=4)
+    missing_dims = set(binning.keys()).difference(binning_order)
+    if missing_dims:
+        raise ValueError(
+            '`binning_order` specified is {} but is missing dimension(s) {}'
+            .format(binning_order, missing_dims)
+        )
+
+    binning_ = OrderedDict()
+    binning_kw_ = OrderedDict()
+    for dim in binning_order:
+        if dim in binning:
+            binning_[dim] = binning[dim]
+            binning_kw_[dim] = binning_kw[dim]
+    binning = binning_
+    binning_kw = binning_kw_
+
+    axes = SphericalAxes(binning.values())
+
+    # Construct metadata initially with items that will be hashed
+    metadata = OrderedDict([
+        ('source_gcd_i3_md5', gcd_info['source_gcd_i3_md5']),
+        ('binning_kw', binning_kw),
+        ('ice_model', ice_model),
+        ('hole_ice_model', hole_ice_model),
+        ('disable_tilt', disable_tilt),
+        ('disable_anisotropy', disable_anisotropy)
+    ])
+
+    hash_val = hash_obj(metadata, fmt='hex')[:8]
+
+    metadata['hash_val'] = hash_val
+
+    dom_spec = OrderedDict([('string', string), ('dom', dom)])
+
+    if 'depth_idx' in dom_spec and ('subdet' in dom_spec or 'string' in dom_spec):
+        if 'subdet' in dom_spec:
+            dom_spec['string'] = dom_spec.pop('subdet')
+
+        string = dom_spec['string']
+        depth_idx = dom_spec['depth_idx']
+
+        if isinstance(string, str):
+            subdet = dom_spec['subdet'].lower()
+            dom_x, dom_y = 0, 0
+
+            ic_avg_z, dc_avg_z = get_average_dom_z_coords(gcd_info['geo'])
+            if string == 'ic':
+                dom_z = ic_avg_z[depth_idx]
+            elif string == 'dc':
+                dom_z = dc_avg_z[depth_idx]
+            else:
+                raise ValueError('Unrecognized subdetector {}'.format(subdet))
+        else:
+            dom_x, dom_y, dom_z = gcd_info['geo'][string - 1, depth_idx]
+
+        metadata['string'] = string
+        metadata['depth_idx'] = depth_idx
+
+        clsim_table_fname_proto = CLSIM_TABLE_FNAME_PROTO[1]
+        clsim_table_metaname_proto = CLSIM_TABLE_METANAME_PROTO[0]
+
+        print('Subdetector {}, depth index {} (z_avg = {} m)'
+              .format(subdet, depth_idx, dom_z))
+
+    elif 'string' in dom_spec and 'dom' in dom_spec:
+        string = dom_spec['string']
+        dom = dom_spec['dom']
+        dom_x, dom_y, dom_z = gcd_info['geo'][string - 1, dom - 1]
+
+        metadata['string'] = string
+        metadata['dom'] = dom
+
+        clsim_table_fname_proto = CLSIM_TABLE_FNAME_PROTO[2]
+        clsim_table_metaname_proto = CLSIM_TABLE_METANAME_PROTO[1]
+
+        print('GCD = "{}"\nString {}, dom {}: (x, y, z) = ({}, {}, {}) m'
+              .format(gcd, string, dom, dom_x, dom_y, dom_z))
+
+    else:
+        raise ValueError('Cannot understand `dom_spec` {}'.format(dom_spec))
+
+    # Until someone figures out DOM tilt and ice column / bubble column / cable
+    # orientations for sure, we'll just set DOM orientation to zenith=pi,
+    # azimuth=0.
+    dom_zenith = np.pi
+    dom_azimuth = 0.0
+
+    # Now add other metadata items that are useful but not used for hashing
+    metadata['dom_x'] = dom_x
+    metadata['dom_y'] = dom_y
+    metadata['dom_z'] = dom_z
+    metadata['dom_zenith'] = dom_zenith
+    metadata['dom_azimuth'] = dom_azimuth
+    metadata['seed'] = seed
+    metadata['n_events'] = n_events
+
+    metapath = join(outdir, clsim_table_metaname_proto.format(**metadata))
+    tablepath = join(outdir, clsim_table_fname_proto.format(**metadata))
+
+    # Save metadata as a JSON file (so it's human-readable by any tool, not
+    # just Python--in contrast to e.g. pickle files)
+    json.dump(metadata, file(metapath, 'w'), sort_keys=False, indent=4)
 
     print('='*80)
     print('Metadata for the table set was written to\n  "{}"'.format(metapath))
-    print('Table will be written to\n  "{}"'.format(filepath))
+    print('Table will be written to\n  "{}"'.format(tablepath))
     print('='*80)
 
     exists_at = []
-    for fpath in [filepath, filepath + '.zst']:
+    for fpath in [tablepath, tablepath + '.zst']:
         if isfile(fpath):
             exists_at.append(fpath)
 
@@ -408,53 +796,42 @@ def generate_clsim_table(subdet, depth_idx, nevts, seed, tilt,
                              ' overwriting.'.format(names))
     print('')
 
-    tray_kw_other = dict(
-        # Note that hash includes the parameters used to construct the axes
-        Axes=axes,
-
-        # Parameters that indicate some "index" into the set defined above.
-        # I.e., you will want to associate all seeds and all z positions
-        # simulated together in the same set, but of course these parameters
-        # will also change the tables produced.
-        ZCoordinate=z_pos, # location of source
-        Seed=seed,
-
-        # Parameters that should have no bearing on the contents of the tables
-        Energy=1 * I3Units.GeV,
-        TabulateImpactAngle=True,
-        Directions=None,
-        Filename=filepath,
-        FlasherWidth=127,
-        FlasherBrightness=127,
-        RecordErrors=False,
-    )
-
-    all_tray_kw = {}
-    all_tray_kw.update(tray_kw_to_hash)
-    all_tray_kw.update(tray_kw_other)
-
-    icetray.logging.set_level_for_unit(
-        'I3CLSimStepToTableConverter', 'TRACE'
-    )
-    icetray.logging.set_level_for_unit(
-        'I3CLSimTabulatorModule', 'DEBUG'
-    )
-    icetray.logging.set_level_for_unit(
-        'I3CLSimLightSourceToStepConverterGeant4', 'TRACE'
-    )
-    icetray.logging.set_level_for_unit(
-        'I3CLSimLightSourceToStepConverterFlasher', 'TRACE'
-    )
-
     tray = I3Tray()
-    tray.AddSegment(TabulatePhotonsFromSource, 'generator', **all_tray_kw)
+    tray.AddSegment(
+        TabulateRetroSources,
+        'TabulateRetroSources',
+        source_gcd_i3_md5=gcd_info['source_gcd_i3_md5'],
+        binning_kw=binning_kw,
+        axes=axes,
+        ice_model=ice_model,
+        hole_ice_model=hole_ice_model,
+        disable_tilt=disable_tilt,
+        disable_anisotropy=disable_anisotropy,
+        hash_val=hash_val,
+        dom_spec=dom_spec,
+        dom_x=dom_x,
+        dom_y=dom_y,
+        dom_z=dom_z,
+        dom_zenith=dom_zenith,
+        dom_azimuth=dom_azimuth,
+        seed=seed,
+        n_events=n_events,
+        tablepath=tablepath,
+        record_errors=False
+    )
+
+    logging.set_level_for_unit('I3CLSimStepToTableConverter', 'TRACE')
+    logging.set_level_for_unit('I3CLSimTabulatorModule', 'DEBUG')
+    logging.set_level_for_unit('I3CLSimLightSourceToStepConverterGeant4', 'TRACE')
+    logging.set_level_for_unit('I3CLSimLightSourceToStepConverterFlasher', 'TRACE')
+
     tray.Execute()
     tray.Finish()
 
     if compress:
         print('Compressing table with zstandard via command line')
-        print('  zstd -1 --rm "{}"'.format(filepath))
-        check_call(['zstd', '-1', '--rm', filepath])
+        print('  zstd -1 --rm "{}"'.format(tablepath))
+        subprocess.check_call(['zstd', '-1', '--rm', tablepath])
         print('done.')
 
 
@@ -468,16 +845,47 @@ def parse_args(description=__doc__):
     """
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '--subdet', required=True, choices=('ic', 'dc'),
-        help='Calculate for IceCube z-pos (ic) or DeepCore z-pos (dc)'
+        '--outdir', default='./',
+        help='Save table to this directory (default: "./")'
     )
     parser.add_argument(
-        '--depth-idx', type=int, required=True,
-        help='''z-position/depth index (referenced to either IceCube or
-        DeepCore average depths, according to which is passed to --subdet.'''
+        '--overwrite', action='store_true',
+        help='Overwrite if the table already exists'
     )
     parser.add_argument(
-        '--nevts', type=int, required=True,
+        '--compress', action='store_true',
+        help='Compress with zstd the table'
+    )
+
+    parser.add_argument(
+        '--gcd', required=True
+    )
+    parser.add_argument(
+        '--ice-model', required=True
+    )
+    parser.add_argument(
+        '--hole-ice-model', required=True
+    )
+
+    parser.add_argument(
+        '--disable-tilt', action='store_true',
+        help='Force no tilt, even if ice model contains tilt'
+    )
+    parser.add_argument(
+        '--disable-anisotropy', action='store_true',
+        help='Force no anisotropy, even if ice model contains anisotropy'
+    )
+
+    parser.add_argument(
+        '--string', type=int, required=True,
+        help='String number in [1, 86]'
+    )
+    parser.add_argument(
+        '--dom', type=int, required=True,
+        help='''DOM number on string, in [1, 60]'''
+    )
+    parser.add_argument(
+        '--n-events', type=int, required=True,
         help='Number of events to simulate'
     )
     parser.add_argument(
@@ -485,38 +893,26 @@ def parse_args(description=__doc__):
         help='Random seed to use, in range of 32 bit uint: [0, 2**32-1]'
     )
 
-    parser.add_argument(
-        '--tilt', action='store_true',
-        help='Enable tilt in ice model'
-    )
+    #parser.add_argument(
+    #    '--binning-order', nargs='+'
+    #)
 
-    parser.add_argument(
-        '--r-max', type=float, required=True,
-        help='Radial binning maximum value, in meters'
-    )
-    parser.add_argument(
-        '--r-power', type=int, required=True,
-        help='Radial binning is regular in raidus to this power'
-    )
     parser.add_argument(
         '--n-r-bins', type=int, required=True,
         help='Number of radial bins'
     )
-
-    parser.add_argument(
-        '--t-max', type=float, required=True,
-        help='Time binning maximum value, in nanoseconds'
-    )
     parser.add_argument(
         '--n-t-bins', type=int, required=True,
-        help='Number of time bins'
+        help='Number of time bins (relative to direct time)'
     )
-
     parser.add_argument(
         '--n-costheta-bins', type=int, required=True,
-        help='Number of costheta (cosine of zenith angle) bins'
+        help='Number of costheta (cosine of position zenith angle) bins'
     )
-
+    parser.add_argument(
+        '--n-phi-bins', type=int, required=True,
+        help='Number of phi (position azimuth) bins'
+    )
     parser.add_argument(
         '--n-costhetadir-bins', type=int, required=True,
         help='Number of costhetadir bins'
@@ -528,13 +924,26 @@ def parse_args(description=__doc__):
     )
 
     parser.add_argument(
-        '--outdir', default='./',
-        help='Save table to this directory (default: "./")'
+        '--r-max', type=float, required=False,
+        help='Radial binning maximum value, in meters'
+    )
+    parser.add_argument(
+        '--r-power', type=int, required=False,
+        help='Radial binning is regular in raidus to this power'
     )
 
     parser.add_argument(
-        '--overwrite', action='store_true',
-        help='Overwrite if the table already exists'
+        '--t-max', type=float, required=False,
+        help='Time binning maximum value, in nanoseconds'
+    )
+    parser.add_argument(
+        '--t-power', type=int, required=False,
+        help='Time binning is regular in time to this power'
+    )
+
+    parser.add_argument(
+        '--deltaphidir-power', type=int, required=False,
+        help='deltaphidir binning is regular in deltaphidir to this power'
     )
 
     return parser.parse_args()
