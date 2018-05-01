@@ -12,12 +12,12 @@ mapping.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    get_cone_map
-    convolve_table
-    survival_prob_from_smeared_cone
-    survival_prob_from_cone
-'''.split()
+__all__ = [
+    'get_cone_map',
+    'convolve_table',
+    'survival_prob_from_smeared_cone',
+    'survival_prob_from_cone'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

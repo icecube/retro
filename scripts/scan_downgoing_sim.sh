@@ -21,9 +21,9 @@ events_base="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_
 #tmpl_lib="--template-library /data/icecube/retro_tables/ckv_dir_templates.npy"
 #tblkind="ckv_templ_compr"
 
-proto="/fastio/icecube/retro/tables/large_5d_notilt_combined/stacked"
+proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked_reordered"
-tmpl_lib="--template-library /fastio/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 tblkind="ckv_templ_compr"
 
 #use_doms="dc_subdust"
@@ -31,7 +31,6 @@ use_doms="all"
 
 #no_noise="--no-noise"
 no_noise=""
-
 gcd="GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.bz2"
 angsens="h2-50cm"
 ttru="0"

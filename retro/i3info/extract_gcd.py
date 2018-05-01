@@ -33,18 +33,18 @@ import gzip
 import hashlib
 import os
 from os.path import abspath, basename, expanduser, expandvars, dirname, isfile, join, splitext
-import pickle
 from shutil import copyfile
-from StringIO import StringIO
 import sys
 
 import numpy as np
+from six import BytesIO
+from six.moves import cPickle as pickle
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DATA_DIR
+from retro import DATA_DIR, load_pickle
 from retro.utils.misc import mkdir
 
 
@@ -92,10 +92,10 @@ def extract_gcd(gcd_file, outdir=None):
             copyfile(data_dir_fpath, outfpath)
 
     if isfile(data_dir_fpath):
-        return pickle.load(open(data_dir_fpath, 'rb'))
+        return load_pickle(data_dir_fpath)
 
     if outfpath is not None and isfile(outfpath):
-        return pickle.load(open(outfpath, 'rb'))
+        return load_pickle(outfpath)
 
     if src_gcd_dir:
         dirs = [src_gcd_dir]
@@ -123,7 +123,7 @@ def extract_gcd(gcd_file, outdir=None):
             for src_dir in dirs:
                 fpath = join(src_dir, src_gcd_stripped)
                 if isfile(fpath):
-                    gcd_info = pickle.load(open(src_gcd_stripped, 'rb'))
+                    gcd_info = load_pickle(src_gcd_stripped)
                     if outdir is not None and outdir != src_gcd_dir:
                         copyfile(src_gcd_stripped, outfpath)
                     return gcd_info
@@ -138,7 +138,7 @@ def extract_gcd(gcd_file, outdir=None):
     source_gcd_md5 = hashlib.md5(decompressed).hexdigest()
     for comp_alg in compression:
         if comp_alg == 'gz':
-            decompressed = gzip.GzipFile(fileobj=StringIO(decompressed)).read()
+            decompressed = gzip.GzipFile(fileobj=BytesIO(decompressed)).read()
         elif comp_alg == 'bz2':
             decompressed = bz2.decompress(decompressed)
     decompressed_gcd_md5 = hashlib.md5(decompressed).hexdigest()

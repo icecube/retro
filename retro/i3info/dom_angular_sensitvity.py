@@ -7,11 +7,11 @@ Extract sampled angular sensitivity curves from IceCube software.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    DEFAULT_DIRPATH
-    extract_angular_sensitvity
-    main
-'''.split()
+__all__ = [
+    'DEFAULT_DIRPATH',
+    'extract_angular_sensitvity',
+    'main'
+]
 
 from os import listdir
 from os.path import expanduser, expandvars, isdir, join

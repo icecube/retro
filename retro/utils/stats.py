@@ -7,12 +7,12 @@ Statistics
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    poisson_llh
-    partial_poisson_llh
-    weighted_average
-    estimate_from_llhp
-'''.split()
+__all__ = [
+    'poisson_llh',
+    'partial_poisson_llh',
+    'weighted_average',
+    'estimate_from_llhp'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

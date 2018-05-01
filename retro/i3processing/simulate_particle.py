@@ -14,11 +14,11 @@ electrons, taus, and their antiparticles)
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    MAX_RUN_NUM
-    simulate_particle
-    parse_args
-'''.split()
+__all__ = [
+    'MAX_RUN_NUM',
+    'simulate_particle',
+    'parse_args'
+]
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import os

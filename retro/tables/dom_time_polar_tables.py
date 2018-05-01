@@ -7,12 +7,12 @@ Class for single-DOM 3D (t, r, costheta) tables (i.e., no directionality).
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    RETRO_DOM_TABLE_FNAME_PROTO
-    RETRO_DOM_TABLE_FNAME_RE
-    load_t_r_theta_table
-    DOMTimePolarTables
-'''.split()
+__all__ = [
+    'RETRO_DOM_TABLE_FNAME_PROTO',
+    'RETRO_DOM_TABLE_FNAME_RE',
+    'load_t_r_theta_table',
+    'DOMTimePolarTables'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

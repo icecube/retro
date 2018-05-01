@@ -9,10 +9,10 @@ a Cherenkov cone)
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    CKV_TABLE_KEYS
-    load_ckv_table
-'''.split()
+__all__ = [
+    'CKV_TABLE_KEYS',
+    'load_ckv_table'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

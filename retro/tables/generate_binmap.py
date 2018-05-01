@@ -7,10 +7,10 @@ Functions for mapping spherical bins to Cartesian bins.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    generate_binmap_meta
-    generate_binmap
-'''.split()
+__all__ = [
+    'generate_binmap_meta',
+    'generate_binmap'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -29,16 +29,17 @@ limitations under the License.'''
 
 from collections import OrderedDict
 from os.path import abspath, dirname, isdir, isfile, join
-import cPickle as pickle
 import sys
 import time
 
 import numpy as np
+from six.moves import cPickle as pickle
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import load_pickle
 from retro.utils.geom import powerspace, spherical_volume
 from retro.utils.misc import hash_obj
 from retro.tables.sphbin2cartbin import sphbin2cartbin
@@ -182,7 +183,7 @@ def generate_binmap(r_max, r_power, n_rbins, n_costhetabins, n_phibins,
         sys.stdout.flush()
 
         t0 = time.time()
-        data = pickle.load(file(fpath, 'rb'))
+        data = load_pickle(fpath)
         ind_arrays = data['ind_arrays']
         vol_arrays = data['vol_arrays']
         t1 = time.time()

@@ -2,16 +2,15 @@
 # pylint: disable=wrong-import-position
 
 """
-Class for using a set of 3D (r, costheta, t) compressed
-Cherenkov Retro tables that contain a (weight, idx)-dtype per bin
+Load a template-compressed Cherenkov table.
 """
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    CKV_TABLE_KEYS
-    load_ckv_table
-'''.split()
+__all__ = [
+    'TMPL_COMPR_CKV_TABLE_KEYS',
+    'load_template_compr_ckv_table'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -43,14 +42,14 @@ from retro import DEBUG
 from retro.utils.misc import expand, wstderr
 
 
-CKV_TABLE_KEYS = [
+TMPL_COMPR_CKV_TABLE_KEYS = [
     'n_photons', 'group_refractive_index', 'phase_refractive_index',
     'r_bin_edges', 'costheta_bin_edges', 't_bin_edges',
     'costhetadir_bin_edges', 'deltaphidir_bin_edges', 'ckv_template_map',
 ]
 
 
-def load_ckv_table_compr(fpath, mmap):
+def load_template_compr_ckv_table(fpath, mmap):
     """Load a Cherenkov table from disk.
 
     Parameters
@@ -96,14 +95,14 @@ def load_ckv_table_compr(fpath, mmap):
     t0 = time()
     indir = fpath
 
-    for key in CKV_TABLE_KEYS + ['t_indep_ckv_table']:
+    for key in TMPL_COMPR_CKV_TABLE_KEYS + ['t_indep_ckv_table']:
         fpath = join(indir, key + '.npy')
         if DEBUG:
             wstderr('    loading {} from "{}" ...'.format(key, fpath))
 
         t1 = time()
         if isfile(fpath):
-            table[key] = np.load(fpath)
+            table[key] = np.load(fpath, mmap_mode=mmap_mode)
 
         elif key != 't_indep_ckv_table':
             raise ValueError(

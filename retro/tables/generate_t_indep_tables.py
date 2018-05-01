@@ -10,6 +10,11 @@ with dimensions (r, costheta, costhetadir, deltaphidir)..
 
 from __future__ import absolute_import, division, print_function
 
+__all__ = [
+    'generate_time_indep_tables',
+    'parse_args'
+]
+
 from argparse import ArgumentParser
 from os.path import abspath, basename, dirname, isdir, isfile, join
 import sys
@@ -27,8 +32,12 @@ from retro.tables.ckv_tables import load_ckv_table
 from retro.utils.misc import expand, mkdir
 
 
-def generate_time_indep_tables(table, outdir=None, kinds=('clsim', 'ckv'),
-                               overwrite=False):
+def generate_time_indep_tables(
+        table,
+        outdir=None,
+        kinds=('clsim', 'ckv'),
+        overwrite=False
+    ):
     """Generate and save to disk time independent table(s) from the original
     CLSim table and/or a Cherenkov table.
 

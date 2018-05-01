@@ -34,8 +34,6 @@ import time
 
 import numpy as np
 
-from pisa.utils.format import hrlist2list
-
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
@@ -44,7 +42,8 @@ from retro import HYPO_PARAMS_T, init_obj
 from retro import likelihood
 from retro.const import ALL_STRS_DOMS_SET
 from retro.scan import scan
-from retro.utils.misc import expand, mkdir, sort_dict
+from retro.utils.misc import expand, mkdir, sort_dict, hrlist2list
+
 
 
 def parse_args(description=__doc__):

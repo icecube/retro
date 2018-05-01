@@ -8,11 +8,11 @@ Generate a json file summarizing a CLSim table
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    summarize_clsim_table
-    parse_args
-    main
-'''.split()
+__all__ = [
+    'summarize_clsim_table',
+    'parse_args',
+    'main'
+]
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi

@@ -11,10 +11,10 @@ weight for each DOM).
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    extract_photons
-    parse_args
-'''.split()
+__all__ = [
+    'extract_photons',
+    'parse_args'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

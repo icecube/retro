@@ -13,10 +13,10 @@ mapping.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    generate_ckv_table
-    parse_args
-'''.split()
+__all__ = [
+    'generate_ckv_table',
+    'parse_args'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

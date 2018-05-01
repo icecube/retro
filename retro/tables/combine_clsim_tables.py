@@ -8,14 +8,14 @@ Combine multiple Retro CLSim tables into a single table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    VALIDATE_KEYS
-    SUM_KEYS
-    ALL_KEYS
-    combine_clsim_tables
-    parse_args
-    main
-'''.split()
+__all__ = [
+    'VALIDATE_KEYS',
+    'SUM_KEYS',
+    'ALL_KEYS',
+    'combine_clsim_tables',
+    'parse_args',
+    'main'
+]
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -46,9 +46,7 @@ if __name__ == '__main__' and __package__ is None:
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
 from retro.utils.misc import COMPR_EXTENSIONS, expand, mkdir, wstderr
-from retro.tables.clsim_tables import (
-    generate_time_indep_table, load_clsim_table_minimal
-)
+from retro.tables.clsim_tables import load_clsim_table_minimal
 
 
 VALIDATE_KEYS = [
@@ -173,15 +171,15 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
 
         del table
 
-    # Force quantum_efficiency and angular_acceptance_fract to 1 (these should
-    # be handled by the user at the time the table is used to represent a
-    # particular or subgroup of DOMs)
-    t_indep_table, _ = generate_time_indep_table(
-        table=table,
-        quantum_efficiency=1,
-        angular_acceptance_fract=1
-    )
-    table['t_indep_table'] = t_indep_table
+    ## Force quantum_efficiency and angular_acceptance_fract to 1 (these should
+    ## be handled by the user at the time the table is used to represent a
+    ## particular or subgroup of DOMs)
+    #t_indep_table, _ = generate_time_indep_tables(
+    #    table=table,
+    #    quantum_efficiency=1,
+    #    angular_acceptance_fract=1
+    #)
+    #table['t_indep_table'] = t_indep_table
 
     # Save the data to npy files on disk (in a sub-directory for all of this
     # table's files)

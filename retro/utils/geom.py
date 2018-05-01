@@ -7,28 +7,28 @@ Utils for binning and geometry
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    GEOM_FILE_PROTO
-    GEOM_META_PROTO
-    generate_geom_meta
-    linbin
-    test_linbin
-    powerbin
-    test_powerbin
-    powerspace
-    inv_power_2nd_diff
-    infer_power
-    test_infer_power
-    sample_powerlaw_binning
-    bin_edges_to_binspec
-    linear_bin_centers
-    spherical_volume
-    sph2cart
-    pol2cart
-    cart2pol
-    cart2sph
-    spacetime_separation
-'''.split()
+__all__ = [
+    'GEOM_FILE_PROTO',
+    'GEOM_META_PROTO',
+    'generate_geom_meta',
+    'linbin',
+    'test_linbin',
+    'powerbin',
+    'test_powerbin',
+    'powerspace',
+    'inv_power_2nd_diff',
+    'infer_power',
+    'test_infer_power',
+    'sample_powerlaw_binning',
+    'bin_edges_to_binspec',
+    'linear_bin_centers',
+    'spherical_volume',
+    'sph2cart',
+    'pol2cart',
+    'cart2pol',
+    'cart2sph',
+    'spacetime_separation'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

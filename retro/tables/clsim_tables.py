@@ -8,17 +8,16 @@ CLSim-produced Retro tables
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    MY_CLSIM_TABLE_KEYS
-    CLSIM_TABLE_FNAME_PROTO
-    CLSIM_TABLE_FNAME_RE
-    CLSIM_TABLE_METANAME_PROTO
-    CLSIM_TABLE_METANAME_RE
-    interpret_clsim_table_fname
-    generate_time_indep_table
-    load_clsim_table_minimal
-    load_clsim_table
-'''.split()
+__all__ = [
+    'MY_CLSIM_TABLE_KEYS',
+    'CLSIM_TABLE_FNAME_PROTO',
+    'CLSIM_TABLE_FNAME_RE',
+    'CLSIM_TABLE_METANAME_PROTO',
+    'CLSIM_TABLE_METANAME_RE',
+    'interpret_clsim_table_fname',
+    'load_clsim_table_minimal',
+    'load_clsim_table'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -50,7 +49,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import DEBUG
 from retro.tables.retro_5d_tables import TABLE_NORM_KEYS, get_table_norm
 from retro.utils.misc import (
-    expand, force_little_endian, get_decompressd_fobj, wstderr
+    expand, force_little_endian, get_decompressd_fobj, hrlist2list, wstderr
 )
 
 
@@ -186,8 +185,6 @@ def interpret_clsim_table_fname(fname):
         ``CLSIM_TABLE_FNAME_RE``
 
     """
-    from pisa.utils.format import hrlist2list
-
     fname = basename(fname)
     fname_version = None
     for fname_version in range(len(CLSIM_TABLE_FNAME_RE) - 1, -1, -1):

@@ -25,7 +25,7 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-import cPickle as pickle
+import pickle
 import hashlib
 from itertools import product
 from os.path import abspath, dirname, isdir, isfile, join
@@ -74,7 +74,7 @@ def parse_args(description=__doc__):
     )
 
     dom_tables_kw, hypo_kw, _, pdf_kw = (
-        init_obj.parse_args(parser=parser, hits=False)
+        init_obj.parse_args(parser=parser)
     )
 
     return dom_tables_kw, hypo_kw, pdf_kw

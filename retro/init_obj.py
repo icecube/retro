@@ -47,7 +47,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const
+from retro import const, load_pickle
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
     point_cascade, point_ckv_cascade, one_dim_cascade
@@ -331,7 +331,7 @@ def get_events(
             photons = [splitext(d)[0] for d in listdir(dpath)]
         else:
             photons = False
-    elif isinstance(photons, basestring):
+    elif isinstance(photons, str):
         photons = [photons]
 
     if pulses is None:
@@ -340,7 +340,7 @@ def get_events(
             pulses = [splitext(d)[0] for d in listdir(dpath) if 'TimeRange' not in d]
         else:
             pulses = False
-    elif isinstance(pulses, basestring):
+    elif isinstance(pulses, str):
         pulses = [pulses]
 
     if recos is None:
@@ -349,7 +349,7 @@ def get_events(
             recos = [splitext(d)[0] for d in listdir(dpath)]
         else:
             recos = False
-    elif isinstance(recos, basestring):
+    elif isinstance(recos, str):
         recos = [recos]
 
     if triggers is None:
@@ -358,7 +358,7 @@ def get_events(
             triggers = [splitext(d)[0] for d in listdir(dpath)]
         else:
             triggers = False
-    elif isinstance(triggers, basestring):
+    elif isinstance(triggers, str):
         triggers = [triggers]
 
     if hits is None:
@@ -368,7 +368,7 @@ def get_events(
             hits = ['photons', photons[0]]
         else:
             hits = False
-    elif isinstance(hits, basestring):
+    elif isinstance(hits, str):
         hits = hits.split('/')
 
     if truth:
@@ -457,7 +457,7 @@ def iterate_file(fpath, start=0, stop=None, step=None):
     slicer = slice(start, stop, step)
     _, ext = splitext(fpath)
     if ext == '.pkl':
-        events = pickle.load(open(fpath, 'rb'))
+        events = load_pickle(fpath)
     elif ext == '.npy':
         try:
             events = np.load(fpath, mmap_mode='r')
@@ -487,7 +487,7 @@ def get_path(event, path):
         another mapping, etc.)
 
     """
-    if isinstance(path, basestring):
+    if isinstance(path, str):
         path = [path]
     node = event
     for subpath in path:
@@ -507,7 +507,7 @@ def get_hits(event, path, angsens_model=None):
 
     path
 
-    angsens_model : basestring, numpy.polynomial.Polynomial, or None
+    angsens_model : str, numpy.polynomial.Polynomial, or None
         If specified and photons are extracted, weights for the photons will be
         applied according to the angular sensitivity model specified.
         Otherwise, each photon will carry a weight of one.
@@ -527,7 +527,7 @@ def get_hits(event, path, angsens_model=None):
         time_window_start = 0
         time_window_stop = 0
         if angsens_model is not None:
-            if isinstance(angsens_model, basestring):
+            if isinstance(angsens_model, str):
                 angsens_poly, _ = load_angsens_model(angsens_model)
             elif isinstance(angsens_model, np.polynomial.Polynomial):
                 angsens_poly = angsens_model
