@@ -201,12 +201,11 @@ EVT_DOM_INFO_T = np.dtype([
         ('table_idx', np.uint32),
         ('hits_start_idx', np.uint32),
         ('hits_stop_idx', np.uint32),
+        ('total_observed_charge', np.float32),
 ])
 
 EXP_DOM_T = np.dtype([
     ('total_expected_charge', np.float32),
-    ('total_observed_charge', np.float32),
-    ('noise_rate_per_ns', np.float32),
     ('exp_at_hit_times', np.float32),
 ])
 

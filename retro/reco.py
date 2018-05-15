@@ -211,10 +211,10 @@ class retro_reco(object):
                 stop = start + event['hits_indexer'][hit_idx]['num']
                 event_dom_info[position]['hits_start_idx'] = start
                 event_dom_info[position]['hits_stop_idx'] = stop
-
+                for h_idx in range(start, stop):
+                    event_dom_info[position]['total_observed_charge'] += hits[h_idx]['charge']
 
         # --------------------------------------------
-
 
 
         def loglike(cube, ndim, nparams): # pylint: disable=unused-argument

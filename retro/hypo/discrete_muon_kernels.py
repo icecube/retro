@@ -53,7 +53,7 @@ from retro.retro_types import SRC_T
 
 ALL_REALS = (-np.inf, np.inf)
 
-def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt=1.0, n_pegleg=1000):
+def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt=1.0, n_pegleg=3000):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
