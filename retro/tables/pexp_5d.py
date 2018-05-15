@@ -306,11 +306,11 @@ def generate_pexp_5d_function(
 
         """
 
-        for dom_idx in range(len(event_dom_info)):
-            table_idx = event_dom_info['table_idx'][dom_idx]
+        for source_idx in range(sources_start, sources_stop):
 
-            for source_idx in range(sources_start, sources_stop):
-                source = sources[source_idx]
+            for dom_idx in range(len(event_dom_info)):
+                table_idx = event_dom_info['table_idx'][dom_idx]
+
                 dx = event_dom_info['x'][dom_idx] - sources[source_idx]['x']
                 dy = event_dom_info['y'][dom_idx] - sources[source_idx]['y']
                 dz = event_dom_info['z'][dom_idx] - sources[source_idx]['z']
