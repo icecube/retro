@@ -49,6 +49,7 @@ from retro.const import TWO_PI, ALL_STRS_DOMS, EMPTY_SOURCES, SPEED_OF_LIGHT_M_P
 from retro.retro_types import PARAM_NAMES, EVT_DOM_INFO_T
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.priors import *
+from retro.hypo.discrete_muon_kernels import pegleg_eval
 
 
 class retro_reco(object):
@@ -249,8 +250,8 @@ class retro_reco(object):
             t1 = time.time()
 
             # ToDo, this is just for testing
-            pegleg_result = [float(pegleg_idx) * SPEED_OF_LIGHT_M_PER_NS / TRACK_M_PER_GEV ]
-            result = tuple([float(cube[i]) for i in range(len(mn_hypo_params))] + pegleg_result)
+            pegleg_result = pegleg_eval(pegleg_idx)
+            result = tuple([float(cube[i]) for i in range(len(mn_hypo_params))] + [pegleg_result])
 
             param_values.append(result)
             log_likelihoods.append(llh)
