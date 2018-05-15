@@ -45,8 +45,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
-from retro.const import TWO_PI, ALL_STRS_DOMS_SET, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV
-from retro.retro_types import PARAM_NAMES
+from retro.const import TWO_PI, ALL_STRS_DOMS, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV
+from retro.retro_types import PARAM_NAMES, EVT_DOM_INFO_T
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.priors import *
 
@@ -184,17 +184,38 @@ class retro_reco(object):
         time_window = np.float32(
             event['hits_summary']['time_window_stop'] - event['hits_summary']['time_window_start']
         )
-        # TODO: implement logic allowing for not all DOMs to be used
-        #hit_sd_indices = np.array(
-        #    sorted(dom_tables.use_sd_indices_set.union(hits_indexer['sd_idx'])),
-        #    dtype=np.uint32
-        #)
-        hit_sd_indices = event['hits_indexer']['sd_idx']
-        unhit_sd_indices = np.array(
-            sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
-            dtype=np.uint32
-        )
+
+        n_operational_doms = np.sum(dom_info['operational'])
+        # array containing all relevant DOMs for the event and the hit information
+        event_dom_info = np.zeros(shape=(n_operational_doms,), dtype=EVT_DOM_INFO_T)
+
+        #loop through all DOMs to fill array:
+        position = 0
+        for sd_idx in ALL_STRS_DOMS:
+            if not dom_info[sd_idx]['operational']:
+                continue
+            event_dom_info[position]['x'] = dom_info[sd_idx]['x']
+            event_dom_info[position]['y'] = dom_info[sd_idx]['y']
+            event_dom_info[position]['z'] = dom_info[sd_idx]['z']
+            event_dom_info[position]['quantum_efficiency'] = dom_info[sd_idx]['quantum_efficiency']
+            event_dom_info[position]['noise_rate_per_ns'] = dom_info[sd_idx]['noise_rate_per_ns']
+            event_dom_info[position]['table_idx'] = sd_idx_table_indexer[sd_idx]
+
+            position += 1
+
+            # add hits indices
+            # super shitty way at the moment, due to legacy way of doing things
+            if sd_idx in event['hits_indexer']['sd_idx']:
+                hit_idx = list(event['hits_indexer']['sd_idx']).index(sd_idx)
+                start = event['hits_indexer'][hit_idx]['offset']
+                stop = start + event['hits_indexer'][hit_idx]['num']
+                event_dom_info[position]['hits_start_idx'] = start
+                event_dom_info[position]['hits_stop_idx'] = stop
+
+
         # --------------------------------------------
+
+
 
         def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function pymultinest calls to get llh values.
@@ -217,11 +238,8 @@ class retro_reco(object):
                 sources=sources,
                 pegleg_sources=pegleg_sources,
                 hits=hits,
-                hits_indexer=hits_indexer,
-                unhit_sd_indices=unhit_sd_indices,
-                sd_idx_table_indexer=sd_idx_table_indexer,
                 time_window=time_window,
-                dom_info=dom_info,
+                event_dom_info=event_dom_info,
                 tables=tables,
                 table_norm=table_norm,
                 t_indep_tables=t_indep_tables,
@@ -268,16 +286,6 @@ class retro_reco(object):
             ('wrapped_params', [int('azimuth' in p.lower()) for p in hypo_params]),
             ('importance_nested_sampling', importance_sampling),
             ('multimodal', max_modes > 1),
-            ('const_efficiency_mode', const_eff),
-            ('n_live_points', n_live),
-            ('evidence_tolerance', evidence_tol),
-            ('sampling_efficiency', sampling_eff),
-            ('null_log_evidence', -1e90),
-            ('max_modes', max_modes),
-            ('mode_tolerance', -1e90),
-            ('seed', seed),
-            ('log_zero', -1e100),
-            ('max_iter', max_iter),
         ])
 
         mn_meta = OrderedDict([
@@ -388,9 +396,11 @@ def parse_args(description=__doc__):
         '--track-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
         required=False,
-        help='''Prior to put on _total_ event track-energy. Must specify
-        --track-energy-lims.'''
+        help='''Lower and upper cascade-energy limits, in GeV. E.g.: --cascade-energy-lims=1,100
+        Required if --cascade-energy-prior is {}, {}, or {}'''
+        .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
     )
+
     group.add_argument(
         '--track-energy-lims', nargs='+',
         required=False,
