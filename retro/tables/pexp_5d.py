@@ -205,9 +205,6 @@ def generate_pexp_5d_function(
             # Original axes ordering
             templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
 
-            # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
-            #templ = table[costheta_bin_idx, r_bin_idx, t_bin_idx]
-
             return templ['weight'] / template_library[templ['index']].size
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -216,9 +213,6 @@ def generate_pexp_5d_function(
             """Helper function for table lookup"""
             # Original axes ordering
             templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
-
-            # Reordered axes (_should_ be faster, but... alas, didn't seem to be)
-            #templ = table[costheta_bin_idx, r_bin_idx, t_bin_idx]
 
             return (
                 templ['weight']
@@ -246,7 +240,6 @@ def generate_pexp_5d_function(
             sources_stop,
             hits,
             event_dom_info,
-            time_window,
             tables,
             table_norm,
             t_indep_tables,
@@ -307,16 +300,13 @@ def generate_pexp_5d_function(
         """
 
         for source_idx in range(sources_start, sources_stop):
-
             for dom_idx in range(len(event_dom_info)):
-                table_idx = event_dom_info['table_idx'][dom_idx]
-
                 dx = event_dom_info['x'][dom_idx] - sources[source_idx]['x']
                 dy = event_dom_info['y'][dom_idx] - sources[source_idx]['y']
                 dz = event_dom_info['z'][dom_idx] - sources[source_idx]['z']
 
-                rhosquared = dx*dx + dy*dy
-                rsquared = rhosquared + dz*dz
+                rhosquared = dx**2 + dy**2
+                rsquared = rhosquared + dz**2
 
                 # Continue if photon is outside the radial binning limits
                 if rsquared >= rsquared_max:
@@ -327,6 +317,7 @@ def generate_pexp_5d_function(
                 r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
                 costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
 
+                table_idx = event_dom_info['table_idx'][dom_idx]
 
                 if sources[source_idx]['kind'] == SRC_OMNI:
                     t_indep_surv_prob = np.mean(
@@ -339,9 +330,6 @@ def generate_pexp_5d_function(
                     # vertex since simulation has photons going _away_ from the DOM
                     # that in reconstruction will hit the DOM if they're moving
                     # _towards_ the DOM.
-
-                    # Zenith angle is indep. of photon position relative to DOM
-                    pdir_costheta = sources[source_idx]['dir_costheta']
 
                     rho = math.sqrt(rhosquared)
 
@@ -367,7 +355,7 @@ def generate_pexp_5d_function(
                         pdir_deltaphi = math.acos(pdir_cosdeltaphi)
 
                     # Make upper edge inclusive
-                    costhetadir_bin_idx = min(int((pdir_costheta + np.float64(1)) / table_dcosthetadir), last_costhetadir_bin_idx)
+                    costhetadir_bin_idx = min(int((sources[source_idx]['dir_costheta']  + 1) / table_dcosthetadir), last_costhetadir_bin_idx)
 
                     # Make upper edge inclusive
                     deltaphidir_bin_idx = min(int(abs(pdir_deltaphi) / table_dphidir), last_deltaphidir_bin_idx)
@@ -505,7 +493,6 @@ def generate_pexp_5d_function(
             sources_stop=len(sources),
             hits=hits,
             event_dom_info=event_dom_info,
-            time_window=time_window,
             tables=tables,
             table_norm=table_norm,
             t_indep_tables=t_indep_tables,
@@ -514,13 +501,12 @@ def generate_pexp_5d_function(
         )
 
         # compute initial LLH (and set all elements to that one)
-        llhs += llh(
+        llhs[:] = llh(
                     event_dom_info=event_dom_info,
                     dom_exp=dom_exp,
                     time_window=time_window,
                     )
 
-        best_llh = llhs[0]
         best_idx = 0
 
         for pegleg_idx in range(len(pegleg_sources)):
@@ -531,7 +517,6 @@ def generate_pexp_5d_function(
                 sources_stop=pegleg_idx+1,
                 hits=hits,
                 event_dom_info=event_dom_info,
-                time_window=time_window,
                 tables=tables,
                 table_norm=table_norm,
                 t_indep_tables=t_indep_tables,
@@ -545,7 +530,6 @@ def generate_pexp_5d_function(
                                      )
             #still improving?
             best_idx = np.argmax(llhs)
-            best_llh = llhs[best_idx]
             # if we weren't improving for the last 50 steps, break
             if pegleg_idx > best_idx + 50:
                 #print('no improvement')
@@ -557,7 +541,7 @@ def generate_pexp_5d_function(
                     #print('little improvement')
                     break
             
-        return best_llh, best_idx
+        return llhs[best_idx], best_idx
 
     get_llh = get_llh_all_doms
 

@@ -228,12 +228,13 @@ class retro_reco(object):
             if not t_start:
                 t_start.append(time.time())
 
-            t0 = time.time()
 
             hypo = dict(zip(mn_hypo_params, cube))
 
             sources = hypo_handler.get_sources(hypo)
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
+
+            t0 = time.time()
             llh, pegleg_idx = get_llh(
                 sources=sources,
                 pegleg_sources=pegleg_sources,
@@ -245,7 +246,6 @@ class retro_reco(object):
                 t_indep_tables=t_indep_tables,
                 t_indep_table_norm=t_indep_table_norm,
             )
-
             t1 = time.time()
 
             # ToDo, this is just for testing
