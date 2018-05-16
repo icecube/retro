@@ -159,7 +159,7 @@ class retro_reco(object):
         log_likelihoods = []
         t_start = []
 
-        report_after = 1000
+        report_after = 1
 
         def prior(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function for pymultinest to translate the hypercube MultiNest uses
@@ -215,6 +215,9 @@ class retro_reco(object):
                     event_dom_info[position]['total_observed_charge'] += hits[h_idx]['charge']
 
             position += 1
+
+        print('evt dom info: ', event_dom_info)
+        print('tot charge: ', np.sum(event_dom_info['total_observed_charge']))
 
         # --------------------------------------------
 

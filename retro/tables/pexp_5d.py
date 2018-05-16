@@ -435,11 +435,14 @@ def generate_pexp_5d_function(
             if obs > 0:
                 exp = dom_exp['total_expected_charge'][i]
                 nr = event_dom_info['noise_rate_per_ns'][i]
-                expr = math.log(exp + nr * time_window)
+                p = math.log(exp + nr * time_window)
                 if exp > 0:
-                    expr += dom_exp['exp_at_hit_times'][i] / exp * (1. - 1./time_window)
-                expr += 1./time_window
-                llh += obs * expr
+                    normed_p = dom_exp['exp_at_hit_times'][i] / exp
+                else:
+                    normed_p = 0.
+                log_expr = normed_p * (1. - 1./time_window) + 1./time_window
+                p += math.log(log_expr)
+                llh += obs * p
         return llh
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)

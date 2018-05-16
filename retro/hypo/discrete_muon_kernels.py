@@ -209,8 +209,6 @@ for idx, egy in enumerate(esamps[1:]):
     lengths.append(np.trapz(y=dxde_samps[:idx+1], x=esamps[:idx+1]))
 lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
 
-print(lengths)
-
 MULEN_INTERP = interpolate.UnivariateSpline(x=esamps, y=lengths, k=1, s=0)
 # does that work? :P
 MUEN_INTERP = interpolate.UnivariateSpline(y=esamps[1:], x=lengths[1:], k=1, s=0)
