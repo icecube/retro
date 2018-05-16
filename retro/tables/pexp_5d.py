@@ -376,16 +376,16 @@ def generate_pexp_5d_function(
 
                 for hit_idx in range(event_dom_info['hits_start_idx'][dom_idx], event_dom_info['hits_stop_idx'][dom_idx]):
 
-                    # Causally impossible? (Note the comparison is written such that it
-                    # will evaluate to True if hit_time is NaN.)
-                    if not sources[source_idx]['time'] <= hits[hit_idx]['time']:
-                        continue
-
                     # A photon that starts immediately in the past (before the DOM
                     # was hit) will show up in the Retro DOM tables in bin 0; the
                     # further in the past the photon started, the higher the time
                     # bin index. Therefore, subract source time from hit time.
                     dt = hits[hit_idx]['time'] - sources[source_idx]['time']
+
+                    # Causally impossible? (Note the comparison is written such that it
+                    # will evaluate to True if hit_time is NaN.)
+                    if not dt >= 0:
+                        continue
 
                     # Is relative time outside binning?
                     if dt >= t_max:
@@ -439,7 +439,7 @@ def generate_pexp_5d_function(
                 if exp > 0:
                     expr += dom_exp['exp_at_hit_times'][i] / exp * (1. - 1./time_window)
                 expr += 1./time_window
-                llh += event_dom_info['total_observed_charge'][i] * expr
+                llh += obs * expr
         return llh
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)

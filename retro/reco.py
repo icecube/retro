@@ -159,7 +159,7 @@ class retro_reco(object):
         log_likelihoods = []
         t_start = []
 
-        report_after = 1
+        report_after = 1000
 
         def prior(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function for pymultinest to translate the hypercube MultiNest uses
@@ -202,7 +202,6 @@ class retro_reco(object):
             event_dom_info[position]['noise_rate_per_ns'] = dom_info[sd_idx]['noise_rate_per_ns']
             event_dom_info[position]['table_idx'] = sd_idx_table_indexer[sd_idx]
 
-            position += 1
 
             # add hits indices
             # super shitty way at the moment, due to legacy way of doing things
@@ -214,6 +213,8 @@ class retro_reco(object):
                 event_dom_info[position]['hits_stop_idx'] = stop
                 for h_idx in range(start, stop):
                     event_dom_info[position]['total_observed_charge'] += hits[h_idx]['charge']
+
+            position += 1
 
         # --------------------------------------------
 
