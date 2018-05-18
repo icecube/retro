@@ -114,9 +114,11 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
                        time_window):
         sources = hypo_handler.get_sources(hypo)
         pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
-        llh, pegleg_idx = get_llh(
+        scaling_sources = hypo_handler.get_scaling_sources(hypo)
+        llh, pegleg_idx, scalefactor = get_llh(
             sources=sources,
             pegleg_sources=pegleg_sources,
+            scaling_sources=scaling_sources,
             hits=hits,
             hits_indexer=hits_indexer,
             unhit_sd_indices=unhit_sd_indices,

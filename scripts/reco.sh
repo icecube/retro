@@ -40,8 +40,6 @@ consteff=""
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
-    --cascade-energy-prior log_uniform \
-    --cascade-energy-lims 0.1,500  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -61,7 +59,7 @@ consteff=""
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "aligned_one_dim" \
+    --cascade-kernel "scaling" \
     --track-kernel "pegleg" \
     --track-time-step 1.0 \
     \

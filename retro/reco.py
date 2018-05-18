@@ -141,7 +141,7 @@ class retro_reco(object):
         # functions / constants in this module will still be import-able w/o it.
         import pymultinest
 
-        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params
+        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
         mn_hypo_params = self.hypo_handler.params
 
         #setup LLHP dtype
@@ -216,8 +216,8 @@ class retro_reco(object):
 
             position += 1
 
-        print('evt dom info: ', event_dom_info)
-        print('tot charge: ', np.sum(event_dom_info['total_observed_charge']))
+        #print('evt dom info: ', event_dom_info)
+        #print('tot charge: ', np.sum(event_dom_info['total_observed_charge']))
 
         # --------------------------------------------
 
@@ -238,11 +238,13 @@ class retro_reco(object):
 
             sources = hypo_handler.get_sources(hypo)
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
+            scaling_sources = hypo_handler.get_scaling_sources(hypo)
 
             t0 = time.time()
-            llh, pegleg_idx = get_llh(
+            llh, pegleg_idx, scalefactor = get_llh(
                 sources=sources,
                 pegleg_sources=pegleg_sources,
+                scaling_sources=scaling_sources,
                 hits=hits,
                 time_window=time_window,
                 event_dom_info=event_dom_info,
@@ -255,7 +257,7 @@ class retro_reco(object):
 
             # ToDo, this is just for testing
             pegleg_result = pegleg_eval(pegleg_idx)
-            result = tuple([float(cube[i]) for i in range(len(mn_hypo_params))] + [pegleg_result])
+            result = tuple([float(cube[i]) for i in range(len(mn_hypo_params))] + [pegleg_result] + [scalefactor])
 
             param_values.append(result)
             log_likelihoods.append(llh)
@@ -385,13 +387,13 @@ def parse_args(description=__doc__):
     group.add_argument(
         '--cascade-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
-        required=True,
+        required=False,
         help='''Prior to put on _total_ event cascade-energy. Must specify
         --cascade-energy-lims.'''
     )
     group.add_argument(
         '--cascade-energy-lims', nargs='+',
-        required=True,
+        required=False,
         help='''Lower and upper cascade-energy limits, in GeV. E.g.: --cascade-energy-lims=1,100
         Required if --cascade-energy-prior is {}, {}, or {}'''
         .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
@@ -465,6 +467,9 @@ def parse_args(description=__doc__):
         elims = ''.join(reco_kw['cascade_energy_lims'])
         elims = [float(l) for l in elims.split(',')]
         reco_kw['cascade_energy_lims'] = elims
+    elif reco_kw['cascade_energy_prior'] is None:
+        reco_kw.pop('cascade_energy_prior')
+        reco_kw.pop('cascade_energy_lims')
     elif reco_kw['cascade_energy_lims'] is not None:
         raise ValueError('--cascade-energy-lims not used with cascade_energy prior {}'
                          .format(reco_kw['cascade_energy_prior']))

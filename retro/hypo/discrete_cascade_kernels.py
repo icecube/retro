@@ -138,6 +138,21 @@ def aligned_point_ckv_cascade(time, x, y, z, cascade_energy, track_azimuth, trac
             cascade_zenith=track_zenith)
 
 
+
+def scaling_aligned_point_ckv_cascade(time, x, y, z, track_azimuth, track_zenith):
+    '''
+    fixed 1 GeV cascade kernel
+    '''
+    return aligned_point_ckv_cascade(time=time,
+                                     x=x,
+                                     y=y,
+                                     z=z,
+                                     track_azimuth=track_azimuth,
+                                     track_zenith=track_zenith,
+                                     cascade_energy=1.,
+                                     )
+
+
 # TODO: use quasi-random (low discrepancy) numbers instead of pseudo-random
 #       (e.g., Sobol sequence)
 

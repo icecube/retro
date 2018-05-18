@@ -421,34 +421,69 @@ def generate_pexp_5d_function(
 
             
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def llh(event_dom_info,
+    def eval_llh(event_dom_info,
             dom_exp,
+            scaling_exp,
             time_window):
         '''
         helper function to calculate llh value
+
+        Parameters:
+        -----------
+        event_dom_info : array
+            containing all relevant event per DOM info
+        dom_exp : array
+            containing the expectations for a given hypo
+        scaling_exp : array
+            containing the expectations for a scaling hypo
+        time_window : float
+            event time_window in ns
+
         '''
-        llh = -(np.sum(dom_exp['total_expected_charge']) +
-                np.sum(event_dom_info['noise_rate_per_ns']) * time_window)
+
+        # calculate the total charges
+        sum_expected_charge = (np.sum(dom_exp['total_expected_charge']) +
+                               np.sum(event_dom_info['noise_rate_per_ns']) * time_window)
+
+        sum_scaling_charge = np.sum(scaling_exp['total_expected_charge'])
+        
+        sum_observed_charge = np.sum(event_dom_info['total_observed_charge'])
+
+        # Poisson has its MLE at lambda = k, i.e. observed = expected charge
+        # if with the regular sources we do not have enough charge, we can scale up the 
+        # scaling sources to reach exactly that value
+        # however, if the regular sources exceed the oberved charge, we can only set it to 0
+
+        diff_charge = sum_observed_charge - sum_expected_charge
+        if diff_charge <= 0.:
+            scalefactor = 0.
+        elif sum_scaling_charge == 0.:
+            scalefactor = 0.
+        else:
+            scalefactor = diff_charge/sum_scaling_charge
+
+        llh = -sum_expected_charge - scalefactor * sum_scaling_charge
 
         for i in range(len(dom_exp)):
             obs = event_dom_info['total_observed_charge'][i]
             if obs > 0:
-                exp = dom_exp['total_expected_charge'][i]
+                exp = dom_exp['total_expected_charge'][i] + scalefactor * scaling_exp['total_expected_charge'][i]
                 nr = event_dom_info['noise_rate_per_ns'][i]
                 p = math.log(exp + nr * time_window)
                 if exp > 0:
-                    normed_p = dom_exp['exp_at_hit_times'][i] / exp
+                    normed_p = (dom_exp['exp_at_hit_times'][i] + scalefactor * scaling_exp['exp_at_hit_times'][i])/ exp
                 else:
                     normed_p = 0.
                 log_expr = normed_p * (1. - 1./time_window) + 1./time_window
                 p += math.log(log_expr)
                 llh += obs * p
-        return llh
+        return llh, scalefactor
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh_all_doms(
             sources,
             pegleg_sources,
+            scaling_sources,
             hits,
             time_window,
             event_dom_info,
@@ -469,6 +504,8 @@ def generate_pexp_5d_function(
         sources : shape (n_sources,) array of dtype SRC_T
         pegleg_sources : shape (n_sources,) array of dtype SRC_T
             over these sources will be maximized in order
+        scaling_sources : shape (n_sources,) array of dtype SRC_T
+            over these sources will be maximized using a scalefactor
         hits : shape (n_hits_total,) array of dtype HIT_T
         time_window : float64
         event_dom_info : array of dtype EVT_DOM_INFO_T
@@ -481,13 +518,38 @@ def generate_pexp_5d_function(
         t_indep_table_norm
             Single norm for all stacked time-independent tables
 
+        Returns
+        -------
+        llh : float
+            log-likelihood value
+        pegleg_idx : int
+            index for best pegleg hypo
+        scalefactor : float
+            best scalefactor for scaling sources
+
         """
 
         # initialize arrays
         dom_exp = np.zeros(shape=event_dom_info.shape, dtype=EXP_DOM_T)
         n_llhs = 1 + len(pegleg_sources)
         llhs = np.zeros(n_llhs, dtype=np.float64)
+        scalefactors = np.zeros(n_llhs, dtype=np.float64)
             
+        # save the scaling sources in a separate array
+        scaling_exp = np.zeros(shape=event_dom_info.shape, dtype=EXP_DOM_T)
+        # and get scaling sources expectation first
+        pexp_5d(
+            sources=scaling_sources,
+            sources_start=0,
+            sources_stop=len(scaling_sources),
+            hits=hits,
+            event_dom_info=event_dom_info,
+            tables=tables,
+            table_norm=table_norm,
+            t_indep_tables=t_indep_tables,
+            t_indep_table_norm=t_indep_table_norm,
+            dom_exp=scaling_exp,
+        )
 
         # get expectations
         pexp_5d(
@@ -504,11 +566,14 @@ def generate_pexp_5d_function(
         )
 
         # compute initial LLH (and set all elements to that one)
-        llhs[:] = llh(
+        llh, scalefacor = eval_llh(
                     event_dom_info=event_dom_info,
                     dom_exp=dom_exp,
+                    scaling_exp=scaling_exp,
                     time_window=time_window,
                     )
+        llhs[:] = llh
+        scalefactors[0] = scalefacor
 
         best_idx = 0
 
@@ -526,11 +591,14 @@ def generate_pexp_5d_function(
                 t_indep_table_norm=t_indep_table_norm,
                 dom_exp=dom_exp,
             )
-            llhs[pegleg_idx+1] = llh(
+            llh, scalefacor = eval_llh(
                                      event_dom_info=event_dom_info,
                                      dom_exp=dom_exp,
+                                     scaling_exp=scaling_exp,
                                      time_window=time_window,
                                      )
+            llhs[pegleg_idx+1] = llh
+            scalefactors[pegleg_idx+1] = scalefacor
             #still improving?
             best_idx = np.argmax(llhs)
             # if we weren't improving for the last 50 steps, break
@@ -544,7 +612,7 @@ def generate_pexp_5d_function(
                     #print('little improvement')
                     break
             
-        return llhs[best_idx], best_idx
+        return llhs[best_idx], best_idx, scalefactors[best_idx]
 
     get_llh = get_llh_all_doms
 
