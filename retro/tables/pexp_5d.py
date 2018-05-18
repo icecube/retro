@@ -566,14 +566,14 @@ def generate_pexp_5d_function(
         )
 
         # compute initial LLH (and set all elements to that one)
-        llh, scalefacor = eval_llh(
+        llh, scalefactor = eval_llh(
                     event_dom_info=event_dom_info,
                     dom_exp=dom_exp,
                     scaling_exp=scaling_exp,
                     time_window=time_window,
                     )
         llhs[:] = llh
-        scalefactors[0] = scalefacor
+        scalefactors[0] = scalefactor
 
         best_idx = 0
 
@@ -591,24 +591,24 @@ def generate_pexp_5d_function(
                 t_indep_table_norm=t_indep_table_norm,
                 dom_exp=dom_exp,
             )
-            llh, scalefacor = eval_llh(
+            llh, scalefactor = eval_llh(
                                      event_dom_info=event_dom_info,
                                      dom_exp=dom_exp,
                                      scaling_exp=scaling_exp,
                                      time_window=time_window,
                                      )
             llhs[pegleg_idx+1] = llh
-            scalefactors[pegleg_idx+1] = scalefacor
+            scalefactors[pegleg_idx+1] = scalefactor
             #still improving?
             best_idx = np.argmax(llhs)
-            # if we weren't improving for the last 50 steps, break
-            if pegleg_idx > best_idx + 50:
-                #print('no improvement')
-                break
-            # if improvements were small, break:
-            if pegleg_idx > 100:
-                delta_llh = llhs[pegleg_idx+1] - llhs[pegleg_idx - 100]
-                if delta_llh < 1:
+            # if we weren't improving for the last 30 steps, break
+            #if pegleg_idx > best_idx + 300:
+            #    #print('no improvement')
+            #    break
+            # if improvements were small or none, break:
+            if pegleg_idx > 300:
+                delta_llh = llhs[pegleg_idx+1] - llhs[pegleg_idx - 300]
+                if delta_llh < 0.5:
                     #print('little improvement')
                     break
             
