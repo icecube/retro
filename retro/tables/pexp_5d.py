@@ -456,9 +456,9 @@ def generate_pexp_5d_function(
 
         diff_charge = sum_observed_charge - sum_expected_charge
         if diff_charge <= 0.:
-            scalefactor = 0.
+            scalefactor = 0.1
         elif sum_scaling_charge == 0.:
-            scalefactor = 0.
+            scalefactor = 0.1
         else:
             scalefactor = diff_charge/sum_scaling_charge
 
