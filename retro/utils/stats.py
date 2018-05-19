@@ -210,7 +210,7 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
                     #w = np.ones(len(llhp))
                 elif prior[0] == 'log_uniform' and dim == 'cascade_energy':
                     cscd_w = llhp['cascade_energy']
-                    w = 1.
+                    #w = 1.
                 elif prior[0] == 'log_uniform' and dim == 'track_energy':
                     w = llhp['track_energy']
                 elif prior[0] == 'cosine':

@@ -46,7 +46,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
 from retro.const import TWO_PI, ALL_STRS_DOMS, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV
-from retro.retro_types import PARAM_NAMES, EVT_DOM_INFO_T
+from retro.retro_types import PARAM_NAMES, EVT_DOM_INFO_T, EVT_HIT_INFO_T
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.priors import *
 from retro.hypo.discrete_muon_kernels import pegleg_eval
@@ -61,7 +61,6 @@ class retro_reco(object):
         self.events_iterator = init_obj.get_events(**events_kw)
         self.reco_kw = reco_kw
 
-        
         # setup priors
         self.prior_defs = OrderedDict()
         for param in self.hypo_handler.params:
@@ -189,6 +188,10 @@ class retro_reco(object):
         n_operational_doms = np.sum(dom_info['operational'])
         # array containing all relevant DOMs for the event and the hit information
         event_dom_info = np.zeros(shape=(n_operational_doms,), dtype=EVT_DOM_INFO_T)
+        event_hit_info = np.zeros(shape=hits.shape, dtype=EVT_HIT_INFO_T)
+
+        event_hit_info['time'][:] = hits['time']
+        event_hit_info['charge'][:] = hits['charge']
 
         #loop through all DOMs to fill array:
         position = 0
@@ -212,6 +215,7 @@ class retro_reco(object):
                 event_dom_info[position]['hits_start_idx'] = start
                 event_dom_info[position]['hits_stop_idx'] = stop
                 for h_idx in range(start, stop):
+                    event_hit_info[h_idx]['dom_idx'] = position
                     event_dom_info[position]['total_observed_charge'] += hits[h_idx]['charge']
 
             position += 1
@@ -245,7 +249,7 @@ class retro_reco(object):
                 sources=sources,
                 pegleg_sources=pegleg_sources,
                 scaling_sources=scaling_sources,
-                hits=hits,
+                event_hit_info=event_hit_info,
                 time_window=time_window,
                 event_dom_info=event_dom_info,
                 tables=tables,

@@ -44,8 +44,6 @@ from retro.utils.ckv import (
     survival_prob_from_cone, survival_prob_from_smeared_cone
 )
 from retro.utils.geom import infer_power
-from retro.retro_types import EXP_DOM_T
-
 
 MACHINE_EPS = 1e-16
 LLH_VERSION = 2
@@ -238,13 +236,14 @@ def generate_pexp_5d_function(
             sources,
             sources_start,
             sources_stop,
-            hits,
+            event_hit_info,
             event_dom_info,
             tables,
             table_norm,
             t_indep_tables,
             t_indep_table_norm,
             dom_exp,
+            hit_exp,
         ):
         r"""For a set of generated photons `sources`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
@@ -267,7 +266,7 @@ def generate_pexp_5d_function(
         sources_start, sources_stop : int, int
             starting and stopping index for part of the array on which to work on
 
-        hits
+        event_hit_info
 
         event_dom_info
 
@@ -370,7 +369,7 @@ def generate_pexp_5d_function(
 
 
                 ti_norm = t_indep_table_norm[r_bin_idx]
-                dom_exp[dom_idx]['total_expected_charge'] += (
+                dom_exp[dom_idx] += (
                     sources[source_idx]['photons'] * ti_norm * t_indep_surv_prob * event_dom_info['quantum_efficiency'][dom_idx]
                 )
 
@@ -380,7 +379,7 @@ def generate_pexp_5d_function(
                     # was hit) will show up in the Retro DOM tables in bin 0; the
                     # further in the past the photon started, the higher the time
                     # bin index. Therefore, subract source time from hit time.
-                    dt = hits[hit_idx]['time'] - sources[source_idx]['time']
+                    dt = event_hit_info[hit_idx]['time'] - sources[source_idx]['time']
 
                     # Causally impossible? (Note the comparison is written such that it
                     # will evaluate to True if hit_time is NaN.)
@@ -410,7 +409,7 @@ def generate_pexp_5d_function(
                         )
 
                     r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
-                    dom_exp[dom_idx]['exp_at_hit_times'] += (
+                    hit_exp[hit_idx] += (
                         sources[source_idx]['photons'] * r_t_bin_norm * surv_prob_at_hit_t * event_dom_info['quantum_efficiency'][dom_idx]
                     )
 
@@ -422,8 +421,11 @@ def generate_pexp_5d_function(
             
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def eval_llh(event_dom_info,
+                event_hit_info,
             dom_exp,
-            scaling_exp,
+            hit_exp,
+            scaling_dom_exp,
+            scaling_hit_exp,
             time_window):
         '''
         helper function to calculate llh value
@@ -441,42 +443,49 @@ def generate_pexp_5d_function(
 
         '''
 
-        # calculate the total charges
-        sum_expected_charge = (np.sum(dom_exp['total_expected_charge']) +
+        # calculate the scalefactor
+
+        sum_scaling_charge = np.sum(scaling_dom_exp)
+        sum_expected_charge = (np.sum(dom_exp) +
                                np.sum(event_dom_info['noise_rate_per_ns']) * time_window)
 
-        sum_scaling_charge = np.sum(scaling_exp['total_expected_charge'])
+        scalefactor = 0.
+        llh = -1e9
+        while True:
         
-        sum_observed_charge = np.sum(event_dom_info['total_observed_charge'])
+            # first time independent part
+            new_llh = -sum_expected_charge - scalefactor * sum_scaling_charge
 
-        # Poisson has its MLE at lambda = k, i.e. observed = expected charge
-        # if with the regular sources we do not have enough charge, we can scale up the 
-        # scaling sources to reach exactly that value
-        # however, if the regular sources exceed the oberved charge, we can only set it to 0
+            # second time independent part
+            for dom_idx in range(len(event_dom_info)):
+                obs = event_dom_info[dom_idx]['total_observed_charge']
+                if obs > 0:
+                    exp = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+                    exp += event_dom_info['noise_rate_per_ns'][dom_idx] * time_window
+                    new_llh += obs * math.log(exp)
 
-        diff_charge = sum_observed_charge - sum_expected_charge
-        if diff_charge <= 0.:
-            scalefactor = 0.1
-        elif sum_scaling_charge == 0.:
-            scalefactor = 0.1
-        else:
-            scalefactor = diff_charge/sum_scaling_charge
+            if scalefactor > 1000:
+                break
+            if new_llh < llh:
+                scalefactor -= 1.
+                break
+            else:
+                scalefactor += 1
+                llh = new_llh
+            
+        # time dependent part
+        for hit_idx in range(len(event_hit_info)):
+            obs = event_hit_info[hit_idx]['charge']
 
-        llh = -sum_expected_charge - scalefactor * sum_scaling_charge
+            dom_idx = event_hit_info[hit_idx]['dom_idx']
+            exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
+            norm = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+            if norm > 0:
+                p = exp/norm
+            else:
+                p = 0.
+            llh += math.log(p * (1. - 1./time_window) + 1./time_window)
 
-        for i in range(len(dom_exp)):
-            obs = event_dom_info['total_observed_charge'][i]
-            if obs > 0:
-                exp = dom_exp['total_expected_charge'][i] + scalefactor * scaling_exp['total_expected_charge'][i]
-                nr = event_dom_info['noise_rate_per_ns'][i]
-                p = math.log(exp + nr * time_window)
-                if exp > 0:
-                    normed_p = (dom_exp['exp_at_hit_times'][i] + scalefactor * scaling_exp['exp_at_hit_times'][i])/ exp
-                else:
-                    normed_p = 0.
-                log_expr = normed_p * (1. - 1./time_window) + 1./time_window
-                p += math.log(log_expr)
-                llh += obs * p
         return llh, scalefactor
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -484,7 +493,7 @@ def generate_pexp_5d_function(
             sources,
             pegleg_sources,
             scaling_sources,
-            hits,
+            event_hit_info,
             time_window,
             event_dom_info,
             tables,
@@ -506,7 +515,7 @@ def generate_pexp_5d_function(
             over these sources will be maximized in order
         scaling_sources : shape (n_sources,) array of dtype SRC_T
             over these sources will be maximized using a scalefactor
-        hits : shape (n_hits_total,) array of dtype HIT_T
+        event_hit_info : shape (n_event_hit_info_total,) array of dtype HIT_T
         time_window : float64
         event_dom_info : array of dtype EVT_DOM_INFO_T
         tables
@@ -530,25 +539,28 @@ def generate_pexp_5d_function(
         """
 
         # initialize arrays
-        dom_exp = np.zeros(shape=event_dom_info.shape, dtype=EXP_DOM_T)
+        dom_exp = np.zeros(shape=event_dom_info.shape)
+        hit_exp = np.zeros(shape=event_hit_info.shape)
         n_llhs = 1 + len(pegleg_sources)
         llhs = np.zeros(n_llhs, dtype=np.float64)
         scalefactors = np.zeros(n_llhs, dtype=np.float64)
             
         # save the scaling sources in a separate array
-        scaling_exp = np.zeros(shape=event_dom_info.shape, dtype=EXP_DOM_T)
+        scaling_dom_exp = np.zeros(shape=event_dom_info.shape)
+        scaling_hit_exp = np.zeros(shape=event_hit_info.shape)
         # and get scaling sources expectation first
         pexp_5d(
             sources=scaling_sources,
             sources_start=0,
             sources_stop=len(scaling_sources),
-            hits=hits,
+            event_hit_info=event_hit_info,
             event_dom_info=event_dom_info,
             tables=tables,
             table_norm=table_norm,
             t_indep_tables=t_indep_tables,
             t_indep_table_norm=t_indep_table_norm,
-            dom_exp=scaling_exp,
+            dom_exp=scaling_dom_exp,
+            hit_exp=scaling_hit_exp,
         )
 
         # get expectations
@@ -556,20 +568,24 @@ def generate_pexp_5d_function(
             sources=sources,
             sources_start=0,
             sources_stop=len(sources),
-            hits=hits,
+            event_hit_info=event_hit_info,
             event_dom_info=event_dom_info,
             tables=tables,
             table_norm=table_norm,
             t_indep_tables=t_indep_tables,
             t_indep_table_norm=t_indep_table_norm,
             dom_exp=dom_exp,
+            hit_exp=hit_exp,
         )
 
         # compute initial LLH (and set all elements to that one)
         llh, scalefactor = eval_llh(
                     event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
                     dom_exp=dom_exp,
-                    scaling_exp=scaling_exp,
+                    hit_exp=hit_exp,
+                    scaling_dom_exp=scaling_dom_exp,
+                    scaling_hit_exp=scaling_hit_exp,
                     time_window=time_window,
                     )
         llhs[:] = llh
@@ -583,18 +599,22 @@ def generate_pexp_5d_function(
                 sources=pegleg_sources,
                 sources_start=pegleg_idx,
                 sources_stop=pegleg_idx+1,
-                hits=hits,
+                event_hit_info=event_hit_info,
                 event_dom_info=event_dom_info,
                 tables=tables,
                 table_norm=table_norm,
                 t_indep_tables=t_indep_tables,
                 t_indep_table_norm=t_indep_table_norm,
                 dom_exp=dom_exp,
+                hit_exp=hit_exp,
             )
             llh, scalefactor = eval_llh(
                                      event_dom_info=event_dom_info,
+                                     event_hit_info=event_hit_info,
                                      dom_exp=dom_exp,
-                                     scaling_exp=scaling_exp,
+                                     hit_exp=hit_exp,
+                                     scaling_dom_exp=scaling_dom_exp,
+                                     scaling_hit_exp=scaling_hit_exp,
                                      time_window=time_window,
                                      )
             llhs[pegleg_idx+1] = llh

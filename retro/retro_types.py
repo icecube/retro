@@ -204,9 +204,10 @@ EVT_DOM_INFO_T = np.dtype([
         ('total_observed_charge', np.float32),
 ])
 
-EXP_DOM_T = np.dtype([
-    ('total_expected_charge', np.float32),
-    ('exp_at_hit_times', np.float32),
+EVT_HIT_INFO_T = np.dtype([
+    ('time', np.float32),
+    ('charge', np.float32),
+    ('dom_idx', np.uint32),
 ])
 
 class ConfigID(enum.IntEnum):
