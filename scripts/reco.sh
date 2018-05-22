@@ -18,12 +18,12 @@ mkdir -p "$outdir"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
 # ACI:
-#proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
-#tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
+tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
 # ET:
-proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
-tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+#proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
+#tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
 #no_noise="--no-noise"
 no_noise=""

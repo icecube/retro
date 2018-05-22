@@ -1,4 +1,4 @@
-for file in {0..29}
+for file in {10..29}
 do
 for dir in {0..59}
 do
@@ -8,8 +8,8 @@ do
 #    echo "/storage/home/pde3/retro/scripts/reco_file.sh $dir $file" | qsub -A dfc13_b_g_sc_default \
 #    echo "/storage/home/pde3/retro/scripts/reco_file.sh $dir $file" | qsub -A dfc13_a_g_sc_default \
 #    echo "/storage/home/pde3/retro/scripts/reco_file.sh $dir $file" | qsub -A open \
+#-l qos=cl_open \
     echo "/storage/home/pde3/retro/scripts/reco_file.sh $dir $file" | qsub -A cyberlamp \
--l qos=cl_open \
 -l nodes=1:ppn=1 \
 -l pmem=8000mb \
 -l walltime=48:00:00 \

@@ -477,16 +477,15 @@ def generate_pexp_5d_function(
                     p = 0.
                 new_llh += obs * math.log(p * (1. - 1./time_window) + 1./time_window)
 
-                if scalefactor > 1000:
-                    break
-                if new_llh < llh:
-                    scalefactor -= 1.
-                    break
-                else:
-                    scalefactor += 1
-                    llh = new_llh
-                
-
+            if scalefactor > 1000:
+                break
+            if new_llh < llh:
+                scalefactor -= 1.
+                break
+            else:
+                scalefactor += 1
+                llh = new_llh
+            
         return llh, scalefactor
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
