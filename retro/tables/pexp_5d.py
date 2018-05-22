@@ -464,27 +464,28 @@ def generate_pexp_5d_function(
                     exp += event_dom_info['noise_rate_per_ns'][dom_idx] * time_window
                     new_llh += obs * math.log(exp)
 
-            if scalefactor > 1000:
-                break
-            if new_llh < llh:
-                scalefactor -= 1.
-                break
-            else:
-                scalefactor += 1
-                llh = new_llh
-            
-        # time dependent part
-        for hit_idx in range(len(event_hit_info)):
-            obs = event_hit_info[hit_idx]['charge']
+            # time dependent part
+            for hit_idx in range(len(event_hit_info)):
+                obs = event_hit_info[hit_idx]['charge']
 
-            dom_idx = event_hit_info[hit_idx]['dom_idx']
-            exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
-            norm = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
-            if norm > 0:
-                p = exp/norm
-            else:
-                p = 0.
-            llh += math.log(p * (1. - 1./time_window) + 1./time_window)
+                dom_idx = event_hit_info[hit_idx]['dom_idx']
+                exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
+                norm = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+                if norm > 0:
+                    p = exp/norm
+                else:
+                    p = 0.
+                new_llh += obs * math.log(p * (1. - 1./time_window) + 1./time_window)
+
+                if scalefactor > 1000:
+                    break
+                if new_llh < llh:
+                    scalefactor -= 1.
+                    break
+                else:
+                    scalefactor += 1
+                    llh = new_llh
+                
 
         return llh, scalefactor
 
