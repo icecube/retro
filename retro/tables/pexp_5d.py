@@ -449,18 +449,21 @@ def generate_pexp_5d_function(
         sum_expected_charge = (np.sum(dom_exp) +
                                np.sum(event_dom_info['noise_rate_per_ns']) * time_window)
 
-        scalefactor = 0.
+        scalefactor = -1.
         llh = -1e9
         while True:
         
+            if scalefactor > 1000:
+                break
             # first time independent part
-            new_llh = -sum_expected_charge - scalefactor * sum_scaling_charge
+            new_scalefactor = scalefactor + 1.
+            new_llh = -sum_expected_charge - new_scalefactor * sum_scaling_charge
 
             # second time independent part
             for dom_idx in range(len(event_dom_info)):
                 obs = event_dom_info[dom_idx]['total_observed_charge']
                 if obs > 0:
-                    exp = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+                    exp = dom_exp[dom_idx] + new_scalefactor * scaling_dom_exp[dom_idx]
                     exp += event_dom_info['noise_rate_per_ns'][dom_idx] * time_window
                     new_llh += obs * math.log(exp)
 
@@ -469,23 +472,23 @@ def generate_pexp_5d_function(
                 obs = event_hit_info[hit_idx]['charge']
 
                 dom_idx = event_hit_info[hit_idx]['dom_idx']
-                exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
-                norm = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+                exp = hit_exp[hit_idx] + new_scalefactor * scaling_hit_exp[hit_idx]
+                norm = dom_exp[dom_idx] + new_scalefactor * scaling_dom_exp[dom_idx]
                 if norm > 0:
                     p = exp/norm
                 else:
                     p = 0.
                 new_llh += obs * math.log(p * (1. - 1./time_window) + 1./time_window)
+            
+            # regularization term
+            #new_llh -= 0.1 * new_scalefactor
 
-            if scalefactor > 1000:
-                break
-            if new_llh < llh:
-                scalefactor -= 1.
+            if new_llh <= llh:
                 break
             else:
-                scalefactor += 1
                 llh = new_llh
-            
+                scalefactor = new_scalefactor
+                
         return llh, scalefactor
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -619,8 +622,9 @@ def generate_pexp_5d_function(
                                      )
             llhs[pegleg_idx+1] = llh
             scalefactors[pegleg_idx+1] = scalefactor
+            if llh > llhs[best_idx]:
+                best_idx = pegleg_idx
             #still improving?
-            best_idx = np.argmax(llhs)
             # if we weren't improving for the last 30 steps, break
             #if pegleg_idx > best_idx + 300:
             #    #print('no improvement')
