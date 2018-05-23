@@ -50,7 +50,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import const
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
-    point_cascade, point_ckv_cascade, one_dim_cascade, aligned_point_ckv_cascade, aligned_one_dim_cascade, scaling_aligned_point_ckv_cascade
+    point_cascade, point_ckv_cascade, one_dim_cascade, aligned_point_ckv_cascade, aligned_one_dim_cascade, scaling_aligned_point_ckv_cascade, scaling_aligned_one_dim_cascade
 )
 from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon, pegleg_muon
@@ -234,7 +234,8 @@ def setup_discrete_hypo(
             hypo_kernels.append(aligned_one_dim_cascade)
             kernel_kwargs.append(dict())
         elif cascade_kernel == 'scaling':
-            scaling_kernel = scaling_aligned_point_ckv_cascade
+            #scaling_kernel = scaling_aligned_point_ckv_cascade
+            scaling_kernel = scaling_aligned_one_dim_cascade
             scaling_kwargs = dict()
         else:
             raise NotImplementedError('{} cascade not implemented yet.'

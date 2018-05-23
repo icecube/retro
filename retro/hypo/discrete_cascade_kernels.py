@@ -178,7 +178,7 @@ PARAM_B = 0.63207
 RAD_LEN_OVER_B = RAD_LEN / PARAM_B
 
 
-def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith):
+def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith, num_samples=-1):
     """Cascade with both longitudinal and angular distributions. All emitters
     are located on the shower axis.
 
@@ -191,6 +191,9 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
     ----------
     time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith
 
+    num_samples : int
+        number of samples for the cascade, if < 0  will use auto settings
+
     Returns
     -------
     sources
@@ -199,16 +202,18 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
     if cascade_energy == 0:
         return EMPTY_SOURCES
 
-    # Note that num_samples must be 1 for cascade_energy <= MIN_CASCADE_ENERGY
-    # (param_a goes <= 0 at this value and below, causing an exception from
-    # gamma distribution)
-    if cascade_energy <= MIN_CASCADE_ENERGY:
-        num_samples = 1
-    else:
-        # See `retro/notebooks/energy_dependent_cascade_num_samples.ipynb`
-        num_samples = int(np.round(
-            np.clip(exp(0.77 * log(cascade_energy) + 2.3), a_min=1, a_max=None)
-        ))
+
+    if num_samples < 0:
+        # Note that num_samples must be 1 for cascade_energy <= MIN_CASCADE_ENERGY
+        # (param_a goes <= 0 at this value and below, causing an exception from
+        # gamma distribution)
+        if cascade_energy <= MIN_CASCADE_ENERGY:
+            num_samples = 1
+        else:
+            # See `retro/notebooks/energy_dependent_cascade_num_samples.ipynb`
+            num_samples = int(np.round(
+                np.clip(exp(0.77 * log(cascade_energy) + 2.3), a_min=1, a_max=None)
+            ))
 
     if num_samples == 1:
         return point_ckv_cascade(
@@ -295,7 +300,7 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
 
     return sources
 
-def aligned_one_dim_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith):
+def aligned_one_dim_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith, **kwargs):
     '''
     same as one_dim_cascade, but using track directionality
     '''
@@ -304,5 +309,20 @@ def aligned_one_dim_cascade(time, x, y, z, cascade_energy, track_azimuth, track_
             x=x, y=y, z=z, 
             cascade_energy=cascade_energy,
             cascade_azimuth=track_azimuth,
-            cascade_zenith=track_zenith)
+            cascade_zenith=track_zenith,
+            **kwargs)
+
+def scaling_aligned_one_dim_cascade(time, x, y, z, track_azimuth, track_zenith):
+    '''
+    fixed 1 GeV cascade kernel
+    '''
+    return aligned_one_dim_cascade(time=time,
+                                     x=x,
+                                     y=y,
+                                     z=z,
+                                     track_azimuth=track_azimuth,
+                                     track_zenith=track_zenith,
+                                     cascade_energy=1.,
+                                     num_samples=100,
+                                     )
 
