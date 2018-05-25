@@ -326,3 +326,17 @@ def scaling_aligned_one_dim_cascade(time, x, y, z, track_azimuth, track_zenith):
                                      num_samples=100,
                                      )
 
+def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith):
+    '''
+    fixed 1 GeV cascade kernel
+    '''
+    return one_dim_cascade(time=time,
+                                     x=x,
+                                     y=y,
+                                     z=z,
+                                     cascade_azimuth=cascade_azimuth,
+                                     cascade_zenith=cascade_zenith,
+                                     cascade_energy=1.,
+                                     num_samples=100,
+                                     )
+
