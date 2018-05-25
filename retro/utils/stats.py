@@ -216,6 +216,8 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
                 elif prior[0] == 'cosine':
                     w = 1./np.clip(np.sin(llhp[dim]), 0.01, None)
                     #w = np.ones(len(llhp))
+                elif prior[0] == 'log_normal' and dim == 'cascade_d_zenith':
+                    w = 1.
                 else:
                     raise NotImplementedError('prior %s for dimension %s unknown'%(prior[0], dim))
 
