@@ -55,7 +55,7 @@ import enum
 import numpy as np
 
 # all possible params
-PARAM_NAMES = ['time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth', 'cascade_zenith', 'track_energy', 'cascade_energy']
+PARAM_NAMES = ['time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth', 'cascade_zenith', 'track_energy', 'cascade_energy', 'cascade_d_zenith', 'cascade_d_azimuth']
 
 
 Event = namedtuple( # pylint: disable=invalid-name

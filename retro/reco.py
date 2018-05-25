@@ -389,6 +389,12 @@ def parse_args(description=__doc__):
         bias) the SPEFit2 time best-fit value.'''
     )
     group.add_argument(
+        '--cascade-angle-prior',
+        choices=[PRI_UNIFORM, PRI_LOG_NORMAL],
+        required=False,
+        help='''Prior to put on opening angle between track and cascade.'''
+    )
+    group.add_argument(
         '--cascade-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
         required=False,

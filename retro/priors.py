@@ -82,7 +82,24 @@ def get_prior_def(param, reco_kw):
 
     '''
 
-    if 'zenith' in param:
+    if param == 'cascade_d_zenith':
+        cascade_angle_prior_name = reco_kw.pop('cascade_angle_prior')
+        if cascade_angle_prior_name == PRI_UNIFORM:
+            return (PRI_UNIFORM, (0, np.pi))
+        elif cascade_angle_prior_name == PRI_LOG_NORMAL:
+            return (
+                PRI_LOG_NORMAL,
+                (
+                    # scipy.stats.lognorm 3 paramters (from fit to data)
+                    0.6486628230670546, -0.1072667784813348, 0.6337073562137334,
+                    # hard limits
+                    0., np.pi
+                )
+            )
+        else:
+            raise ValueError(str(cascade_angle_prior_name))
+
+    elif 'zenith' in param:
         return (PRI_COSINE, (-1, 1))
 
     elif 'azimuth' in param:

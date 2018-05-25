@@ -31,7 +31,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from math import cos, sin, exp, log, log10
+import math
 from os.path import abspath, dirname
 import sys
 
@@ -100,11 +100,11 @@ def point_ckv_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_ze
     opposite_zenith = PI - cascade_zenith
     opposite_azimuth = PI + cascade_azimuth
 
-    dir_costheta = cos(opposite_zenith)
-    dir_sintheta = sin(opposite_zenith)
+    dir_costheta = math.cos(opposite_zenith)
+    dir_sintheta = math.sin(opposite_zenith)
 
-    dir_cosphi = cos(opposite_azimuth)
-    dir_sinphi = sin(opposite_azimuth)
+    dir_cosphi = math.cos(opposite_azimuth)
+    dir_sinphi = math.sin(opposite_azimuth)
 
     sources = np.empty(shape=(1,), dtype=SRC_T)
     sources[0]['kind'] = SRC_CKV_BETA1
@@ -212,7 +212,7 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
         else:
             # See `retro/notebooks/energy_dependent_cascade_num_samples.ipynb`
             num_samples = int(np.round(
-                np.clip(exp(0.77 * log(cascade_energy) + 2.3), a_min=1, a_max=None)
+                np.clip(math.exp(0.77 * math.log(cascade_energy) + 2.3), a_min=1, a_max=None)
             ))
 
     if num_samples == 1:
@@ -226,10 +226,10 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
     zenith = PI - cascade_zenith
     azimuth = PI + cascade_azimuth
 
-    sin_zen = sin(zenith)
-    cos_zen = cos(zenith)
-    sin_azi = sin(azimuth)
-    cos_azi = cos(azimuth)
+    sin_zen = math.sin(zenith)
+    cos_zen = math.cos(zenith)
+    sin_azi = math.sin(azimuth)
+    cos_azi = math.cos(azimuth)
     dir_x = sin_zen * cos_azi
     dir_y = sin_zen * sin_azi
     dir_z = cos_zen
@@ -244,7 +244,7 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
     # Create longitudinal distribution (from arXiv:1210.5140v2)
     param_a = (
         PARAM_ALPHA
-        + PARAM_BETA * log10(max(MIN_CASCADE_ENERGY, cascade_energy))
+        + PARAM_BETA * math.log10(max(MIN_CASCADE_ENERGY, cascade_energy))
     )
 
     np.random.seed(1)
@@ -312,7 +312,7 @@ def aligned_one_dim_cascade(time, x, y, z, cascade_energy, track_azimuth, track_
             cascade_zenith=track_zenith,
             **kwargs)
 
-def scaling_aligned_one_dim_cascade(time, x, y, z, track_azimuth, track_zenith):
+def scaling_aligned_one_dim_cascade(time, x, y, z, track_azimuth, track_zenith, **kwargs):
     '''
     fixed 1 GeV cascade kernel
     '''
@@ -324,9 +324,9 @@ def scaling_aligned_one_dim_cascade(time, x, y, z, track_azimuth, track_zenith):
                                      track_zenith=track_zenith,
                                      cascade_energy=1.,
                                      num_samples=100,
-                                     )
+                                     **kwargs)
 
-def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith):
+def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith, **kwargs):
     '''
     fixed 1 GeV cascade kernel
     '''
@@ -338,5 +338,81 @@ def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith):
                                      cascade_zenith=cascade_zenith,
                                      cascade_energy=1.,
                                      num_samples=100,
-                                     )
+                                     **kwargs)
+
+def one_dim_delta_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith, cascade_d_azimuth, cascade_d_zenith, **kwargs):
+    '''
+    cascade defined as rotation off of track angle
+
+    '''
+
+    cascade_zenith, cascade_azimuth = rotate_point(cascade_d_zenith, cascade_d_azimuth, track_zenith, track_azimuth)
+    return one_dim_cascade(time=time,
+                           x=x,
+                           y=y,
+                           z=z,
+                           cascade_azimuth=cascade_azimuth,
+                           cascade_zenith=cascade_zenith,
+                           cascade_energy=cascade_energy,
+                           **kwargs)
+
+def scaling_one_dim_delta_cascade(time, x, y, z, track_azimuth, track_zenith, cascade_d_azimuth, cascade_d_zenith, **kwargs):
+    return one_dim_delta_cascade(time=time,
+                                 x=x,
+                                 y=y,
+                                 z=z,
+                                 track_zenith=track_zenith,
+                                 track_azimuth=track_azimuth,
+                                 cascade_d_azimuth=cascade_d_azimuth,
+                                 cascade_d_zenith=cascade_d_zenith,
+                                 cascade_energy=1.,
+                                 num_samples=100,
+                                 **kwargs)
+    
+
+@numba_jit
+def rotate_point(p_theta, p_phi, rot_theta, rot_phi):
+    """
+    Parameters
+    ----------
+    p_theta :  float
+        theta coordinate.
+        
+    p_phi : float
+        Azimuth  on the circle
+        
+    rot_theta :  float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+        
+    rot_phi :  float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    Returns
+    -------
+    q_theta : float
+        theta coordinate of rotated point
+        
+    q_phi : float
+        phi coordinate of rotated point
+
+    """
+    sin_rot_theta = math.sin(rot_theta)
+    cos_rot_theta = math.cos(rot_theta)
+    
+    sin_rot_phi = math.sin(rot_phi)
+    cos_rot_phi = math.cos(rot_phi)
+
+    sin_p_theta = math.sin(p_theta)
+    cos_p_theta = math.cos(p_theta)
+
+    sin_p_phi = math.sin(p_phi)
+    cos_p_phi = math.cos(p_phi)
+    
+    q_theta = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
+    q_phi = math.atan2(
+        (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
+        (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+    )
+
+    return q_theta, q_phi
 

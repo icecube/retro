@@ -60,7 +60,8 @@ consteff=""
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "scaling_one_dim" \
+    --cascade-kernel "scaling_one_dim_delta" \
+    --cascade-angle-prior "log_normal" \
     --track-kernel "pegleg" \
     --track-time-step 1.0 \
     \
