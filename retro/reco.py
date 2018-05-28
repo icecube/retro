@@ -72,19 +72,29 @@ class retro_reco(object):
     def run(self):
         print('Running reconstructions...')
         t00 = time.time()
+        outdir = self.reco_kw.pop('outdir')
+        outdir = expand(outdir)
+        mkdir(outdir)
+
         for event_idx, event in self.events_iterator: # pylint: disable=unused-variable
-            t1 = time.time()
-            if 'mc_truth' in event:
-                print(event['mc_truth'])
-            llhp, _ = self.run_multinest(
+            self.out_prefix = join(outdir, 'evt{}-'.format(event_idx))
+            print('Output files prefix: "{}"\n'.format(self.out_prefix))
+
+            #self.run_multinest(
+            #    event_idx=event_idx,
+            #    event=event,
+            #    **self.reco_kw
+            #)
+            #self.run_scipy(
+            #    event_idx=event_idx,
+            #    event=event,
+            #    method='differential_evolution',
+            #    eps=0.02
+            #)
+            self.run_nlopt(
                 event_idx=event_idx,
                 event=event,
-                **self.reco_kw
             )
-            dt = time.time() - t1
-            n_points = llhp.size
-            print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
-                  .format(dt, n_points, dt / n_points * 1e3))
 
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
@@ -103,7 +113,7 @@ class retro_reco(object):
             prior_funcs.append(prior_fun)
             priors_used[dim_name] = prior_def
 
-        def prior(cube, ndim, nparams): # pylint: disable=unused-argument
+        def prior(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Function for pymultinest to translate the hypercube MultiNest uses
             (each value is in [0, 1]) into the dimensions of the parameter space.
 
@@ -131,7 +141,7 @@ class retro_reco(object):
 
 
         '''
-        report_after = 200
+        report_after = 1
 
         hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
         mn_hypo_params = self.hypo_handler.params
@@ -192,7 +202,7 @@ class retro_reco(object):
         # --------------------------------------------
 
 
-        def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
+        def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Function pymultinest calls to get llh values.
 
             Note that this is called _after_ `prior` has been called, so `cube`
@@ -234,11 +244,11 @@ class retro_reco(object):
             n_calls = len(log_likelihoods)
 
             if n_calls % report_after == 0:
+                print('')
                 t_now = time.time()
                 best_idx = np.argmax(log_likelihoods)
                 best_llh = log_likelihoods[best_idx]
                 best_p = param_values[best_idx]
-                print('')
                 msg = 'best llh = {:.3f} @ '.format(best_llh)
                 for key, val in zip(hypo_params, best_p):
                     msg += ' %s=%.1f'%(key, val)
@@ -256,9 +266,78 @@ class retro_reco(object):
 
         return loglike
 
+
+    def run_scipy(
+            self,
+            event_idx,
+            event,
+            method,
+            eps):
+
+        from scipy import optimize
+        prior, priors_used = self.generate_prior(event)
+        param_values = []
+        log_likelihoods = []
+        t_start = []
+        loglike = self.generate_loglike(event, param_values, log_likelihoods, t_start)
+        mn_hypo_params = self.hypo_handler.params
+
+        def fun(x, *args):
+            param_vals = np.copy(x)
+            prior(param_vals)    
+            llh = loglike(param_vals)
+            del param_vals
+            return -llh
+
+        n_dim = len(mn_hypo_params)
+        x0 = 0.5 * np.ones(shape=(n_dim,))
+        bounds = [(eps,1-eps)]*n_dim
+
+        options = {'eps':eps}
+
+        if method == 'differential_evolution':
+            optimize.differential_evolution(fun, bounds=bounds, popsize=100)
+        else:
+            optimize.minimize(fun, x0, method=method, bounds=bounds, options=options)
+
+    def run_nlopt(
+            self,
+            event_idx,
+            event,
+            ):
+
+        import nlopt
+
+        prior, priors_used = self.generate_prior(event)
+        param_values = []
+        log_likelihoods = []
+        t_start = []
+        loglike = self.generate_loglike(event, param_values, log_likelihoods, t_start)
+        mn_hypo_params = self.hypo_handler.params
+        n_dim = len(mn_hypo_params)
+        x0 = 0.5 * np.ones(shape=(n_dim,))
+
+        #opt = nlopt.opt(nlopt.LN_BOBYQA, n_dim)
+        #opt = nlopt.opt(nlopt.LN_SBPLX, n_dim)
+        #opt = nlopt.opt(nlopt.GN_DIRECT_L, n_dim)
+        opt = nlopt.opt(nlopt.GN_DIRECT_L_NOSCAL, n_dim)
+
+        def fun(x, grad):
+            param_vals = np.copy(x)
+            prior(param_vals)    
+            llh = loglike(param_vals)
+            del param_vals
+            return -llh
+
+        opt.set_lower_bounds([0.]*n_dim)
+        opt.set_upper_bounds([1.]*n_dim)
+        opt.set_min_objective(fun)
+        #opt.set_xtol_rel(0.5)
+        opt.set_ftol_abs(0.1)
+        x = opt.optimize(x0)
+
     def run_multinest(
             self,
-            outdir,
             event_idx,
             event,
             importance_sampling,
@@ -277,7 +356,6 @@ class retro_reco(object):
 
         Parameters
         ----------
-        outdir
         event_idx
         event
         importance_sampling
@@ -306,17 +384,16 @@ class retro_reco(object):
         # pylint: disable=missing-docstring
         # Import pymultinest here; it's a less common dependency, so other
         # functions / constants in this module will still be import-able w/o it.
+        t1 = time.time()
         import pymultinest
 
         hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
-        mn_hypo_params = self.hypo_handler.params
 
         #setup LLHP dtype
         hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
         LLHP_T = np.dtype([(n, np.float32) for n in hypo_params_sorted])
 
         prior, priors_used = self.generate_prior(event)
-
         param_values = []
         log_likelihoods = []
         t_start = []
@@ -340,11 +417,6 @@ class retro_reco(object):
             ('kwargs', sort_dict(mn_kw)),
         ])
 
-        outdir = expand(outdir)
-        mkdir(outdir)
-
-        out_prefix = join(outdir, 'evt{}-'.format(event_idx))
-        print('Output files prefix: "{}"\n'.format(out_prefix))
 
         print('Runing MultiNest...')
         t0 = time.time()
@@ -352,7 +424,7 @@ class retro_reco(object):
             LogLikelihood=loglike,
             Prior=prior,
             verbose=True,
-            outputfiles_basename=out_prefix,
+            outputfiles_basename=self.out_prefix,
             resume=False,
             write_output=False,
             n_iter_before_update=5000,
@@ -364,13 +436,13 @@ class retro_reco(object):
         llhp['llh'] = log_likelihoods
         llhp[hypo_params] = param_values
 
-        llhp_outf = out_prefix + 'llhp.npy'
+        llhp_outf = self.out_prefix + 'llhp.npy'
         print('Saving llhp to "{}"...'.format(llhp_outf))
         np.save(llhp_outf, llhp)
 
         mn_meta['num_llhp'] = len(param_values)
         mn_meta['run_time'] = t1 - t0
-        mn_meta_outf = out_prefix + 'multinest_meta.pkl'
+        mn_meta_outf = self.out_prefix + 'multinest_meta.pkl'
         print('Saving MultiNest metadata to "{}"'.format(mn_meta_outf))
         pickle.dump(
             mn_meta,
@@ -378,7 +450,10 @@ class retro_reco(object):
             protocol=pickle.HIGHEST_PROTOCOL
         )
 
-        return llhp, mn_meta
+        dt = time.time() - t1
+        n_points = llhp.size
+        print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
+              .format(dt, n_points, dt / n_points * 1e3))
 
 
 
