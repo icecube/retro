@@ -360,15 +360,6 @@ class retro_reco(object):
             ):
 
         import nlopt
-        settings = OrderedDict()
-
-        # initial guess
-        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
-
-        #opt = nlopt.opt(nlopt.LN_BOBYQA, n_dim)
-        #opt = nlopt.opt(nlopt.LN_SBPLX, n_dim)
-        #opt = nlopt.opt(nlopt.GN_DIRECT_L, n_dim)
-        opt = nlopt.opt(nlopt.GN_DIRECT_L_NOSCAL, self.n_opt_dim)
 
         def fun(x, grad):
             param_vals = np.copy(x)
@@ -377,12 +368,40 @@ class retro_reco(object):
             del param_vals
             return -llh
 
+        # initial guess
+        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+
+        #local_opt = nlopt.opt(nlopt.LN_SBPLX, self.n_opt_dim)
+        #local_opt.set_lower_bounds([0.]*self.n_opt_dim)
+        #local_opt.set_upper_bounds([1.]*self.n_opt_dim)
+        #local_opt.set_min_objective(fun)
+        #local_opt.set_ftol_abs(2)
+        #opt = nlopt.opt(nlopt.G_MLSL_LDS, self.n_opt_dim)
+        #opt.set_lower_bounds([0.]*self.n_opt_dim)
+        #opt.set_upper_bounds([1.]*self.n_opt_dim)
+        #opt.set_min_objective(fun)
+        #opt.set_ftol_abs(10)
+        #opt.set_local_optimizer(local_opt)
+
+        #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_dim)
+        opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_dim)
         opt.set_lower_bounds([0.]*self.n_opt_dim)
         opt.set_upper_bounds([1.]*self.n_opt_dim)
         opt.set_min_objective(fun)
-        #opt.set_xtol_rel(0.5)
         opt.set_ftol_abs(0.1)
+
         x = opt.optimize(x0)
+
+        settings = OrderedDict()
+        settings['method'] = opt.get_algorithm_name()
+        settings['ftol_abs'] = opt.get_ftol_abs()
+        settings['ftol_rel'] = opt.get_ftol_rel()
+        settings['xtol_abs'] = opt.get_xtol_abs()
+        settings['xtol_rel'] = opt.get_xtol_rel()
+        settings['maxeval'] = opt.get_maxeval()
+        settings['maxtime'] = opt.get_maxtime()
+        settings['stopval'] = opt.get_stopval()
+
         return settings
 
     def run_multinest(

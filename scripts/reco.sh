@@ -60,7 +60,7 @@ consteff=""
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "scaling_one_dim_delta" \
+    --cascade-kernel "scaling_aligned_one_dim" \
     --cascade-angle-prior "log_normal" \
     --track-kernel "pegleg" \
     --track-time-step 1.0 \
@@ -72,7 +72,6 @@ consteff=""
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/OfflinePulses" \
-    --angsens-model "h2-50cm" \
-    --truth
+    --angsens-model "h2-50cm"
 
 wait
