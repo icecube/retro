@@ -88,77 +88,20 @@ class retro_reco(object):
 
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
-    def run_multinest(
-            self,
-            outdir,
-            event_idx,
-            event,
-            importance_sampling,
-            max_modes,
-            const_eff,
-            n_live,
-            evidence_tol,
-            sampling_eff,
-            max_iter,
-            seed,
-        ):
-        """Setup and run MultiNest on an event.
 
-        See the README file from MultiNest for greater detail on parameters
-        specific to to MultiNest (parameters from `importance_sampling` on).
+    def generate_prior(self, event):
+        '''
+        generate the prior transform functions + info for a given events
 
-        Parameters
-        ----------
-        outdir
-        event_idx
-        event
-        importance_sampling
-        max_modes
-        const_eff
-        n_live
-        evidence_tol
-        sampling_eff
-        max_iter
-            Note that this limit is the maximum number of sample replacements and
-            _not_ max number of likelihoods evaluated. A replacement only occurs
-            when a likelihood is found that exceeds the minimum likelihood among
-            the live points.
-        seed
-
-        Returns
-        -------
-        llhp : shape (num_llh,) structured array of dtype retro.LLHP_T
-            LLH and the corresponding parameter values.
-
-        mn_meta : OrderedDict
-            Metadata used for running MultiNest, including priors, parameters, and
-            the keyword args used to invoke the `pymultinest.run` function.
-
-        """
-        # pylint: disable=missing-docstring
-        # Import pymultinest here; it's a less common dependency, so other
-        # functions / constants in this module will still be import-able w/o it.
-        import pymultinest
-
-        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
+        '''
         mn_hypo_params = self.hypo_handler.params
-
-        #setup LLHP dtype
-        hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
-        LLHP_T = np.dtype([(n, np.float32) for n in hypo_params_sorted])
-
-        priors_used = OrderedDict()
         prior_funcs = []
+        priors_used = OrderedDict()
+
         for dim_num, dim_name in enumerate(mn_hypo_params):
             prior_fun, prior_def = get_prior_fun(dim_num, dim_name, self.prior_defs[dim_name], event)
             prior_funcs.append(prior_fun)
             priors_used[dim_name] = prior_def
-
-        param_values = []
-        log_likelihoods = []
-        t_start = []
-
-        report_after = 200
 
         def prior(cube, ndim, nparams): # pylint: disable=unused-argument
             """Function for pymultinest to translate the hypercube MultiNest uses
@@ -169,6 +112,29 @@ class retro_reco(object):
             """
             for prior_func in prior_funcs:
                 prior_func(cube)
+
+        return prior, priors_used
+
+
+    def generate_loglike(self, event, param_values, log_likelihoods, t_start):
+        '''
+        generate the LLH callback function for a given event
+
+        Parameters:
+        -----------
+
+        event
+
+        param_values : list
+        log_likelihoods : list
+        t_start : list
+
+
+        '''
+        report_after = 200
+
+        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
+        mn_hypo_params = self.hypo_handler.params
 
         # --- define here stuff for closure ---
         hits = event['hits']
@@ -230,13 +196,12 @@ class retro_reco(object):
             """Function pymultinest calls to get llh values.
 
             Note that this is called _after_ `prior` has been called, so `cube`
-            alsready contains the parameter values scaled to be in their physical
+            already contains the parameter values scaled to be in their physical
             ranges.
 
             """
             if not t_start:
                 t_start.append(time.time())
-
 
             hypo = dict(zip(mn_hypo_params, cube))
 
@@ -289,6 +254,75 @@ class retro_reco(object):
 
             return llh
 
+        return loglike
+
+    def run_multinest(
+            self,
+            outdir,
+            event_idx,
+            event,
+            importance_sampling,
+            max_modes,
+            const_eff,
+            n_live,
+            evidence_tol,
+            sampling_eff,
+            max_iter,
+            seed,
+        ):
+        """Setup and run MultiNest on an event.
+
+        See the README file from MultiNest for greater detail on parameters
+        specific to to MultiNest (parameters from `importance_sampling` on).
+
+        Parameters
+        ----------
+        outdir
+        event_idx
+        event
+        importance_sampling
+        max_modes
+        const_eff
+        n_live
+        evidence_tol
+        sampling_eff
+        max_iter
+            Note that this limit is the maximum number of sample replacements and
+            _not_ max number of likelihoods evaluated. A replacement only occurs
+            when a likelihood is found that exceeds the minimum likelihood among
+            the live points.
+        seed
+
+        Returns
+        -------
+        llhp : shape (num_llh,) structured array of dtype retro.LLHP_T
+            LLH and the corresponding parameter values.
+
+        mn_meta : OrderedDict
+            Metadata used for running MultiNest, including priors, parameters, and
+            the keyword args used to invoke the `pymultinest.run` function.
+
+        """
+        # pylint: disable=missing-docstring
+        # Import pymultinest here; it's a less common dependency, so other
+        # functions / constants in this module will still be import-able w/o it.
+        import pymultinest
+
+        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
+        mn_hypo_params = self.hypo_handler.params
+
+        #setup LLHP dtype
+        hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
+        LLHP_T = np.dtype([(n, np.float32) for n in hypo_params_sorted])
+
+        prior, priors_used = self.generate_prior(event)
+
+        param_values = []
+        log_likelihoods = []
+        t_start = []
+        loglike = self.generate_loglike(event, param_values, log_likelihoods, t_start)
+
+
         n_dims = len(hypo_params)
         mn_kw = OrderedDict([
             ('n_dims', n_dims),
@@ -303,7 +337,6 @@ class retro_reco(object):
             ('params', hypo_params),
             ('original_prior_specs', self.prior_defs),
             ('priors_used', priors_used),
-            ('time_window', time_window),
             ('kwargs', sort_dict(mn_kw)),
         ])
 
