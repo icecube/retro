@@ -426,7 +426,8 @@ def generate_pexp_5d_function(
             hit_exp,
             scaling_dom_exp,
             scaling_hit_exp,
-            time_window):
+            time_window,
+            last_scalefactor):
         '''
         helper function to calculate llh value
 
@@ -440,6 +441,8 @@ def generate_pexp_5d_function(
             containing the expectations for a scaling hypo
         time_window : float
             event time_window in ns
+        last_scalefactor : float
+            starting pint for minimizer
 
         '''
 
@@ -449,45 +452,63 @@ def generate_pexp_5d_function(
         sum_expected_charge = (np.sum(dom_exp) +
                                np.sum(event_dom_info['noise_rate_per_ns']) * time_window)
 
-        scalefactor = -1.
-        llh = -1e9
-        while True:
-        
-            if scalefactor > 1000:
-                break
-            # first time independent part
-            new_scalefactor = scalefactor + 1.
-            new_llh = -sum_expected_charge - new_scalefactor * sum_scaling_charge
-
-            # second time independent part
+        def grad(scalefactor):
+            '''
+            gradient of time independent LLH part used for finding cascade energy
+            '''
+            x = -sum_scaling_charge
             for dom_idx in range(len(event_dom_info)):
                 obs = event_dom_info[dom_idx]['total_observed_charge']
                 if obs > 0:
-                    exp = dom_exp[dom_idx] + new_scalefactor * scaling_dom_exp[dom_idx]
+                    exp = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
                     exp += event_dom_info['noise_rate_per_ns'][dom_idx] * time_window
-                    new_llh += obs * math.log(exp)
+                    x += obs/exp * scaling_dom_exp[dom_idx]
+            return -x
 
-            # time dependent part
-            for hit_idx in range(len(event_hit_info)):
-                obs = event_hit_info[hit_idx]['charge']
+        # minimize
+        scalefactor = last_scalefactor
+        gamma = 10.
+        epsilon = 1e-1
+        previous_step = 100
+        n = 0
+        #print('****** minimize ********')
 
-                dom_idx = event_hit_info[hit_idx]['dom_idx']
-                exp = hit_exp[hit_idx] + new_scalefactor * scaling_hit_exp[hit_idx]
-                norm = dom_exp[dom_idx] + new_scalefactor * scaling_dom_exp[dom_idx]
-                if norm > 0:
-                    p = exp/norm
-                else:
-                    p = 0.
-                new_llh += obs * math.log(p * (1. - 1./time_window) + 1./time_window)
-            
-            # regularization term
-            #new_llh -= 0.1 * new_scalefactor
+        # gradient descent
+        while previous_step > epsilon and scalefactor >= 0 and scalefactor < 1000 and n < 100:
+            prev_scalefactor = scalefactor
+            gradient = grad(scalefactor)
+            #print('x = ',scalefactor)
+            #print('dx = ',gradient)
+            step = -gamma * gradient
+            scalefactor += step
+            previous_step = abs(step)
+            n += 1
 
-            if new_llh <= llh:
-                break
+        #print('****** done ********')
+        # make psoitive definite
+        scalefactor = max(0, scalefactor)
+
+        llh = -sum_expected_charge - scalefactor * sum_scaling_charge
+        # second time independent part
+        for dom_idx in range(len(event_dom_info)):
+            obs = event_dom_info[dom_idx]['total_observed_charge']
+            if obs > 0:
+                exp = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+                exp += event_dom_info['noise_rate_per_ns'][dom_idx] * time_window
+                llh += obs * math.log(exp)
+        # time dependent part
+        for hit_idx in range(len(event_hit_info)):
+            obs = event_hit_info[hit_idx]['charge']
+
+            dom_idx = event_hit_info[hit_idx]['dom_idx']
+            exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
+            norm = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+            if norm > 0:
+                p = exp/norm
             else:
-                llh = new_llh
-                scalefactor = new_scalefactor
+                p = 0.
+            llh += obs * math.log(p * (1. - 1./time_window) + 1./time_window)
+            
                 
         return llh, scalefactor
 
@@ -590,6 +611,7 @@ def generate_pexp_5d_function(
                     scaling_dom_exp=scaling_dom_exp,
                     scaling_hit_exp=scaling_hit_exp,
                     time_window=time_window,
+                    last_scalefactor=10.,
                     )
         llhs[:] = llh
         scalefactors[0] = scalefactor
@@ -619,6 +641,7 @@ def generate_pexp_5d_function(
                                      scaling_dom_exp=scaling_dom_exp,
                                      scaling_hit_exp=scaling_hit_exp,
                                      time_window=time_window,
+                                     last_scalefactor=scalefactor,
                                      )
             llhs[pegleg_idx+1] = llh
             scalefactors[pegleg_idx+1] = scalefactor
