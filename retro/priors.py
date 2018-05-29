@@ -100,7 +100,8 @@ def get_prior_def(param, reco_kw):
             raise ValueError(str(cascade_angle_prior_name))
 
     elif 'zenith' in param:
-        return (PRI_COSINE, (-1, 1))
+        #return (PRI_COSINE, (-1, 1))
+        return (PRI_UNIFORM, (0, np.pi))
 
     elif 'azimuth' in param:
         return (PRI_UNIFORM, (0, TWO_PI))
@@ -289,6 +290,13 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
                     x = cube[n]
                     x = x%1
                     cube[n] = x * maxval
+            elif 'zenith' in dim_name:
+                def prior_func(cube, n=dim_num, maxval=maxval):
+                    x = cube[n]
+                    while x < 0 or x > 1:
+                        if x < 0: x = -x
+                        else: x = 1 -x
+                    cube[n] = x * maxval
             else:
                 def prior_func(cube, n=dim_num, maxval=maxval):
                     cube[n] = cube[n] * maxval
@@ -337,8 +345,10 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
         loc = spe_fit_val + rel_loc
         cauchy = stats.cauchy(loc=loc, scale=scale)
         if dim_name == 'time':
-            low += hits_summary['time_window_start']
-            high += hits_summary['time_window_stop']
+            low = spe_fit_val - 3000
+            high = spe_fit_val + 3000
+            #low += hits_summary['time_window_start']
+            #high += hits_summary['time_window_stop']
         prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high):
             cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
