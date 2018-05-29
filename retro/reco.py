@@ -69,6 +69,7 @@ class retro_reco(object):
             self.prior_defs[param] = get_prior_def(param, reco_kw)
         # keyword fuckery
         reco_kw.pop('spatial_prior')
+        reco_kw.pop('cascade_angle_prior')
 
 
     def run(self):
@@ -116,6 +117,12 @@ class retro_reco(object):
                 prior=prior,
                 loglike=loglike,
             )
+            #settings = self.run_skopt(
+            #    event_idx=event_idx,
+            #    event=event,
+            #    prior=prior,
+            #    loglike=loglike,
+            #)
 
             t1 = time.time()
 
@@ -351,6 +358,39 @@ class retro_reco(object):
             optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
         return settings
 
+    def run_skopt(
+            self,
+            event_idx,
+            event,
+            prior,
+            loglike,
+            ):
+
+        from skopt import gp_minimize, forest_minimize
+
+        # initial guess
+        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+
+        def fun(x, *args):
+            param_vals = np.copy(x)
+            prior(param_vals)    
+            llh = loglike(param_vals)
+            del param_vals
+            return -llh
+
+        bounds = [(0,1)]*self.n_opt_dim
+        settings = OrderedDict()
+
+        res = gp_minimize(fun,                  # the function to minimize
+                          bounds,      # the bounds on each dimension of x
+                          acq_func="EI",      # the acquisition function
+                          n_calls=1000,         # the number of evaluations of f 
+                          n_random_starts=5,  # the number of random initialization 
+                          x0=list(x0),
+                          )
+
+        return settings
+
     def run_nlopt(
             self,
             event_idx,
@@ -363,13 +403,28 @@ class retro_reco(object):
 
         def fun(x, grad):
             param_vals = np.copy(x)
-            prior(param_vals)    
+            #print(param_vals)
+            prior(param_vals)
+            #print(param_vals)
             llh = loglike(param_vals)
             del param_vals
             return -llh
 
+        # bounds
+        lower_bounds = np.zeros(shape=(self.n_opt_dim,))
+        upper_bounds = np.ones(shape=(self.n_opt_dim,))
+        # for angles make bigger
+        for i, name in enumerate(self.opt_params):
+            if 'azimuth' in name:
+                lower_bounds[i] = -0.5
+                upper_bounds[i] = 1.5
+            if 'zenith' in name:
+                lower_bounds[i] = -0.5
+                upper_bounds[i] = 1.5
+
         # initial guess
         x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+
         # stepsize
         dx = np.zeros(shape=(self.n_opt_dim,))
         for i in range(self.n_opt_dim):
@@ -384,44 +439,36 @@ class retro_reco(object):
             elif self.hypo_handler.params[i] == 'time':
                 dx[i] = 0.01
 
+
         # does not converge :/
-        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
-        #local_opt.set_lower_bounds([0.]*self.n_opt_dim)
-        #local_opt.set_upper_bounds([1.]*self.n_opt_dim)
-        #local_opt.set_min_objective(fun)
-        ##local_opt.set_ftol_abs(0.5)
+        local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+        local_opt.set_lower_bounds([0.]*self.n_opt_dim)
+        local_opt.set_upper_bounds([1.]*self.n_opt_dim)
+        local_opt.set_min_objective(fun)
+        #local_opt.set_ftol_abs(0.5)
         #local_opt.set_ftol_abs(100)
         #local_opt.set_xtol_rel(10)
-        #opt = nlopt.opt(nlopt.G_MLSL_LDS, self.n_opt_dim)
-        #opt.set_lower_bounds([0.]*self.n_opt_dim)
-        #opt.set_upper_bounds([1.]*self.n_opt_dim)
-        #opt.set_min_objective(fun)
-        #opt.set_ftol_abs(100)
-        #opt.set_xtol_rel(10)
-        #opt.set_population(10)
-        #opt.set_local_optimizer(local_opt)
+        local_opt.set_ftol_abs(1)
+        opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_dim)
+        opt.set_lower_bounds([0.]*self.n_opt_dim)
+        opt.set_upper_bounds([1.]*self.n_opt_dim)
+        opt.set_min_objective(fun)
+        opt.set_local_optimizer(local_opt)
+        opt.set_ftol_abs(10)
+        opt.set_xtol_rel(1)
+        opt.set_maxeval(1111)
 
         #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_dim)
         #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_dim)
-        opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_dim)
         #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_dim)
         #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
-        lower_bounds = np.zeros(shape=(self.n_opt_dim,))
-        upper_bounds = np.ones(shape=(self.n_opt_dim,))
-        # for angles make bigger
-        for i, name in enumerate(self.opt_params):
-            if 'azimuth' in name:
-                lower_bounds[i] = -1
-                upper_bounds[i] = 2
-            if 'zenith' in name:
-                lower_bounds[i] = -1
-                upper_bounds[i] = 2
 
-        opt.set_lower_bounds(lower_bounds)
-        opt.set_upper_bounds(upper_bounds)
-        opt.set_min_objective(fun)
-        opt.set_ftol_abs(0.1)
-        #opt.set_population(80)
+        #opt.set_lower_bounds(lower_bounds)
+        #opt.set_upper_bounds(upper_bounds)
+        #opt.set_min_objective(fun)
+        #opt.set_ftol_abs(0.1)
+        #opt.set_population([x0])
         #opt.set_initial_step(dx)
 
         #local_opt.set_maxeval(10)
@@ -429,12 +476,25 @@ class retro_reco(object):
         x = opt.optimize(x0)
 
         # polish it up
-        #print('polishing')
-        #local_opt = nlopt.opt(nlopt.LN_COBYLA, self.n_opt_dim)
-        #local_opt.set_lower_bounds([0.]*self.n_opt_dim)
-        #local_opt.set_upper_bounds([1.]*self.n_opt_dim)
+        #print('***************** polishing ******************')
+
+        #dx = np.ones(shape=(self.n_opt_dim,)) * 0.001
+        #dx[0] = 0.1
+        #dx[1] = 0.1
+
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+        #lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
+        #upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
+        #lower_bounds[0] = 0
+        #lower_bounds[1] = 0
+        #upper_bounds[0] = 0
+        #upper_bounds[1] = 0
+
+        #local_opt.set_lower_bounds(lower_bounds)
+        #local_opt.set_upper_bounds(upper_bounds)
         #local_opt.set_min_objective(fun)
         #local_opt.set_ftol_abs(0.1)
+        #local_opt.set_initial_step(dx)
         #x = opt.optimize(x)
 
         settings = OrderedDict()
@@ -505,7 +565,7 @@ class retro_reco(object):
             ('n_dims', self.n_opt_dim),
             ('n_params', self.n_opt_dim),
             ('n_clustering_params', self.n_opt_dim),
-            ('wrapped_params', [int('azimuth' in p.lower()) for p in hypo_params]),
+            ('wrapped_params', [int('azimuth' in p.lower()) for p in self.opt_params]),
             ('importance_nested_sampling', importance_sampling),
             ('multimodal', max_modes > 1),
         ])
