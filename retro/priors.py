@@ -268,6 +268,7 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
 
     prior_kind, prior_params = prior_def
 
+
     if prior_kind is PRI_UNIFORM:
         # Time is special since prior is relative to hits in the event
         if dim_name == 'time':
@@ -282,8 +283,15 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
                 pass
         elif np.min(prior_params[0]) == 0:
             maxval = np.max(prior_params)
-            def prior_func(cube, n=dim_num, maxval=maxval):
-                cube[n] = cube[n] * maxval
+            if 'azimuth' in dim_name:
+                def prior_func(cube, n=dim_num, maxval=maxval):
+                    # cyclic quantity
+                    x = cube[n]
+                    x = x%1
+                    cube[n] = x * maxval
+            else:
+                def prior_func(cube, n=dim_num, maxval=maxval):
+                    cube[n] = cube[n] * maxval
         else:
             minval = np.min(prior_params)
             width = np.max(prior_params) - minval
@@ -302,7 +310,12 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
         cos_min = np.min(prior_params)
         cos_width = np.max(prior_params) - cos_min
         def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min):
-            cube[n] = acos(cube[n] * cos_width + cos_min)
+            # reflect back values outside [0,1]
+            x = cube[n]
+            while x < 0 or x > 1:
+                if x < 0: x = -x
+                else: x = 1 -x
+            cube[n] = acos(x * cos_width + cos_min)
 
     elif prior_kind == PRI_GAUSSIAN:
         prior_def = (prior_kind, prior_params)

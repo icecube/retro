@@ -60,11 +60,12 @@ class retro_reco(object):
         self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
         self.events_iterator = init_obj.get_events(**events_kw)
         self.reco_kw = reco_kw
-        self.n_opt_dim = len(self.hypo_handler.params)
+        self.opt_params = self.hypo_handler.params
+        self.n_opt_dim = len(self.opt_params)
 
         # setup priors
         self.prior_defs = OrderedDict()
-        for param in self.hypo_handler.params:
+        for param in self.opt_params:
             self.prior_defs[param] = get_prior_def(param, reco_kw)
         # keyword fuckery
         reco_kw.pop('spatial_prior')
@@ -78,7 +79,7 @@ class retro_reco(object):
         mkdir(outdir)
 
         #setup LLHP dtype
-        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
+        hypo_params = self.opt_params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
         hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
         LLHP_T = np.dtype([(n, np.float32) for n in hypo_params_sorted])
 
@@ -157,11 +158,10 @@ class retro_reco(object):
         generate the prior transform functions + info for a given events
 
         '''
-        opt_hypo_params = self.hypo_handler.params
         prior_funcs = []
         priors_used = OrderedDict()
 
-        for dim_num, dim_name in enumerate(opt_hypo_params):
+        for dim_num, dim_name in enumerate(self.opt_params):
             prior_fun, prior_def = get_prior_fun(dim_num, dim_name, self.prior_defs[dim_name], event)
             prior_funcs.append(prior_fun)
             priors_used[dim_name] = prior_def
@@ -196,8 +196,8 @@ class retro_reco(object):
         '''
         report_after = 1
 
-        hypo_params = self.hypo_handler.params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
-        opt_hypo_params = self.hypo_handler.params
+        hypo_params = self.opt_params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
+        opt_params = self.opt_params
 
         # --- define here stuff for closure ---
         hits = event['hits']
@@ -266,7 +266,7 @@ class retro_reco(object):
             if not t_start:
                 t_start.append(time.time())
 
-            hypo = dict(zip(opt_hypo_params, cube))
+            hypo = dict(zip(opt_params, cube))
 
             sources = hypo_handler.get_sources(hypo)
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
@@ -289,7 +289,7 @@ class retro_reco(object):
 
             # ToDo, this is just for testing
             pegleg_result = pegleg_eval(pegleg_idx)
-            result = tuple([float(cube[i]) for i in range(len(opt_hypo_params))] + [pegleg_result] + [scalefactor])
+            result = tuple([float(cube[i]) for i in range(len(opt_params))] + [pegleg_result] + [scalefactor])
 
             param_values.append(result)
             log_likelihoods.append(llh)
@@ -370,27 +370,72 @@ class retro_reco(object):
 
         # initial guess
         x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+        # stepsize
+        dx = np.zeros(shape=(self.n_opt_dim,))
+        for i in range(self.n_opt_dim):
+            if 'azimuth' in self.hypo_handler.params[i]:
+                dx[i] = 0.001
+            elif 'zenith' in self.hypo_handler.params[i]:
+                dx[i] = 0.001
+            elif self.hypo_handler.params[i] in ['x','y']:
+                dx[i] = 0.005
+            elif self.hypo_handler.params[i] == 'z':
+                dx[i] = 0.002
+            elif self.hypo_handler.params[i] == 'time':
+                dx[i] = 0.01
 
-        #local_opt = nlopt.opt(nlopt.LN_SBPLX, self.n_opt_dim)
+        # does not converge :/
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
         #local_opt.set_lower_bounds([0.]*self.n_opt_dim)
         #local_opt.set_upper_bounds([1.]*self.n_opt_dim)
         #local_opt.set_min_objective(fun)
-        #local_opt.set_ftol_abs(2)
+        ##local_opt.set_ftol_abs(0.5)
+        #local_opt.set_ftol_abs(100)
+        #local_opt.set_xtol_rel(10)
         #opt = nlopt.opt(nlopt.G_MLSL_LDS, self.n_opt_dim)
         #opt.set_lower_bounds([0.]*self.n_opt_dim)
         #opt.set_upper_bounds([1.]*self.n_opt_dim)
         #opt.set_min_objective(fun)
-        #opt.set_ftol_abs(10)
+        #opt.set_ftol_abs(100)
+        #opt.set_xtol_rel(10)
+        #opt.set_population(10)
         #opt.set_local_optimizer(local_opt)
 
         #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_dim)
         opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_dim)
-        opt.set_lower_bounds([0.]*self.n_opt_dim)
-        opt.set_upper_bounds([1.]*self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+        lower_bounds = np.zeros(shape=(self.n_opt_dim,))
+        upper_bounds = np.ones(shape=(self.n_opt_dim,))
+        # for angles make bigger
+        for i, name in enumerate(self.opt_params):
+            if 'azimuth' in name:
+                lower_bounds[i] = -1
+                upper_bounds[i] = 2
+            if 'zenith' in name:
+                lower_bounds[i] = -1
+                upper_bounds[i] = 2
+
+        opt.set_lower_bounds(lower_bounds)
+        opt.set_upper_bounds(upper_bounds)
         opt.set_min_objective(fun)
         opt.set_ftol_abs(0.1)
+        #opt.set_population(80)
+        #opt.set_initial_step(dx)
+
+        #local_opt.set_maxeval(10)
 
         x = opt.optimize(x0)
+
+        # polish it up
+        #print('polishing')
+        #local_opt = nlopt.opt(nlopt.LN_COBYLA, self.n_opt_dim)
+        #local_opt.set_lower_bounds([0.]*self.n_opt_dim)
+        #local_opt.set_upper_bounds([1.]*self.n_opt_dim)
+        #local_opt.set_min_objective(fun)
+        #local_opt.set_ftol_abs(0.1)
+        #x = opt.optimize(x)
 
         settings = OrderedDict()
         settings['method'] = opt.get_algorithm_name()
