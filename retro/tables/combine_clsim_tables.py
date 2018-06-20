@@ -42,9 +42,9 @@ from time import time
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 from retro.utils.misc import COMPR_EXTENSIONS, expand, mkdir, wstderr
 from retro.tables.clsim_tables import load_clsim_table_minimal
 
@@ -57,7 +57,8 @@ VALIDATE_KEYS = [
     'costheta_bin_edges',
     't_bin_edges',
     'costhetadir_bin_edges',
-    'deltaphidir_bin_edges'
+    'deltaphidir_bin_edges',
+    'step_length',
 ] # yapf: disable
 """Values corresponding to these keys must match in all loaded tables"""
 
