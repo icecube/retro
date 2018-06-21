@@ -196,6 +196,8 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
         wstderr('Writing files:\n')
 
         for key in ALL_KEYS:
+            if key == 't_indep_table' and key not in combined_table:
+                continue
             fpath = output_fpaths[key]
             wstderr('  {} ...'.format(fpath))
             t0 = time()
