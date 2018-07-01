@@ -11,11 +11,8 @@ import cPickle as pickle
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 parser = ArgumentParser()
-parser.add_argument('--string', type=str,
-                    choices=['dc', 'ic'], 
-                    help='string ic or dc')
-parser.add_argument('--depth-idx', type=int,
-                    help='depth index (0,59)')
+parser.add_argument('--cluster-idx', type=int,
+                    help='cluster index (0,79)')
 parser.add_argument('--nfs', action='store_true',
                     help='also acces over NFS')
 parser.add_argument('--overwrite', action='store_true',
@@ -23,16 +20,18 @@ parser.add_argument('--overwrite', action='store_true',
 args = parser.parse_args()
 
 # load the latest, greates kmeans centroids
-centroids = np.load('../table_compression/kmcuda_4000_clusters_centroids_rand.npy')
+centroids = np.load('spicelea_kmcuda_4000_clusters_centroids_rand.npy')
 centroids = np.nan_to_num(centroids)
 k_means = KMeans(centroids.shape[0])
 k_means.cluster_centers_ = centroids
 #with open('kmeans_4000_clusters.pkl', 'rb') as f:
 #    k_means = pickle.load(f)
 
-print 'det %s table %s'%(args.string, args.depth_idx)
+print 'table cluster %s'%(args.cluster_idx)
 
-if os.path.isfile('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/templates.npy'%(args.string, args.depth_idx)):
+path = 'tilt_on_anisotropy_on_noazimuth_80/cl%s/'%(args.cluster_idx)
+
+if os.path.isfile('/data/icecube/retro_tables/' + path + 'templates.npy'):
     if args.overwrite:
         print 'overwritting existing file'
     else:
@@ -40,12 +39,12 @@ if os.path.isfile('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_
         sys.exit()
 
 # try files on fastio first
-fname = '/fastio/icecube/retro/tables/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+fname = '/fastio/icecube/retro/tables/' + path + 'ckv_table.npy'
 if not os.path.isfile(fname):
-    fname = '/fastio2/icecube/retro/tables/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+    fname = '/fastio2/icecube/retro/tables/' + path + 'ckv_table.npy'
 if not os.path.isfile(fname):
     if args.nfs:
-        fname = '/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+        fname = '/data/icecube/retro_tables/' + path + 'ckv_table.npy'
     else:
         sys.exit()
 table_5d = np.load(fname)
@@ -57,7 +56,7 @@ print '3d table created'
 mask = table_3d < 1000.
 print 'mask created'
 
-reduced_data = np.load('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/pca_reduced_table.npy'%(args.string, args.depth_idx))
+reduced_data = np.load('/data/icecube/retro_tables/' + path + 'pca_reduced_table.npy')
 print 'reduced data loaded'
 
 length = np.product(table_5d.shape[:3])-np.sum(mask)
@@ -87,4 +86,4 @@ for i in xrange(length):
 
 print 'templates computed'
 
-np.save('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/templates.npy'%(args.string, args.depth_idx), templates)
+np.save('/data/icecube/retro_tables/'+path+'/templates.npy', templates)

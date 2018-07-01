@@ -17,20 +17,18 @@ args = parser.parse_args()
 
 
 first = True
+for cluster_idx in range(60):
+    if os.path.isfile('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/templates.npy'%(cluster_idx)):
+        template = np.load('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/templates.npy'%(cluster_idx))
 
-for string in ['ic', 'dc']:
-    for depth_idx in range(60):
-        if os.path.isfile('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/templates.npy'%(string, depth_idx)):
-            template = np.load('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/templates.npy'%(string, depth_idx))
+        if first:
+            templates = np.zeros(template.shape)
+            first = False
 
-            if first:
-                templates = np.zeros(template.shape)
-                first = False
-
-            # add
-            templates = templates + template
-        else:
-            print 'templates missing for string %s depth %s'%(string, depth_idx)
+        # add
+        templates = templates + template
+    else:
+        print 'templates missing for table cluster %s'%(cluster_idx)
 
 print 'all templates summed'
 
@@ -53,4 +51,4 @@ sorted_indices = np.argsort(n_templates)
 templates = templates[sorted_indices[::-1]]
 
 #save
-np.save('final_templates.npy', templates)
+np.save('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/final_templates.npy', templates)

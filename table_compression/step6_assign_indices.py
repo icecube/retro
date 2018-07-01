@@ -10,11 +10,8 @@ import cPickle as pickle
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 parser = ArgumentParser()
-parser.add_argument('--string', type=str,
-                    choices=['dc', 'ic'], 
-                    help='string ic or dc')
-parser.add_argument('--depth-idx', type=int,
-                    help='depth index (0,59)')
+parser.add_argument('--cluster-idx', type=int,
+                    help='cluster index (0,59)')
 parser.add_argument('--nfs', action='store_true',
                     help='also acces over NFS')
 parser.add_argument('--overwrite', action='store_true',
@@ -78,10 +75,11 @@ def fill_template_map(index_table, table_3d):
                 template_map[i,j,k]['weight'] = table_3d[i,j,k]
     return template_map
 
+print 'table cluster %s'%(args.cluster_idx)
 
-print 'det %s table %s'%(args.string, args.depth_idx)
+path = 'tilt_on_anisotropy_on_noazimuth_80/cl%s/'%(args.cluster_idx)
 
-if os.path.isfile('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/ckv_template_map.npy'%(args.string, args.depth_idx)):
+if os.path.isfile('/data/icecube/retro_tables/' + path + 'ckv_template_map.npy'):
     if args.overwrite:
         print 'overwritting existing file'
     else:
@@ -89,12 +87,12 @@ if os.path.isfile('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_
         sys.exit()
 
 # try files on fastio first
-fname = '/fastio/icecube/retro/tables/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+fname = '/fastio/icecube/retro/tables/' + path + 'ckv_table.npy'
 if not os.path.isfile(fname):
-    fname = '/fastio2/icecube/retro/tables/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+    fname = '/fastio2/icecube/retro/tables/' + path + 'ckv_table.npy'
 if not os.path.isfile(fname):
     if args.nfs:
-        fname = '/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+        fname = '/data/icecube/retro_tables/' + path + 'ckv_table.npy'
     else:
         sys.exit()
 
@@ -107,7 +105,7 @@ table_5d_normed = np.nan_to_num(table_5d / table_3d[:,:,:,np.newaxis,np.newaxis]
 del table_5d
 print 'table normed'
 
-templates = np.load('/home/peller/retro/table_compression/final_templates.npy')
+templates = np.load('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/final_templates.npy')
 templates = templates.astype(np.float32)
 templates = SmartArray(templates)
 
@@ -118,5 +116,5 @@ template_map = fill_template_map(index_table, table_3d)
 
 
 
-np.save('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/ckv_template_map.npy'%(args.string, args.depth_idx), template_map)
-np.save('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/template_chi2s.npy'%(args.string, args.depth_idx), chi2s)
+np.save('/data/icecube/retro_tables/'+path+'ckv_template_map.npy', template_map)
+np.save('/data/icecube/retro_tables/'+path+'template_chi2s.npy', chi2s)
