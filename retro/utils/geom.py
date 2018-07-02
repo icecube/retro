@@ -360,11 +360,11 @@ def inv_power_2nd_diff(power, edges):
     return np.diff(edges**(1/power), n=2)
 
 
-def infer_power(edges):
+def infer_power(edges, dtype=np.float64):
     """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
     first_three_edges = edges[:3]
     atol = 1e-15
-    rtol = 4*np.finfo(np.float).eps
+    rtol = 4*np.finfo(dtype).eps
     power = None
     try:
         power = brentq(
