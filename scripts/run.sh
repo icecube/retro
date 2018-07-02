@@ -10,10 +10,11 @@ PROCDIR="${MYDIR}/../retro/i3processing"
 #GCD="$I3_TESTDATA/sim/GeoCalibDetectorStatus_IC86.55697_corrected_V2.i3.gz"
 GCD="$I3_DATA/GCD/GeoCalibDetectorStatus_IC86.2017.Run129700_V0.i3.gz"
 
-ICE_MODEL="$I3_SRC/clsim/resources/ice/spice_mie"
-#ICE_MODEL="$I3_SRC/clsim/resources/ice/spice_lea"
+#ICE_MODEL="$I3_SRC/clsim/resources/ice/spice_mie"
+ICE_MODEL="$I3_SRC/clsim/resources/ice/spice_lea"
 
-HOLE_ICE_MODEL="$I3_SRC/ice-models/resources/models/angsens/as.h2-50cm"
+#HOLE_ICE_MODEL="$I3_SRC/ice-models/resources/models/angsens/as.h2-50cm"
+HOLE_ICE_MODEL="$I3_SRC/ice-models/resources/models/angsens_flasher/as.9"
 
 USE_GEANT4=false
 
