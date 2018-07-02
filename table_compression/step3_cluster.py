@@ -19,11 +19,10 @@ args = parser.parse_args()
 
 all_tables = []
 length_list = []
-for string in ['ic','dc']:
-    for depth_idx in range(60):
-        all_tables.append(np.load('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/pca_reduced_table.npy'%(string, depth_idx),  mmap_mode='r'))
-        # figure out how many element does each table have
-        length_list.append(all_tables[-1].shape[0])
+for cluster_idx in range(80):
+    all_tables.append(np.load('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/pca_reduced_table.npy'%(cluster_idx),  mmap_mode='r'))
+    # figure out how many element does each table have
+    length_list.append(all_tables[-1].shape[0])
 
 length_list = np.array(length_list)
 
@@ -49,7 +48,7 @@ k_means = KMeans(n_clusters=args.n_clusters,
 k_means.fit(data)
 print 'clustering done'
 # save everything
-with open('kmeans_%i_clusters.pkl'%args.n_clusters, 'wb') as f:
+with open('kmeans_%i_clusters_spice_lea_tables.pkl'%args.n_clusters, 'wb') as f:
     pickle.dump(k_means, f)
 
 #print 'predicting'

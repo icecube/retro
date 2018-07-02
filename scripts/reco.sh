@@ -17,13 +17,14 @@ mkdir -p "$outdir"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-# ACI:
-#proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
-#tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
-# ET:
-proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
-tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
+    proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
+    tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+else
+    proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
+    tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+fi
 
 #no_noise="--no-noise"
 no_noise=""
@@ -40,8 +41,6 @@ consteff=""
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
-    --cascade-energy-prior log_uniform \
-    --cascade-energy-lims 0.1,1000  \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -61,7 +60,8 @@ consteff=""
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "aligned_point_ckv" \
+    --cascade-kernel "scaling_aligned_one_dim" \
+    --cascade-angle-prior "log_normal" \
     --track-kernel "pegleg" \
     --track-time-step 1.0 \
     \

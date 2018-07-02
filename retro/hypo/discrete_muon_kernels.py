@@ -53,7 +53,7 @@ from retro.retro_types import SRC_T
 
 ALL_REALS = (-np.inf, np.inf)
 
-def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt=1.0, n_pegleg=1000):
+def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt=1.0, n_pegleg=3000):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -210,6 +210,8 @@ for idx, egy in enumerate(esamps[1:]):
 lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
 
 MULEN_INTERP = interpolate.UnivariateSpline(x=esamps, y=lengths, k=1, s=0)
+# does that work? :P
+MUEN_INTERP = interpolate.UnivariateSpline(y=esamps[1:], x=lengths[1:], k=1, s=0)
 
 
 def table_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zenith, dt=1.0):
@@ -288,3 +290,15 @@ def table_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zen
     sources['ckv_sintheta'] = SIN_CKV
 
     return sources
+
+
+def pegleg_eval(pegleg_idx, dt=1.0, const_e_loss=False):
+    '''
+    Convert the pegleg index into track energy in GeV
+    '''
+    length = float(pegleg_idx) / dt * SPEED_OF_LIGHT_M_PER_NS
+    if const_e_loss:
+        return length * TRACK_M_PER_GEV
+    else:
+        return MUEN_INTERP(length)
+

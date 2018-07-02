@@ -29,7 +29,9 @@ __all__ = [
     'SourceID',
     'SubtypeID',
     'TRIGGER_T',
-    'SRC_T'
+    'SRC_T',
+    'EVT_DOM_INFO_T',
+    'EXP_DOM_T',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -53,7 +55,7 @@ import enum
 import numpy as np
 
 # all possible params
-PARAM_NAMES = ['time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth', 'cascade_zenith', 'track_energy', 'cascade_energy']
+PARAM_NAMES = ['time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth', 'cascade_zenith', 'track_energy', 'cascade_energy', 'cascade_d_zenith', 'cascade_d_azimuth']
 
 
 Event = namedtuple( # pylint: disable=invalid-name
@@ -190,6 +192,23 @@ HITS_SUMMARY_T = np.dtype([
     ('time_window_stop', np.float32)
 ])
 
+EVT_DOM_INFO_T = np.dtype([
+        ('x', np.float32),
+        ('y', np.float32),
+        ('z', np.float32),
+        ('quantum_efficiency', np.float32),
+        ('noise_rate_per_ns', np.float32),
+        ('table_idx', np.uint32),
+        ('hits_start_idx', np.uint32),
+        ('hits_stop_idx', np.uint32),
+        ('total_observed_charge', np.float32),
+])
+
+EVT_HIT_INFO_T = np.dtype([
+    ('time', np.float32),
+    ('charge', np.float32),
+    ('dom_idx', np.uint32),
+])
 
 class ConfigID(enum.IntEnum):
     """Trigger common names mapped into ConfigID (or config_id) in i3 files.

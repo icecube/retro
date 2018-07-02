@@ -50,7 +50,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import const
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
-    point_cascade, point_ckv_cascade, one_dim_cascade, aligned_point_ckv_cascade, aligned_one_dim_cascade
+    point_cascade, point_ckv_cascade, one_dim_cascade, aligned_point_ckv_cascade, aligned_one_dim_cascade, scaling_aligned_point_ckv_cascade, scaling_aligned_one_dim_cascade, scaling_one_dim_cascade, one_dim_delta_cascade, scaling_one_dim_delta_cascade
 )
 from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon, pegleg_muon
@@ -215,6 +215,8 @@ def setup_discrete_hypo(
     kernel_kwargs = []
     pegleg_kernel = None
     pegleg_kernel_kwargs = None
+    scaling_kernel = None
+    scaling_kernel_kwargs = None
     if cascade_kernel is not None:
         if cascade_kernel == 'point':
             hypo_kernels.append(point_cascade)
@@ -231,6 +233,21 @@ def setup_discrete_hypo(
         elif cascade_kernel == 'aligned_one_dim':
             hypo_kernels.append(aligned_one_dim_cascade)
             kernel_kwargs.append(dict())
+        elif cascade_kernel == 'one_dim_delta':
+            hypo_kernels.append(one_dim_delta_cascade)
+            kernel_kwargs.append(dict())
+        elif cascade_kernel == 'scaling_aligned_one_dim':
+            scaling_kernel = scaling_aligned_one_dim_cascade
+            scaling_kwargs = dict()
+        elif cascade_kernel == 'scaling_aligned_point_ckv':
+            scaling_kernel = scaling_aligned_point_ckv_cascade
+            scaling_kwargs = dict()
+        elif cascade_kernel == 'scaling_one_dim':
+            scaling_kernel = scaling_one_dim_cascade
+            scaling_kwargs = dict()
+        elif cascade_kernel == 'scaling_one_dim_delta':
+            scaling_kernel = scaling_one_dim_delta_cascade
+            scaling_kwargs = dict()
         else:
             raise NotImplementedError('{} cascade not implemented yet.'
                                       .format(cascade_kernel))
@@ -254,6 +271,8 @@ def setup_discrete_hypo(
         kernel_kwargs=kernel_kwargs,
         pegleg_kernel=pegleg_kernel,
         pegleg_kernel_kwargs=pegleg_kernel_kwargs,
+        scaling_kernel=scaling_kernel,
+        scaling_kernel_kwargs=scaling_kernel_kwargs,
     )
 
     return hypo_handler
@@ -806,7 +825,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         group.add_argument(
             '--cascade-kernel',
             required=True,
-            choices=['point','point_ckv','one_dim', 'aligned_point_ckv', 'aligned_one_dim'],
+            choices=['point','point_ckv','one_dim', 'aligned_point_ckv', 'aligned_one_dim', 'scaling_aligned_one_dim', 'scaling_aligned_point_ckv', 'scaling_one_dim', 'one_dim_delta', 'scaling_one_dim_delta'],
         )
         group.add_argument(
             '--track-kernel',
