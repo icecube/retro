@@ -8,9 +8,7 @@ namedtuples for interface simplicity and consistency
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'HypoParams8D',
-    'HypoParams10D',
-    'TrackParams',
+    'PARAM_NAMES',
     'Hit',
     'Photon',
     'Event',
@@ -24,8 +22,6 @@ __all__ = [
     'TimePolCoord',
     'TimeSphCoord',
     'DOM_INFO_T',
-    'LLHP8D_T',
-    'LLHP10D_T',
     'HIT_T',
     'SD_INDEXER_T',
     'HITS_SUMMARY_T',
@@ -33,7 +29,9 @@ __all__ = [
     'SourceID',
     'SubtypeID',
     'TRIGGER_T',
-    'SRC_T'
+    'SRC_T',
+    'EVT_DOM_INFO_T',
+    'EXP_DOM_T',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -56,30 +54,9 @@ import enum
 
 import numpy as np
 
+# all possible params
+PARAM_NAMES = ['time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth', 'cascade_zenith', 'track_energy', 'cascade_energy', 'cascade_d_zenith', 'cascade_d_azimuth']
 
-HypoParams8D = namedtuple( # pylint: disable=invalid-name
-    typename='HypoParams8D',
-    field_names=('time', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
-                 'track_energy', 'cascade_energy')
-)
-"""Hypothesis in 8 dimensions (parameters). Units are: t/ns, {x,y,z}/m,
-{track_zenith,track_azimuth}/rad, {track_energy,cascade_energy}/GeV"""
-
-HypoParams10D = namedtuple( # pylint: disable=invalid-name
-    typename='HypoParams10D',
-    field_names=(HypoParams8D._fields + ('cascade_zenith', 'cascade_azimuth'))
-)
-"""Hypothesis in 10 dimensions (parameters). Units are: t/ns, {x,y,z}/m,
-{track_zenith,track_azimuth}/rad, {track_energy,cascade_energy}/GeV,
-{cascade_zenith,cascade_azimuth}/rad"""
-
-TrackParams = namedtuple( # pylint: disable=invalid-name
-    typename='TrackParams',
-    field_names=('time', 'x', 'y', 'z', 'track_zenith', 'track_azimuth',
-                 'track_energy')
-)
-"""Hypothesis for just the track (7 dimensions / parameters). Units are: t/ns,
-{x,y,z}/m, {track_zenith,track_azimuth}/rad, track_energy/GeV"""
 
 Event = namedtuple( # pylint: disable=invalid-name
     typename='Event',
@@ -172,16 +149,6 @@ DOM_INFO_T = np.dtype(
     ]
 )
 
-LLHP8D_T = np.dtype(
-    [('llh', np.float32)]
-    + [(field, np.float32) for field in HypoParams8D._fields]
-)
-
-LLHP10D_T = np.dtype(
-    [('llh', np.float32)]
-    + [(field, np.float32) for field in HypoParams10D._fields]
-)
-
 PULSE_T = np.dtype([
     ('time', np.float32),
     ('charge', np.float32),
@@ -225,6 +192,23 @@ HITS_SUMMARY_T = np.dtype([
     ('time_window_stop', np.float32)
 ])
 
+EVT_DOM_INFO_T = np.dtype([
+        ('x', np.float32),
+        ('y', np.float32),
+        ('z', np.float32),
+        ('quantum_efficiency', np.float32),
+        ('noise_rate_per_ns', np.float32),
+        ('table_idx', np.uint32),
+        ('hits_start_idx', np.uint32),
+        ('hits_stop_idx', np.uint32),
+        ('total_observed_charge', np.float32),
+])
+
+EVT_HIT_INFO_T = np.dtype([
+    ('time', np.float32),
+    ('charge', np.float32),
+    ('dom_idx', np.uint32),
+])
 
 class ConfigID(enum.IntEnum):
     """Trigger common names mapped into ConfigID (or config_id) in i3 files.

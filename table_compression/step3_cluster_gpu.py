@@ -15,14 +15,13 @@ parser.add_argument('--n-clusters', type=int,
                     help='number of clusters')
 args = parser.parse_args()
 
-if not os.path.isfile('cluster_data.fp32.npy'):
+if not os.path.isfile('spicelea_cluster_data.fp32.npy'):
     all_tables = []
     length_list = []
-    for string in ['ic','dc']:
-        for depth_idx in range(60):
-            all_tables.append(np.load('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/pca_reduced_table.npy'%(string, depth_idx),  mmap_mode='r'))
-            # figure out how many element does each table have
-            length_list.append(all_tables[-1].shape[0])
+    for cluster_idx in range(80):
+        all_tables.append(np.load('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/pca_reduced_table.npy'%(cluster_idx),  mmap_mode='r'))
+        # figure out how many element does each table have
+        length_list.append(all_tables[-1].shape[0])
 
     length_list = np.array(length_list)
 
@@ -33,11 +32,11 @@ if not os.path.isfile('cluster_data.fp32.npy'):
     np.save('cluster_data.fp32.npy', data)
 else:
     print('loading exisiting data')
-    data = np.load('cluster_data.fp32.npy') #, mmap_mode='r')
+    data = np.load('spicelea_cluster_data.fp32.npy') #, mmap_mode='r')
 
 # random subsample
-print('subsampling')
-data = data[np.random.choice(data.shape[0], 41000000, replace=False), :]
+#print('subsampling')
+#data = data[np.random.choice(data.shape[0], 41000000, replace=False), :]
 
 #data = data[:100000]
 
@@ -52,5 +51,5 @@ centroids, assignments = kmeans_cuda(data, args.n_clusters, verbosity=2, seed=3,
 #centroids, assignments = kmeans_cuda(data, args.n_clusters, verbosity=2, seed=3, device=1, yinyang_t=0, tolerance=0.5, init='random')
 
 print('clustering done')
-np.save('kmcuda_%i_clusters_centroids_rand.npy'%args.n_clusters, centroids)
-np.save('kmcuda_%i_clusters_assignements_rand.npy'%args.n_clusters, assignments)
+np.save('spicelea_kmcuda_%i_clusters_centroids_rand.npy'%args.n_clusters, centroids)
+np.save('spicelea_kmcuda_%i_clusters_assignements_rand.npy'%args.n_clusters, assignments)

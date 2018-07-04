@@ -10,25 +10,22 @@ from numba import jit
 import cPickle as pickle
 
 # load the latest, greates PCA
-with open('pca_after_ic59.pkl','rb') as f:
+with open('pca_after_cl79.pkl','rb') as f:
     pca = pickle.load(f)
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 parser = ArgumentParser()
-parser.add_argument('--string', type=str,
-                    choices=['dc', 'ic'], 
-                    help='string ic or dc')
-parser.add_argument('--depth-idx', type=int,
-                    help='depth index (0,59)')
+parser.add_argument('--cluster-idx', type=int,
+                    help='table cluster index (0,79)')
 parser.add_argument('--nfs', action='store_true',
                     help='also acces over NFS')
 parser.add_argument('--overwrite', action='store_true',
                     help='overwrite existing file')
 args = parser.parse_args()
 
-print 'det %s table %s'%(args.string, args.depth_idx)
+print 'table cluster %s'%(args.cluster_idx)
 
-if os.path.isfile('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/pca_reduced_table.npy'%(args.string, args.depth_idx)):
+if os.path.isfile('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/pca_reduced_table.npy'%(args.cluster_idx)):
     if args.overwrite:
         print 'overwritting existing file'
     else:
@@ -36,12 +33,12 @@ if os.path.isfile('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_
         sys.exit()
 
 # try fles on fastio first
-fname = '/fastio/icecube/retro/tables/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+fname = '/fastio/icecube/retro/tables/cl%s/ckv_table.npy'%(args.cluster_idx)
 if not os.path.isfile(fname):
-    fname = '/fastio2/icecube/retro/tables/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+    fname = '/fastio2/icecube/retro/tables/cl%s/ckv_table.npy'%(args.cluster_idx)
 if not os.path.isfile(fname):
     if args.nfs:
-        fname = '/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/ckv_table.npy'%(args.string, args.depth_idx)
+        fname = '/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/ckv_table.npy'%(args.cluster_idx)
     else:
         sys.exit()
 table_5d = np.load(fname)
@@ -67,4 +64,4 @@ del table_5d
 print 'data created'
 reduced_data = pca.transform(data)
 print 'PCA transformed'
-np.save('/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_%s_depth_%s/pca_reduced_table.npy'%(args.string, args.depth_idx), reduced_data)
+np.save('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/pca_reduced_table.npy'%(args.cluster_idx), reduced_data)

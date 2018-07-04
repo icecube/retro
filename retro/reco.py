@@ -8,19 +8,7 @@ Instantiate Retro tables and find the max over the log-likelihood space.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    'CUBE_DIMS',
-    'PRI_UNIFORM',
-    'PRI_LOG_UNIFORM',
-    'PRI_LOG_NORMAL',
-    'PRI_COSINE',
-    'PRI_GAUSSIAN',
-    'PRI_SPEFIT2',
-    'PRI_CAUCHY',
-    'run_multinest',
-    'reco',
-    'parse_args'
-]
+__all__ = ['RetroReco', 'parse_args']
 
 __author__ = 'J.L. Lanfranchi, P. Eller'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -39,7 +27,6 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from math import acos, exp
 
 from os.path import abspath, dirname, join
 import pickle
@@ -47,553 +34,547 @@ import sys
 import time
 
 import numpy as np
-from scipy import stats
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import HYPO_PARAMS_T, LLHP_T, init_obj
-from retro.const import TWO_PI, ALL_STRS_DOMS_SET
-from retro.retro_types import HypoParams8D, HypoParams10D
+from retro import init_obj
+from retro.const import ALL_STRS_DOMS
+from retro.retro_types import PARAM_NAMES, EVT_DOM_INFO_T, EVT_HIT_INFO_T
 from retro.utils.misc import expand, mkdir, sort_dict
-#from retro.likelihood import get_llh
+from retro.priors import (
+    get_prior_def,
+    get_prior_fun,
+    PRI_UNIFORM,
+    PRI_LOG_NORMAL,
+    PRI_LOG_UNIFORM,
+)
+from retro.hypo.discrete_muon_kernels import pegleg_eval
 
 
-T = 'time'
-X = 'x'
-Y = 'y'
-Z = 'z'
-TRCK_ZEN = 'track_zenith'
-TRCK_AZ = 'track_azimuth'
-CSCD_ZEN = 'cascade_zenith'
-CSCD_AZ = 'cascade_azimuth'
-ENERGY = 'energy'
-TRCK_FRAC = 'track_fraction'
+class RetroReco(object):
 
+    def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
+        self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+        self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
+        self.events_iterator = init_obj.get_events(**events_kw)
+        self.reco_kw = reco_kw
+        self.opt_params_names = self.hypo_handler.params
+        self.n_opt_dim = len(self.opt_params_names)
 
-if HYPO_PARAMS_T is HypoParams8D:
-    CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC]
-elif HYPO_PARAMS_T is HypoParams10D:
-    CUBE_DIMS = [X, Y, Z, T, TRCK_ZEN, TRCK_AZ, ENERGY, TRCK_FRAC, CSCD_ZEN, CSCD_AZ]
-else:
-    raise NotImplementedError(str(HYPO_PARAMS_T))
+        self.out_prefix = None
 
+        # Setup priors
+        self.prior_defs = OrderedDict()
+        for param in self.opt_params_names:
+            self.prior_defs[param] = get_prior_def(param, reco_kw)
 
-CUBE_T_IDX = CUBE_DIMS.index(T)
-CUBE_X_IDX = CUBE_DIMS.index(X)
-CUBE_Y_IDX = CUBE_DIMS.index(Y)
-CUBE_Z_IDX = CUBE_DIMS.index(Z)
-CUBE_TRACK_ZEN_IDX = CUBE_DIMS.index(TRCK_ZEN)
-CUBE_TRACK_AZ_IDX = CUBE_DIMS.index(TRCK_AZ)
-CUBE_ENERGY_IDX = CUBE_DIMS.index(ENERGY)
-CUBE_TRACK_FRAC_IDX = CUBE_DIMS.index(TRCK_FRAC)
-if HYPO_PARAMS_T is HypoParams8D:
-    CUBE_CSCD_ZEN_IDX = None
-    CUBE_CSCD_AZ_IDX = None
-else:
-    CUBE_CSCD_ZEN_IDX = CUBE_DIMS.index(CSCD_ZEN)
-    CUBE_CSCD_AZ_IDX = CUBE_DIMS.index(CSCD_AZ)
+    def run(self):
+        """Run reconstructions."""
+        print('Running reconstructions...')
+        t00 = time.time()
+        outdir = self.reco_kw.pop('outdir')
+        outdir = expand(outdir)
+        mkdir(outdir)
 
+        # Setup LLHP dtype
+        hypo_params = (
+            self.opt_params_names
+            + self.hypo_handler.pegleg_params
+            + self.hypo_handler.scaling_params
+        )
+        hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
+        llhp_t = np.dtype([(n, np.float32) for n in hypo_params_sorted])
 
-PRI_UNIFORM = 'uniform'
-PRI_LOG_UNIFORM = 'log_uniform'
-PRI_LOG_NORMAL = 'log_normal'
-PRI_COSINE = 'cosine'
-PRI_GAUSSIAN = 'gaussian'
-PRI_SPEFIT2 = 'spefit2'
-PRI_CAUCHY = 'cauchy'
+        for event_idx, event in self.events_iterator: # pylint: disable=unused-variable
+            t0 = time.time()
 
+            self.out_prefix = join(outdir, 'evt{}-'.format(event_idx))
+            print('Output files prefix: "{}"\n'.format(self.out_prefix))
 
-def run_multinest(
-        outdir,
-        event_idx,
-        event,
-        dom_tables,
-        hypo_handler,
-        priors,
-        importance_sampling,
-        max_modes,
-        const_eff,
-        n_live,
-        evidence_tol,
-        sampling_eff,
-        max_iter,
-        seed,
-    ):
-    """Setup and run MultiNest on an event.
+            prior, priors_used = self.generate_prior(event)
+            param_values = []
+            log_likelihoods = []
+            t_start = []
+            loglike = self.generate_loglike(event, param_values, log_likelihoods, t_start)
 
-    See the README file from MultiNest for greater detail on parameters
-    specific to to MultiNest (parameters from `importance_sampling` on).
+            #settings = self.run_multinest(
+            #    prior=prior,
+            #    loglike=loglike,
+            #    **self.reco_kw
+            #)
+            #settings = self.run_scipy(
+            #    prior=prior,
+            #    loglike=loglike,
+            #    method='differential_evolution',
+            #    eps=0.02
+            #)
+            settings = self.run_nlopt(
+                prior=prior,
+                loglike=loglike,
+            )
+            #settings = self.run_skopt(
+            #    prior=prior,
+            #    loglike=loglike,
+            #)
 
-    Parameters
-    ----------
-    outdir
-    event_idx
-    event
-    dom_tables,
-    hypo_handler,
-    priors : mapping
-    importance_sampling
-    max_modes
-    const_eff
-    n_live
-    evidence_tol
-    sampling_eff
-    max_iter
-        Note that this limit is the maximum number of sample replacements and
-        _not_ max number of likelihoods evaluated. A replacement only occurs
-        when a likelihood is found that exceeds the minimum likelihood among
-        the live points.
-    seed
+            t1 = time.time()
 
-    Returns
-    -------
-    llhp : shape (num_llh,) structured array of dtype retro.LLHP_T
-        LLH and the corresponding parameter values.
+            # dump
+            llhp = np.empty(shape=len(param_values), dtype=llhp_t)
+            llhp['llh'] = log_likelihoods
+            llhp[hypo_params] = param_values
 
-    mn_meta : OrderedDict
-        Metadata used for running MultiNest, including priors, parameters, and
-        the keyword args used to invoke the `pymultinest.run` function.
+            llhp_outf = self.out_prefix + 'llhp.npy'
+            print('Saving llhp to "{}"...'.format(llhp_outf))
+            np.save(llhp_outf, llhp)
 
-    """
-    # pylint: disable=missing-docstring
-    # Import pymultinest here; it's a less common dependency, so other
-    # functions / constants in this module will still be import-able w/o it.
-    import pymultinest
+            opt_meta = OrderedDict([
+                ('params', hypo_params),
+                ('original_prior_specs', self.prior_defs),
+                ('priors_used', priors_used),
+                ('settings', sort_dict(settings)),
+            ])
 
-    hits = event['hits']
-    hits_indexer = event['hits_indexer']
-    hits_summary = event['hits_summary']
+            opt_meta['num_llhp'] = len(param_values)
+            opt_meta['run_time'] = t1 - t0
+            opt_meta_outf = self.out_prefix + 'opt_meta.pkl'
+            print('Saving metadata to "{}"'.format(opt_meta_outf))
+            pickle.dump(
+                opt_meta,
+                open(opt_meta_outf, 'wb'),
+                protocol=pickle.HIGHEST_PROTOCOL
+            )
 
-    priors_used = OrderedDict()
+            dt = time.time() - t1
+            n_points = llhp.size
+            print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
+                  .format(dt, n_points, dt / n_points * 1e3))
 
-    prior_funcs = []
-    for dim_num, dim_name in enumerate(CUBE_DIMS):
-        prior_kind, prior_params = priors[dim_name]
-        if prior_kind is PRI_UNIFORM:
-            # Time is special since prior is relative to hits in the event
-            if dim_name == T:
-                prior_params = (
-                    hits_summary['earliest_hit_time'] + prior_params[0],
-                    hits_summary['latest_hit_time'] + prior_params[1]
-                )
-            priors_used[dim_name] = (prior_kind, prior_params)
+        print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
-            if prior_params == (0, 1):
+    def generate_prior(self, event):
+        """Generate the prior transform functions + info for a given event.
+
+        Parameters
+        ----------
+        event
+
+        Returns
+        -------
+        prior : callable
+        priors_used : OrderedDict
+
+        """
+        prior_funcs = []
+        priors_used = OrderedDict()
+
+        for dim_num, dim_name in enumerate(self.opt_params_names):
+            prior_fun, prior_def = get_prior_fun(
+                dim_num=dim_num,
+                dim_name=dim_name,
+                prior_def=self.prior_defs[dim_name],
+                event=event,
+            )
+            prior_funcs.append(prior_fun)
+            priors_used[dim_name] = prior_def
+
+        def prior(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
+            """Apply `prior_funcs` to the hypercube to map values from the unit
+            hypercube onto values in the physical parameter space.
+
+            The result overwrites the values in `cube`.
+
+            Parameters
+            ----------
+            cube
+            ndim
+            nparams
+
+            """
+            for prior_func in prior_funcs:
+                prior_func(cube)
+
+        return prior, priors_used
+
+    def generate_loglike(self, event, param_values, log_likelihoods, t_start):
+        """Generate the LLH callback function for a given event
+
+        Parameters
+        ----------
+        event
+        param_values : list
+        log_likelihoods : list
+        t_start : list
+
+        Returns
+        -------
+        loglike : callable
+
+        """
+        report_after = 1
+
+        hypo_params = (
+            self.opt_params_names
+            + self.hypo_handler.pegleg_params
+            + self.hypo_handler.scaling_params
+        )
+        opt_params_names = self.opt_params_names
+
+        # -- Variables to be captured by `loglike` closure -- #
+
+        hits = event['hits']
+        hits_indexer = event['hits_indexer']
+        hypo_handler = self.hypo_handler
+        get_llh = self.dom_tables._get_llh # pylint: disable=protected-access
+        dom_info = self.dom_tables.dom_info
+        tables = self.dom_tables.tables
+        table_norm = self.dom_tables.table_norm
+        t_indep_tables = self.dom_tables.t_indep_tables
+        t_indep_table_norm = self.dom_tables.t_indep_table_norm
+        sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
+        time_window = np.float32(
+            event['hits_summary']['time_window_stop'] - event['hits_summary']['time_window_start']
+        )
+
+        n_operational_doms = np.sum(dom_info['operational'])
+        # array containing all relevant DOMs for the event and the hit information
+        event_dom_info = np.zeros(shape=(n_operational_doms,), dtype=EVT_DOM_INFO_T)
+        event_hit_info = np.zeros(shape=hits.shape, dtype=EVT_HIT_INFO_T)
+
+        event_hit_info['time'][:] = hits['time']
+        event_hit_info['charge'][:] = hits['charge']
+
+        # Loop through all DOMs to fill array
+        position = 0
+        for sd_idx in ALL_STRS_DOMS:
+            if not dom_info[sd_idx]['operational']:
                 continue
-                #def prior_func(cube): # pylint: disable=unused-argument
-                #    pass
-            elif np.min(prior_params[0]) == 0:
-                maxval = np.max(prior_params)
-                def prior_func(cube, n=dim_num, maxval=maxval):
-                    cube[n] = cube[n] * maxval
-            else:
-                minval = np.min(prior_params)
-                width = np.max(prior_params) - minval
-                def prior_func(cube, n=dim_num, width=width, minval=minval):
-                    cube[n] = cube[n] * width + minval
+            event_dom_info[position]['x'] = dom_info[sd_idx]['x']
+            event_dom_info[position]['y'] = dom_info[sd_idx]['y']
+            event_dom_info[position]['z'] = dom_info[sd_idx]['z']
+            event_dom_info[position]['quantum_efficiency'] = dom_info[sd_idx]['quantum_efficiency']
+            event_dom_info[position]['noise_rate_per_ns'] = dom_info[sd_idx]['noise_rate_per_ns']
+            event_dom_info[position]['table_idx'] = sd_idx_table_indexer[sd_idx]
 
-        elif prior_kind == PRI_LOG_UNIFORM:
-            priors_used[dim_name] = (prior_kind, prior_params)
-            log_min = np.log(np.min(prior_params))
-            log_width = np.log(np.max(prior_params) / np.min(prior_params))
-            def prior_func(cube, n=dim_num, log_width=log_width, log_min=log_min):
-                cube[n] = exp(cube[n] * log_width + log_min)
+            # Add hits indices
+            # super shitty way at the moment, due to legacy way of doing things
+            if sd_idx in hits_indexer['sd_idx']:
+                hit_idx = list(hits_indexer['sd_idx']).index(sd_idx)
+                start = hits_indexer[hit_idx]['offset']
+                stop = start + hits_indexer[hit_idx]['num']
+                event_dom_info[position]['hits_start_idx'] = start
+                event_dom_info[position]['hits_stop_idx'] = stop
+                for h_idx in range(start, stop):
+                    event_hit_info[h_idx]['dom_idx'] = position
+                    event_dom_info[position]['total_observed_charge'] += hits[h_idx]['charge']
 
-        elif prior_kind == PRI_COSINE:
-            priors_used[dim_name] = (prior_kind, prior_params)
-            cos_min = np.min(prior_params)
-            cos_width = np.max(prior_params) - cos_min
-            def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min):
-                cube[n] = acos(cube[n] * cos_width + cos_min)
+            position += 1
 
-        elif prior_kind == PRI_GAUSSIAN:
-            priors_used[dim_name] = (prior_kind, prior_params)
-            mean, stddev = prior_params
-            norm = 1 / (stddev * np.sqrt(TWO_PI))
-            def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
-                cube[n] = norm * exp(-((cube[n] - mean) / stddev)**2)
+        def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
+            """Get log likelihood values.
 
-        elif prior_kind == PRI_LOG_NORMAL:
-            priors_used[dim_name] = (prior_kind, prior_params)
-            shape, loc, scale, low, high = prior_params
-            lognorm = stats.lognorm(shape, loc, scale)
-            def prior_func(cube, lognorm=lognorm, n=dim_num, low=low, high=high):
-                cube[n] = np.clip(lognorm.isf(cube[n]), a_min=low, a_max=high)
+            Defined as a closure to capture particulars of the event and priors without
+            having to pass these as parameters to the function.
 
-        elif prior_kind == PRI_SPEFIT2:
-            spe_fit_val = event['recos']['SPEFit2'][dim_name]
-            rel_loc, scale, low, high = prior_params
-            loc = spe_fit_val + rel_loc
-            cauchy = stats.cauchy(loc=loc, scale=scale)
-            if dim_name == T:
-                low += hits_summary['time_window_start']
-                high += hits_summary['time_window_stop']
-            priors_used[dim_name] = (PRI_CAUCHY, (loc, scale, low, high))
-            def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high):
-                cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
+            Note that this is called _after_ `prior` has been called, so `cube`
+            already contains the parameter values scaled to be in their physical
+            ranges.
 
+            """
+            if not t_start:
+                t_start.append(time.time())
+
+            hypo = OrderedDict(zip(opt_params_names, cube))
+
+            sources = hypo_handler.get_sources(hypo)
+            pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
+            scaling_sources = hypo_handler.get_scaling_sources(hypo)
+
+            t0 = time.time()
+            llh, pegleg_idx, scalefactor = get_llh(
+                sources=sources,
+                pegleg_sources=pegleg_sources,
+                scaling_sources=scaling_sources,
+                event_hit_info=event_hit_info,
+                time_window=time_window,
+                event_dom_info=event_dom_info,
+                tables=tables,
+                table_norm=table_norm,
+                t_indep_tables=t_indep_tables,
+                t_indep_table_norm=t_indep_table_norm,
+            )
+            t1 = time.time()
+
+            # TODO: this is just for testing
+            pegleg_result = pegleg_eval(pegleg_idx)
+
+            log_likelihoods.append(llh)
+            result = tuple(
+                [float(cube[i]) for i in range(len(opt_params_names))]
+                + [pegleg_result]
+                + [scalefactor]
+            )
+            param_values.append(result)
+
+            n_calls = len(log_likelihoods)
+
+            if n_calls % report_after == 0:
+                print('')
+                t_now = time.time()
+                best_idx = np.argmax(log_likelihoods)
+                best_llh = log_likelihoods[best_idx]
+                best_p = param_values[best_idx]
+                msg = 'best llh = {:.3f} @ '.format(best_llh)
+                for key, val in zip(hypo_params, best_p):
+                    msg += ' %s=%.1f'%(key, val)
+                print(msg)
+                msg = 'this llh = {:.3f} @ '.format(llh)
+                for key, val in zip(hypo_params, result):
+                    msg += ' %s=%.1f'%(key, val)
+                print(msg)
+                print('{} LLH computed'.format(n_calls))
+                print('avg time per llh: {:.3f} ms'.format((t_now - t_start[0])/n_calls*1000))
+                print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
+                print('')
+
+            return llh
+
+        return loglike
+
+    def run_scipy(self, prior, loglike, method, eps):
+        from scipy import optimize
+
+        # initial guess
+        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+
+        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
+            param_vals = np.copy(x)
+            prior(param_vals)
+            llh = loglike(param_vals)
+            del param_vals
+            return -llh
+
+        bounds = [(eps, 1 - eps)]*self.n_opt_dim
+        settings = OrderedDict()
+        settings['eps'] = eps
+
+        if method == 'differential_evolution':
+            optimize.differential_evolution(fun, bounds=bounds, popsize=100)
         else:
-            raise NotImplementedError('Prior "{}" not implemented.'
-                                      .format(prior_kind))
+            optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
 
-        prior_funcs.append(prior_func)
+        return settings
 
-    param_values = []
-    log_likelihoods = []
-    t_start = []
+    def run_skopt(self, prior, loglike):
+        from skopt import gp_minimize #, forest_minimize
 
-    report_after = 1000
+        # initial guess
+        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
 
-    def prior(cube, ndim, nparams): # pylint: disable=unused-argument
-        """Function for pymultinest to translate the hypercube MultiNest uses
-        (each value is in [0, 1]) into the dimensions of the parameter space.
+        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
+            param_vals = np.copy(x)
+            prior(param_vals)
+            llh = loglike(param_vals)
+            del param_vals
+            return -llh
 
-        Note that the cube dimension names are defined in module variable
-        `CUBE_DIMS` for reference elsewhere.
+        bounds = [(0, 1)]*self.n_opt_dim
+        settings = OrderedDict()
+
+        res = gp_minimize(
+            fun,                # function to minimize
+            bounds,             # bounds on each dimension of x
+            acq_func="EI",      # acquisition function
+            n_calls=1000,       # number of evaluations of f
+            n_random_starts=5,  # number of random initialization
+            x0=list(x0),
+        )
+
+        return settings
+
+    def run_nlopt(self, prior, loglike):
+        import nlopt
+
+        def fun(x, grad): # pylint: disable=unused-argument, missing-docstring
+            param_vals = np.copy(x)
+            #print(param_vals)
+            prior(param_vals)
+            #print(param_vals)
+            llh = loglike(param_vals)
+            del param_vals
+            return -llh
+
+        # bounds
+        lower_bounds = np.zeros(shape=(self.n_opt_dim,))
+        upper_bounds = np.ones(shape=(self.n_opt_dim,))
+        # for angles make bigger
+        for i, name in enumerate(self.opt_params_names):
+            if 'azimuth' in name:
+                lower_bounds[i] = -0.5
+                upper_bounds[i] = 1.5
+            if 'zenith' in name:
+                lower_bounds[i] = -0.5
+                upper_bounds[i] = 1.5
+
+        # initial guess
+        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+
+        # stepsize
+        dx = np.zeros(shape=(self.n_opt_dim,))
+        for i in range(self.n_opt_dim):
+            if 'azimuth' in self.hypo_handler.params[i]:
+                dx[i] = 0.001
+            elif 'zenith' in self.hypo_handler.params[i]:
+                dx[i] = 0.001
+            elif self.hypo_handler.params[i] in ('x', 'y'):
+                dx[i] = 0.005
+            elif self.hypo_handler.params[i] == 'z':
+                dx[i] = 0.002
+            elif self.hypo_handler.params[i] == 'time':
+                dx[i] = 0.01
+
+        # does not converge :/
+        local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+        local_opt.set_lower_bounds([0.]*self.n_opt_dim)
+        local_opt.set_upper_bounds([1.]*self.n_opt_dim)
+        local_opt.set_min_objective(fun)
+        #local_opt.set_ftol_abs(0.5)
+        #local_opt.set_ftol_abs(100)
+        #local_opt.set_xtol_rel(10)
+        local_opt.set_ftol_abs(1)
+        opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_dim)
+        opt.set_lower_bounds([0.]*self.n_opt_dim)
+        opt.set_upper_bounds([1.]*self.n_opt_dim)
+        opt.set_min_objective(fun)
+        opt.set_local_optimizer(local_opt)
+        opt.set_ftol_abs(10)
+        opt.set_xtol_rel(1)
+        opt.set_maxeval(1111)
+
+        #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+
+        #opt.set_lower_bounds(lower_bounds)
+        #opt.set_upper_bounds(upper_bounds)
+        #opt.set_min_objective(fun)
+        #opt.set_ftol_abs(0.1)
+        #opt.set_population([x0])
+        #opt.set_initial_step(dx)
+
+        #local_opt.set_maxeval(10)
+
+        x = opt.optimize(x0) # pylint: disable=unused-variable
+
+        # polish it up
+        #print('***************** polishing ******************')
+
+        #dx = np.ones(shape=(self.n_opt_dim,)) * 0.001
+        #dx[0] = 0.1
+        #dx[1] = 0.1
+
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+        #lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
+        #upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
+        #lower_bounds[0] = 0
+        #lower_bounds[1] = 0
+        #upper_bounds[0] = 0
+        #upper_bounds[1] = 0
+
+        #local_opt.set_lower_bounds(lower_bounds)
+        #local_opt.set_upper_bounds(upper_bounds)
+        #local_opt.set_min_objective(fun)
+        #local_opt.set_ftol_abs(0.1)
+        #local_opt.set_initial_step(dx)
+        #x = opt.optimize(x)
+
+        settings = OrderedDict()
+        settings['method'] = opt.get_algorithm_name()
+        settings['ftol_abs'] = opt.get_ftol_abs()
+        settings['ftol_rel'] = opt.get_ftol_rel()
+        settings['xtol_abs'] = opt.get_xtol_abs()
+        settings['xtol_rel'] = opt.get_xtol_rel()
+        settings['maxeval'] = opt.get_maxeval()
+        settings['maxtime'] = opt.get_maxtime()
+        settings['stopval'] = opt.get_stopval()
+
+        return settings
+
+    def run_multinest(
+            self,
+            prior,
+            loglike,
+            importance_sampling,
+            max_modes,
+            const_eff,
+            n_live,
+            evidence_tol,
+            sampling_eff,
+            max_iter,
+            seed,
+    ):
+        """Setup and run MultiNest on an event.
+
+        See the README file from MultiNest for greater detail on parameters
+        specific to to MultiNest (parameters from `importance_sampling` on).
+
+        Parameters
+        ----------
+        importance_sampling
+        max_modes
+        const_eff
+        n_live
+        evidence_tol
+        sampling_eff
+        max_iter
+            Note that this limit is the maximum number of sample replacements and
+            _not_ max number of likelihoods evaluated. A replacement only occurs
+            when a likelihood is found that exceeds the minimum likelihood among
+            the live points.
+        seed
+
+        Returns
+        -------
+        llhp : length `num_llh` array of dtype llhp_t
+            LLH and the corresponding parameter values.
+
+        settings : OrderedDict
+            Metadata used for running MultiNest, i.e.
+            the keyword args used to invoke the `pymultinest.run` function.
 
         """
-        for prior_func in prior_funcs:
-            prior_func(cube)
+        # pylint: disable=missing-docstring
+        # Import pymultinest here; it's a less common dependency, so other
+        # functions / constants in this module will still be import-able w/o it.
+        import pymultinest
 
-    get_llh = dom_tables._get_llh # pylint: disable=protected-access
-    dom_info = dom_tables.dom_info
-    tables = dom_tables.tables
-    table_norm = dom_tables.table_norm
-    t_indep_tables = dom_tables.t_indep_tables
-    t_indep_table_norm = dom_tables.t_indep_table_norm
-    sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
-    time_window = np.float32(
-        hits_summary['time_window_stop'] - hits_summary['time_window_start']
-    )
-    # TODO: implement logic allowing for not all DOMs to be used
-    #hit_sd_indices = np.array(
-    #    sorted(dom_tables.use_sd_indices_set.union(hits_indexer['sd_idx'])),
-    #    dtype=np.uint32
-    #)
-    hit_sd_indices = hits_indexer['sd_idx']
-    unhit_sd_indices = np.array(
-        sorted(ALL_STRS_DOMS_SET.difference(hit_sd_indices)),
-        dtype=np.uint32
-    )
+        # TODO: reintroduce full set of MN params
+        settings = OrderedDict([
+            ('n_dims', self.n_opt_dim),
+            ('n_params', self.n_opt_dim),
+            ('n_clustering_params', self.n_opt_dim),
+            ('wrapped_params', [int('azimuth' in p.lower()) for p in self.opt_params_names]),
+            ('importance_nested_sampling', importance_sampling),
+            ('multimodal', max_modes > 1),
+        ])
 
-    # DEBUG
-    #table_indices = []
-    #t_indep_indices = []
-
-    def loglike(cube, ndim, nparams): # pylint: disable=unused-argument
-        """Function pymultinest calls to get llh values.
-
-        Note that this is called _after_ `prior` has been called, so `cube`
-        alsready contains the parameter values scaled to be in their physical
-        ranges.
-
-        """
-        if not t_start:
-            t_start.append(time.time())
-
-        t0 = time.time()
-
-        total_energy = cube[CUBE_ENERGY_IDX]
-        track_fraction = cube[CUBE_TRACK_FRAC_IDX]
-
-        if HYPO_PARAMS_T is HypoParams8D:
-            hypo = HYPO_PARAMS_T(
-                time=cube[CUBE_T_IDX],
-                x=cube[CUBE_X_IDX],
-                y=cube[CUBE_Y_IDX],
-                z=cube[CUBE_Z_IDX],
-                track_zenith=cube[CUBE_TRACK_ZEN_IDX],
-                track_azimuth=cube[CUBE_TRACK_AZ_IDX],
-                cascade_energy=total_energy * (1 - track_fraction),
-                track_energy=total_energy * track_fraction
-            )
-        else:
-            hypo = HYPO_PARAMS_T(
-                time=cube[CUBE_T_IDX],
-                x=cube[CUBE_X_IDX],
-                y=cube[CUBE_Y_IDX],
-                z=cube[CUBE_Z_IDX],
-                track_zenith=cube[CUBE_TRACK_ZEN_IDX],
-                track_azimuth=cube[CUBE_TRACK_AZ_IDX],
-                cascade_energy=total_energy * (1 - track_fraction),
-                track_energy=total_energy * track_fraction,
-                cascade_zenith=cube[CUBE_CSCD_ZEN_IDX],
-                cascade_azimuth=cube[CUBE_CSCD_AZ_IDX]
-            )
-        sources = hypo_handler.get_sources(hypo)
-        llh = get_llh(
-            sources=sources,
-            hits=hits,
-            hits_indexer=hits_indexer,
-            unhit_sd_indices=unhit_sd_indices,
-            sd_idx_table_indexer=sd_idx_table_indexer,
-            time_window=time_window,
-            dom_info=dom_info,
-            tables=tables,
-            table_norm=table_norm,
-            t_indep_tables=t_indep_tables,
-            t_indep_table_norm=t_indep_table_norm,
-            # DEBUG
-            #table_indices=table_indices,
-            #t_indep_indices=t_indep_indices
+        print('Runing MultiNest...')
+        pymultinest.run(
+            LogLikelihood=loglike,
+            Prior=prior,
+            verbose=True,
+            outputfiles_basename=self.out_prefix,
+            resume=False,
+            write_output=False,
+            n_iter_before_update=5000,
+            **settings
         )
-        # DEBUG
-        #print('')
-        #with open('/tmp/get_llh.asm', 'w') as f:
-        #print(get_llh.inspect_asm(get_llh.signatures[0]))
-        #print('number of signatures:', len(get_llh.signatures))
-        #print('')
-        #raise Exception()
 
-        t1 = time.time()
-
-        param_values.append(hypo)
-        log_likelihoods.append(llh)
-
-        n_calls = len(log_likelihoods)
-
-        if n_calls % report_after == 0:
-            t_now = time.time()
-            best_idx = np.argmax(log_likelihoods)
-            best_llh = log_likelihoods[best_idx]
-            best_p = param_values[best_idx]
-            print('')
-            if HYPO_PARAMS_T is HypoParams8D:
-                print(('best llh = {:.3f} @ '
-                       '(t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
-                       ' zen={:.1f} deg, az={:.1f} deg, Etrk={:.1f}, Ecscd={:.1f})')
-                      .format(
-                          best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
-                          np.rad2deg(best_p.track_zenith),
-                          np.rad2deg(best_p.track_azimuth),
-                          best_p.track_energy,
-                          best_p.cascade_energy))
-            else:
-                print(('best llh = {:.3f} @'
-                       ' (t={:+.1f}, x={:+.1f}, y={:+.1f}, z={:+.1f},'
-                       ' zen_trk={:.1f} deg, zen_csc={:.1f} deg,'
-                       ' az_trk={:.1f}, az_csc={:.1f},'
-                       ' Etrk={:.1f}, Ecscd={:.1f})')
-                      .format(
-                          best_llh, best_p.time, best_p.x, best_p.y, best_p.z,
-                          np.rad2deg(best_p.track_zenith),
-                          np.rad2deg(best_p.cascade_zenith),
-                          np.rad2deg(best_p.track_azimuth),
-                          np.rad2deg(best_p.cascade_azimuth),
-                          best_p.track_energy,
-                          best_p.cascade_energy))
-            print('{} LLH computed'.format(n_calls))
-            print('avg time per llh: {:.3f} ms'.format((t_now - t_start[0])/n_calls*1000))
-            print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
-            print('')
-
-        return llh
-
-    n_dims = len(HYPO_PARAMS_T._fields)
-    mn_kw = OrderedDict([
-        ('n_dims', n_dims),
-        ('n_params', n_dims),
-        ('n_clustering_params', n_dims),
-        ('wrapped_params', [int('azimuth' in p.lower()) for p in CUBE_DIMS]),
-        ('importance_nested_sampling', importance_sampling),
-        ('multimodal', max_modes > 1),
-        ('const_efficiency_mode', const_eff),
-        ('n_live_points', n_live),
-        ('evidence_tolerance', evidence_tol),
-        ('sampling_efficiency', sampling_eff),
-        ('null_log_evidence', -1e90),
-        ('max_modes', max_modes),
-        ('mode_tolerance', -1e90),
-        ('seed', seed),
-        ('log_zero', -1e100),
-        ('max_iter', max_iter),
-    ])
-
-    mn_meta = OrderedDict([
-        ('params', CUBE_DIMS),
-        ('original_prior_specs', priors),
-        ('priors_used', priors_used),
-        ('time_window', time_window),
-        ('kwargs', sort_dict(mn_kw)),
-    ])
-
-    outdir = expand(outdir)
-    mkdir(outdir)
-
-    out_prefix = join(outdir, 'evt{}-'.format(event_idx))
-    print('Output files prefix: "{}"\n'.format(out_prefix))
-
-    print('Runing MultiNest...')
-    t0 = time.time()
-    pymultinest.run(
-        LogLikelihood=loglike,
-        Prior=prior,
-        verbose=True,
-        outputfiles_basename=out_prefix,
-        resume=False,
-        write_output=True,
-        n_iter_before_update=5000,
-        **mn_kw
-    )
-    t1 = time.time()
-
-    llhp = np.empty(shape=len(param_values), dtype=LLHP_T)
-    llhp['llh'] = log_likelihoods
-    llhp[list(HYPO_PARAMS_T._fields)] = param_values
-
-    llhp_outf = out_prefix + 'llhp.npy'
-    print('Saving llhp to "{}"...'.format(llhp_outf))
-    np.save(llhp_outf, llhp)
-
-    mn_meta['num_llhp'] = len(param_values)
-    mn_meta['run_time'] = t1 - t0
-    mn_meta_outf = out_prefix + 'multinest_meta.pkl'
-    print('Saving MultiNest metadata to "{}"'.format(mn_meta_outf))
-    pickle.dump(
-        mn_meta,
-        open(mn_meta_outf, 'wb'),
-        protocol=pickle.HIGHEST_PROTOCOL
-    )
-
-    # DEBUG
-    #table_indices_outf = out_prefix + 'table_indices.pkl'
-    #pickle.dump(table_indices, open(table_indices_outf, 'wb'),
-    #            protocol=pickle.HIGHEST_PROTOCOL)
-    #t_indep_table_indices_outf = out_prefix + 't_indep_table_indices.pkl'
-    #pickle.dump(t_indep_indices, open(t_indep_table_indices_outf, 'wb'),
-    #            protocol=pickle.HIGHEST_PROTOCOL)
-
-    return llhp, mn_meta
-
-
-def reco(dom_tables_kw, hypo_kw, events_kw, reco_kw):
-    """Script "main" function"""
-    t00 = time.time()
-
-    dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
-    hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
-    events_iterator = init_obj.get_events(**events_kw)
-
-    print('Running reconstructions...')
-
-    spatial_prior_orig = reco_kw.pop('spatial_prior').strip()
-    spatial_prior_name = spatial_prior_orig.lower()
-    if spatial_prior_name == 'ic':
-        x_prior = (PRI_UNIFORM, (-860, 870))
-        y_prior = (PRI_UNIFORM, (-780, 770))
-        z_prior = (PRI_UNIFORM, (-780, 790))
-    elif spatial_prior_name == 'dc':
-        x_prior = (PRI_UNIFORM, (-150, 270))
-        y_prior = (PRI_UNIFORM, (-210, 150))
-        z_prior = (PRI_UNIFORM, (-770, 760))
-    elif spatial_prior_name == 'dc_subdust':
-        x_prior = (PRI_UNIFORM, (-150, 270))
-        y_prior = (PRI_UNIFORM, (-210, 150))
-        z_prior = (PRI_UNIFORM, (-610, -60))
-    elif spatial_prior_name == 'spefit2':
-        x_prior = (
-            PRI_SPEFIT2,
-            (
-                # scipy.stats.cauchy loc, scale parameters
-                -0.19687812829978152, 14.282171566308806,
-                # Hard limits
-                -600, 750
-            )
-        )
-        y_prior = (
-            PRI_SPEFIT2,
-            (
-                # scipy.stats.cauchy loc, scale parameters
-                -0.2393645701205161, 15.049528023495354,
-                # Hard limits
-                -750, 650
-            )
-        )
-        z_prior = (
-            PRI_SPEFIT2,
-            (
-                # scipy.stats.cauchy loc, scale parameters
-                -5.9170661027492546, 12.089399308036718,
-                # Hard limits
-                -1200, 200
-            )
-        )
-    else:
-        raise ValueError('Spatial prior "{}" not recognized'
-                         .format(spatial_prior_orig))
-
-    temporal_prior_orig = reco_kw.pop('temporal_prior').strip()
-    temporal_prior_name = temporal_prior_orig.lower()
-    if temporal_prior_name == PRI_UNIFORM:
-        time_prior = (PRI_UNIFORM, (-4e3, 0.0))
-    elif temporal_prior_name == PRI_SPEFIT2:
-        time_prior = (
-            PRI_SPEFIT2,
-            (
-                # scipy.stats.cauchy loc (rel to SPEFit2 time), scale
-                -82.631395081663754, 75.619895703067343,
-                # Hard limits (relative to left, right edges of window,
-                # respectively)
-                -4e3, 0.0
-            )
-        )
-    else:
-        raise ValueError('Temporal prior "{}" not recognized'
-                         .format(temporal_prior_orig))
-
-    energy_prior_name = reco_kw.pop('energy_prior')
-    energy_lims = reco_kw.pop('energy_lims')
-    if energy_prior_name == PRI_UNIFORM:
-        energy_prior = (PRI_UNIFORM, (np.min(energy_lims), np.max(energy_lims)))
-    elif energy_prior_name == PRI_LOG_UNIFORM:
-        energy_prior = (PRI_LOG_UNIFORM, (np.min(energy_lims), np.max(energy_lims)))
-    elif energy_prior_name == PRI_LOG_NORMAL:
-        energy_prior = (
-            PRI_LOG_NORMAL,
-            (
-                # scipy.stats.lognorm 3 paramters
-                0.96251341305506233, 0.4175592980195757, 17.543915051586644,
-                # hard limits
-                np.min(energy_lims), np.max(energy_lims)
-            )
-        )
-    else:
-        raise ValueError(str(energy_prior_name))
-
-    priors = OrderedDict([
-        ('time', time_prior),
-        ('x', x_prior),
-        ('y', y_prior),
-        ('z', z_prior),
-        ('track_zenith', (PRI_COSINE, (-1, 1))),
-        ('track_azimuth', (PRI_UNIFORM, (0, TWO_PI))),
-        ('energy', energy_prior),
-        ('track_fraction', (PRI_UNIFORM, (0, 1)))
-    ])
-    if HYPO_PARAMS_T is HypoParams10D:
-        priors['cascade_zenith'] = (PRI_COSINE, (-1, 1))
-        priors['cascade_azimuth'] = (PRI_UNIFORM, (0, TWO_PI))
-
-    for event_idx, event in events_iterator: # pylint: disable=unused-variable
-        t1 = time.time()
-        if 'mc_truth' in event:
-            print(event['mc_truth'])
-        llhp, _ = run_multinest(
-            event_idx=event_idx,
-            event=event,
-            dom_tables=dom_tables,
-            hypo_handler=hypo_handler,
-            priors=priors,
-            **reco_kw
-        )
-        dt = time.time() - t1
-        n_points = llhp.size
-        print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
-              .format(dt, n_points, dt / n_points * 1e3))
-
-    print('Total script run time is {:.3f} s'.format(time.time() - t00))
+        return settings
 
 
 def parse_args(description=__doc__):
@@ -617,15 +598,15 @@ def parse_args(description=__doc__):
         title='Hypothesis parameter priors',
     )
 
-    group.add_argument(
-        '--spatial-prior',
-        choices='dc dc_subdust ic SPEFit2'.split(),
-        required=True,
-        help='''Choose a prior for choosing spatial samples. "dc", "dc_subdust"
-        and "ic" are uniform priors with hard cut-offs at the extents of the
-        respective volumes, while "SPEFit2" samples from Cauchy distributions
-        around the SPEFit2 (x, y, z) best-fit values.'''
-    )
+    #group.add_argument(
+    #    '--spatial-prior',
+    #    choices='dc dc_subdust ic SPEFit2'.split(),
+    #    required=True,
+    #    help='''Choose a prior for choosing spatial samples. "dc", "dc_subdust"
+    #    and "ic" are uniform priors with hard cut-offs at the extents of the
+    #    respective volumes, while "SPEFit2" samples from Cauchy distributions
+    #    around the SPEFit2 (x, y, z) best-fit values.'''
+    #)
     group.add_argument(
         '--temporal-prior',
         choices='uniform SPEFit2'.split(),
@@ -635,18 +616,41 @@ def parse_args(description=__doc__):
         "SPEFit2" samples from a Cauchy distribution near (not *at* due to
         bias) the SPEFit2 time best-fit value.'''
     )
+    #group.add_argument(
+    #    '--cascade-angle-prior',
+    #    choices=[PRI_UNIFORM, PRI_LOG_NORMAL],
+    #    required=False,
+    #    help='''Prior to put on opening angle between track and cascade.'''
+    #)
     group.add_argument(
-        '--energy-prior',
+        '--cascade-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
-        required=True,
-        help='''Prior to put on _total_ event energy. Must specify
-        --energy-lims.'''
+        required=False,
+        help='''Prior to put on _total_ event cascade-energy. Must specify
+        --cascade-energy-lims.'''
     )
     group.add_argument(
-        '--energy-lims', nargs='+',
-        required=True,
-        help='''Lower and upper energy limits, in GeV. E.g.: --energy-lims=1,100
-        Required if --energy-prior is {}, {}, or {}'''
+        '--cascade-energy-lims', nargs='+',
+        required=False,
+        help='''Lower and upper cascade-energy limits, in GeV. E.g.: --cascade-energy-lims=1,100
+        Required if --cascade-energy-prior is {}, {}, or {}'''
+        .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
+    )
+
+    group.add_argument(
+        '--track-energy-prior',
+        choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],
+        required=False,
+        help='''Lower and upper cascade-energy limits, in GeV. E.g.: --cascade-energy-lims=1,100
+        Required if --cascade-energy-prior is {}, {}, or {}'''
+        .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
+    )
+
+    group.add_argument(
+        '--track-energy-lims', nargs='+',
+        required=False,
+        help='''Lower and upper track-energy limits, in GeV. E.g.: --track-energy-lims=1,100
+        Required if --track-energy-prior is {}, {}, or {}'''
         .format(PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL)
     )
 
@@ -696,17 +700,33 @@ def parse_args(description=__doc__):
 
     split_kwargs['reco_kw'] = reco_kw = split_kwargs.pop('other_kw')
 
-    if reco_kw['energy_prior'] in [PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL]:
-        assert reco_kw['energy_lims'] is not None
-        elims = ''.join(reco_kw['energy_lims'])
+    if reco_kw['cascade_energy_prior'] in [PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL]:
+        assert reco_kw['cascade_energy_lims'] is not None
+        elims = ''.join(reco_kw['cascade_energy_lims'])
         elims = [float(l) for l in elims.split(',')]
-        reco_kw['energy_lims'] = elims
-    elif reco_kw['energy_lims'] is not None:
-        raise ValueError('--energy-limits not used with energy prior {}'
-                         .format(reco_kw['energy_prior']))
+        reco_kw['cascade_energy_lims'] = elims
+    elif reco_kw['cascade_energy_prior'] is None:
+        reco_kw.pop('cascade_energy_prior')
+        reco_kw.pop('cascade_energy_lims')
+    elif reco_kw['cascade_energy_lims'] is not None:
+        raise ValueError('--cascade-energy-lims not used with cascade_energy prior {}'
+                         .format(reco_kw['cascade_energy_prior']))
+
+    if reco_kw['track_energy_prior'] in [PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL]:
+        assert reco_kw['track_energy_lims'] is not None
+        elims = ''.join(reco_kw['track_energy_lims'])
+        elims = [float(l) for l in elims.split(',')]
+        reco_kw['track_energy_lims'] = elims
+    elif reco_kw['track_energy_prior'] is None:
+        reco_kw.pop('track_energy_prior')
+        reco_kw.pop('track_energy_lims')
+    elif reco_kw['track_energy_lims'] is not None:
+        raise ValueError('--track-energy-lims not used with track_energy prior {}'
+                         .format(reco_kw['track_energy_prior']))
 
     return split_kwargs
 
 
 if __name__ == '__main__':
-    reco(**parse_args())
+    my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
+    my_reco.run()
