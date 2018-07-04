@@ -70,6 +70,10 @@ class RetroReco(object):
         for param in self.opt_params_names:
             self.prior_defs[param] = get_prior_def(param, reco_kw)
 
+        # Remove unused reco kwargs
+        reco_kw.pop('spatial_prior')
+        reco_kw.pop('cascade_angle_prior')
+
     def run(self):
         """Run reconstructions."""
         print('Running reconstructions...')
@@ -99,22 +103,22 @@ class RetroReco(object):
             t_start = []
             loglike = self.generate_loglike(event, param_values, log_likelihoods, t_start)
 
-            #settings = self.run_multinest(
-            #    prior=prior,
-            #    loglike=loglike,
-            #    **self.reco_kw
-            #)
+            settings = self.run_multinest(
+                prior=prior,
+                loglike=loglike,
+                **self.reco_kw
+            )
             #settings = self.run_scipy(
             #    prior=prior,
             #    loglike=loglike,
             #    method='differential_evolution',
             #    eps=0.02
             #)
-            settings = self.run_nlopt(
-                prior=prior,
-                loglike=loglike,
-            )
-            #settings = self.run_skopt(
+            #settings = self.run_nlopt(
+            #    prior=prior,
+            #    loglike=loglike,
+            #)
+            ##settings = self.run_skopt(
             #    prior=prior,
             #    loglike=loglike,
             #)
@@ -286,7 +290,7 @@ class RetroReco(object):
             if not t_start:
                 t_start.append(time.time())
 
-            hypo = OrderedDict(zip(opt_params_names, cube))
+            hypo = OrderedDict(list(zip(opt_params_names, cube)))
 
             sources = hypo_handler.get_sources(hypo)
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
@@ -383,7 +387,7 @@ class RetroReco(object):
         bounds = [(0, 1)]*self.n_opt_dim
         settings = OrderedDict()
 
-        res = gp_minimize(
+        _ = gp_minimize(
             fun,                # function to minimize
             bounds,             # bounds on each dimension of x
             acq_func="EI",      # acquisition function
@@ -524,6 +528,8 @@ class RetroReco(object):
 
         Parameters
         ----------
+        prior
+        loglike
         importance_sampling
         max_modes
         const_eff
@@ -539,15 +545,11 @@ class RetroReco(object):
 
         Returns
         -------
-        llhp : length `num_llh` array of dtype llhp_t
-            LLH and the corresponding parameter values.
-
         settings : OrderedDict
             Metadata used for running MultiNest, i.e.
             the keyword args used to invoke the `pymultinest.run` function.
 
         """
-        # pylint: disable=missing-docstring
         # Import pymultinest here; it's a less common dependency, so other
         # functions / constants in this module will still be import-able w/o it.
         import pymultinest
@@ -560,6 +562,16 @@ class RetroReco(object):
             ('wrapped_params', [int('azimuth' in p.lower()) for p in self.opt_params_names]),
             ('importance_nested_sampling', importance_sampling),
             ('multimodal', max_modes > 1),
+            ('const_efficiency_mode', const_eff),
+            ('n_live_points', n_live),
+            ('evidence_tolerance', evidence_tol),
+            ('sampling_efficiency', sampling_eff),
+            ('null_log_evidence', -1e90),
+            ('max_modes', max_modes),
+            ('mode_tolerance', -1e90),
+            ('seed', seed),
+            ('log_zero', -1e100),
+            ('max_iter', max_iter),
         ])
 
         print('Runing MultiNest...')
@@ -598,15 +610,15 @@ def parse_args(description=__doc__):
         title='Hypothesis parameter priors',
     )
 
-    #group.add_argument(
-    #    '--spatial-prior',
-    #    choices='dc dc_subdust ic SPEFit2'.split(),
-    #    required=True,
-    #    help='''Choose a prior for choosing spatial samples. "dc", "dc_subdust"
-    #    and "ic" are uniform priors with hard cut-offs at the extents of the
-    #    respective volumes, while "SPEFit2" samples from Cauchy distributions
-    #    around the SPEFit2 (x, y, z) best-fit values.'''
-    #)
+    group.add_argument(
+        '--spatial-prior',
+        choices='dc dc_subdust ic SPEFit2'.split(),
+        required=True,
+        help='''Choose a prior for choosing spatial samples. "dc", "dc_subdust"
+        and "ic" are uniform priors with hard cut-offs at the extents of the
+        respective volumes, while "SPEFit2" samples from Cauchy distributions
+        around the SPEFit2 (x, y, z) best-fit values.'''
+    )
     group.add_argument(
         '--temporal-prior',
         choices='uniform SPEFit2'.split(),
@@ -616,12 +628,12 @@ def parse_args(description=__doc__):
         "SPEFit2" samples from a Cauchy distribution near (not *at* due to
         bias) the SPEFit2 time best-fit value.'''
     )
-    #group.add_argument(
-    #    '--cascade-angle-prior',
-    #    choices=[PRI_UNIFORM, PRI_LOG_NORMAL],
-    #    required=False,
-    #    help='''Prior to put on opening angle between track and cascade.'''
-    #)
+    group.add_argument(
+        '--cascade-angle-prior',
+        choices=[PRI_UNIFORM, PRI_LOG_NORMAL],
+        required=False,
+        help='''Prior to put on opening angle between track and cascade.'''
+    )
     group.add_argument(
         '--cascade-energy-prior',
         choices=[PRI_UNIFORM, PRI_LOG_UNIFORM, PRI_LOG_NORMAL],

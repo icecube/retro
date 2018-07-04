@@ -19,8 +19,8 @@ mkdir -p "$outdir"
 
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
-    proto="/data/icecube/retro_tables/large_5d_notilt_combined/stacked"
-    tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    proto="/home/icecube/retro/tables/large_5d_notilt_combined/stacked"
+    tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 else
     proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
     tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
@@ -37,7 +37,7 @@ consteff=""
 
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
-~/retro/retro/reco.py \
+~/src/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
