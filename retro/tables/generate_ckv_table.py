@@ -53,8 +53,8 @@ from retro.utils.misc import expand, mkdir
 
 
 def generate_ckv_table(
-        table, beta, oversample, num_cone_samples, outdir=None, mmap_src=True,
-        mmap_dst=False
+        table, t_is_dt, beta, oversample, num_cone_samples, outdir=None,
+        mmap_src=True, mmap_dst=False
     ):
     """
     Parameters
@@ -63,6 +63,10 @@ def generate_ckv_table(
         If string, path to table file (or directory in the case of npy table).
         A mapping is assumed to be a table loaded as by
         `retro.table_readers.load_clsim_table_minimal`.
+
+    t_is_dt : bool
+        Whether table time binning is time difference from direct-light (True)
+        or time binning is absolute time from photon creation (False).
 
     beta : float in [0, 1]
         Beta factor, i.e. velocity of the charged particle divided by the speed
@@ -119,6 +123,7 @@ def generate_ckv_table(
     # NOTE: we are making output binning same as input binning.
 
     n_phase = table['phase_refractive_index']
+    n_group = table['group_refractive_index']
     cos_ckv = 1 / (n_phase * beta)
     if cos_ckv > 1:
         raise ValueError(
@@ -167,11 +172,12 @@ def generate_ckv_table(
             r_bin_edges=r_bin_edges.astype(np.float32),
             ct_bin_edges=costheta_bin_edges.astype(np.float32),
             t_bin_edges=t_bin_edges.astype(np.float32),
+            t_is_dt=t_is_dt,
             ctdir_bin_edges=costhetadir_bin_edges.astype(np.float32),
             dpdir_bin_edges=deltaphidir_bin_edges.astype(np.float32),
             num_cone_samples=num_cone_samples,
             oversample=oversample,
-            n_phase=n_phase
+            n_group=n_group,
         )
     except:
         del ckv_table
@@ -191,6 +197,11 @@ def parse_args(description=__doc__):
     parser.add_argument(
         '--table', required=True,
         help='''npy-table directories and/or .fits table files'''
+    )
+    parser.add_argument(
+        '--t-is-dt', action='store_true',
+        help='''Pass this flag if table's time binning is time difference from
+        direct time.'''
     )
     parser.add_argument(
         '--beta', type=float, default=1.0,
