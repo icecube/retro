@@ -36,7 +36,6 @@ from collections import Mapping, OrderedDict
 from operator import getitem
 from os import listdir
 from os.path import abspath, dirname, isdir, isfile, join, splitext
-import pickle
 import re
 import sys
 import time
@@ -44,13 +43,22 @@ import time
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import const, load_pickle
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
-    point_cascade, point_ckv_cascade, one_dim_cascade, aligned_point_ckv_cascade, aligned_one_dim_cascade, scaling_aligned_point_ckv_cascade, scaling_aligned_one_dim_cascade, scaling_one_dim_cascade, one_dim_delta_cascade, scaling_one_dim_delta_cascade
+    point_cascade,
+    point_ckv_cascade,
+    one_dim_cascade,
+    aligned_point_ckv_cascade,
+    aligned_one_dim_cascade,
+    scaling_aligned_point_ckv_cascade,
+    scaling_aligned_one_dim_cascade,
+    scaling_one_dim_cascade,
+    one_dim_delta_cascade,
+    scaling_one_dim_delta_cascade,
 )
 from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon, pegleg_muon
@@ -202,7 +210,6 @@ def setup_discrete_hypo(
     ----------
     cascade_kernel : string or None
         One of {"point", "point_ckv", or "one_dim"}
-
     track_kernel : string or None
     track_time_step : float or None
 
@@ -238,16 +245,16 @@ def setup_discrete_hypo(
             kernel_kwargs.append(dict())
         elif cascade_kernel == 'scaling_aligned_one_dim':
             scaling_kernel = scaling_aligned_one_dim_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_aligned_point_ckv':
             scaling_kernel = scaling_aligned_point_ckv_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_one_dim':
             scaling_kernel = scaling_one_dim_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_one_dim_delta':
             scaling_kernel = scaling_one_dim_delta_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         else:
             raise NotImplementedError('{} cascade not implemented yet.'
                                       .format(cascade_kernel))
@@ -825,7 +832,12 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         group.add_argument(
             '--cascade-kernel',
             required=True,
-            choices=['point','point_ckv','one_dim', 'aligned_point_ckv', 'aligned_one_dim', 'scaling_aligned_one_dim', 'scaling_aligned_point_ckv', 'scaling_one_dim', 'one_dim_delta', 'scaling_one_dim_delta'],
+            choices=sorted([
+                'point', 'point_ckv', 'one_dim', 'aligned_point_ckv',
+                'aligned_one_dim', 'scaling_aligned_one_dim',
+                'scaling_aligned_point_ckv', 'scaling_one_dim',
+                'one_dim_delta', 'scaling_one_dim_delta'
+            ]),
         )
         group.add_argument(
             '--track-kernel',

@@ -21,7 +21,6 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.utils.misc import expand
-from retro.reco import CUBE_DIMS
 
 
 UNITS = dict(
@@ -33,13 +32,15 @@ UNITS = dict(
 # TODO: handle multi-modal output
 
 
-def parse(stats):
+def parse(stats, cube_dims):
     """Parse the contents of a MultiNest *stats output file.
 
     Parameters
     ----------
     stats : iterable of str
         Result of open(file, 'r').readlines()
+    cube_dims : sequence
+        Dimension names in order used for the MultiNest hypercube
 
     Returns
     -------
@@ -53,12 +54,12 @@ def parse(stats):
     if not found:
         raise ValueError('Could not find line with "Dim No." in file')
 
-    stats = [s.strip() for s in stats[lineno + 1 : lineno + 1 + len(CUBE_DIMS)]]
+    stats = [s.strip() for s in stats[lineno + 1 : lineno + 1 + len(cube_dims)]]
 
     points = OrderedDict()
     errors = OrderedDict()
 
-    for stat_line, dim in zip(stats, CUBE_DIMS):
+    for stat_line, dim in zip(stats, cube_dims):
         points[dim], errors[dim] = [float(x) for x in stat_line.split()[1:]]
 
     e_pt = points['energy']

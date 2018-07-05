@@ -31,7 +31,6 @@ __all__ = [
     'TRIGGER_T',
     'SRC_T',
     'EVT_DOM_INFO_T',
-    'EXP_DOM_T',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
