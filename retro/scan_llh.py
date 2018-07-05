@@ -39,8 +39,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
-from retro import likelihood
-from retro.const import ALL_STRS_DOMS_SET, EMPTY_SOURCES
+from retro.const import ALL_STRS_DOMS_SET
 from retro.scan import scan
 from retro.utils.misc import expand, mkdir, sort_dict, hrlist2list
 from retro.retro_types import PARAM_NAMES
@@ -98,42 +97,7 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     print('Scanning paramters')
     t0 = time.time()
 
-    fast_llh = True
-
-<<<<<<< HEAD
-    if fast_llh:
-        get_llh = dom_tables._get_llh # pylint: disable=protected-access
-        dom_info = dom_tables.dom_info
-        tables = dom_tables.tables
-        table_norm = dom_tables.table_norm.astype(np.float32)
-        t_indep_tables = dom_tables.t_indep_tables
-        t_indep_table_norm = dom_tables.t_indep_table_norm.astype(np.float32)
-        sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
-        metric_kw = {}
-        def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,
-                           time_window):
-            sources = hypo_handler.get_sources(hypo)
-            return get_llh(
-                sources=sources,
-                hits=hits,
-                hits_indexer=hits_indexer,
-                unhit_sd_indices=unhit_sd_indices,
-                sd_idx_table_indexer=sd_idx_table_indexer,
-                time_window=time_window,
-                dom_info=dom_info,
-                tables=tables,
-                table_norm=table_norm,
-                t_indep_tables=t_indep_tables,
-                t_indep_table_norm=t_indep_table_norm
-            )
-    else:
-        metric_kw = dict(dom_tables=dom_tables, tdi_table=None)
-        get_llh = likelihood.get_llh
-        def metric_wrapper(hypo, **metric_kw):
-            sources = hypo_handler.get_sources(hypo)
-            return get_llh(sources=sources, **metric_kw)
-=======
-    get_llh = dom_tables._get_llh
+    get_llh = dom_tables._get_llh # pylint: disable=protected-access
     dom_info = dom_tables.dom_info
     tables = dom_tables.tables
     table_norm = dom_tables.table_norm
@@ -141,12 +105,13 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     t_indep_table_norm = dom_tables.t_indep_table_norm
     sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
     metric_kw = {}
-    def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,
-                       time_window):
+    def metric_wrapper( # pylint: disable=missing-docstring
+            hypo, hits, hits_indexer, unhit_sd_indices, time_window
+        ):
         sources = hypo_handler.get_sources(hypo)
         pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
         scaling_sources = hypo_handler.get_scaling_sources(hypo)
-        llh, pegleg_idx, scalefactor = get_llh(
+        llh, _, _ = get_llh(
             sources=sources,
             pegleg_sources=pegleg_sources,
             scaling_sources=scaling_sources,
@@ -162,7 +127,6 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
             t_indep_table_norm=t_indep_table_norm
         )
         return llh
->>>>>>> philippeller/master
 
     n_points_total = 0
     metric_vals = []
