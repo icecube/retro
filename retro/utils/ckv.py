@@ -12,12 +12,12 @@ mapping.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    get_cone_map
-    convolve_table
-    survival_prob_from_smeared_cone
-    survival_prob_from_cone
-'''.split()
+__all__ = [
+    'get_cone_map',
+    'convolve_table',
+    'survival_prob_from_smeared_cone',
+    'survival_prob_from_cone'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -45,7 +45,12 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
-from retro.const import PI, TWO_PI, SPEED_OF_LIGHT_M_PER_NS
+from retro.const import SPEED_OF_LIGHT_M_PER_NS
+
+
+FLOAT_T = np.float32
+PI = FLOAT_T(np.pi)
+TWO_PI = FLOAT_T(2*np.pi)
 
 
 # NOTE: dithering the ckv angle appears to do non-representative things to the
@@ -90,8 +95,8 @@ from retro.const import PI, TWO_PI, SPEED_OF_LIGHT_M_PER_NS
 #    weights : array of floats, same len as `bin_indices`
 #
 #    """
-#    costheta_bin_width = 2 / float(num_costheta_bins)
-#    deltaphi_bin_width = PI / float(num_deltaphi_bins)
+#    costheta_bin_width = 2 / FLOAT_T(num_costheta_bins)
+#    deltaphi_bin_width = PI / FLOAT_T(num_deltaphi_bins)
 #
 #    last_costheta_bin = num_costheta_bins - 1
 #    last_deltaphi_bin = num_deltaphi_bins - 1
@@ -100,7 +105,7 @@ from retro.const import PI, TWO_PI, SPEED_OF_LIGHT_M_PER_NS
 #    counts = []
 #    counts_total = 0
 #
-#    phi_step = TWO_PI / float(num_phi)
+#    phi_step = TWO_PI / FLOAT_T(num_phi)
 #
 #    for phi_idx in range(num_phi):
 #        p_phi = phi_idx * phi_step
@@ -138,12 +143,12 @@ from retro.const import PI, TWO_PI, SPEED_OF_LIGHT_M_PER_NS
 #                counts.append(1)
 #
 #    cnt_tot = np.float64(counts_total)
-#    weights = np.array([np.float64(c) / cnt_tot for c in counts], dtype=np.float32)
+#    weights = np.array([np.float64(c) / cnt_tot for c in counts], dtype=FLOAT_T)
 #
 #    return bin_indices, weights
 
 
-@numba_jit(parallel=False, nogil=True, cache=True) #**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
 def get_cone_map(
         costheta, sintheta, num_phi, axis_costheta, axis_sintheta, axis_cosphi,
         axis_sinphi, num_costheta_bins, num_deltaphi_bins
@@ -181,8 +186,8 @@ def get_cone_map(
     weights : array of floats, same len as `bin_indices`
 
     """
-    costheta_bin_width = 2 / float(num_costheta_bins)
-    deltaphi_bin_width = PI / float(num_deltaphi_bins)
+    costheta_bin_width = 2 / FLOAT_T(num_costheta_bins)
+    deltaphi_bin_width = PI / FLOAT_T(num_deltaphi_bins)
 
     last_costheta_bin = num_costheta_bins - 1
     last_deltaphi_bin = num_deltaphi_bins - 1
@@ -191,7 +196,7 @@ def get_cone_map(
     counts = []
     counts_total = 0
 
-    phi_step = TWO_PI / float(num_phi)
+    phi_step = TWO_PI / FLOAT_T(num_phi)
 
     assert axis_costheta.shape == axis_sintheta.shape == axis_cosphi.shape == axis_sinphi.shape
 
@@ -232,17 +237,18 @@ def get_cone_map(
                 counts.insert(0, 1)
 
     cnt_tot = np.float64(counts_total)
-    weights = np.array([np.float64(c) / cnt_tot for c in counts], dtype=np.float32)
+    weights = np.array([np.float64(c) / cnt_tot for c in counts], dtype=FLOAT_T)
     costheta_indices = np.array([i[0] for i in bin_indices], dtype=np.uint32)
     deltaphi_indices = np.array([i[1] for i in bin_indices], dtype=np.uint32)
 
     return costheta_indices, deltaphi_indices, weights
 
 
-@numba_jit(parallel=False, nogil=True, cache=True) #**DFLT_NUMBA_JIT_KWARGS)
+@numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
 def convolve_table(
         src, dst, cos_ckv, sin_ckv, r_bin_edges, ct_bin_edges, t_bin_edges,
-        ctdir_bin_edges, dpdir_bin_edges, num_cone_samples, oversample, n_phase
+        t_is_dt, ctdir_bin_edges, dpdir_bin_edges, num_cone_samples,
+        oversample, n_group
     ):
     """
     Parameters
@@ -262,6 +268,10 @@ def convolve_table(
     t_bin_edges
         Time bin edges, units of nanoseconds.
 
+    t_is_dt : bool
+        Whether time bins represent time residuals (True) or absolute time
+        (False).
+
     ctdir_bin_edges : array
         Cosine-of-direction-theta (zenith angle) bin edges.
 
@@ -272,11 +282,12 @@ def convolve_table(
 
     oversample : int > 0
 
-    n_phase : float > 0
-        Phase refractive index in the medium (use lowest value used for all ice
+    n_group : float > 0
+        Group refractive index in the medium (use lowest value used for all ice
         simulated).
 
     """
+    n_t = len(t_bin_edges) - 1
     n_ct = len(ct_bin_edges) - 1
     n_ctdir = len(ctdir_bin_edges) - 1
     n_dpdir = len(dpdir_bin_edges) - 1
@@ -299,15 +310,21 @@ def convolve_table(
     samples_shape = (oversample, oversample)
 
     # Cosine and sine of thetadir
-    ctd_samples = np.empty(shape=samples_shape, dtype=np.float32)
-    std_samples = np.empty(shape=samples_shape, dtype=np.float32)
+    ctd_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
+    std_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
 
     # Cosine and sine of deltaphidir
-    cdpd_samples = np.empty(shape=samples_shape, dtype=np.float32)
-    sdpd_samples = np.empty(shape=samples_shape, dtype=np.float32)
+    cdpd_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
+    sdpd_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
 
-    # Max distance from the DOM light could be, for each time bin
-    tbin_max_dist = [t*SPEED_OF_LIGHT_M_PER_NS/n_phase for t in np.nditer(t_bin_edges[1:])]
+    # Max distance from the DOM light could be for each time bin
+    if t_is_dt:
+        causal = True
+    if not t_is_dt:
+        tbin_max_dist = np.array(
+            [t*SPEED_OF_LIGHT_M_PER_NS/n_group for t in np.nditer(t_bin_edges[1:])],
+            dtype=FLOAT_T
+        )
 
     for ctdir_idx in range(n_ctdir):
         ctd0 = ctdir_min_samp + ctdir_idx*ctdir_bw
@@ -340,16 +357,23 @@ def convolve_table(
                 num_costheta_bins=n_ctdir,
                 num_deltaphi_bins=n_dpdir
             )
-            assert len(ctd_idxs) == len(dpd_idxs) == len(weights)
+            num_idxs = len(ctd_idx)
+            assert len(dpd_idxs) == len(weights) == num_idxs
 
             for r_idx, r_lower in enumerate(np.nditer(r_bin_edges[:-1])):
-                for t_idx, max_dist in enumerate(tbin_max_dist):
-                    causal = r_lower <= max_dist
+                for t_idx in range(n_t):
+                    if not t_is_dt:
+                        max_dist = tbin_max_dist[t_idx]
+                        causal = r_lower <= max_dist
                     for ct_idx in range(n_ct):
                         avg = 0.0
                         if causal:
                             # Apply the weights to the corresponding entries
-                            for ctd_idx, dpd_idx, weight in zip(ctd_idxs, dpd_idxs, weights):
+                            # (note that weights account for normalization)
+                            for i_idx in range(num_idxs):
+                                ctd_idx = ctd_idxs[i_idx]
+                                dpd_idx = dpd_idxs[i_idx]
+                                weight = weights[i_idx]
                                 avg += weight * src[r_idx, ct_idx, t_idx, ctd_idx, dpd_idx]
                             #avg = np.sum(
                             #    weights *
@@ -415,8 +439,8 @@ def survival_prob_from_smeared_cone(
     counts_total = 0
     num_indices = 0
 
-    costheta_bin_width = 2 / float(num_costheta_bins)
-    deltaphi_bin_width = PI / float(num_deltaphi_bins)
+    costheta_bin_width = 2 / FLOAT_T(num_costheta_bins)
+    deltaphi_bin_width = PI / FLOAT_T(num_deltaphi_bins)
 
     last_costheta_bin = num_costheta_bins - 1
     last_deltaphi_bin = num_deltaphi_bins - 1
@@ -426,7 +450,7 @@ def survival_prob_from_smeared_cone(
         costheta = math.cos(offset_theta)
         sintheta = math.sin(offset_theta)
 
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
+        p_phi = TWO_PI * FLOAT_T(phi_idx) / FLOAT_T(num_phi)
 
         sin_p_phi = math.sin(p_phi)
         cos_p_phi = math.cos(p_phi)
@@ -460,7 +484,7 @@ def survival_prob_from_smeared_cone(
 
     # NOTE: Don't use e.g. /= before return until the following is resolved:
     #   https://github.com/numba/numba/issues/2746
-    survival_prob = survival_prob / float(counts_total)
+    survival_prob = survival_prob / FLOAT_T(counts_total)
 
     return survival_prob, bin_indices, counts
 
@@ -518,14 +542,14 @@ def survival_prob_from_cone(
     counts_total = 0
     num_indices = 0
 
-    costheta_bin_width = 2.0 / float(num_costheta_bins)
-    deltaphi_bin_width = PI / float(num_deltaphi_bins)
+    costheta_bin_width = 2.0 / FLOAT_T(num_costheta_bins)
+    deltaphi_bin_width = PI / FLOAT_T(num_deltaphi_bins)
 
     last_costheta_bin = num_costheta_bins - 1
     last_deltaphi_bin = num_deltaphi_bins - 1
 
     for phi_idx in range(num_phi):
-        p_phi = TWO_PI * float(phi_idx) / float(num_phi)
+        p_phi = TWO_PI * FLOAT_T(phi_idx) / FLOAT_T(num_phi)
         sin_p_phi = np.sin(p_phi)
         cos_p_phi = np.cos(p_phi)
         q_costheta = ((-sintheta * rot_sintheta * cos_p_phi)
@@ -563,6 +587,6 @@ def survival_prob_from_cone(
 
     # NOTE: Don't use e.g. /= before return until the following is resolved:
     #   https://github.com/numba/numba/issues/2746
-    survival_prob = survival_prob / float(counts_total)
+    survival_prob = survival_prob / FLOAT_T(counts_total)
 
     return survival_prob, bin_indices, counts

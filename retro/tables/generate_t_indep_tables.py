@@ -10,6 +10,11 @@ with dimensions (r, costheta, costhetadir, deltaphidir)..
 
 from __future__ import absolute_import, division, print_function
 
+__all__ = [
+    'generate_time_indep_tables',
+    'parse_args'
+]
+
 from argparse import ArgumentParser
 from os.path import abspath, basename, dirname, isdir, isfile, join
 import sys
@@ -27,8 +32,12 @@ from retro.tables.ckv_tables import load_ckv_table
 from retro.utils.misc import expand, mkdir
 
 
-def generate_time_indep_tables(table, outdir=None, kinds=('clsim', 'ckv'),
-                               overwrite=False):
+def generate_time_indep_tables(
+        table,
+        outdir=None,
+        kinds=('clsim', 'ckv'),
+        overwrite=False
+    ):
     """Generate and save to disk time independent table(s) from the original
     CLSim table and/or a Cherenkov table.
 
@@ -75,12 +84,26 @@ def generate_time_indep_tables(table, outdir=None, kinds=('clsim', 'ckv'),
             ckv_table_path = table
 
     t_indep_table_exists = False
-    if 'clsim' in kinds and isfile(join(outdir, 't_indep_table.npy')):
+    t_indep_table_fpath = join(outdir, 't_indep_table.npy')
+    if 'clsim' in kinds and isfile(t_indep_table_fpath):
         t_indep_table_exists = True
+        if overwrite:
+            print('WARNING: t_indep_table already exists, overwriting: "{}"'
+                  .format(t_indep_table_fpath))
+        else:
+            print('t_indep_table already exists, not overwriting: "{}"'
+                  .format(t_indep_table_fpath))
 
     t_indep_ckv_table_exists = False
-    if 'ckv' in kinds and isfile(join(outdir, 't_indep_ckv_table.npy')):
+    t_indep_ckv_table_fpath = join(outdir, 't_indep_ckv_table.npy')
+    if 'ckv' in kinds and isfile(t_indep_ckv_table_fpath):
         t_indep_ckv_table_exists = True
+        if overwrite:
+            print('WARNING: t_indep_ckv_table already exists, overwriting: "{}"'
+                  .format(t_indep_ckv_table_fpath))
+        else:
+            print('t_indep_ckv_table already exists, not overwriting: "{}"'
+                  .format(t_indep_ckv_table_fpath))
 
     if 'clsim' in kinds and (overwrite or not t_indep_table_exists):
         if clsim_table_path is None:
@@ -88,7 +111,7 @@ def generate_time_indep_tables(table, outdir=None, kinds=('clsim', 'ckv'),
                 'Told to generate t-indep table from CLSim table but CLSim'
                 ' table does not exist.'
             )
-        print('generating t_indep_table')
+        print('generating t_indep_table at "{}"'.format(clsim_table_path))
         mkdir(outdir)
         t0 = time.time()
 
@@ -104,7 +127,7 @@ def generate_time_indep_tables(table, outdir=None, kinds=('clsim', 'ckv'),
         if retro.DEBUG:
             print('summed over t-axis in {:.3f} s'.format(t2 - t1))
 
-        np.save(join(outdir, 't_indep_table.npy'), t_indep_table)
+        np.save(t_indep_table_fpath, t_indep_table)
 
         t3 = time.time()
         if retro.DEBUG:
@@ -118,7 +141,7 @@ def generate_time_indep_tables(table, outdir=None, kinds=('clsim', 'ckv'),
                 'Told to generate t-indep table from ckv table but ckv'
                 ' table does not exist.'
             )
-        print('generating t_indep_ckv_table')
+        print('generating t_indep_ckv_table at "{}"'.format(ckv_table_path))
         mkdir(outdir)
         t0 = time.time()
 
@@ -134,7 +157,7 @@ def generate_time_indep_tables(table, outdir=None, kinds=('clsim', 'ckv'),
         if retro.DEBUG:
             print('summed over t-axis in {:.3f} s'.format(t2 - t1))
 
-        np.save(join(outdir, 't_indep_ckv_table.npy'), t_indep_ckv_table)
+        np.save(t_indep_ckv_table_fpath, t_indep_ckv_table)
 
         t3 = time.time()
         if retro.DEBUG:

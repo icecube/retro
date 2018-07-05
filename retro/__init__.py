@@ -3,21 +3,23 @@
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    RETRO_DIR
-    DATA_DIR
-    NUMBA_AVAIL
-    FTYPE
-    UITYPE
-    LLHP_T
-    DEBUG
-    DFLT_NUMBA_JIT_KWARGS
-    DFLT_PULSE_SERIES
-    DFLT_ML_RECO_NAME
-    DFLT_SPE_RECO_NAME
-    DETECTOR_GEOM_FILE
-    DETECTOR_GCD_DICT_FILE
-'''.split()
+__all__ = [
+    'RETRO_DIR',
+    'DATA_DIR',
+    'NUMBA_AVAIL',
+    'FTYPE',
+    'UITYPE',
+    'DEBUG',
+    'DFLT_NUMBA_JIT_KWARGS',
+    'DFLT_PULSE_SERIES',
+    'DFLT_ML_RECO_NAME',
+    'DFLT_SPE_RECO_NAME',
+    'DETECTOR_GEOM_FILE',
+    'DETECTOR_GCD_DICT_FILE',
+    'PY2',
+    'PY3',
+    'load_pickle'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -35,7 +37,6 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
-import cPickle as pickle
 from itertools import product
 import math
 from os import environ
@@ -44,6 +45,8 @@ import re
 import sys
 from time import time
 
+from six import PY2, PY3
+from six.moves import cPickle as pickle
 import numpy as np
 
 NUMBA_AVAIL = False
@@ -105,5 +108,26 @@ DFLT_SPE_RECO_NAME = 'SPEFit2'
 DETECTOR_GEOM_FILE = join(RETRO_DIR, 'data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
-DETECTOR_GCD_DICT_FILE = join(dirname(dirname(abspath(__file__))), 'data', 'gcd_dict.pkl')
+DETECTOR_GCD_DICT_FILE = join(
+    dirname(dirname(abspath(__file__))), 'data', 'gcd_dict.pkl'
+)
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
+
+
+def load_pickle(path):
+    """Load a pickle file, independent of Python2 or Python3.
+
+    Parameters
+    ----------
+    path : string
+        Filepath (will be expanded).
+
+    Returns
+    -------
+    obj
+
+    """
+    with file(expanduser(expandvars(path)), 'rb') as fobj:
+        if PY2:
+            return pickle.load(fobj)
+        return pickle.load(fobj, endocing='latin1')

@@ -34,17 +34,14 @@ import time
 
 import numpy as np
 
-from pisa.utils.format import hrlist2list
-
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
-from retro import likelihood
-from retro.const import ALL_STRS_DOMS_SET, EMPTY_SOURCES
+from retro.const import ALL_STRS_DOMS_SET
 from retro.scan import scan
-from retro.utils.misc import expand, mkdir, sort_dict
+from retro.utils.misc import expand, mkdir, sort_dict, hrlist2list
 from retro.retro_types import PARAM_NAMES
 
 
@@ -100,9 +97,7 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     print('Scanning paramters')
     t0 = time.time()
 
-    fast_llh = True
-
-    get_llh = dom_tables._get_llh
+    get_llh = dom_tables._get_llh # pylint: disable=protected-access
     dom_info = dom_tables.dom_info
     tables = dom_tables.tables
     table_norm = dom_tables.table_norm
@@ -110,12 +105,13 @@ def scan_llh(dom_tables_kw, hypo_kw, events_kw, scan_kw):
     t_indep_table_norm = dom_tables.t_indep_table_norm
     sd_idx_table_indexer = dom_tables.sd_idx_table_indexer
     metric_kw = {}
-    def metric_wrapper(hypo, hits, hits_indexer, unhit_sd_indices,
-                       time_window):
+    def metric_wrapper( # pylint: disable=missing-docstring
+            hypo, hits, hits_indexer, unhit_sd_indices, time_window
+        ):
         sources = hypo_handler.get_sources(hypo)
         pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
         scaling_sources = hypo_handler.get_scaling_sources(hypo)
-        llh, pegleg_idx, scalefactor = get_llh(
+        llh, _, _ = get_llh(
             sources=sources,
             pegleg_sources=pegleg_sources,
             scaling_sources=scaling_sources,

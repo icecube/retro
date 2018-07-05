@@ -35,7 +35,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
 from os.path import abspath, dirname
-import cPickle as pickle
+import pickle
 import sys
 
 import numpy as np
@@ -44,7 +44,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import FTYPE
+from retro import FTYPE, load_pickle
 from retro.const import (
     ALL_STRS_DOMS, ALL_STRS_DOMS_SET, NUM_STRINGS, NUM_DOMS_PER_STRING,
     NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI, get_sd_idx
@@ -180,8 +180,10 @@ class Retro5DTables(object):
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_table'
         elif self.tbl_is_templ_compr:
-            from retro.tables.ckv_tables_compr import load_ckv_table_compr
-            self.table_loader_func = load_ckv_table_compr
+            from retro.tables.template_compr_ckv_tables import (
+                load_template_compr_ckv_table
+            )
+            self.table_loader_func = load_template_compr_ckv_table
             self.usable_table_slice = (slice(None),)*3
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_template_map'
@@ -324,7 +326,7 @@ class Retro5DTables(object):
         else:
             t_indep_mmap_mode = None
 
-        self.table_meta = pickle.load(open(expand(stacked_tables_meta_fpath), 'rb'))
+        self.table_meta = load_pickle(stacked_tables_meta_fpath)
 
         self.tables = np.load(
             expand(stacked_tables_fpath),

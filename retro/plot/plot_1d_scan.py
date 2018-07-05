@@ -8,11 +8,11 @@ Plot likelihood scan results
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    FNAME_TEMPLATE
-    plot_1d_scan
-    parse_args
-'''.split()
+__all__ = [
+    'FNAME_TEMPLATE',
+    'plot_1d_scan',
+    'parse_args'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -30,7 +30,6 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from argparse import ArgumentParser
-import cPickle as pickle
 from os.path import abspath, dirname, join
 import sys
 
@@ -43,7 +42,7 @@ if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
         sys.path.append(PARENT_DIR)
-from retro import HypoParams8D
+from retro import HypoParams8D, load_pickle
 from retro.utils.misc import expand, get_primary_interaction_tex
 
 
@@ -60,7 +59,7 @@ def plot_1d_scan(dir, event, uid): # pylint: disable=redefined-builtin
     for pnum, param in enumerate(HypoParams8D._fields):
         fname = FNAME_TEMPLATE.format(event=event, uid=uid, param=param)
         fpath = expand(join(dir, fname))
-        scan = pickle.load(file(fpath, 'rb'))
+        scan = load_pickle(fpath)
         scan_values = scan['scan_values'][0]
         truth = scan['truth'][0]
         llh = -scan['neg_llh']

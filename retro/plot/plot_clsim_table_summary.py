@@ -9,12 +9,12 @@ for one or more tables.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    formatter
-    plot_clsim_table_summary
-    parse_args
-    main
-'''.split()
+__all__ = [
+    'formatter',
+    'plot_clsim_table_summary',
+    'parse_args',
+    'main'
+]
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi

@@ -36,7 +36,6 @@ from collections import Mapping, OrderedDict
 from operator import getitem
 from os import listdir
 from os.path import abspath, dirname, isdir, isfile, join, splitext
-import pickle
 import re
 import sys
 import time
@@ -44,13 +43,22 @@ import time
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const
+from retro import const, load_pickle
 from retro.hypo.discrete_hypo import DiscreteHypo
 from retro.hypo.discrete_cascade_kernels import (
-    point_cascade, point_ckv_cascade, one_dim_cascade, aligned_point_ckv_cascade, aligned_one_dim_cascade, scaling_aligned_point_ckv_cascade, scaling_aligned_one_dim_cascade, scaling_one_dim_cascade, one_dim_delta_cascade, scaling_one_dim_delta_cascade
+    point_cascade,
+    point_ckv_cascade,
+    one_dim_cascade,
+    aligned_point_ckv_cascade,
+    aligned_one_dim_cascade,
+    scaling_aligned_point_ckv_cascade,
+    scaling_aligned_one_dim_cascade,
+    scaling_one_dim_cascade,
+    one_dim_delta_cascade,
+    scaling_one_dim_delta_cascade,
 )
 from retro.hypo.discrete_muon_kernels import (
     const_energy_loss_muon, table_energy_loss_muon, pegleg_muon
@@ -202,7 +210,6 @@ def setup_discrete_hypo(
     ----------
     cascade_kernel : string or None
         One of {"point", "point_ckv", or "one_dim"}
-
     track_kernel : string or None
     track_time_step : float or None
 
@@ -238,16 +245,16 @@ def setup_discrete_hypo(
             kernel_kwargs.append(dict())
         elif cascade_kernel == 'scaling_aligned_one_dim':
             scaling_kernel = scaling_aligned_one_dim_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_aligned_point_ckv':
             scaling_kernel = scaling_aligned_point_ckv_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_one_dim':
             scaling_kernel = scaling_one_dim_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_one_dim_delta':
             scaling_kernel = scaling_one_dim_delta_cascade
-            scaling_kwargs = dict()
+            scaling_kernel_kwargs = dict()
         else:
             raise NotImplementedError('{} cascade not implemented yet.'
                                       .format(cascade_kernel))
@@ -367,7 +374,7 @@ def get_events(
             photons = [splitext(d)[0] for d in listdir(dpath)]
         else:
             photons = False
-    elif isinstance(photons, basestring):
+    elif isinstance(photons, str):
         photons = [photons]
 
     if pulses is None:
@@ -376,7 +383,7 @@ def get_events(
             pulses = [splitext(d)[0] for d in listdir(dpath) if 'TimeRange' not in d]
         else:
             pulses = False
-    elif isinstance(pulses, basestring):
+    elif isinstance(pulses, str):
         pulses = [pulses]
 
     if recos is None:
@@ -385,7 +392,7 @@ def get_events(
             recos = [splitext(d)[0] for d in listdir(dpath)]
         else:
             recos = False
-    elif isinstance(recos, basestring):
+    elif isinstance(recos, str):
         recos = [recos]
 
     if triggers is None:
@@ -394,7 +401,7 @@ def get_events(
             triggers = [splitext(d)[0] for d in listdir(dpath)]
         else:
             triggers = False
-    elif isinstance(triggers, basestring):
+    elif isinstance(triggers, str):
         triggers = [triggers]
 
     if hits is None:
@@ -404,7 +411,7 @@ def get_events(
             hits = ['photons', photons[0]]
         else:
             hits = False
-    elif isinstance(hits, basestring):
+    elif isinstance(hits, str):
         hits = hits.split('/')
 
     if truth:
@@ -493,7 +500,7 @@ def iterate_file(fpath, start=0, stop=None, step=None):
     slicer = slice(start, stop, step)
     _, ext = splitext(fpath)
     if ext == '.pkl':
-        events = pickle.load(open(fpath, 'rb'))
+        events = load_pickle(fpath)
     elif ext == '.npy':
         try:
             events = np.load(fpath, mmap_mode='r')
@@ -523,7 +530,7 @@ def get_path(event, path):
         another mapping, etc.)
 
     """
-    if isinstance(path, basestring):
+    if isinstance(path, str):
         path = [path]
     node = event
     for subpath in path:
@@ -543,7 +550,7 @@ def get_hits(event, path, angsens_model=None):
 
     path
 
-    angsens_model : basestring, numpy.polynomial.Polynomial, or None
+    angsens_model : str, numpy.polynomial.Polynomial, or None
         If specified and photons are extracted, weights for the photons will be
         applied according to the angular sensitivity model specified.
         Otherwise, each photon will carry a weight of one.
@@ -563,7 +570,7 @@ def get_hits(event, path, angsens_model=None):
         time_window_start = 0
         time_window_stop = 0
         if angsens_model is not None:
-            if isinstance(angsens_model, basestring):
+            if isinstance(angsens_model, str):
                 angsens_poly, _ = load_angsens_model(angsens_model)
             elif isinstance(angsens_model, np.polynomial.Polynomial):
                 angsens_poly = angsens_model
@@ -825,7 +832,12 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         group.add_argument(
             '--cascade-kernel',
             required=True,
-            choices=['point','point_ckv','one_dim', 'aligned_point_ckv', 'aligned_one_dim', 'scaling_aligned_one_dim', 'scaling_aligned_point_ckv', 'scaling_one_dim', 'one_dim_delta', 'scaling_one_dim_delta'],
+            choices=sorted([
+                'point', 'point_ckv', 'one_dim', 'aligned_point_ckv',
+                'aligned_one_dim', 'scaling_aligned_one_dim',
+                'scaling_aligned_point_ckv', 'scaling_one_dim',
+                'one_dim_delta', 'scaling_one_dim_delta'
+            ]),
         )
         group.add_argument(
             '--track-kernel',

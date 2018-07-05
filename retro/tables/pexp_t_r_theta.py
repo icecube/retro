@@ -8,9 +8,7 @@ costheta) table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    pexp_t_r_theta
-'''.split()
+__all__ = ['pexp_t_r_theta']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

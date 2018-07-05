@@ -7,28 +7,30 @@ Miscellaneous utilites: file I/O, hashing, etc.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    ZSTD_EXTENSIONS
-    COMPR_EXTENSIONS
-    expand
-    mkdir
-    get_decompressd_fobj
-    wstdout
-    wstderr
-    force_little_endian
-    hash_obj
-    test_hash_obj
-    get_file_md5
-    sort_dict
-    convert_to_namedtuple
-    event_to_hypo_params
-    hypo_to_track_params
-    generate_anisotropy_str
-    generate_unique_ids
-    get_primary_interaction_str
-    get_primary_interaction_tex
-    get_sd_idx
-'''.split()
+__all__ = [
+    'ZSTD_EXTENSIONS',
+    'COMPR_EXTENSIONS',
+    'expand',
+    'mkdir',
+    'get_decompressd_fobj',
+    'wstdout',
+    'wstderr',
+    'force_little_endian',
+    'hash_obj',
+    'test_hash_obj',
+    'get_file_md5',
+    'sort_dict',
+    'convert_to_namedtuple',
+    'event_to_hypo_params',
+    'hypo_to_track_params',
+    'generate_anisotropy_str',
+    'generate_unique_ids',
+    'get_primary_interaction_str',
+    'get_primary_interaction_tex',
+    'hrlist2list',
+    'hr_range_formatter',
+    'list2hrlist'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -47,18 +49,20 @@ limitations under the License.'''
 
 import base64
 from collections import Iterable, OrderedDict, Mapping, Sequence
-import cPickle as pickle
+import pickle
 import errno
 import hashlib
 from numbers import Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
-from StringIO import StringIO
+import re
 import struct
 from subprocess import Popen, PIPE
 import sys
 
 import numpy as np
+from six import BytesIO
+from six.moves import map, range
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -137,7 +141,7 @@ def get_decompressd_fobj(fpath):
         # Read from stdout
         (proc_stdout, _) = proc.communicate()
         # Give the string from stdout a file-like interface
-        fobj = StringIO(proc_stdout)
+        fobj = BytesIO(proc_stdout)
     elif ext in ('fits',):
         fobj = open(fpath, 'rb')
     else:
@@ -215,7 +219,7 @@ def hash_obj(obj, prec=None, fmt='hex'):
         if prec is not None:
             obj = prec(obj)
         hashable = obj
-    elif isinstance(obj, basestring):
+    elif isinstance(obj, str):
         hashable = obj
     elif isinstance(obj, Iterable):
         hashable = tuple(hash_obj(x, prec=prec) for x in obj)
@@ -223,7 +227,7 @@ def hash_obj(obj, prec=None, fmt='hex'):
         raise ValueError('`obj`="{}" is unhandled type {}'
                          .format(obj, type(obj)))
 
-    if not isinstance(hashable, basestring):
+    if not isinstance(hashable, str):
         hashable = pickle.dumps(hashable, pickle.HIGHEST_PROTOCOL)
 
     md5hash = hashlib.md5(hashable)
@@ -422,6 +426,203 @@ def get_primary_interaction_tex(event):
     pdg = int(event.neutrino.pdg)
     inter = int(event.interaction)
     return const.PDG_INTER_TEX[(pdg, inter)]
+
+
+WHITESPACE_RE = re.compile(r'\s')
+
+NUMBER_RESTR = r'((?:-|\+){0,1}[0-9.]+(?:e(?:-|\+)[0-9.]+){0,1})'
+
+HRGROUP_RESTR = (
+    NUMBER_RESTR
+    + r'(?:-' + NUMBER_RESTR
+    + r'(?:\:' + NUMBER_RESTR + r'){0,1}'
+    + r'){0,1}'
+)
+
+HRGROUP_RE = re.compile(HRGROUP_RESTR, re.IGNORECASE)
+"""RE str for matching signed, unsigned, and sci.-not. ("1e10") numbers."""
+
+IGNORE_CHARS_RE = re.compile(r'[^0-9e:.,;+-]', re.IGNORECASE)
+
+
+def _hrgroup2list(hrgroup):
+    def isint(num):
+        """Test whether a number is *functionally* an integer"""
+        try:
+            return int(num) == np.float32(num)
+        except ValueError:
+            return False
+
+    def num_to_float_or_int(num):
+        """Return int if number is effectively int, otherwise return float"""
+        try:
+            if isint(num):
+                return int(num)
+        except (ValueError, TypeError):
+            pass
+        return np.float32(num)
+
+    # Strip all whitespace, brackets, parens, and other ignored characters from
+    # the group string
+    hrgroup = IGNORE_CHARS_RE.sub('', hrgroup)
+    if (hrgroup is None) or (hrgroup == ''):
+        return []
+    num_str = HRGROUP_RE.match(hrgroup).groups()
+    range_start = num_to_float_or_int(num_str[0])
+
+    # If no range is specified, just return the number
+    if num_str[1] is None:
+        return [range_start]
+
+    range_stop = num_to_float_or_int(num_str[1])
+    if num_str[2] is None:
+        step_size = 1 if range_stop >= range_start else -1
+    else:
+        step_size = num_to_float_or_int(num_str[2])
+    all_ints = isint(range_start) and isint(step_size)
+
+    # Make an *INCLUSIVE* list (as best we can considering floating point mumbo
+    # jumbo)
+    n_steps = np.clip(
+        np.floor(np.around(
+            (range_stop - range_start)/step_size,
+            decimals=12,
+        )),
+        a_min=0, a_max=np.inf
+    )
+    lst = np.linspace(range_start, range_start + n_steps*step_size, n_steps+1)
+    if all_ints:
+        lst = lst.astype(np.int)
+
+    return lst.tolist()
+
+
+def hrlist2list(hrlst):
+    """Convert human-readable string specifying a list of numbers to a Python
+    list of numbers.
+
+    Parameters
+    ----------
+    hrlist : string
+
+    Returns
+    -------
+    lst : list of numbers
+
+    """
+    groups = re.split(r'[,; _]+', WHITESPACE_RE.sub('', hrlst))
+    lst = []
+    if not groups:
+        return lst
+    for group in groups:
+        lst.extend(_hrgroup2list(group))
+    return lst
+
+
+def hr_range_formatter(start, end, step):
+    """Format a range (sequence) in a simple and human-readable format by
+    specifying the range's starting number, ending number (inclusive), and step
+    size.
+
+    Parameters
+    ----------
+    start, end, step : numeric
+
+    Notes
+    -----
+    If `start` and `end` are integers and `step` is 1, step size is omitted.
+
+    The format does NOT follow Python's slicing syntax, in part because the
+    interpretation is meant to differ; e.g.,
+        '0-10:2' includes both 0 and 10 with step size of 2
+    whereas
+        0:10:2 (slicing syntax) excludes 10
+
+    Numbers are converted to integers if they are equivalent for more compact
+    display.
+
+    Examples
+    --------
+    >>> hr_range_formatter(start=0, end=10, step=1)
+    '0-10'
+    >>> hr_range_formatter(start=0, end=10, step=2)
+    '0-10:2'
+    >>> hr_range_formatter(start=0, end=3, step=8)
+    '0-3:8'
+    >>> hr_range_formatter(start=0.1, end=3.1, step=1.0)
+    '0.1-3.1:1'
+
+    """
+    if int(start) == start:
+        start = int(start)
+    if int(end) == end:
+        end = int(end)
+    if int(step) == step:
+        step = int(step)
+    if int(start) == start and int(end) == end and step == 1:
+        return '{}-{}'.format(start, end)
+    return '{}-{}:{}'.format(start, end, step)
+
+
+def list2hrlist(lst):
+    """Convert a list of numbers to a compact and human-readable string.
+
+    Parameters
+    ----------
+    lst : sequence
+
+    Notes
+    -----
+    Adapted to make scientific notation work correctly from [1].
+
+    References
+    ----------
+    [1] http://stackoverflow.com/questions/9847601 user Scott B's adaptation to
+        Python 2 of Rik Poggi's answer to his question
+
+    Examples
+    --------
+    >>> list2hrlist([0, 1])
+    '0,1'
+    >>> list2hrlist([0, 3])
+    '0,3'
+    >>> list2hrlist([0, 1, 2])
+    '0-2'
+    >>> utils.list2hrlist([0.1, 1.1, 2.1, 3.1])
+    '0.1-3.1:1'
+    >>> list2hrlist([0, 1, 2, 4, 5, 6, 20])
+    '0-2,4-6,20'
+
+    """
+    if isinstance(lst, Number):
+        lst = [lst]
+    lst = sorted(lst)
+    rtol = np.finfo(np.float32).resolution
+    n = len(lst)
+    result = []
+    scan = 0
+    while n - scan > 2:
+        step = lst[scan + 1] - lst[scan]
+        if not np.isclose(lst[scan + 2] - lst[scan + 1], step, rtol=rtol):
+            result.append(str(lst[scan]))
+            scan += 1
+            continue
+        for j in range(scan+2, n-1):
+            if not np.isclose(lst[j+1] - lst[j], step, rtol=rtol):
+                result.append(hr_range_formatter(lst[scan], lst[j], step))
+                scan = j+1
+                break
+        else:
+            result.append(hr_range_formatter(lst[scan], lst[-1], step))
+            return ','.join(result)
+    if n - scan == 1:
+        result.append(str(lst[scan]))
+    elif n - scan == 2:
+        result.append(','.join(map(str, lst[scan:])))
+
+    return ','.join(result)
+
+
 
 
 if __name__ == '__main__':

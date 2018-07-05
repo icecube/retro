@@ -9,13 +9,13 @@ DOMs.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    N_STRINGS
-    N_OMS
-    extract_dom_coordinates
-    parse_args
-    main
-'''.split()
+__all__ = [
+    'N_STRINGS',
+    'N_OMS',
+    'extract_dom_coordinates',
+    'parse_args',
+    'main'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

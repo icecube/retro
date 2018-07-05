@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals
+# pylint: disable=wrong-import-position, too-many-return-statements
 
 """
 Prior definition generator and prior funcion generator to use for multinest
@@ -17,7 +17,7 @@ __all__ = [
     'PRI_SPEFIT2',
     'PRI_CAUCHY',
     'get_prior_def',
-    'get_prior_fun'
+    'get_prior_fun',
 ]
 
 __author__ = 'J.L. Lanfranchi, P. Eller'
@@ -35,12 +35,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from collections import OrderedDict
 from math import acos, exp
 
-from os.path import abspath, dirname, join
+from os.path import abspath, dirname
 import sys
-import time
 
 import numpy as np
 from scipy import stats
@@ -49,9 +47,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import init_obj
 from retro.const import TWO_PI
-from retro.retro_types import PARAM_NAMES
 
 
 PRI_UNIFORM = 'uniform'
@@ -64,24 +60,21 @@ PRI_CAUCHY = 'cauchy'
 
 
 def get_prior_def(param, reco_kw):
-    '''
-    Function to generate prior definitions from kw_args
+    """Generate prior definitions from keyword args passed to `reco`.
 
-    Parameters:
-    -----------
-
+    Parameters
+    ----------
     params : str
         name of parameter
     reco_kw : dict
         dict from arg parse containing the prior info
 
-    Returns:
-    --------
+    Returns
+    -------
+    prior_kind : tuple
+    prior_params : tuple
 
-    tuple (prior_kind, prior_params)
-
-    '''
-
+    """
     if param == 'cascade_d_zenith':
         cascade_angle_prior_name = reco_kw.pop('cascade_angle_prior')
         if cascade_angle_prior_name == PRI_UNIFORM:
@@ -99,8 +92,10 @@ def get_prior_def(param, reco_kw):
         else:
             raise ValueError(str(cascade_angle_prior_name))
 
+    elif 'coszen' in param:
+        return (PRI_COSINE, (-1, 1))
+
     elif 'zenith' in param:
-        #return (PRI_COSINE, (-1, 1))
         return (PRI_UNIFORM, (0, np.pi))
 
     elif 'azimuth' in param:
@@ -152,7 +147,6 @@ def get_prior_def(param, reco_kw):
             raise ValueError('Spatial prior "{}" not recognized'
                              .format(spatial_prior_orig))
 
-
     elif param == 'z':
         spatial_prior_orig = reco_kw.get('spatial_prior').strip()
         spatial_prior_name = spatial_prior_orig.lower()
@@ -175,8 +169,6 @@ def get_prior_def(param, reco_kw):
         else:
             raise ValueError('Spatial prior "{}" not recognized'
                              .format(spatial_prior_orig))
-
-
 
     elif param == 'time':
         temporal_prior_orig = reco_kw.pop('temporal_prior').strip()
@@ -242,15 +234,11 @@ def get_prior_def(param, reco_kw):
         raise ValueError('Dimension %s unknown for priors'%param)
 
 
-
-
 def get_prior_fun(dim_num, dim_name, prior_def, event):
-    '''
-    generate prior function given a prior definition and the actual event
+    """Generate prior function given a prior definition and the actual event
 
-    Paraneters:
-    -----------
-
+    Parameters
+    ----------
     dim_num : int
         the cube dimension number from multinest
     dim_name : str
@@ -258,17 +246,14 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
     prior_def : tuple
     event : event
 
-    Returns:
-    --------
+    Returns
+    -------
+    prior_func : callable
+    prior_def : tuple
 
-    callable, tuple
-
-    '''
-
+    """
     hits_summary = event['hits_summary']
-
     prior_kind, prior_params = prior_def
-
 
     if prior_kind is PRI_UNIFORM:
         # Time is special since prior is relative to hits in the event
@@ -280,63 +265,73 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
         prior_def = (prior_kind, prior_params)
 
         if prior_params == (0, 1):
-            def prior_func(cube): # pylint: disable=unused-argument
+            def prior_func(cube): # pylint: disable=unused-argument, missing-docstring
                 pass
         elif np.min(prior_params[0]) == 0:
             maxval = np.max(prior_params)
             if 'azimuth' in dim_name:
-                def prior_func(cube, n=dim_num, maxval=maxval):
+                # minval must be 0 and maxval must be 2pi for wraparound logic to work
+                assert maxval == 2*np.pi
+                def prior_func(cube, n=dim_num, maxval=maxval): # pylint: disable=missing-docstring
                     # cyclic quantity
                     x = cube[n]
                     x = x%1
                     cube[n] = x * maxval
             elif 'zenith' in dim_name:
-                def prior_func(cube, n=dim_num, maxval=maxval):
+                def prior_func(cube, n=dim_num, maxval=maxval): # pylint: disable=missing-docstring
                     x = cube[n]
                     while x < 0 or x > 1:
-                        if x < 0: x = -x
-                        else: x = 1 -x
+                        if x < 0:
+                            x = -x
+                        else:
+                            x = 1 - x
                     cube[n] = x * maxval
             else:
-                def prior_func(cube, n=dim_num, maxval=maxval):
+                def prior_func(cube, n=dim_num, maxval=maxval): # pylint: disable=missing-docstring
                     cube[n] = cube[n] * maxval
         else:
             minval = np.min(prior_params)
             width = np.max(prior_params) - minval
-            def prior_func(cube, n=dim_num, width=width, minval=minval):
+            def prior_func(cube, n=dim_num, width=width, minval=minval): # pylint: disable=missing-docstring
                 cube[n] = cube[n] * width + minval
 
     elif prior_kind == PRI_LOG_UNIFORM:
         prior_def = (prior_kind, prior_params)
         log_min = np.log(np.min(prior_params))
         log_width = np.log(np.max(prior_params) / np.min(prior_params))
-        def prior_func(cube, n=dim_num, log_width=log_width, log_min=log_min):
+        def prior_func(cube, n=dim_num, log_width=log_width, log_min=log_min): # pylint: disable=missing-docstring
             cube[n] = exp(cube[n] * log_width + log_min)
 
     elif prior_kind == PRI_COSINE:
         prior_def = (prior_kind, prior_params)
         cos_min = np.min(prior_params)
-        cos_width = np.max(prior_params) - cos_min
-        def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min):
-            # reflect back values outside [0,1]
+        cos_max = np.max(prior_params)
+        # Reflection logic below doesn't work if not using [-1, +1] domain
+        assert cos_min == -1
+        assert cos_max == -1
+        cos_width = cos_max - cos_min
+        def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min): # pylint: disable=missing-docstring
+            # reflect back hypercube values outside [0, 1] (i.e., cz outside [-1, +1])
             x = cube[n]
             while x < 0 or x > 1:
-                if x < 0: x = -x
-                else: x = 1 -x
+                if x < 0:
+                    x = -x
+                else:
+                    x = 1 - x
             cube[n] = acos(x * cos_width + cos_min)
 
     elif prior_kind == PRI_GAUSSIAN:
         prior_def = (prior_kind, prior_params)
         mean, stddev = prior_params
         norm = 1 / (stddev * np.sqrt(TWO_PI))
-        def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
+        def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev): # pylint: disable=missing-docstring
             cube[n] = norm * exp(-((cube[n] - mean) / stddev)**2)
 
     elif prior_kind == PRI_LOG_NORMAL:
         prior_def = (prior_kind, prior_params)
         shape, loc, scale, low, high = prior_params
         lognorm = stats.lognorm(shape, loc, scale)
-        def prior_func(cube, lognorm=lognorm, n=dim_num, low=low, high=high):
+        def prior_func(cube, lognorm=lognorm, n=dim_num, low=low, high=high): # pylint: disable=missing-docstring
             cube[n] = np.clip(lognorm.isf(cube[n]), a_min=low, a_max=high)
 
     elif prior_kind == PRI_SPEFIT2:
@@ -350,7 +345,7 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
             #low += hits_summary['time_window_start']
             #high += hits_summary['time_window_stop']
         prior_def = (PRI_CAUCHY, (loc, scale, low, high))
-        def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high):
+        def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high): # pylint: disable=missing-docstring
             cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
 
     else:
@@ -358,4 +353,3 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
                                   .format(prior_kind))
 
     return prior_func, prior_def
-

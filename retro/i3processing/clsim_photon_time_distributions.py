@@ -9,10 +9,10 @@ extracted from a CLSim forward event simulation).
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    generate_histos
-    parse_args
-'''.split()
+__all__ = [
+    'generate_histos',
+    'parse_args'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -42,6 +42,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import load_pickle
 from retro.i3info.extract_gcd import extract_gcd
 
 
@@ -124,7 +125,7 @@ def generate_histos(
     photons_file_name = None
     if isinstance(photons, basestring):
         photons_file_name = photons
-        photons = pickle.load(open(photons_file_name, 'rb'))
+        photons = load_pickle(photons_file_name)
     dom_info = photons['doms']
 
     bin_edges = np.linspace(0, t_max, num_bins + 1)
@@ -134,7 +135,7 @@ def generate_histos(
     if isinstance(gcd, basestring):
         exp_gcd = expanduser(expandvars(gcd))
         if exp_gcd.endswith('.pkl'):
-            gcd_info = pickle.load(open(exp_gcd, 'rb'))
+            gcd_info = load_pickle(exp_gcd)
         elif '.i3' in exp_gcd:
             gcd_info = extract_gcd(exp_gcd)
         else:
@@ -144,7 +145,7 @@ def generate_histos(
         try:
             gcd_from_data = expanduser(expandvars(photons['gcd']))
             if gcd_from_data.endswith('.pkl'):
-                gcd_info_from_data = pickle.load(open(gcd_from_data, 'rb'))
+                gcd_info_from_data = load_pickle(gcd_from_data)
             else:
                 gcd_info_from_data = extract_gcd(gcd_from_data)
         except (AttributeError, KeyError, ValueError):

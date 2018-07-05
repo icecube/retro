@@ -7,9 +7,7 @@ Simple class DiscreteHypo for evaluating discrete hypotheses.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    'DiscreteHypo'
-]
+__all__ = ['get_hypo_args', 'DiscreteHypo']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -28,18 +26,33 @@ limitations under the License.'''
 
 from collections import Mapping
 from copy import deepcopy
+import inspect
+from os.path import abspath, dirname
+import sys
 
 import numpy as np
 import numba
-import inspect
 
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 from retro.const import EMPTY_SOURCES
-from retro_types import PARAM_NAMES
+from retro.retro_types import PARAM_NAMES
+
 
 def get_hypo_args(kernel):
-    '''
-    get the hypo args from a kernel by inspecting it
-    '''
+    """Get the hypo args from a kernel by inspecting it
+
+    Parameters
+    ----------
+    kernel
+
+    Returns
+    -------
+    hypo_args : list
+
+    """
     if isinstance(kernel, numba.targets.registry.CPUDispatcher):
         py_func = kernel.py_func
     else:
@@ -47,7 +60,6 @@ def get_hypo_args(kernel):
     kernel_args = inspect.getargspec(py_func)[0]
     hypo_args = set(kernel_args) & set(PARAM_NAMES)
     return list(hypo_args)
-
 
 
 class DiscreteHypo(object):
@@ -84,7 +96,9 @@ class DiscreteHypo(object):
     scaling_kernel_kwargs : None or dict
 
     """
-    def __init__(self, hypo_kernels, kernel_kwargs=None, pegleg_kernel=None, pegleg_kernel_kwargs=None, scaling_kernel=None, scaling_kernel_kwargs=None):
+    def __init__(self, hypo_kernels, kernel_kwargs=None, pegleg_kernel=None,
+                 pegleg_kernel_kwargs=None, scaling_kernel=None,
+                 scaling_kernel_kwargs=None):
         # If a single kernel is passed, make it into a singleton list
         if callable(hypo_kernels):
             hypo_kernels = [hypo_kernels]
@@ -171,7 +185,7 @@ class DiscreteHypo(object):
 
         Parameters
         ----------
-        hypo : dict 
+        hypo : dict
             This is a module-level constant defined in ``__init__.py``, e.g.
             retro.HypoParams8D. See docstring on the `HYPO_PARAMS_T` defined
             for the specification of `hypo_params` including units.
@@ -194,15 +208,14 @@ class DiscreteHypo(object):
 
         Parameters
         ----------
-        hypo : dict 
+        hypo : dict
             This is a module-level constant defined in ``__init__.py``, e.g.
             retro.HypoParams8D. See docstring on the `HYPO_PARAMS_T` defined
             for the specification of `hypo_params` including units.
 
         Returns
         -------
-        sources : shape (N, len(`SRC_T`)) numpy.ndarray
-            Each row is a `SRC_T`.
+        sources : 1d array of SRC_T
 
         """
         if self.scaling_kernel is None:
@@ -214,9 +227,7 @@ class DiscreteHypo(object):
 
     @property
     def params(self):
-        '''
-        return all used hypo parameter dimensions
-        '''
+        """Return all used hypo parameter dimensions"""
         params = []
         params.extend(self.pegleg_kernel_args)
         params.extend(self.scaling_kernel_args)
@@ -227,20 +238,14 @@ class DiscreteHypo(object):
 
     @property
     def pegleg_params(self):
-        '''
-        return all used hypo parameter dimensions of pegleg kernel
-        '''
+        """Return all used hypo parameter dimensions of pegleg kernel"""
         if self.pegleg_kernel is None:
             return []
-        else:
-            return ['track_energy']
+        return ['track_energy']
 
     @property
     def scaling_params(self):
-        '''
-        return all used hypo parameter dimensions of scaling kernel
-        '''
+        """Return all used hypo parameter dimensions of scaling kernel"""
         if self.scaling_kernel is None:
             return []
-        else:
-            return ['cascade_energy']
+        return ['cascade_energy']

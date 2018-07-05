@@ -8,24 +8,29 @@ Plot one or more results from running retro_dom_pdfs.py script
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    ks_test
-    plot_run_info
-    parse_args
-    main
-'''.split()
+__all__ = [
+    'ks_test',
+    'plot_run_info',
+    'parse_args',
+    'main'
+]
 
 from argparse import ArgumentParser
-import cPickle as pickle
-from os.path import expanduser, expandvars, isdir, join
+from os.path import abspath, dirname, expanduser, expandvars, isdir, join
 from os import makedirs
 import sys
 
-from retro.const import get_string_dom_pair, get_sd_idx
 import numpy as np
 import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
+
+if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(abspath(__file__)))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
+from retro import load_pickle
+from retro.const import get_string_dom_pair, get_sd_idx
 
 
 def ks_test(a, b):
@@ -46,6 +51,7 @@ def ks_test(a, b):
 
 
 def num_fmt(n):
+    """Simple number formatting"""
     return format(n, '.2e').replace('-0', '-').replace('+0', '')
 
 
@@ -72,29 +78,28 @@ def plot_run_info(
     outdir = expanduser(expandvars(outdir))
 
     if fwd_hists is not None:
-        with open(expanduser(expandvars(fwd_hists)), 'rb') as fobj:
-            fwd_hists = pickle.load(fobj)
-            if 'binning' in fwd_hists:
-                t_min = fwd_hists['binning']['t_min']
-                t_max = fwd_hists['binning']['t_max']
-                t_window = t_max - t_min
-                num_bins = fwd_hists['binning']['num_bins']
-                spacing = fwd_hists['binning']['spacing']
-                assert spacing == 'linear', spacing
-                fwd_hists_binning = np.linspace(t_min, t_max, num_bins + 1)
-            elif 'bin_edges' in fwd_hists:
-                fwd_hists_binning = fwd_hists['bin_edges']
-                t_window = np.max(fwd_hists_binning) - np.min(fwd_hists_binning)
-            else:
-                raise ValueError(
-                    'Need "binning" or "bin_edges" in fwd_hists; keys are {}'
-                    .format(fwd_hists.keys())
-                )
-            hist_bin_widths = np.diff(fwd_hists_binning)
-            if 'results' in fwd_hists:
-                fwd_hists = fwd_hists['results']
-            else:
-                raise ValueError('Could not find key "results" in fwd hists!')
+        fwd_hists = load_pickle(fwd_hists)
+        if 'binning' in fwd_hists:
+            t_min = fwd_hists['binning']['t_min']
+            t_max = fwd_hists['binning']['t_max']
+            t_window = t_max - t_min
+            num_bins = fwd_hists['binning']['num_bins']
+            spacing = fwd_hists['binning']['spacing']
+            assert spacing == 'linear', spacing
+            fwd_hists_binning = np.linspace(t_min, t_max, num_bins + 1)
+        elif 'bin_edges' in fwd_hists:
+            fwd_hists_binning = fwd_hists['bin_edges']
+            t_window = np.max(fwd_hists_binning) - np.min(fwd_hists_binning)
+        else:
+            raise ValueError(
+                'Need "binning" or "bin_edges" in fwd_hists; keys are {}'
+                .format(fwd_hists.keys())
+            )
+        hist_bin_widths = np.diff(fwd_hists_binning)
+        if 'results' in fwd_hists:
+            fwd_hists = fwd_hists['results']
+        else:
+            raise ValueError('Could not find key "results" in fwd hists!')
     else:
         raise NotImplementedError('Need fwd hists for now.')
 
@@ -108,8 +113,7 @@ def plot_run_info(
         filepath = expanduser(expandvars(filepath))
         if isdir(filepath):
             filepath = join(filepath, 'run_info.pkl')
-        with open(expanduser(expandvars(filepath)), 'rb') as fobj:
-            run_info = pickle.load(fobj)
+        run_info = load_pickle(filepath)
         run_infos.append(run_info)
         pairs = []
         for sd_idx in run_info['sd_indices']:

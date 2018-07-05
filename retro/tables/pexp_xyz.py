@@ -8,9 +8,7 @@ time-independent Cartesian-binned table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    pexp_xyz
-'''.split()
+__all__ = ['pexp_xyz']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi

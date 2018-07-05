@@ -8,14 +8,14 @@ Combine multiple Retro CLSim tables into a single table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    VALIDATE_KEYS
-    SUM_KEYS
-    ALL_KEYS
-    combine_clsim_tables
-    parse_args
-    main
-'''.split()
+__all__ = [
+    'VALIDATE_KEYS',
+    'SUM_KEYS',
+    'ALL_KEYS',
+    'combine_clsim_tables',
+    'parse_args',
+    'main'
+]
 
 __author__ = 'J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -42,13 +42,11 @@ from time import time
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
-    PARENT_DIR = dirname(dirname(abspath(__file__)))
-    if PARENT_DIR not in sys.path:
-        sys.path.append(PARENT_DIR)
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
+    if RETRO_DIR not in sys.path:
+        sys.path.append(RETRO_DIR)
 from retro.utils.misc import COMPR_EXTENSIONS, expand, mkdir, wstderr
-from retro.tables.clsim_tables import (
-    generate_time_indep_table, load_clsim_table_minimal
-)
+from retro.tables.clsim_tables import load_clsim_table_minimal
 
 
 VALIDATE_KEYS = [
@@ -59,7 +57,8 @@ VALIDATE_KEYS = [
     'costheta_bin_edges',
     't_bin_edges',
     'costhetadir_bin_edges',
-    'deltaphidir_bin_edges'
+    'deltaphidir_bin_edges',
+    'step_length',
 ] # yapf: disable
 """Values corresponding to these keys must match in all loaded tables"""
 
@@ -173,15 +172,15 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
 
         del table
 
-    # Force quantum_efficiency and angular_acceptance_fract to 1 (these should
-    # be handled by the user at the time the table is used to represent a
-    # particular or subgroup of DOMs)
-    t_indep_table, _ = generate_time_indep_table(
-        table=table,
-        quantum_efficiency=1,
-        angular_acceptance_fract=1
-    )
-    table['t_indep_table'] = t_indep_table
+    ## Force quantum_efficiency and angular_acceptance_fract to 1 (these should
+    ## be handled by the user at the time the table is used to represent a
+    ## particular or subgroup of DOMs)
+    #t_indep_table, _ = generate_time_indep_tables(
+    #    table=table,
+    #    quantum_efficiency=1,
+    #    angular_acceptance_fract=1
+    #)
+    #table['t_indep_table'] = t_indep_table
 
     # Save the data to npy files on disk (in a sub-directory for all of this
     # table's files)
@@ -197,6 +196,8 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
         wstderr('Writing files:\n')
 
         for key in ALL_KEYS:
+            if key == 't_indep_table' and key not in combined_table:
+                continue
             fpath = output_fpaths[key]
             wstderr('  {} ...'.format(fpath))
             t0 = time()

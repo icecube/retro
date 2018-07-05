@@ -8,10 +8,7 @@ Instantiate Retro tables and find the max over the log-likelihood space.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    'reco',
-    'parse_args'
-]
+__all__ = ['RetroReco', 'parse_args']
 
 __author__ = 'J.L. Lanfranchi, P. Eller'
 __license__ = '''Copyright 2017 Justin L. Lanfranchi
@@ -30,7 +27,6 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from math import acos, exp
 
 from os.path import abspath, dirname, join
 import pickle
@@ -38,51 +34,62 @@ import sys
 import time
 
 import numpy as np
-from scipy import stats
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
-from retro.const import TWO_PI, ALL_STRS_DOMS, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV
+from retro.const import ALL_STRS_DOMS
 from retro.retro_types import PARAM_NAMES, EVT_DOM_INFO_T, EVT_HIT_INFO_T
 from retro.utils.misc import expand, mkdir, sort_dict
-from retro.priors import *
+from retro.priors import (
+    get_prior_def,
+    get_prior_fun,
+    PRI_UNIFORM,
+    PRI_LOG_NORMAL,
+    PRI_LOG_UNIFORM,
+)
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 
 
-class retro_reco(object):
+class RetroReco(object):
 
     def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
-
         self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
         self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
         self.events_iterator = init_obj.get_events(**events_kw)
         self.reco_kw = reco_kw
-        self.opt_params = self.hypo_handler.params
-        self.n_opt_dim = len(self.opt_params)
+        self.opt_params_names = self.hypo_handler.params
+        self.n_opt_dim = len(self.opt_params_names)
 
-        # setup priors
+        self.out_prefix = None
+
+        # Setup priors
         self.prior_defs = OrderedDict()
-        for param in self.opt_params:
+        for param in self.opt_params_names:
             self.prior_defs[param] = get_prior_def(param, reco_kw)
-        # keyword fuckery
+
+        # Remove unused reco kwargs
         reco_kw.pop('spatial_prior')
         reco_kw.pop('cascade_angle_prior')
 
-
     def run(self):
+        """Run reconstructions."""
         print('Running reconstructions...')
         t00 = time.time()
         outdir = self.reco_kw.pop('outdir')
         outdir = expand(outdir)
         mkdir(outdir)
 
-        #setup LLHP dtype
-        hypo_params = self.opt_params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
+        # Setup LLHP dtype
+        hypo_params = (
+            self.opt_params_names
+            + self.hypo_handler.pegleg_params
+            + self.hypo_handler.scaling_params
+        )
         hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
-        LLHP_T = np.dtype([(n, np.float32) for n in hypo_params_sorted])
+        llhp_t = np.dtype([(n, np.float32) for n in hypo_params_sorted])
 
         for event_idx, event in self.events_iterator: # pylint: disable=unused-variable
             t0 = time.time()
@@ -96,30 +103,22 @@ class retro_reco(object):
             t_start = []
             loglike = self.generate_loglike(event, param_values, log_likelihoods, t_start)
 
-            #settings = self.run_multinest(
-            #    event_idx=event_idx,
-            #    event=event,
-            #    prior=prior,
-            #    loglike=loglike,
-            #    **self.reco_kw
-            #)
+            settings = self.run_multinest(
+                prior=prior,
+                loglike=loglike,
+                **self.reco_kw
+            )
             #settings = self.run_scipy(
-            #    event_idx=event_idx,
-            #    event=event,
             #    prior=prior,
             #    loglike=loglike,
             #    method='differential_evolution',
             #    eps=0.02
             #)
-            settings = self.run_nlopt(
-                event_idx=event_idx,
-                event=event,
-                prior=prior,
-                loglike=loglike,
-            )
-            #settings = self.run_skopt(
-            #    event_idx=event_idx,
-            #    event=event,
+            #settings = self.run_nlopt(
+            #    prior=prior,
+            #    loglike=loglike,
+            #)
+            ##settings = self.run_skopt(
             #    prior=prior,
             #    loglike=loglike,
             #)
@@ -127,7 +126,7 @@ class retro_reco(object):
             t1 = time.time()
 
             # dump
-            llhp = np.empty(shape=len(param_values), dtype=LLHP_T)
+            llhp = np.empty(shape=len(param_values), dtype=llhp_t)
             llhp['llh'] = log_likelihoods
             llhp[hypo_params] = param_values
 
@@ -159,54 +158,76 @@ class retro_reco(object):
 
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
-
     def generate_prior(self, event):
-        '''
-        generate the prior transform functions + info for a given events
+        """Generate the prior transform functions + info for a given event.
 
-        '''
+        Parameters
+        ----------
+        event
+
+        Returns
+        -------
+        prior : callable
+        priors_used : OrderedDict
+
+        """
         prior_funcs = []
         priors_used = OrderedDict()
 
-        for dim_num, dim_name in enumerate(self.opt_params):
-            prior_fun, prior_def = get_prior_fun(dim_num, dim_name, self.prior_defs[dim_name], event)
+        for dim_num, dim_name in enumerate(self.opt_params_names):
+            prior_fun, prior_def = get_prior_fun(
+                dim_num=dim_num,
+                dim_name=dim_name,
+                prior_def=self.prior_defs[dim_name],
+                event=event,
+            )
             prior_funcs.append(prior_fun)
             priors_used[dim_name] = prior_def
 
         def prior(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
-            """Function for pymultinest to translate the hypercube MultiNest uses
-            (each value is in [0, 1]) into the dimensions of the parameter space.
+            """Apply `prior_funcs` to the hypercube to map values from the unit
+            hypercube onto values in the physical parameter space.
 
-            Note that the cube dimension names are defined in module variable
-            `CUBE_DIMS` for reference elsewhere.
+            The result overwrites the values in `cube`.
+
+            Parameters
+            ----------
+            cube
+            ndim
+            nparams
+
             """
             for prior_func in prior_funcs:
                 prior_func(cube)
 
         return prior, priors_used
 
-
     def generate_loglike(self, event, param_values, log_likelihoods, t_start):
-        '''
-        generate the LLH callback function for a given event
+        """Generate the LLH callback function for a given event
 
-        Parameters:
-        -----------
-
+        Parameters
+        ----------
         event
-
         param_values : list
         log_likelihoods : list
         t_start : list
 
+        Returns
+        -------
+        loglike : callable
 
-        '''
-        report_after = 1
+        """
+        report_after = 1000
 
-        hypo_params = self.opt_params + self.hypo_handler.pegleg_params + self.hypo_handler.scaling_params
-        opt_params = self.opt_params
+        hypo_params = (
+            self.opt_params_names
+            + self.hypo_handler.pegleg_params
+            + self.hypo_handler.scaling_params
+        )
+        opt_params_names = self.opt_params_names
 
-        # --- define here stuff for closure ---
+        # -- Variables to be captured by `loglike` closure -- #
+
         hits = event['hits']
         hits_indexer = event['hits_indexer']
         hypo_handler = self.hypo_handler
@@ -229,7 +250,7 @@ class retro_reco(object):
         event_hit_info['time'][:] = hits['time']
         event_hit_info['charge'][:] = hits['charge']
 
-        #loop through all DOMs to fill array:
+        # Loop through all DOMs to fill array
         position = 0
         for sd_idx in ALL_STRS_DOMS:
             if not dom_info[sd_idx]['operational']:
@@ -241,13 +262,12 @@ class retro_reco(object):
             event_dom_info[position]['noise_rate_per_ns'] = dom_info[sd_idx]['noise_rate_per_ns']
             event_dom_info[position]['table_idx'] = sd_idx_table_indexer[sd_idx]
 
-
-            # add hits indices
+            # Add hits indices
             # super shitty way at the moment, due to legacy way of doing things
-            if sd_idx in event['hits_indexer']['sd_idx']:
-                hit_idx = list(event['hits_indexer']['sd_idx']).index(sd_idx)
-                start = event['hits_indexer'][hit_idx]['offset']
-                stop = start + event['hits_indexer'][hit_idx]['num']
+            if sd_idx in hits_indexer['sd_idx']:
+                hit_idx = list(hits_indexer['sd_idx']).index(sd_idx)
+                start = hits_indexer[hit_idx]['offset']
+                stop = start + hits_indexer[hit_idx]['num']
                 event_dom_info[position]['hits_start_idx'] = start
                 event_dom_info[position]['hits_stop_idx'] = stop
                 for h_idx in range(start, stop):
@@ -256,14 +276,11 @@ class retro_reco(object):
 
             position += 1
 
-        #print('evt dom info: ', event_dom_info)
-        #print('tot charge: ', np.sum(event_dom_info['total_observed_charge']))
-
-        # --------------------------------------------
-
-
         def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
-            """Function pymultinest calls to get llh values.
+            """Get log likelihood values.
+
+            Defined as a closure to capture particulars of the event and priors without
+            having to pass these as parameters to the function.
 
             Note that this is called _after_ `prior` has been called, so `cube`
             already contains the parameter values scaled to be in their physical
@@ -273,7 +290,7 @@ class retro_reco(object):
             if not t_start:
                 t_start.append(time.time())
 
-            hypo = dict(zip(opt_params, cube))
+            hypo = OrderedDict(list(zip(opt_params_names, cube)))
 
             sources = hypo_handler.get_sources(hypo)
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
@@ -294,12 +311,16 @@ class retro_reco(object):
             )
             t1 = time.time()
 
-            # ToDo, this is just for testing
+            # TODO: this is just for testing
             pegleg_result = pegleg_eval(pegleg_idx)
-            result = tuple([float(cube[i]) for i in range(len(opt_params))] + [pegleg_result] + [scalefactor])
 
-            param_values.append(result)
             log_likelihoods.append(llh)
+            result = tuple(
+                [float(cube[i]) for i in range(len(opt_params_names))]
+                + [pegleg_result]
+                + [scalefactor]
+            )
+            param_values.append(result)
 
             n_calls = len(log_likelihoods)
 
@@ -326,29 +347,20 @@ class retro_reco(object):
 
         return loglike
 
-
-    def run_scipy(
-            self,
-            event_idx,
-            event,
-            prior,
-            loglike,
-            method,
-            eps):
-
+    def run_scipy(self, prior, loglike, method, eps):
         from scipy import optimize
 
         # initial guess
         x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
 
-        def fun(x, *args):
+        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
-            prior(param_vals)    
+            prior(param_vals)
             llh = loglike(param_vals)
             del param_vals
             return -llh
 
-        bounds = [(eps,1-eps)]*self.n_opt_dim
+        bounds = [(eps, 1 - eps)]*self.n_opt_dim
         settings = OrderedDict()
         settings['eps'] = eps
 
@@ -356,52 +368,40 @@ class retro_reco(object):
             optimize.differential_evolution(fun, bounds=bounds, popsize=100)
         else:
             optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
+
         return settings
 
-    def run_skopt(
-            self,
-            event_idx,
-            event,
-            prior,
-            loglike,
-            ):
-
-        from skopt import gp_minimize, forest_minimize
+    def run_skopt(self, prior, loglike):
+        from skopt import gp_minimize #, forest_minimize
 
         # initial guess
         x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
 
-        def fun(x, *args):
+        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
-            prior(param_vals)    
+            prior(param_vals)
             llh = loglike(param_vals)
             del param_vals
             return -llh
 
-        bounds = [(0,1)]*self.n_opt_dim
+        bounds = [(0, 1)]*self.n_opt_dim
         settings = OrderedDict()
 
-        res = gp_minimize(fun,                  # the function to minimize
-                          bounds,      # the bounds on each dimension of x
-                          acq_func="EI",      # the acquisition function
-                          n_calls=1000,         # the number of evaluations of f 
-                          n_random_starts=5,  # the number of random initialization 
-                          x0=list(x0),
-                          )
+        _ = gp_minimize(
+            fun,                # function to minimize
+            bounds,             # bounds on each dimension of x
+            acq_func="EI",      # acquisition function
+            n_calls=1000,       # number of evaluations of f
+            n_random_starts=5,  # number of random initialization
+            x0=list(x0),
+        )
 
         return settings
 
-    def run_nlopt(
-            self,
-            event_idx,
-            event,
-            prior,
-            loglike,
-            ):
-
+    def run_nlopt(self, prior, loglike):
         import nlopt
 
-        def fun(x, grad):
+        def fun(x, grad): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
             #print(param_vals)
             prior(param_vals)
@@ -414,7 +414,7 @@ class retro_reco(object):
         lower_bounds = np.zeros(shape=(self.n_opt_dim,))
         upper_bounds = np.ones(shape=(self.n_opt_dim,))
         # for angles make bigger
-        for i, name in enumerate(self.opt_params):
+        for i, name in enumerate(self.opt_params_names):
             if 'azimuth' in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
@@ -432,13 +432,12 @@ class retro_reco(object):
                 dx[i] = 0.001
             elif 'zenith' in self.hypo_handler.params[i]:
                 dx[i] = 0.001
-            elif self.hypo_handler.params[i] in ['x','y']:
+            elif self.hypo_handler.params[i] in ('x', 'y'):
                 dx[i] = 0.005
             elif self.hypo_handler.params[i] == 'z':
                 dx[i] = 0.002
             elif self.hypo_handler.params[i] == 'time':
                 dx[i] = 0.01
-
 
         # does not converge :/
         local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
@@ -473,7 +472,7 @@ class retro_reco(object):
 
         #local_opt.set_maxeval(10)
 
-        x = opt.optimize(x0)
+        x = opt.optimize(x0) # pylint: disable=unused-variable
 
         # polish it up
         #print('***************** polishing ******************')
@@ -511,8 +510,6 @@ class retro_reco(object):
 
     def run_multinest(
             self,
-            event_idx,
-            event,
             prior,
             loglike,
             importance_sampling,
@@ -523,7 +520,7 @@ class retro_reco(object):
             sampling_eff,
             max_iter,
             seed,
-        ):
+    ):
         """Setup and run MultiNest on an event.
 
         See the README file from MultiNest for greater detail on parameters
@@ -531,8 +528,8 @@ class retro_reco(object):
 
         Parameters
         ----------
-        event_idx
-        event
+        prior
+        loglike
         importance_sampling
         max_modes
         const_eff
@@ -548,26 +545,33 @@ class retro_reco(object):
 
         Returns
         -------
-        llhp : shape (num_llh,) structured array of dtype retro.LLHP_T
-            LLH and the corresponding parameter values.
-
         settings : OrderedDict
             Metadata used for running MultiNest, i.e.
             the keyword args used to invoke the `pymultinest.run` function.
 
         """
-        # pylint: disable=missing-docstring
         # Import pymultinest here; it's a less common dependency, so other
         # functions / constants in this module will still be import-able w/o it.
         import pymultinest
 
+        # TODO: reintroduce full set of MN params
         settings = OrderedDict([
             ('n_dims', self.n_opt_dim),
             ('n_params', self.n_opt_dim),
             ('n_clustering_params', self.n_opt_dim),
-            ('wrapped_params', [int('azimuth' in p.lower()) for p in self.opt_params]),
+            ('wrapped_params', [int('azimuth' in p.lower()) for p in self.opt_params_names]),
             ('importance_nested_sampling', importance_sampling),
             ('multimodal', max_modes > 1),
+            ('const_efficiency_mode', const_eff),
+            ('n_live_points', n_live),
+            ('evidence_tolerance', evidence_tol),
+            ('sampling_efficiency', sampling_eff),
+            ('null_log_evidence', -1e90),
+            ('max_modes', max_modes),
+            ('mode_tolerance', -1e90),
+            ('seed', seed),
+            ('log_zero', -1e100),
+            ('max_iter', max_iter),
         ])
 
         print('Runing MultiNest...')
@@ -583,7 +587,6 @@ class retro_reco(object):
         )
 
         return settings
-
 
 
 def parse_args(description=__doc__):
@@ -737,5 +740,5 @@ def parse_args(description=__doc__):
 
 
 if __name__ == '__main__':
-    my_reco = retro_reco(**parse_args())
+    my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     my_reco.run()

@@ -8,17 +8,16 @@ CLSim-produced Retro tables
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    MY_CLSIM_TABLE_KEYS
-    CLSIM_TABLE_FNAME_PROTO
-    CLSIM_TABLE_FNAME_RE
-    CLSIM_TABLE_METANAME_PROTO
-    CLSIM_TABLE_METANAME_RE
-    interpret_clsim_table_fname
-    generate_time_indep_table
-    load_clsim_table_minimal
-    load_clsim_table
-'''.split()
+__all__ = [
+    'MY_CLSIM_TABLE_KEYS',
+    'CLSIM_TABLE_FNAME_PROTO',
+    'CLSIM_TABLE_FNAME_RE',
+    'CLSIM_TABLE_METANAME_PROTO',
+    'CLSIM_TABLE_METANAME_RE',
+    'interpret_clsim_table_fname',
+    'load_clsim_table_minimal',
+    'load_clsim_table'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -50,7 +49,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import DEBUG
 from retro.tables.retro_5d_tables import TABLE_NORM_KEYS, get_table_norm
 from retro.utils.misc import (
-    expand, force_little_endian, get_decompressd_fobj, wstderr
+    expand, force_little_endian, get_decompressd_fobj, hrlist2list, wstderr
 )
 
 
@@ -71,6 +70,15 @@ CLSIM_TABLE_FNAME_PROTO = [
         '_string_{string}'
         '_depth_{depth_idx:d}'
         '_seed_{seed}'
+        '.fits'
+    ),
+    (
+        'clsim_table'
+        '_set_{hash_val:s}'
+        '_string_{string}'
+        '_dom_{dom:d}'
+        '_seed_{seed:d}'
+        '_n_{n_events:d}'
         '.fits'
     )
 ]
@@ -100,11 +108,31 @@ CLSIM_TABLE_FNAME_RE = [
         _seed_(?P<seed>[0-9]+)
         \.fits
         ''', re.IGNORECASE | re.VERBOSE
+    ),
+    re.compile(
+        r'''
+        clsim_table
+        _set_(?P<hash_val>[0-9a-f]+)
+        _string_(?P<string>[0-9a-z]+)
+        _dom_(?P<dom>[0-9]+)
+        _seed_(?P<seed>[0-9]+)
+        _n_(?P<n_events>[0-9]+)
+        \.fits
+        ''', re.IGNORECASE | re.VERBOSE
     )
 ]
 
 CLSIM_TABLE_METANAME_PROTO = [
-    'clsim_table_set_{hash_val:s}_meta.json'
+    'clsim_table_set_{hash_val:s}_meta.json',
+    (
+        'clsim_table'
+        '_set_{hash_val:s}'
+        '_string_{string}'
+        '_dom_{dom:d}'
+        '_seed_{seed:d}'
+        '_n_{n_events:d}'
+        '_meta.json'
+    )
 ]
 
 CLSIM_TABLE_METANAME_RE = [
@@ -114,6 +142,17 @@ CLSIM_TABLE_METANAME_RE = [
         _set_(?P<hash_val>[0-9a-f]+)
         _meta
         \.json
+        ''', re.IGNORECASE | re.VERBOSE
+    ),
+    re.compile(
+        r'''
+        clsim_table
+        _set_(?P<hash_val>[0-9a-f]+)
+        _string_(?P<string>[0-9a-z]+)
+        _dom_(?P<dom>[0-9]+)
+        _seed_(?P<seed>[0-9]+)
+        _n_(?P<n_events>[0-9]+)
+        _meta\.json
         ''', re.IGNORECASE | re.VERBOSE
     )
 ]
@@ -146,8 +185,6 @@ def interpret_clsim_table_fname(fname):
         ``CLSIM_TABLE_FNAME_RE``
 
     """
-    from pisa.utils.format import hrlist2list
-
     fname = basename(fname)
     fname_version = None
     for fname_version in range(len(CLSIM_TABLE_FNAME_RE) - 1, -1, -1):

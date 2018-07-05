@@ -7,28 +7,29 @@ Utils for binning and geometry
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    GEOM_FILE_PROTO
-    GEOM_META_PROTO
-    generate_geom_meta
-    linbin
-    test_linbin
-    powerbin
-    test_powerbin
-    powerspace
-    inv_power_2nd_diff
-    infer_power
-    test_infer_power
-    sample_powerlaw_binning
-    bin_edges_to_binspec
-    linear_bin_centers
-    spherical_volume
-    sph2cart
-    pol2cart
-    cart2pol
-    cart2sph
-    spacetime_separation
-'''.split()
+__all__ = [
+    'GEOM_FILE_PROTO',
+    'GEOM_META_PROTO',
+    'generate_geom_meta',
+    'linbin',
+    'test_linbin',
+    'powerbin',
+    'test_powerbin',
+    'powerspace',
+    'inv_power_2nd_diff',
+    'infer_power',
+    'test_infer_power',
+    'sample_powerlaw_binning',
+    'bin_edges_to_binspec',
+    'linear_bin_centers',
+    'spacetime_separation',
+    'spherical_volume',
+    'sph2cart',
+    'pol2cart',
+    'cart2pol',
+    'cart2sph',
+    'rotsph2cart',
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -359,11 +360,11 @@ def inv_power_2nd_diff(power, edges):
     return np.diff(edges**(1/power), n=2)
 
 
-def infer_power(edges):
+def infer_power(edges, dtype=np.float64):
     """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
     first_three_edges = edges[:3]
     atol = 1e-15
-    rtol = 4*np.finfo(np.float).eps
+    rtol = 4*np.finfo(dtype).eps
     power = None
     try:
         power = brentq(
@@ -643,6 +644,54 @@ def cart2sph(x, y, z, r, theta, phi):
         r_flat[idx] = rfi
         phi_flat[idx] = math.atan2(yfi, xfi)
         theta_flat[idx] = math.acos(zfi / rfi)
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def rotsph2cart(p_sintheta, p_costheta, p_phi, rot_sintheta, rot_costheta,
+                rot_phi):
+    """Rotate a vector `p` (defined by its theta and phi coordinates) by `rot`
+    (defined by the theta and phi components) and return the result `q`
+    (defined by its x, y, and z coordinates).
+
+    Parameters
+    ----------
+    p_costheta, p_phi
+        Spherical angular coordinates of vector to be rotated
+    rot_costheta, rot_phi
+        Angles to rotate vector by
+
+    Returns
+    -------
+    x, y, z
+        Cartesian components of the rotated vector (length = 1)
+
+    Notes
+    -----
+    See `cone_in_spherical_coords.ipynb` for derivation of the equations.
+
+    """
+    # TODO: use trig identities to reduce number of trig function calls; should
+    # speed code up significantly
+
+    p_sinphi = np.sin(p_phi)
+    p_cosphi = np.cos(p_phi)
+
+    rot_sinphi = np.sin(rot_phi)
+    rot_cosphi = np.cos(rot_phi)
+
+    # Intermediate computations that can be reused
+    psphi_pstheta = p_sinphi * p_sintheta
+    pcphi_pstheta = p_cosphi * p_sintheta
+    pctheta_rstheta = p_costheta * rot_sintheta
+
+    q_x = (-psphi_pstheta * rot_sinphi
+           + pcphi_pstheta * rot_cosphi * rot_costheta
+           + pctheta_rstheta * rot_cosphi)
+    q_y = (psphi_pstheta * rot_cosphi
+           + pcphi_pstheta * rot_sinphi * rot_costheta
+           + pctheta_rstheta * rot_sinphi)
+    q_z = -pcphi_pstheta * rot_sintheta + p_costheta * rot_costheta
+
+    return q_x, q_y, q_z
 
 
 if __name__ == '__main__':

@@ -33,11 +33,11 @@ any of the voxel(s) of this table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    generate_tdi_table_meta
-    generate_tdi_table
-    parse_args
-'''.split()
+__all__ = [
+    'generate_tdi_table_meta',
+    'generate_tdi_table',
+    'parse_args'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -64,9 +64,6 @@ import time
 import numpy as np
 import pyfits
 
-# TODO: remove PISA dependencies
-from pisa.utils.format import hrlist2list, list2hrlist
-
 if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
     if PARENT_DIR not in sys.path:
@@ -80,7 +77,9 @@ from retro.tables.shift_and_bin import shift_and_bin
 from retro.tables.dom_time_polar_tables import load_t_r_theta_table
 from retro.tables.tdi_cart_tables import TDI_TABLE_FNAME_PROTO
 from retro.utils.geom import generate_geom_meta
-from retro.utils.misc import generate_anisotropy_str, hash_obj
+from retro.utils.misc import (
+    generate_anisotropy_str, hash_obj, hrlist2list, list2hrlist
+)
 
 
 def generate_tdi_table_meta(

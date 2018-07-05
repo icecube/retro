@@ -2,9 +2,7 @@
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    HadLightyield
-'''.split()
+__all__ = ['HadLightyield']
 
 from icecube import icetray, dataclasses, clsim
 from numpy import random

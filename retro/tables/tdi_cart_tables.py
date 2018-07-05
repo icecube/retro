@@ -7,11 +7,11 @@ Class for time- and DOM-independent table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = '''
-    TDI_TABLE_FNAME_PROTO
-    TDI_TABLE_FNAME_RE
-    TDICartTable
-'''.split()
+__all__ = [
+    'TDI_TABLE_FNAME_PROTO',
+    'TDI_TABLE_FNAME_RE',
+    'TDICartTable'
+]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -37,15 +37,13 @@ from time import time
 
 import numpy as np
 
-from pisa.utils.format import hrlist2list
-
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.tables.pexp_xyz import pexp_xyz
 from retro.utils.misc import (
-    expand, force_little_endian, generate_anisotropy_str
+    expand, force_little_endian, generate_anisotropy_str, hrlist2list
 )
 
 

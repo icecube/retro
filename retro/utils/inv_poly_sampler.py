@@ -124,6 +124,8 @@ class InvPolySampler(object):
 
     def __call__(self, val):
         """Perform linear interpolation on `val`, sample(s) in [0, 1]"""
+        scalar = np.isscalar(val)
+        val = np.atleast_1d(val)
         prob_bin_idx, dx = np.divmod(val**self.inv_power, self.prob_binwidth)
         exceed_max_mask = prob_bin_idx > self.n_samp - 2
         prob_bin_idx[exceed_max_mask] = self.n_samp - 2
@@ -132,4 +134,6 @@ class InvPolySampler(object):
         y0 = self.domain_samples[prob_bin_idx]
         m = self.inv_cdf_slopes[prob_bin_idx]
         y = m*dx + y0
+        if scalar:
+            y = y[0]
         return y
