@@ -1,6 +1,6 @@
 #!/bin/bash
 
-base="/data/justin/retro/scans/downgoing_muon_evtidx${start_evt}_newcode_ckv_compr_speedup"
+base="/data/justin/retro/scans/downgoing_muon_ckv_compr_baseline"
 mkdir -p "$base"
 
 #proto="/fastio2/icecube/retro/tables/large_5d_notilt_string_{subdet}_depth_{depth_idx}"

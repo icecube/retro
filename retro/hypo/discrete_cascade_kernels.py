@@ -202,7 +202,6 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
     if cascade_energy == 0:
         return EMPTY_SOURCES
 
-
     if num_samples < 0:
         # Note that num_samples must be 1 for cascade_energy <= MIN_CASCADE_ENERGY
         # (param_a goes <= 0 at this value and below, causing an exception from

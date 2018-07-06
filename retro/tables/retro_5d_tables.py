@@ -289,7 +289,7 @@ class Retro5DTables(object):
         exp_at_hit_times = np.zeros(shape=(NUM_DOMS_TOT, num_hit_times),
                                     dtype=np.float32)
 
-        for sd_idx in ALL_STRS_DOMS:
+        for sd_idx in self.loaded_sd_indices:
             table_idx = self.sd_idx_table_indexer[sd_idx]
             for t_idx in range(num_hit_times):
                 this_t_indep_exp, sum_log_exp_at_hit_times = self._pexp(
@@ -316,15 +316,8 @@ class Retro5DTables(object):
         if self.is_stacked is not None:
             assert self.is_stacked
 
-        if mmap_tables:
-            tables_mmap_mode = 'r'
-        else:
-            tables_mmap_mode = None
-
-        if mmap_t_indep:
-            t_indep_mmap_mode = 'r'
-        else:
-            t_indep_mmap_mode = None
+        tables_mmap_mode = 'r' if mmap_tables else None
+        t_indep_mmap_mode = 'r' if mmap_t_indep else None
 
         self.table_meta = load_pickle(stacked_tables_meta_fpath)
 
@@ -343,6 +336,7 @@ class Retro5DTables(object):
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=self.table_meta,
                 table_kind=self.table_kind,
+                use_residual_time=False,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 compute_unhit_doms=True, # TODO: modify when TDI table works
                 use_directionality=self.use_directionality,
@@ -445,6 +439,7 @@ class Retro5DTables(object):
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=table,
                 table_kind=self.table_kind,
+                use_residual_time=True,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 use_directionality=self.use_directionality,
                 compute_unhit_doms=True, # TODO: modify when TDI works
@@ -498,13 +493,13 @@ def get_table_norm(
         Step length used in CLSim tabulator, in units of meters. (Hard-coded to
         1 m in CLSim, but this is a paramter that ultimately could be changed.)
 
-    r_bin_edges : 1D numpy.ndarray, ascending values => 0 (meters)
+    r_bin_edges : 1D array, ascending non-negative values (meters)
         Radial bin edges in units of meters.
 
-    costheta_bin_edges : 1D numpy.ndarray, ascending values in [-1, 1]
+    costheta_bin_edges : 1D array, ascending values in [-1, 1]
         Cosine of the zenith angle bin edges; all must be equally spaced.
 
-    t_bin_edges : 1D numpy.ndarray, ascending values > 0 (nanoseconds)
+    t_bin_edges : 1D array, ascending values > 0 (nanoseconds)
         Time bin eges in units of nanoseconds.
 
     quantum_efficiency : float in (0, 1], optional
@@ -524,14 +519,14 @@ def get_table_norm(
 
     Returns
     -------
-    table_norm : numpy.ndarray of shape (n_r_bins, n_t_bins), values >= 0
+    table_norm : shape (n_r_bins, n_t_bins) array, values >= 0
         The normalization is a function of both r- and t-bin (we assume
         costheta binning is "regular"). To obtain a survival probability,
         multiply the value in the CLSim table's bin by the appropriate
         `table_norm` entry. I.e.:
         ``survival_prob = raw_bin_val * table_norm[r_bin_idx, t_bin_idx]``.
 
-    t_indep_table_norm : numpy.ndarray of shape (n_r_bins,)
+    t_indep_table_norm : shape (n_r_bins,) array
 
     """
     n_costheta_bins = len(costheta_bin_edges) - 1

@@ -217,7 +217,7 @@ class RetroReco(object):
         loglike : callable
 
         """
-        report_after = 1000
+        report_after = 10
 
         hypo_params = (
             self.opt_params_names

@@ -7,7 +7,7 @@ Simple class DiscreteHypo for evaluating discrete hypotheses.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['get_hypo_args', 'DiscreteHypo']
+__all__ = ['get_hypo_param_names', 'DiscreteHypo']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -41,8 +41,9 @@ from retro.const import EMPTY_SOURCES
 from retro.retro_types import PARAM_NAMES
 
 
-def get_hypo_args(kernel):
-    """Get the hypo args from a kernel by inspecting it
+def get_hypo_param_names(kernel):
+    """Get the hypothesis parameter names that a hypo kernel takes based on the
+    argument names specified by the function.
 
     Parameters
     ----------
@@ -50,16 +51,22 @@ def get_hypo_args(kernel):
 
     Returns
     -------
-    hypo_args : list
+    hypo_param_names : list
 
     """
     if isinstance(kernel, numba.targets.registry.CPUDispatcher):
         py_func = kernel.py_func
     else:
         py_func = kernel
-    kernel_args = inspect.getargspec(py_func)[0]
-    hypo_args = set(kernel_args) & set(PARAM_NAMES)
-    return list(hypo_args)
+    # Get all the function's argument names
+    kernel_argnames = inspect.getargspec(py_func)[0]
+
+    # Select out the argument names that are "officially recognized" hypo
+    # params; this is effectively an "intersection" operation, but where we
+    # preserve the ordering of the names from the `PARAM_NAMES` constant
+    hypo_param_names = [name for name in PARAM_NAMES if name in kernel_argnames]
+
+    return hypo_param_names
 
 
 class DiscreteHypo(object):
@@ -105,51 +112,34 @@ class DiscreteHypo(object):
 
         # Make sure items in hypo_kernels are callables (functions or methods)
         for kernel in hypo_kernels:
-            assert callable(kernel)
+            assert callable(kernel), str(kernel)
 
-        if pegleg_kernel is not None:
-            assert callable(pegleg_kernel)
-
-        if scaling_kernel is not None:
-            assert callable(scaling_kernel)
+        assert pegleg_kernel is None or callable(pegleg_kernel), str(pegleg_kernel)
+        assert scaling_kernel is None or callable(scaling_kernel), str(scaling_kernel)
 
         # If None or dict is passed, duplicate it to send to each hypo kernel
         if kernel_kwargs is None or isinstance(kernel_kwargs, Mapping):
             kernel_kwargs = [deepcopy(kernel_kwargs) for _ in hypo_kernels]
 
         # Translate each None into an empty dict
-        kernel_kwargs = [{} if kw is None else kw for kw in kernel_kwargs]
+        self.kernel_kwargs = [kw or {} for kw in kernel_kwargs]
+        self.pegleg_kernel_kwargs = pegleg_kernel_kwargs or {}
+        self.scaling_kernel_kwargs = scaling_kernel_kwargs or {}
 
-        if pegleg_kernel_kwargs is None:
-            pegleg_kernel_kwargs = {}
-
-        if scaling_kernel_kwargs is None:
-            scaling_kernel_kwargs = {}
-
-        kernel_args = []
-        for kernel in hypo_kernels:
-            kernel_args.append(get_hypo_args(kernel))
-
-
-        if pegleg_kernel is None:
-            pegleg_kernel_args = []
-        else:
-            pegleg_kernel_args = get_hypo_args(pegleg_kernel)
-
-        if scaling_kernel is None:
-            scaling_kernel_args = []
-        else:
-            scaling_kernel_args = get_hypo_args(scaling_kernel)
+        # Get hypo param names required by kernels handled by optimization
+        # (hypo_kernels), pegleg-ing (pegleg_kernel), and scaling
+        # (scaling_kernel)
+        self.kernel_param_names = [get_hypo_param_names(k) for k in hypo_kernels]
+        self.pegleg_kernel_param_names = (
+            get_hypo_param_names(pegleg_kernel) if pegleg_kernel else ()
+        )
+        self.scaling_kernel_param_names = (
+            get_hypo_param_names(scaling_kernel) if scaling_kernel else ()
+        )
 
         self.hypo_kernels = hypo_kernels
-        self.kernel_kwargs = kernel_kwargs
-        self.kernel_args = kernel_args
         self.pegleg_kernel = pegleg_kernel
-        self.pegleg_kernel_kwargs = pegleg_kernel_kwargs
-        self.pegleg_kernel_args = pegleg_kernel_args
         self.scaling_kernel = scaling_kernel
-        self.scaling_kernel_kwargs = scaling_kernel_kwargs
-        self.scaling_kernel_args = scaling_kernel_args
 
     def get_sources(self, hypo):
         """Evaluate the discrete hypothesis (all hypo kernels) given particular
@@ -158,19 +148,15 @@ class DiscreteHypo(object):
         Parameters
         ----------
         hypo : dict
-            This is a module-level constant defined in ``__init__.py``, e.g.
-            retro.HypoParams8D. See docstring on the `HYPO_PARAMS_T` defined
-            for the specification of `hypo_params` including units.
 
         Returns
         -------
-        sources : shape (N, len(`SRC_T`)) numpy.ndarray
-            Each row is a `SRC_T`.
+        sources : shape (n_sources,) array of dtype SRC_T
 
         """
         sources = []
-        for kernel, args, kwargs in zip(self.hypo_kernels, self.kernel_args, self.kernel_kwargs):
-            total_kwargs = {a:hypo[a] for a in args}
+        for kernel, argnames, kwargs in zip(self.hypo_kernels, self.kernel_argnames, self.kernel_kwargs):
+            total_kwargs = {a:hypo[a] for a in argnames}
             total_kwargs.update(kwargs)
             sources.append(kernel(**total_kwargs))
         if len(sources) == 0:
@@ -192,13 +178,12 @@ class DiscreteHypo(object):
 
         Returns
         -------
-        sources : shape (N, len(`SRC_T`)) numpy.ndarray
-            Each row is a `SRC_T`.
+        sources : shape (n_sources,) array of dtype SRC_T
 
         """
         if self.pegleg_kernel is None:
             return EMPTY_SOURCES
-        total_kwargs = {a:hypo[a] for a in self.pegleg_kernel_args}
+        total_kwargs = {a:hypo[a] for a in self.pegleg_kernel_argnames}
         total_kwargs.update(self.pegleg_kernel_kwargs)
         return self.pegleg_kernel(**total_kwargs)
 
@@ -215,12 +200,12 @@ class DiscreteHypo(object):
 
         Returns
         -------
-        sources : 1d array of SRC_T
+        sources : shape (n_sources,) array of dtype SRC_T
 
         """
         if self.scaling_kernel is None:
             return EMPTY_SOURCES
-        total_kwargs = {a:hypo[a] for a in self.scaling_kernel_args}
+        total_kwargs = {a:hypo[a] for a in self.scaling_kernel_argnames}
         total_kwargs.update(self.scaling_kernel_kwargs)
         return self.scaling_kernel(**total_kwargs)
 
@@ -229,10 +214,10 @@ class DiscreteHypo(object):
     def params(self):
         """Return all used hypo parameter dimensions"""
         params = []
-        params.extend(self.pegleg_kernel_args)
-        params.extend(self.scaling_kernel_args)
-        for kernel_args in self.kernel_args:
-            params.extend(kernel_args)
+        params.extend(self.pegleg_kernel_argnames)
+        params.extend(self.scaling_kernel_argnames)
+        for kernel_argnames in self.kernel_argnames:
+            params.extend(kernel_argnames)
         params = set(params)
         return list(params)
 
