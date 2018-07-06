@@ -37,8 +37,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
-from retro.const import PI, SRC_OMNI
-from retro.utils.geom import infer_power
+from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI
+from retro.utils.geom import generate_digitizer
 
 
 FTYPE = np.float32
@@ -49,6 +49,7 @@ LLH_VERSION = 2
 def generate_pexp_5d_function(
         table,
         table_kind,
+        use_residual_time,
         compute_t_indep_exp,
         compute_unhit_doms,
         use_directionality,
@@ -66,6 +67,10 @@ def generate_pexp_5d_function(
         As returned by `load_clsim_table_minimal`
 
     table_kind : str in {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr'}
+
+    use_residual_time : bool
+        Whether time axis is actually time residual, defined to be
+        (actual time) - (fastest time a photon could get to spatial coordinate)
 
     compute_t_indep_exp : bool
         Whether to use the single-DOM tables for computing time-independent
@@ -111,6 +116,7 @@ def generate_pexp_5d_function(
         redundant pexp_5d functions.)
 
     """
+    # pylint: disable=missing-docstring
     tbl_is_raw = table_kind in ['raw_uncompr', 'raw_templ_compr']
     tbl_is_ckv = table_kind in ['ckv_uncompr', 'ckv_templ_compr']
     tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
@@ -132,73 +138,37 @@ def generate_pexp_5d_function(
     if ckv_sigma_deg is None:
         ckv_sigma_deg = 0
 
-    r_min = np.min(table['r_bin_edges'])
+    digitize_r = generate_digitizer(table['r_bin_edges'])
+    digitize_ct = generate_digitizer(table['costheta_bin_edges'])
+    digitize_t = generate_digitizer(table['t_bin_edges'])
+    digitize_ctdir = generate_digitizer(table['costhetadir_bin_edges'])
+    digitize_dpdir = generate_digitizer(table['deltaphidir_bin_edges'])
 
-    # Ensure r_min is zero; this removes need for lower-bound checks and a
-    # subtraction each time computing bin index
-    assert r_min == 0
+    rsquared_max = table['r_bin_edges'][-1]**2
+    last_costhetadir_bin_idx = len(table['costhetadir_bin_edges']) - 1
+    last_deltaphidir_bin_idx = len(table['deltaphidir_bin_edges']) - 1
+    t_max = table['t_bin_edges'][-1]
+    recip_max_group_vel = table['group_refractive_index'] / SPEED_OF_LIGHT_M_PER_NS
 
-    r_max = np.max(table['r_bin_edges'])
-    rsquared_max = r_max*r_max
-    r_power = infer_power(table['r_bin_edges'])
-    assert r_power == 2
-    inv_r_power = 1 / r_power
-    n_r_bins = len(table['r_bin_edges']) - 1
-    table_dr_pwr = (r_max - r_min)**inv_r_power / n_r_bins
-
-    n_costheta_bins = len(table['costheta_bin_edges']) - 1
-    table_dcostheta = 2 / n_costheta_bins
-
-    t_min = np.min(table['t_bin_edges'])
-
-    # Ensure t_min is zero; this removes need for lower-bound checks and a
-    # subtraction each time computing bin index
-    assert t_min == 0
-
-    t_max = np.max(table['t_bin_edges'])
-    n_t_bins = len(table['t_bin_edges']) - 1
-    table_dt = (t_max - t_min) / n_t_bins
-
-    assert table['costhetadir_bin_edges'][0] == -1
-    assert table['costhetadir_bin_edges'][-1] == 1
-    n_costhetadir_bins = len(table['costhetadir_bin_edges']) - 1
-    table_dcosthetadir = 2 / n_costhetadir_bins
-    assert np.allclose(np.diff(table['costhetadir_bin_edges']), table_dcosthetadir)
-    last_costhetadir_bin_idx = n_costhetadir_bins - 1
-
-    assert table['deltaphidir_bin_edges'][0] == 0
-    assert np.isclose(table['deltaphidir_bin_edges'][-1], PI)
-    n_deltaphidir_bins = len(table['deltaphidir_bin_edges']) - 1
-    table_dphidir = PI / n_deltaphidir_bins
-    assert np.allclose(np.diff(table['deltaphidir_bin_edges']), table_dphidir)
-    last_deltaphidir_bin_idx = n_deltaphidir_bins - 1
-
-    binning_info = dict(
-        r_min=r_min, r_max=r_max, n_r_bins=n_r_bins, r_power=r_power,
-        n_costheta_bins=n_costheta_bins,
-        t_min=t_min, t_max=t_max, n_t_bins=n_t_bins,
-        n_costhetadir_bins=n_costhetadir_bins,
-        n_deltaphidir_bins=n_deltaphidir_bins,
-        deltaphidir_one_sided=True
+    binning_info = OrderedDict(
+        ('r_bin_edges', table['r_bin_edges']),
+        ('costheta_bin_edges', table['costheta_bin_edges']),
+        ('t_bin_edges', table['t_bin_edges']),
+        ('costhetadir_bin_edges', table['costhetadir_bin_edges']),
+        ('deltaphidir_bin_edges', table['deltaphidir_bin_edges']),
     )
     meta['binning_info'] = binning_info
 
     if tbl_is_templ_compr:
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup_mean(tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx):
-            """Helper function for directionality-averaged table lookup"""
-            # Original axes ordering
             templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
-
             return templ['weight'] / template_library[templ['index']].size
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup(tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx):
-            """Helper function for table lookup"""
-            # Original axes ordering
             templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
-
             return (
                 templ['weight']
                 * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
@@ -207,16 +177,18 @@ def generate_pexp_5d_function(
     else:
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
-            """Helper function for directionality averaged table lookup"""
             return np.mean(table[r_bin_idx, costheta_bin_idx, t_bin_idx, :, :])
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx):
-            """Helper function for table lookup"""
             return table[r_bin_idx, costheta_bin_idx, t_bin_idx,
                          costhetadir_bin_idx, deltaphidir_bin_idx]
 
+    table_lookup_mean.__doc__ = (
+        """Helper function for directionality-averaged table lookup"""
+    )
+    table_lookup.__doc__ = """Helper function for table lookup"""
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d_ckv_compute_t_indep(
@@ -303,10 +275,10 @@ def generate_pexp_5d_function(
                 if rsquared >= rsquared_max:
                     continue
 
-                r = math.sqrt(rsquared)
-                r = max(r, MACHINE_EPS)
-                r_bin_idx = int(math.sqrt(r) / table_dr_pwr)
-                costheta_bin_idx = int((1 - dz/r) / table_dcostheta)
+                r = max(math.sqrt(rsquared), MACHINE_EPS)
+
+                r_bin_idx = digitize_r(r)
+                costheta_bin_idx = digitize_ct(-dz/r)
 
                 table_idx = event_dom_info['table_idx'][dom_idx]
 
@@ -348,13 +320,13 @@ def generate_pexp_5d_function(
 
                     # Make upper edge inclusive
                     costhetadir_bin_idx = min(
-                        int((sources[source_idx]['dir_costheta'] + 1) / table_dcosthetadir),
+                        digitize_ctdir(sources[source_idx]['dir_costheta']),
                         last_costhetadir_bin_idx
                     )
 
                     # Make upper edge inclusive
                     deltaphidir_bin_idx = min(
-                        int(abs(pdir_deltaphi) / table_dphidir),
+                        digitize_dpdir(abs(pdir_deltaphi)),
                         last_deltaphidir_bin_idx
                     )
 
@@ -380,20 +352,26 @@ def generate_pexp_5d_function(
                     # bin index. Therefore, subract source time from hit time.
                     dt = event_hit_info[hit_idx]['time'] - sources[source_idx]['time']
 
-                    # Causally impossible? (Note the comparison is written such that it
-                    # will evaluate to True if hit_time is NaN.)
-                    if not dt >= 0:
-                        continue
-
-                    # Is relative time outside binning?
-                    if dt >= t_max:
-                        continue
-
-                    t_bin_idx = int(dt / table_dt)
+                    if use_residual_time:
+                        direct_time = r * recip_max_group_vel
+                        t_bin_idx = digitize_t(dt - direct_time)
+                    else: # time is simply "time from start of event"
+                        # Causally impossible? (Note the comparison is written such that it
+                        # will evaluate to True if hit_time is NaN.)
+                        if not dt >= 0:
+                            continue
+                        # Is relative time outside binning?
+                        if dt >= t_max:
+                            continue
+                        t_bin_idx = digitize_t(dt)
 
                     if sources[source_idx]['kind'] == SRC_OMNI:
                         surv_prob_at_hit_t = table_lookup_mean(
-                            tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx
+                            tables,
+                            table_idx,
+                            r_bin_idx,
+                            costheta_bin_idx,
+                            t_bin_idx,
                         )
 
                     else: # SRC_CKV_BETA1
@@ -404,7 +382,7 @@ def generate_pexp_5d_function(
                             costheta_bin_idx,
                             t_bin_idx,
                             costhetadir_bin_idx,
-                            deltaphidir_bin_idx
+                            deltaphidir_bin_idx,
                         )
 
                     r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
@@ -471,7 +449,7 @@ def generate_pexp_5d_function(
             grad_llh : float
 
             """
-            grad_llh = -sum_scaling_charge
+            grad_llh = -sum_scaling_charge # pylint: disable=invalid-unary-operand-type
             for dom_idx in range(len(event_dom_info)):
                 obs = event_dom_info[dom_idx]['total_observed_charge']
                 if obs > 0:

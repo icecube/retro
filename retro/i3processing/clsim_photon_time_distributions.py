@@ -11,7 +11,7 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'generate_histos',
-    'parse_args'
+    'parse_args',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
