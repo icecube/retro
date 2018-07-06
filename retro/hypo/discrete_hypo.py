@@ -155,8 +155,8 @@ class DiscreteHypo(object):
 
         """
         sources = []
-        for kernel, argnames, kwargs in zip(self.hypo_kernels, self.kernel_argnames, self.kernel_kwargs):
-            total_kwargs = {a:hypo[a] for a in argnames}
+        for kernel, param_names, kwargs in zip(self.hypo_kernels, self.kernel_param_names, self.kernel_kwargs):
+            total_kwargs = {a:hypo[a] for a in param_names}
             total_kwargs.update(kwargs)
             sources.append(kernel(**total_kwargs))
         if len(sources) == 0:
@@ -183,7 +183,7 @@ class DiscreteHypo(object):
         """
         if self.pegleg_kernel is None:
             return EMPTY_SOURCES
-        total_kwargs = {a:hypo[a] for a in self.pegleg_kernel_argnames}
+        total_kwargs = {a:hypo[a] for a in self.pegleg_kernel_param_names}
         total_kwargs.update(self.pegleg_kernel_kwargs)
         return self.pegleg_kernel(**total_kwargs)
 
@@ -205,7 +205,7 @@ class DiscreteHypo(object):
         """
         if self.scaling_kernel is None:
             return EMPTY_SOURCES
-        total_kwargs = {a:hypo[a] for a in self.scaling_kernel_argnames}
+        total_kwargs = {a:hypo[a] for a in self.scaling_kernel_param_names}
         total_kwargs.update(self.scaling_kernel_kwargs)
         return self.scaling_kernel(**total_kwargs)
 
@@ -214,10 +214,10 @@ class DiscreteHypo(object):
     def params(self):
         """Return all used hypo parameter dimensions"""
         params = []
-        params.extend(self.pegleg_kernel_argnames)
-        params.extend(self.scaling_kernel_argnames)
-        for kernel_argnames in self.kernel_argnames:
-            params.extend(kernel_argnames)
+        params.extend(self.pegleg_kernel_param_names)
+        params.extend(self.scaling_kernel_param_names)
+        for kernel_param_names in self.kernel_param_names:
+            params.extend(kernel_param_names)
         params = set(params)
         return list(params)
 
