@@ -751,7 +751,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
     if dom_tables or events:
         parser.add_argument(
             '--angsens-model', required=True,
-            choices='nominal  h1-100cm  h2-50cm  h3-30cm'.split(),
+            choices='nominal  h1-100cm  h2-50cm  h3-30cm 9'.split(),
             help='''Angular sensitivity model; only necessary if loading tables
             or photon hits.'''
         )
