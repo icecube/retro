@@ -110,7 +110,7 @@ def generate_pexp_5d_function(
     get_llh : callable
 
     meta : OrderedDict
-        Paramters, including the binning, that uniquely identify what the
+        Parameters, including the binning, that uniquely identify what the
         capabilities of the returned `pexp_5d`. (Use this to eliminate
         redundant pexp_5d functions.)
 
@@ -281,6 +281,7 @@ def generate_pexp_5d_function(
             See above
 
         """
+        num_hit_doms = len(event_dom_info)
         for source_idx in range(sources_start, sources_stop):
             source = sources[source_idx]
             src_kind = source['kind']
@@ -293,7 +294,7 @@ def generate_pexp_5d_function(
             src_dir_costheta = source['dir_costheta']
             src_photons = source['photons']
 
-            for dom_idx in range(len(event_dom_info)):
+            for dom_idx in range(num_hit_doms):
                 dom = event_dom_info[dom_idx]
                 dom_tbl_idx = dom['table_idx']
                 dom_qe = dom['quantum_efficiency']
@@ -459,7 +460,7 @@ def generate_pexp_5d_function(
         """
         sum_scaling_exp_charge = np.sum(scaling_dom_exp)
         sum_nonscaling_exp_charge = np.sum(dom_exp) + sum_noise_rate * time_window
-        num_active_doms = len(event_dom_info)
+        num_hit_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
         # -- Find the best scale factor -- #
@@ -478,7 +479,7 @@ def generate_pexp_5d_function(
 
             """
             grad_llh = -sum_scaling_exp_charge # pylint: disable=invalid-unary-operand-type
-            for dom_idx in range(num_active_doms):
+            for dom_idx in range(num_hit_doms):
                 dom = event_dom_info[dom_idx]
                 dom_total_observed_charge = dom['total_observed_charge']
                 if dom_total_observed_charge > 0:
@@ -508,7 +509,7 @@ def generate_pexp_5d_function(
 
         llh = -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
         # Second time-independent part
-        for dom_idx in range(num_active_doms):
+        for dom_idx in range(num_hit_doms):
             dom = event_dom_info[dom_idx]
             dom_total_observed_charge = dom['total_observed_charge']
             if dom_total_observed_charge > 0:
@@ -519,7 +520,7 @@ def generate_pexp_5d_function(
         # Time-dependent part
         for hit_idx in range(num_hits):
             hit = event_hit_info[hit_idx]
-            dom_idx = hit['dom_idx']
+            dom_idx = hit['event_dom_idx']
             exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
             norm = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
             if norm > 0:
@@ -532,7 +533,7 @@ def generate_pexp_5d_function(
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh_all_doms(
-            sources,
+            generic_sources,
             pegleg_sources,
             scaling_sources,
             event_hit_info,
@@ -552,7 +553,7 @@ def generate_pexp_5d_function(
 
         Parameters
         ----------
-        sources : shape (n_sources,) array of dtype SRC_T
+        generic_sources : shape (n_sources,) array of dtype SRC_T
         pegleg_sources : shape (n_sources,) array of dtype SRC_T
             over these sources will be maximized in order
         scaling_sources : shape (n_sources,) array of dtype SRC_T
@@ -576,26 +577,26 @@ def generate_pexp_5d_function(
         pegleg_idx : int
             Index for best pegleg hypo
         scalefactor : float
-            Scale factor for scaling sources at best pegleg hypo
+            Best scale factor for `scaling_sources` at best pegleg hypo
 
         """
         # Each pegleg iteration, include this many more pegleg sources
         pegleg_stepsize = 1
 
         num_pegleg_sources = len(pegleg_sources)
-        num_llhs = 1 + int(num_pegleg_sources / pegleg_stepsize)
-        num_active_doms = len(event_dom_info)
+        num_pegleg_llhs = 1 + int(num_pegleg_sources / pegleg_stepsize)
+        num_hit_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
         recip_time_window = 1 / time_window
         sum_noise_rate = np.sum(event_dom_info['noise_rate_per_ns'])
 
         # Initialize expectations arrays
-        dom_exp = np.zeros(shape=num_active_doms, dtype=np.float64)
+        dom_exp = np.zeros(shape=num_hit_doms, dtype=np.float64)
         hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
         # Save the scaling sources expectations in separate arrays
-        scaling_dom_exp = np.zeros(shape=num_active_doms, dtype=np.float64)
+        scaling_dom_exp = np.zeros(shape=num_hit_doms, dtype=np.float64)
         scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
         # Get scaling sources expectations first for a nominal (e.g. cascade)
@@ -614,11 +615,11 @@ def generate_pexp_5d_function(
             hit_exp=scaling_hit_exp,
         )
 
-        # Get expectations for non-scaling sources
+        # Get expectations for sources handled generically
         pexp_5d(
-            sources=sources,
+            sources=generic_sources,
             sources_start=0,
-            sources_stop=len(sources),
+            sources_stop=len(generic_sources),
             event_dom_info=event_dom_info,
             event_hit_info=event_hit_info,
             tables=tables,
@@ -643,8 +644,8 @@ def generate_pexp_5d_function(
             last_scalefactor=10.,
         )
 
-        llhs = np.full(shape=num_llhs, fill_value=llh, dtype=np.float64)
-        scalefactors = np.zeros(shape=num_llhs, dtype=np.float64)
+        llhs = np.full(shape=num_pegleg_llhs, fill_value=llh, dtype=np.float64)
+        scalefactors = np.zeros(shape=num_pegleg_llhs, dtype=np.float64)
         scalefactors[0] = scalefactor
 
         best_idx = 0
@@ -667,7 +668,7 @@ def generate_pexp_5d_function(
                 hit_exp=hit_exp,
             )
 
-            # Get new best scaling factor, llh for the scaling sources
+            # Get new best scaling factor & llh for the scaling sources
             llh, scalefactor = eval_llh(
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,

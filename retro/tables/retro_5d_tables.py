@@ -223,6 +223,7 @@ class Retro5DTables(object):
             operational = (
                 operational_doms[s_idx, d_idx] and sd_idx in self.use_sd_indices
             )
+            self.dom_info[sd_idx]['sd_idx'] = sd_idx
             self.dom_info[sd_idx]['operational'] = operational
             self.dom_info[sd_idx]['x'] = geom[s_idx, d_idx, 0]
             self.dom_info[sd_idx]['y'] = geom[s_idx, d_idx, 1]
@@ -316,18 +317,18 @@ class Retro5DTables(object):
         if self.is_stacked is not None:
             assert self.is_stacked
 
+        stacked_tables_meta_fpath = expand(stacked_tables_meta_fpath)
+        stacked_tables_fpath = expand(stacked_tables_fpath)
+        stacked_t_indep_tables_fpath = expand(stacked_t_indep_tables_fpath)
+
         tables_mmap_mode = 'r' if mmap_tables else None
         t_indep_mmap_mode = 'r' if mmap_t_indep else None
 
         self.table_meta = load_pickle(stacked_tables_meta_fpath)
-
-        self.tables = np.load(
-            expand(stacked_tables_fpath),
-            mmap_mode=tables_mmap_mode
-        )
+        self.tables = np.load(stacked_tables_fpath, mmap_mode=tables_mmap_mode)
         self.tables.setflags(write=False, align=True, uic=False)
         self.t_indep_tables = np.load(
-            expand(stacked_t_indep_tables_fpath),
+            stacked_t_indep_tables_fpath,
             mmap_mode=t_indep_mmap_mode
         )
         self.t_indep_tables.setflags(write=False, align=True, uic=False)
@@ -389,7 +390,7 @@ class Retro5DTables(object):
         step_length : float > 0, optional
             The stepLength parameter (in meters) used in CLSim tabulator code
             for tabulating a single photon as it travels. This is a hard-coded
-            paramter set to 1 meter in the trunk version of the code, but it's
+            parameter set to 1 meter in the trunk version of the code, but it's
             something we might play with to optimize table generation speed, so
             just be warned that this _can_ change. Note that this is only
             required for CLSim .fits tables, which do not record this
@@ -491,7 +492,8 @@ def get_table_norm(
 
     step_length : float > 0
         Step length used in CLSim tabulator, in units of meters. (Hard-coded to
-        1 m in CLSim, but this is a paramter that ultimately could be changed.)
+        1 m in CLSim, but this is a parameter that ultimately could be
+        changed.)
 
     r_bin_edges : 1D array, ascending non-negative values (meters)
         Radial bin edges in units of meters.

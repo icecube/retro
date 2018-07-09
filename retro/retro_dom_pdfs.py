@@ -50,6 +50,7 @@ from retro.i3info.extract_gcd import extract_gcd
 from retro.tables.dom_time_polar_tables import DOMTimePolarTables
 #from retro.tables.tdi_cart_tables import TDICartTable
 from retro.tables.retro_5d_tables import Retro5DTables
+from retro.types import DOM_INFO_T, EVT_HIT_INFO_T
 from retro.utils.misc import expand, mkdir
 from retro.const import NUM_DOMS_TOT
 from retro import init_obj
@@ -57,7 +58,7 @@ from retro import init_obj
 
 # pylint: disable=line-too-long
 SIMULATIONS = dict(
-    upgoing_muon=dict(
+    mie_upgoing_muon=dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=np.pi,
@@ -66,7 +67,7 @@ SIMULATIONS = dict(
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl'
     ),
-    downgoing_muon=dict(
+    mie_downgoing_muon=dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-300,
             track_azimuth=0, track_zenith=0,
@@ -75,7 +76,7 @@ SIMULATIONS = dict(
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
     ),
-    horizontal_muon=dict(
+    mie_horizontal_muon=dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-350,
             track_azimuth=0, track_zenith=np.pi/2,
@@ -84,7 +85,7 @@ SIMULATIONS = dict(
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
     ),
-    upgoing_em_cascade=dict(
+    mie_upgoing_em_cascade=dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=np.pi,
@@ -93,6 +94,42 @@ SIMULATIONS = dict(
         ),
         fwd_sim_histo_file='EMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-4000ns_400bins.pkl'
     ),
+    lea_upgoing_muon=dict(
+        mc_true_params=dict(
+            time=0, x=0, y=0, z=-400,
+            track_azimuth=0, track_zenith=np.pi,
+#            cascade_azimuth=0, cascade_zenith=0,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl',
+    ),
+    lea_downgoing_muon=dict(
+        mc_true_params=dict(
+            time=0, x=0, y=0, z=-300,
+            track_azimuth=0, track_zenith=0,
+#            cascade_azimuth=0, cascade_zenith=0,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1.0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl',
+    ),
+    lea_horizontal_muon=dict(
+        mc_true_params=dict(
+            time=0, x=0, y=0, z=-350,
+            track_azimuth=0, track_zenith=np.pi/2,
+#            cascade_azimuth=0, cascade_zenith=0,
+            track_energy=20, cascade_energy=0
+        ),
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl',
+    ),
+    #lea_upgoing_em_cascade=dict(
+    #    mc_true_params=dict(
+    #        time=0, x=0, y=0, z=-400,
+    #        track_azimuth=0, track_zenith=np.pi,
+#   #         cascade_azimuth=0, cascade_zenith=np.pi,
+    #        track_energy=0, cascade_energy=20
+    #    ),
+    #    fwd_sim_histo_file='EMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_mie_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl'
+    #),
 )
 
 
@@ -170,6 +207,19 @@ if __name__ == '__main__':
     run_info['hit_times'] = hit_times
     time_window = np.max(bin_edges) - np.min(bin_edges)
     run_info['time_window'] = time_window
+
+    num_doms_loaded = len(dom_tables.loaded_sd_indices)
+    num_hits = len(hit_times)
+    event_hit_info = np.empty(shape=num_doms_loaded * num_hits, dtype=EVT_HIT_INFO_T)
+    event_dom_info = np.empty(shape=num_doms_loaded, dtype=DOM_INFO_T)
+    hits_start_idx = 0
+    for sd_idx in dom_tables.loaded_sd_indices:
+        hits_stop_idx = hits_start_idx + num_hits
+        hits = event_hit_info[hits_start_idx:hits_stop_idx]
+        hits['time'] = hit_times
+        hits['charge'] = 1
+        hits['dom_idx'] = 
+        hits_start_idx += num_hits
 
     results = [None] * NUM_DOMS_TOT
     for sd_idx in dom_tables.loaded_sd_indices:

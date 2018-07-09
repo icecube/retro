@@ -8,7 +8,6 @@ namedtuples for interface simplicity and consistency
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'PARAM_NAMES',
     'Hit',
     'Photon',
     'Event',
@@ -52,12 +51,6 @@ from collections import namedtuple
 import enum
 
 import numpy as np
-
-# all possible params
-PARAM_NAMES = ['time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith',
-               'cascade_azimuth', 'cascade_zenith', 'track_energy',
-               'cascade_energy', 'cascade_d_zenith', 'cascade_d_azimuth']
-
 
 Event = namedtuple( # pylint: disable=invalid-name
     typename='Event',
@@ -141,6 +134,7 @@ TimeSphCoord = namedtuple( # pylint: disable=invalid-name
 
 DOM_INFO_T = np.dtype(
     [
+        ('sd_idx', np.uint32),
         ('operational', np.bool),
         ('x', np.float32),
         ('y', np.float32),
@@ -149,6 +143,18 @@ DOM_INFO_T = np.dtype(
         ('noise_rate_per_ns', np.float32)
     ]
 )
+
+EVT_DOM_INFO_T = np.dtype([
+    ('x', np.float32),
+    ('y', np.float32),
+    ('z', np.float32),
+    ('quantum_efficiency', np.float32),
+    ('noise_rate_per_ns', np.float32),
+    ('table_idx', np.uint32),
+    ('hits_start_idx', np.uint32),
+    ('hits_stop_idx', np.uint32),
+    ('total_observed_charge', np.float32),
+])
 
 PULSE_T = np.dtype([
     ('time', np.float32),
@@ -193,22 +199,10 @@ HITS_SUMMARY_T = np.dtype([
     ('time_window_stop', np.float32)
 ])
 
-EVT_DOM_INFO_T = np.dtype([
-        ('x', np.float32),
-        ('y', np.float32),
-        ('z', np.float32),
-        ('quantum_efficiency', np.float32),
-        ('noise_rate_per_ns', np.float32),
-        ('table_idx', np.uint32),
-        ('hits_start_idx', np.uint32),
-        ('hits_stop_idx', np.uint32),
-        ('total_observed_charge', np.float32),
-])
-
 EVT_HIT_INFO_T = np.dtype([
     ('time', np.float32),
     ('charge', np.float32),
-    ('dom_idx', np.uint32),
+    ('event_dom_idx', np.uint32),
 ])
 
 class ConfigID(enum.IntEnum):
@@ -217,8 +211,17 @@ class ConfigID(enum.IntEnum):
     Note that this seems to be a really unique ID for a trigger, subsuming
     TypeID and SourceID.
 
-    See docs at
+    See docs at ::
+
       http://software.icecube.wisc.edu/documentation/projects/trigger-sim/trigger_config_ids.html
+
+    script to dump enumerated values & details of each is at ::
+
+      http://code.icecube.wisc.edu/svn/projects/trigger-sim/trunk/resources/scripts/print_trigger_configuration.py
+
+    run via .. ::
+
+      $I3_SRC/trigger-sim/resources/scripts/print_trigger_configuration.py -g GCDFILE
 
     """
     SMT8_IN_ICE = 1006
@@ -239,6 +242,19 @@ class ConfigID(enum.IntEnum):
 
 
 class TypeID(enum.IntEnum):
+    """Trigger TypeID:  Enumeration describing what "algorithm" issued a
+    trigger. More details about a specific trigger can be stored in the
+    I3TriggerStatus maps as part of the detector status.
+
+    See docs at ::
+
+      http://software.icecube.wisc.edu/documentation/projects/trigger-sim/trigger_config_ids.html
+
+    and enumerated values (and more comments on each type) are defined in ::
+
+      http://code.icecube.wisc.edu/svn/projects/dataclasses/trunk/public/dataclasses/TriggerKey.h
+
+    """
     SIMPLE_MULTIPLICITY = 0
     CALIBRATION = 10
     MIN_BIAS = 20
@@ -257,6 +273,17 @@ class TypeID(enum.IntEnum):
 
 
 class SourceID(enum.IntEnum):
+    """Trigger SourceID: Enumeration describing what "subdetector" issued a trigger.
+
+    See docs at ::
+
+      http://software.icecube.wisc.edu/documentation/projects/trigger-sim/trigger_config_ids.html
+
+    and enumerated values are defined in ::
+
+      http://code.icecube.wisc.edu/svn/projects/dataclasses/trunk/public/dataclasses/TriggerKey.h
+
+    """
     IN_ICE = 0
     ICE_TOP = 10
     AMANDA_TWR_DAQ = 20
@@ -268,6 +295,15 @@ class SourceID(enum.IntEnum):
 
 
 class SubtypeID(enum.IntEnum):
+    """Trigger SubtypeID: Enumeration describing how a software trigger was
+    orginally "configured" within the TWR DAQ trigger system.
+
+    Enumerated values are defined in ::
+
+      http://code.icecube.wisc.edu/svn/projects/dataclasses/trunk/public/dataclasses/TriggerKey.h
+
+    """
+    # pylint: disable=invalid-name
     NO_SUBTYPE = 0
     M18 = 50
     M24 = 100
@@ -287,22 +323,19 @@ TRIGGER_T = np.dtype([
 ])
 
 
-SRC_T = np.dtype(
-    [
-        ('kind', np.uint32),
-        ('time', np.float32),
-        ('x', np.float32),
-        ('y', np.float32),
-        ('z', np.float32),
-        ('photons', np.float32),
-        ('dir_costheta', np.float32),
-        ('dir_sintheta', np.float32),
-        ('dir_cosphi', np.float32),
-        ('dir_sinphi', np.float32),
-        ('ckv_theta', np.float32),
-        ('ckv_costheta', np.float32),
-        ('ckv_sintheta', np.float32),
-    ],
-    align=True
-)
+SRC_T = np.dtype([
+    ('kind', np.uint32),
+    ('time', np.float32),
+    ('x', np.float32),
+    ('y', np.float32),
+    ('z', np.float32),
+    ('photons', np.float32),
+    ('dir_costheta', np.float32),
+    ('dir_sintheta', np.float32),
+    ('dir_cosphi', np.float32),
+    ('dir_sinphi', np.float32),
+    ('ckv_theta', np.float32),
+    ('ckv_costheta', np.float32),
+    ('ckv_sintheta', np.float32),
+], align=True)
 """Each source point is described by (up to) these 9 fields"""

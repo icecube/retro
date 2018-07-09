@@ -48,21 +48,8 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import const, load_pickle
 from retro.hypo.discrete_hypo import DiscreteHypo
-from retro.hypo.discrete_cascade_kernels import (
-    point_cascade,
-    point_ckv_cascade,
-    one_dim_cascade,
-    aligned_point_ckv_cascade,
-    aligned_one_dim_cascade,
-    scaling_aligned_point_ckv_cascade,
-    scaling_aligned_one_dim_cascade,
-    scaling_one_dim_cascade,
-    one_dim_delta_cascade,
-    scaling_one_dim_delta_cascade,
-)
-from retro.hypo.discrete_muon_kernels import (
-    const_energy_loss_muon, table_energy_loss_muon, pegleg_muon
-)
+from retro.hypo import discrete_cascade_kernels as dck
+from retro.hypo import discrete_muon_kernels as dmk
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
 from retro.retro_types import (
@@ -103,11 +90,30 @@ def setup_dom_tables(
         no_noise=False,
         force_no_mmap=False,
     ):
-    """Instantiate and load single-DOM tables
+    """Instantiate and load single-DOM tables.
+
+    Parameters
+    ----------
+    dom_tables_kind : str
+    dom_tables_fname_proto : str
+    gcd : str
+    angsens_model : str
+    norm_version : str
+    use_sd_indices : sequence
+    step_length : float
+    num_phi_samples : int, optional
+    ckv_sigma_deg : float, optional
+    template_library : str, optional
+    compute_t_indep_exp : bool, optional
+    use_directionality : bool, optional
+    no_noise : bool, optional
+    force_no_mmap : bool, optional
 
     """
     print('Instantiating and loading single-DOM tables')
     t0 = time.time()
+
+    dom_tables_fname_proto = expand(dom_tables_fname_proto)
 
     # TODO: set mmap based on memory?
     if force_no_mmap:
@@ -151,8 +157,9 @@ def setup_dom_tables(
 
             for dom in doms:
                 fpath = dom_tables_fname_proto.format(
-                    subdet=subdet, dom=dom, depth_idx=dom-1
+                    subdet=subdet, dom=dom, depth_idx=dom - 1
                 )
+
                 shared_table_sd_indices = []
                 for string in strings:
                     sd_idx = const.get_sd_idx(string=string, dom=dom)
@@ -167,14 +174,38 @@ def setup_dom_tables(
                     fpath=fpath,
                     sd_indices=shared_table_sd_indices,
                     step_length=step_length,
-                    mmap=mmap
+                    mmap=mmap,
                 )
+
     elif '{string}' in dom_tables_fname_proto:
         raise NotImplementedError('dom_tables_fname_proto with {string} not'
                                   ' implemented')
+
     elif '{string_idx}' in dom_tables_fname_proto:
         raise NotImplementedError('dom_tables_fname_proto with {string_idx}'
                                   ' not implemented')
+
+    elif '{cluster_idx}' in dom_tables_fname_proto:
+        cluster_idx = -1
+        while True:
+            cluster_idx += 1
+            dpath = dom_tables_fname_proto.format(cluster_idx)
+            if not isdir(dpath):
+                break
+
+            # TODO: make the omkeys field generic to all tables & place
+            # loading & intersection ops within the `load_table` method.
+            omkeys = np.load(join(dpath, 'omkeys.npy'))
+            sd_indices = set(const.omkeys_to_sd_indices(omkeys))
+            shared_table_sd_indices = sorted(sd_indices.intersection(use_sd_indices))
+
+            dom_tables.load_table(
+                fpath=dpath,
+                sd_indices=shared_table_sd_indices,
+                step_length=step_length,
+                mmap=mmap,
+            )
+
     else:
         stacked_tables_fpath = expand(join(
             dom_tables_fname_proto,
@@ -192,7 +223,7 @@ def setup_dom_tables(
             stacked_tables_meta_fpath=stacked_tables_meta_fpath,
             stacked_tables_fpath=stacked_tables_fpath,
             stacked_t_indep_tables_fpath=stacked_t_indep_tables_fpath,
-            mmap_t_indep=mmap
+            mmap_t_indep=mmap,
         )
 
     print('  -> {:.3f} s\n'.format(time.time() - t0))
@@ -218,42 +249,42 @@ def setup_discrete_hypo(
     hypo_handler
 
     """
-    hypo_kernels = []
-    kernel_kwargs = []
+    generic_kernels = []
+    generic_kernels_kwargs = []
     pegleg_kernel = None
     pegleg_kernel_kwargs = None
     scaling_kernel = None
     scaling_kernel_kwargs = None
     if cascade_kernel is not None:
         if cascade_kernel == 'point':
-            hypo_kernels.append(point_cascade)
-            kernel_kwargs.append(dict())
+            generic_kernels.append(dck.point_cascade)
+            generic_kernels_kwargs.append(dict())
         elif cascade_kernel == 'point_ckv':
-            hypo_kernels.append(point_ckv_cascade)
-            kernel_kwargs.append(dict())
+            generic_kernels.append(dck.point_ckv_cascade)
+            generic_kernels_kwargs.append(dict())
         elif cascade_kernel == 'aligned_point_ckv':
-            hypo_kernels.append(aligned_point_ckv_cascade)
-            kernel_kwargs.append(dict())
+            generic_kernels.append(dck.aligned_point_ckv_cascade)
+            generic_kernels_kwargs.append(dict())
         elif cascade_kernel == 'one_dim':
-            hypo_kernels.append(one_dim_cascade)
-            kernel_kwargs.append(dict())
+            generic_kernels.append(dck.one_dim_cascade)
+            generic_kernels_kwargs.append(dict())
         elif cascade_kernel == 'aligned_one_dim':
-            hypo_kernels.append(aligned_one_dim_cascade)
-            kernel_kwargs.append(dict())
+            generic_kernels.append(dck.aligned_one_dim_cascade)
+            generic_kernels_kwargs.append(dict())
         elif cascade_kernel == 'one_dim_delta':
-            hypo_kernels.append(one_dim_delta_cascade)
-            kernel_kwargs.append(dict())
+            generic_kernels.append(dck.one_dim_delta_cascade)
+            generic_kernels_kwargs.append(dict())
         elif cascade_kernel == 'scaling_aligned_one_dim':
-            scaling_kernel = scaling_aligned_one_dim_cascade
+            scaling_kernel = dck.scaling_aligned_one_dim_cascade
             scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_aligned_point_ckv':
-            scaling_kernel = scaling_aligned_point_ckv_cascade
+            scaling_kernel = dck.scaling_aligned_point_ckv_cascade
             scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_one_dim':
-            scaling_kernel = scaling_one_dim_cascade
+            scaling_kernel = dck.scaling_one_dim_cascade
             scaling_kernel_kwargs = dict()
         elif cascade_kernel == 'scaling_one_dim_delta':
-            scaling_kernel = scaling_one_dim_delta_cascade
+            scaling_kernel = dck.scaling_one_dim_delta_cascade
             scaling_kernel_kwargs = dict()
         else:
             raise NotImplementedError('{} cascade not implemented yet.'
@@ -261,21 +292,21 @@ def setup_discrete_hypo(
 
     if track_kernel is not None:
         if track_kernel == 'const_e_loss':
-            hypo_kernels.append(const_energy_loss_muon)
-            kernel_kwargs.append(dict(dt=track_time_step))
+            generic_kernels.append(dmk.const_energy_loss_muon)
+            generic_kernels_kwargs.append(dict(dt=track_time_step))
         elif track_kernel == 'pegleg':
-            pegleg_kernel = pegleg_muon
+            pegleg_kernel = dmk.pegleg_muon
             pegleg_kernel_kwargs = dict(dt=track_time_step)
         elif track_kernel == 'table_e_loss':
-            hypo_kernels.append(table_energy_loss_muon)
-            kernel_kwargs.append(dict(dt=track_time_step))
+            generic_kernels.append(dmk.table_energy_loss_muon)
+            generic_kernels_kwargs.append(dict(dt=track_time_step))
         else:
             raise NotImplementedError('{} track not implemented yet.'
                                       .format(track_kernel))
 
     hypo_handler = DiscreteHypo(
-        hypo_kernels=hypo_kernels,
-        kernel_kwargs=kernel_kwargs,
+        generic_kernels=generic_kernels,
+        generic_kernels_kwargs=generic_kernels_kwargs,
         pegleg_kernel=pegleg_kernel,
         pegleg_kernel_kwargs=pegleg_kernel_kwargs,
         scaling_kernel=scaling_kernel,
@@ -595,7 +626,9 @@ def get_hits(event, path, angsens_model=None):
             config_id = trigger['config_id']
             tr_time = trigger['time']
 
-            # TODO: rework to _only_ use ConfigID
+            # TODO: rework to _only_ use ConfigID?
+            # Below values can be extracted by running
+            # $I3_SRC/trigger-sim/resources/scripts/print_trigger_configuration.py -g GCDFILE
             trigger_handled = False
             if tr_type == TypeID.SIMPLE_MULTIPLICITY:
                 if source == SourceID.IN_ICE:
@@ -635,7 +668,7 @@ def get_hits(event, path, angsens_model=None):
     offset = 0
 
     for (string, dom, pmt), p in series:
-        sd_idx = const.get_sd_idx(string=string, dom=dom)
+        sd_idx = const.get_sd_idx(string=string, dom=dom, pmt=pmt)
         num = len(p)
         sd_hits = np.empty(shape=num, dtype=HIT_T)
         sd_hits['time'] = p['time']
