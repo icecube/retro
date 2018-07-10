@@ -33,26 +33,13 @@ import sys
 import time
 
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from matplotlib.offsetbox import AnchoredText
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-import retro
-from retro.hypo.discrete_hypo import DiscreteHypo
-from retro.hypo.discrete_muon_kernels import const_energy_loss_muon, table_energy_loss_muon
-from retro.hypo.discrete_cascade_kernels import point_cascade, one_dim_cascade
-from retro.i3info.extract_gcd import extract_gcd
-from retro.tables.dom_time_polar_tables import DOMTimePolarTables
-#from retro.tables.tdi_cart_tables import TDICartTable
-from retro.tables.retro_5d_tables import Retro5DTables
-from retro.types import DOM_INFO_T, EVT_HIT_INFO_T
+from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T
 from retro.utils.misc import expand, mkdir
-from retro.const import NUM_DOMS_TOT
 from retro import init_obj
 
 
@@ -62,7 +49,7 @@ SIMULATIONS = dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=np.pi,
-#            cascade_azimuth=0, cascade_zenith=0,
+            #cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl'
@@ -71,7 +58,7 @@ SIMULATIONS = dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-300,
             track_azimuth=0, track_zenith=0,
-#            cascade_azimuth=0, cascade_zenith=0,
+            #cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
@@ -80,7 +67,7 @@ SIMULATIONS = dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-350,
             track_azimuth=0, track_zenith=np.pi/2,
-#            cascade_azimuth=0, cascade_zenith=0,
+            #cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000000_step1_photon_histos_0-4000ns_400bins.pkl',
@@ -89,7 +76,7 @@ SIMULATIONS = dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=np.pi,
-#            cascade_azimuth=0, cascade_zenith=np.pi,
+            #cascade_azimuth=0, cascade_zenith=np.pi,
             track_energy=0, cascade_energy=20
         ),
         fwd_sim_histo_file='EMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-4000ns_400bins.pkl'
@@ -98,7 +85,7 @@ SIMULATIONS = dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-400,
             track_azimuth=0, track_zenith=np.pi,
-#            cascade_azimuth=0, cascade_zenith=0,
+            #cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl',
@@ -107,7 +94,7 @@ SIMULATIONS = dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-300,
             track_azimuth=0, track_zenith=0,
-#            cascade_azimuth=0, cascade_zenith=0,
+            #cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-300_cz+1.0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl',
@@ -116,7 +103,7 @@ SIMULATIONS = dict(
         mc_true_params=dict(
             time=0, x=0, y=0, z=-350,
             track_azimuth=0, track_zenith=np.pi/2,
-#            cascade_azimuth=0, cascade_zenith=0,
+            #cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
         fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl',
@@ -125,7 +112,7 @@ SIMULATIONS = dict(
     #    mc_true_params=dict(
     #        time=0, x=0, y=0, z=-400,
     #        track_azimuth=0, track_zenith=np.pi,
-#   #         cascade_azimuth=0, cascade_zenith=np.pi,
+    #        #cascade_azimuth=0, cascade_zenith=np.pi,
     #        track_energy=0, cascade_energy=20
     #    ),
     #    fwd_sim_histo_file='EMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_mie_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl'
@@ -155,26 +142,26 @@ if __name__ == '__main__':
         ('hostname', socket.gethostname())
     ])
 
-    CODE_TO_TEST = (
-        '{tables}_tables_{norm}norm_{no_dir_str}{cone_str}{dedx_str}dt{muon_dt:.1f}'
-    ).format(
-        tables=kwargs['dom_tables_kw']['dom_tables_kind'],
-        norm=kwargs['dom_tables_kw']['norm_version'],
-        no_dir_str='no_dir_' if not kwargs['dom_tables_kw']['use_directionality'] else '',
-        cone_str=(
-            'sigma{}deg_{}phi_'.format(kwargs['dom_tables_kw']['ckv_sigma_deg'], kwargs['dom_tables_kw']['ckv_sigma_deg'])
-            if (kwargs['dom_tables_kw']['use_directionality'] and
-                kwargs['dom_tables_kw']['dom_tables_kind'] in ['raw_uncompr', 'raw_templ_compr'])
-            else ''
-        ),
-        dedx_str='dedx_' if kwargs['hypo_kw']['track_kernel'] == 'table_e_loss' else '',
-        muon_dt=kwargs['hypo_kw']['track_time_step']
-        
-    )
+    #CODE_TO_TEST = (
+    #    '{tables}_tables_{norm}norm_{no_dir_str}{cone_str}{dedx_str}dt{muon_dt:.1f}'
+    #).format(
+    #    tables=kwargs['dom_tables_kw']['dom_tables_kind'],
+    #    norm=kwargs['dom_tables_kw']['norm_version'],
+    #    no_dir_str='no_dir_' if not kwargs['dom_tables_kw']['use_directionality'] else '',
+    #    cone_str=(
+    #        'sigma{}deg_{}phi_'.format(kwargs['dom_tables_kw']['ckv_sigma_deg'], kwargs['dom_tables_kw']['ckv_sigma_deg'])
+    #        if (kwargs['dom_tables_kw']['use_directionality'] and
+    #            kwargs['dom_tables_kw']['dom_tables_kind'] in ['raw_uncompr', 'raw_templ_compr'])
+    #        else ''
+    #    ),
+    #    dedx_str='dedx_' if kwargs['hypo_kw']['track_kernel'] == 'table_e_loss' else '',
+    #    muon_dt=kwargs['hypo_kw']['track_time_step']
+    #
+    #)
 
     dom_tables = init_obj.setup_dom_tables(**kwargs['dom_tables_kw'])
     hypo_handler = init_obj.setup_discrete_hypo(**kwargs['hypo_kw'])
-    sim=SIMULATIONS[kwargs['other_kw']['sim_to_test']]
+    sim = SIMULATIONS[kwargs['other_kw']['sim_to_test']]
     outdir = expand(kwargs['other_kw'].pop('outdir'))
 
     fwd_sim_dir = '/data/icecube/retro/sims/'
@@ -194,14 +181,34 @@ if __name__ == '__main__':
         bin_edges = np.linspace(0, 4000, 401)
 
     run_info['sim'] = OrderedDict([
-        ('mc_true_params', sim['mc_true_params']._asdict()),
+        ('mc_true_params', sim['mc_true_params']),
         ('fwd_sim_histo_file', sim['fwd_sim_histo_file']),
         ('fwd_sim_histo_file_md5', fwd_sim_histo_file_md5)
     ])
     run_info['sim_to_test'] = kwargs['other_kw']['sim_to_test']
     hit_times = (0.5 * (bin_edges[:-1] + bin_edges[1:])).astype(np.float32)
 
-    sources = hypo_handler.get_sources(hypo_params=sim['mc_true_params'])
+    generic_sources = hypo_handler.get_generic_sources(sim['mc_true_params'])
+    pegleg_sources = hypo_handler.get_pegleg_sources(sim['mc_true_params'])
+    scaling_sources = hypo_handler.get_scaling_sources(sim['mc_true_params'])
+
+    # TODO: enable using pegleg and scaling sources (with "ideal" choices of
+    # `pegleg_idx` and `scalefactor`) to replicate the exact behavior of the
+    # actual code were optimizer to fit an event perfectly
+    assert len(pegleg_sources) == 0
+    assert len(scaling_sources) == 0
+
+    pegleg_idx = len(pegleg_sources)
+    scalefactor = 1
+
+    pegleg_sources = pegleg_sources[:pegleg_idx]
+    scaling_sources['photons'] *= scalefactor
+
+    all_sources = np.concatenate((
+        generic_sources,
+        pegleg_sources,
+        scaling_sources
+    ))
 
     run_info['sd_indices'] = dom_tables.loaded_sd_indices
     run_info['hit_times'] = hit_times
@@ -209,40 +216,60 @@ if __name__ == '__main__':
     run_info['time_window'] = time_window
 
     num_doms_loaded = len(dom_tables.loaded_sd_indices)
-    num_hits = len(hit_times)
-    event_hit_info = np.empty(shape=num_doms_loaded * num_hits, dtype=EVT_HIT_INFO_T)
-    event_dom_info = np.empty(shape=num_doms_loaded, dtype=DOM_INFO_T)
+    num_hit_times = len(hit_times)
+
+    # Construct event hit & DOM arrays as if hits came at all times for all
+    # loaded & operational DOMs
+    event_hit_info = np.empty(shape=num_doms_loaded * num_hit_times,
+                              dtype=EVT_HIT_INFO_T)
+    event_dom_info = np.empty(shape=num_doms_loaded, dtype=EVT_DOM_INFO_T)
+
+    copy_fields = ['x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
+
     hits_start_idx = 0
-    for sd_idx in dom_tables.loaded_sd_indices:
-        hits_stop_idx = hits_start_idx + num_hits
-        hits = event_hit_info[hits_start_idx:hits_stop_idx]
-        hits['time'] = hit_times
-        hits['charge'] = 1
-        hits['dom_idx'] = 
-        hits_start_idx += num_hits
+    for event_dom_idx, sd_idx in enumerate(dom_tables.loaded_sd_indices):
+        hits_stop_idx = hits_start_idx + num_hit_times
 
-    results = [None] * NUM_DOMS_TOT
-    for sd_idx in dom_tables.loaded_sd_indices:
-        exp_at_hit_times = []
+        this_event_hits_info = event_hit_info[hits_start_idx:hits_stop_idx]
 
-        for hit in hit_times:
-            t_indep_exp, sum_log_at_hit_times = dom_tables.pexp(
-                sources,
-                np.array([[hit, 1]]).T,
-                dom_tables.dom_info[sd_idx],
-                time_window,
-                *dom_tables.tables[sd_idx]
-            )
-            exp_at_hit_times.append(np.exp(sum_log_at_hit_times))
+        this_event_hits_info['time'] = hit_times
+        this_event_hits_info['charge'] = 1 # value shouldn't matter
+        this_event_hits_info['event_dom_idx'] = event_dom_idx
 
-        tot_retro = np.sum(exp_at_hit_times)
+        # Note we need to keep a slice of length 1 to be able to update the
+        # contents of the array
+        this_event_dom_info = event_dom_info[event_dom_idx:event_dom_idx+1]
 
-        results[sd_idx] = OrderedDict([
-            ('t_indep_exp', t_indep_exp),
-            ('exp_at_hit_times', exp_at_hit_times)
-        ])
+        this_dom_info = dom_tables.dom_info[sd_idx]
 
-    run_info['results'] = results
+        this_event_dom_info[copy_fields] = this_dom_info[copy_fields]
+        this_event_dom_info['sd_idx'] = sd_idx
+        this_event_dom_info['table_idx'] = dom_tables.sd_idx_table_indexer[sd_idx]
+        this_event_dom_info['hits_start_idx'] = hits_start_idx
+        this_event_dom_info['hits_stop_idx'] = hits_stop_idx
+        this_event_dom_info['total_observed_charge'] = num_hit_times
+
+        hits_start_idx += num_hit_times
+
+    dom_exp = np.zeros(shape=num_doms_loaded)
+    hit_exp = np.zeros(shape=(num_doms_loaded * num_hit_times))
+
+    dom_tables._pexp( # pylint: disable=protected-access
+        sources=all_sources,
+        sources_start=0,
+        sources_stop=len(all_sources),
+        event_dom_info=event_dom_info,
+        event_hit_info=event_hit_info,
+        tables=dom_tables.tables,
+        table_norm=dom_tables.table_norms[0],
+        t_indep_tables=dom_tables.t_indep_tables,
+        t_indep_table_norm=dom_tables.t_indep_table_norms[0],
+        dom_exp=dom_exp,
+        hit_exp=hit_exp,
+    )
+
+    run_info['dom_exp'] = dom_exp
+    run_info['hit_exp'] = hit_exp.reshape(num_doms_loaded, num_hit_times)
     run_info_fpath = expand(join(outdir, 'run_info.pkl'))
     print('Writing run info to "{}"'.format(run_info_fpath))
     pickle.dump(run_info, open(run_info_fpath, 'wb'), pickle.HIGHEST_PROTOCOL)

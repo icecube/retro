@@ -110,7 +110,7 @@ def setup_dom_tables(
     force_no_mmap : bool, optional
 
     """
-    print('Instantiating and loading single-DOM tables')
+    print('Instantiating and loading DOM tables')
     t0 = time.time()
 
     dom_tables_fname_proto = expand(dom_tables_fname_proto)

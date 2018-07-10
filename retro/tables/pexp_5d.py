@@ -251,27 +251,28 @@ def generate_pexp_5d_function(
 
         table_norm : shape (n_r, n_t) array
             Normalization to apply to `table`, which is assumed to depend on
-            both r- and t-dimensions and therefore is an array.
+            both r- and t-dimensions.
 
-        t_indep_table : array, optional
+        t_indep_table : array
             Time-independent photon survival probability table. If using an
             uncompressed table, this will have shape
                 (n_r, n_costheta, n_costhetadir, n_deltaphidir)
             while if using a
 
-        t_indep_table_norm : array, optional
+        t_indep_table_norm : shape (n_r,) array
             r-dependent normalization (any t-dep normalization is assumed to
             already have been applied to generate the t_indep_table).
 
         dom_exp : shape (n_operational_doms,) array of floats
-            Expectation of hits for each operational DOM; initialize outside of
-            calls to this function, as values are incremented within this
-            function.
+            Expectation of total hits for each operational DOM; initialize
+            outside of calls to this function, as values are incremented within
+            this function.
 
-        hit_exp
+        hit_exp : shape (n_hits,) array of floats
             Time-dependent hit expectation at each (actual) hit time;
             initialize outside of this function, as values are incremented
-            within this function.
+            within this function. Values in `hit_exp` correspond to the values
+            in `event_hit_info`.
 
         Out
         ---
@@ -283,19 +284,19 @@ def generate_pexp_5d_function(
         """
         num_hit_doms = len(event_dom_info)
         for source_idx in range(sources_start, sources_stop):
-            source = sources[source_idx]
-            src_kind = source['kind']
-            src_x = source['x']
-            src_y = source['y']
-            src_z = source['z']
-            src_time = source['time']
-            src_dir_cosphi = source['dir_cosphi']
-            src_dir_sinphi = source['dir_sinphi']
-            src_dir_costheta = source['dir_costheta']
-            src_photons = source['photons']
+            src = sources[source_idx]
+            src_kind = src['kind']
+            src_x = src['x']
+            src_y = src['y']
+            src_z = src['z']
+            src_time = src['time']
+            src_dir_cosphi = src['dir_cosphi']
+            src_dir_sinphi = src['dir_sinphi']
+            src_dir_costheta = src['dir_costheta']
+            src_photons = src['photons']
 
-            for dom_idx in range(num_hit_doms):
-                dom = event_dom_info[dom_idx]
+            for evt_dom_idx in range(num_hit_doms):
+                dom = event_dom_info[evt_dom_idx]
                 dom_tbl_idx = dom['table_idx']
                 dom_qe = dom['quantum_efficiency']
                 dom_hits_start_idx = dom['hits_start_idx']
@@ -312,7 +313,9 @@ def generate_pexp_5d_function(
                 if rsquared >= rsquared_max:
                     continue
 
-                r = max(math.sqrt(rsquared), MACHINE_EPS)
+                r = math.sqrt(rsquared)
+                if r < MACHINE_EPS:
+                    r = MACHINE_EPS
 
                 r_bin_idx = digitize_r(r)
                 costheta_bin_idx = digitize_ct(neg_dz/r)
@@ -324,43 +327,48 @@ def generate_pexp_5d_function(
 
                 else: # SRC_CKV_BETA1:
                     # Note that for these tables, we have to invert the photon
-                    # direction relative to the vector from the DOM to the photon's
-                    # vertex since simulation has photons going _away_ from the DOM
-                    # that in reconstruction will hit the DOM if they're moving
-                    # _towards_ the DOM.
+                    # direction relative to the vector from the DOM to the
+                    # photon's vertex since simulation has photons going
+                    # _away_ from the DOM that in reconstruction will hit the
+                    # DOM if they're moving _towards_ the DOM.
 
                     rho = math.sqrt(rhosquared)
 
-                    # \Delta\phi depends on photon position relative to the DOM...
+                    # \Delta\phi depends on photon position relative to the
+                    # DOM...
 
-                    # Below is the projection of pdir into the (x, y) plane and the
-                    # projection of that onto the vector in that plane connecting
-                    # the photon source to the DOM. We get the cosine of the angle
-                    # between these vectors by solving the identity
+                    # Below is the projection of pdir into the (x, y) plane
+                    # and the projection of that onto the vector in that plane
+                    # connecting the photon source to the DOM. We get the
+                    # cosine of the angle between these vectors by solving the
+                    # identity
                     #   `a dot b = |a| |b| cos(deltaphi)`
                     # for cos(deltaphi), where the `a` and `b` vectors are the
-                    # projections of the aforementioned vectors onto the xy-plane.
+                    # projections of the aforementioned vectors onto the
+                    # xy-plane.
 
                     if rho <= MACHINE_EPS:
                         pdir_deltaphi = 0
                     else:
                         pdir_cosdeltaphi = (src_dir_cosphi*dx + src_dir_sinphi*dy) / rho
 
-                        # Note the max and min to clip value to [-1, 1];
-                        # otherwise, numerical precision issues can cause the
-                        # dot product to blow up.
-                        pdir_cosdeltaphi = min(1, max(-1, pdir_cosdeltaphi))
+                        # Clip pdir_cosdeltaphi to range [-1, 1]
+                        if pdir_cosdeltaphi < -1.0:
+                            pdir_cosdeltaphi = -1.0
+                        elif pdir_cosdeltaphi > 1.0:
+                            pdir_cosdeltaphi = 1.0
+
                         pdir_deltaphi = math.acos(pdir_cosdeltaphi)
 
-                    # Find directional bin indices & make upper edges inclusive
-                    costhetadir_bin_idx = min(
-                        digitize_costhetadir(src_dir_costheta),
-                        last_costhetadir_bin_idx
-                    )
-                    deltaphidir_bin_idx = min(
-                        digitize_deltaphidir(abs(pdir_deltaphi)),
-                        last_deltaphidir_bin_idx
-                    )
+                    # Find directional bin indices
+                    costhetadir_bin_idx = digitize_costhetadir(-src_dir_costheta)
+                    deltaphidir_bin_idx = digitize_deltaphidir(abs(pdir_deltaphi))
+
+                    # Make upper edges inclusive
+                    if costhetadir_bin_idx > last_costhetadir_bin_idx:
+                        costhetadir_bin_idx = last_costhetadir_bin_idx
+                    if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
+                        deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
                     t_indep_surv_prob = t_indep_tables[
                         dom_tbl_idx,
@@ -371,27 +379,27 @@ def generate_pexp_5d_function(
                     ]
 
                 ti_norm = t_indep_table_norm[r_bin_idx]
-                dom_exp[dom_idx] += src_photons * ti_norm * t_indep_surv_prob * dom_qe
+                dom_exp[evt_dom_idx] += (
+                    src_photons * ti_norm * t_indep_surv_prob * dom_qe
+                )
 
                 for hit_idx in range(dom_hits_start_idx, dom_hits_stop_idx):
-                    # A photon that starts immediately in the past (before the DOM
-                    # was hit) will show up in the Retro DOM tables in bin 0; the
-                    # further in the past the photon started, the higher the time
-                    # bin index. Therefore, subract source time from hit time.
+                    # A photon that starts immediately in the past (before the
+                    # DOM was hit) will show up in the Retro DOM tables in bin
+                    # 0; the further in the past the photon started, the
+                    # higher the time bin index. Therefore, subract source
+                    # time from hit time.
                     dt = event_hit_info[hit_idx]['time'] - src_time
 
                     if use_residual_time:
-                        direct_time = r * recip_max_group_vel
-                        t_bin_idx = digitize_t(dt - direct_time)
-                    else: # time is simply "time from start of event"
-                        # Causally impossible? (Note the comparison is written such that it
-                        # will evaluate to True if hit_time is NaN.)
-                        if not dt >= 0:
-                            continue
-                        # Is relative time outside binning?
-                        if dt >= t_max:
-                            continue
-                        t_bin_idx = digitize_t(dt)
+                        dt -= r * recip_max_group_vel
+
+                    # Note the comparison is written such that it will evaluate
+                    # to True if hit_time is NaN.
+                    if not dt >= 0 or dt >= t_max:
+                        continue
+
+                    t_bin_idx = digitize_t(dt)
 
                     if src_kind == SRC_OMNI:
                         surv_prob_at_hit_t = table_lookup_mean(
@@ -479,12 +487,12 @@ def generate_pexp_5d_function(
 
             """
             grad_llh = -sum_scaling_exp_charge # pylint: disable=invalid-unary-operand-type
-            for dom_idx in range(num_hit_doms):
-                dom = event_dom_info[dom_idx]
+            for evt_dom_idx in range(num_hit_doms):
+                dom = event_dom_info[evt_dom_idx]
                 dom_total_observed_charge = dom['total_observed_charge']
                 if dom_total_observed_charge > 0:
-                    dom_scaling_dom_exp = scaling_dom_exp[dom_idx]
-                    exp = dom_exp[dom_idx] + scalefactor * dom_scaling_dom_exp
+                    dom_scaling_dom_exp = scaling_dom_exp[evt_dom_idx]
+                    exp = dom_exp[evt_dom_idx] + scalefactor * dom_scaling_dom_exp
                     exp += dom['noise_rate_per_ns'] * time_window
                     grad_llh += dom_total_observed_charge / exp * dom_scaling_dom_exp
             return -grad_llh
@@ -502,32 +510,38 @@ def generate_pexp_5d_function(
             previous_step = abs(step)
             n += 1
 
-        # Make scalefactor >= 0
-        scalefactor = max(0, scalefactor)
+        if scalefactor < 0:
+            scalefactor = 0
 
         # -- Calculate the scale factor -- #
 
         llh = -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
         # Second time-independent part
-        for dom_idx in range(num_hit_doms):
-            dom = event_dom_info[dom_idx]
+        for evt_dom_idx in range(num_hit_doms):
+            dom = event_dom_info[evt_dom_idx]
             dom_total_observed_charge = dom['total_observed_charge']
             if dom_total_observed_charge > 0:
-                exp = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
-                exp += dom['noise_rate_per_ns'] * time_window
+                exp = (
+                    dom_exp[evt_dom_idx]
+                    + scalefactor * scaling_dom_exp[evt_dom_idx]
+                    + dom['noise_rate_per_ns'] * time_window
+                )
                 llh += dom_total_observed_charge * math.log(exp)
 
         # Time-dependent part
         for hit_idx in range(num_hits):
             hit = event_hit_info[hit_idx]
-            dom_idx = hit['event_dom_idx']
+            evt_dom_idx = hit['event_dom_idx']
+            hit_charge = hit['charge']
             exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
-            norm = dom_exp[dom_idx] + scalefactor * scaling_dom_exp[dom_idx]
+            norm = dom_exp[evt_dom_idx] + scalefactor * scaling_dom_exp[evt_dom_idx]
             if norm > 0:
                 p = exp / norm
             else:
                 p = 0.
-            llh += hit['charge'] * math.log(p * (1 - recip_time_window) + recip_time_window)
+            llh += (
+                hit_charge * math.log(p*(1 - recip_time_window) + recip_time_window)
+            )
 
         return llh, scalefactor
 
@@ -580,6 +594,7 @@ def generate_pexp_5d_function(
             Best scale factor for `scaling_sources` at best pegleg hypo
 
         """
+        # TODO: make pegleg_stepsize a kwarg param somehow
         # Each pegleg iteration, include this many more pegleg sources
         pegleg_stepsize = 1
 

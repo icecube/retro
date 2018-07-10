@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, range-builtin-not-iterating
 
 """
 Physical constants and constant-for-us values
@@ -241,13 +241,13 @@ NUM_DOMS_PER_STRING = 60
 NUM_DOMS_TOT = NUM_STRINGS * NUM_DOMS_PER_STRING
 
 
-IC_STRS = np.array(list(range(1, 78+1)), dtype=np.uint8)
-DC_STRS = np.array(list(range(79, 86+1)), dtype=np.uint8)
+IC_STRS = np.array(range(1, 78+1), dtype=np.uint8)
+DC_STRS = np.array(range(79, 86+1), dtype=np.uint8)
 DC_IC_STRS = np.array([26, 27, 35, 36, 37, 45, 46], dtype=np.uint8)
 DC_ALL_STRS = np.concatenate([DC_STRS, DC_IC_STRS], axis=0)
 
-DC_SUBDUST_DOMS = np.array(list(range(11, 60+1)), dtype=np.uint8)
-IC_SUBDUST_DOMS = np.array(list(range(25, 60+1)), dtype=np.uint8)
+DC_SUBDUST_DOMS = np.array(range(11, 60+1), dtype=np.uint8)
+IC_SUBDUST_DOMS = np.array(range(25, 60+1), dtype=np.uint8)
 
 DC_SUBDUST_STRS_DOMS = np.array(
     [get_sd_idx(s, d) for s, d in product(DC_STRS, DC_SUBDUST_DOMS)]

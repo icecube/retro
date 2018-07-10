@@ -135,7 +135,7 @@ class RetroReco(object):
                     loglike=loglike,
                 )
             else:
-                raise NotImplementedError(method)
+                raise ValueError('Unknown `Method` {}'.format(method))
 
             t1 = time.time()
 
@@ -271,13 +271,12 @@ class RetroReco(object):
         # Copy 'time' and 'charge' over directly; add 'event_dom_idx' below
         event_hit_info[['time', 'charge']] = hits[['time', 'charge']]
 
-        copy_fields = ('x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns')
+        copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
 
         # Fill `event_{hit,dom}_info` arrays only for operational DOMs
         for dom_idx, this_dom_info in enumerate(dom_info[dom_info['operational']]):
-            this_event_dom_info = event_dom_info[dom_idx]
-            for field in copy_fields:
-                this_event_dom_info[field] = this_dom_info[field]
+            this_event_dom_info = event_dom_info[dom_idx:dom_idx+1]
+            this_event_dom_info[copy_fields] = this_dom_info[copy_fields]
             sd_idx = this_dom_info['sd_idx']
             this_event_dom_info['table_idx'] = sd_idx_table_indexer[sd_idx]
 
@@ -288,14 +287,6 @@ class RetroReco(object):
                 continue
             start = this_hit_indexer[0]['offset']
             stop = start + this_hit_indexer[0]['num']
-            #print(type(event_hit_info))
-            #print(event_hit_info.dtype.names)
-            #print(event_hit_info[2:10])
-            #print(event_hit_info[2:10]['event_dom_idx'])
-            #event_hit_info[2:10]['event_dom_idx'] = 1
-            #print(type(dom_idx))
-            #print(type(start), type(stop))
-            #print(start, stop)
             event_hit_info[start:stop]['event_dom_idx'] = dom_idx
             this_event_dom_info['hits_start_idx'] = start
             this_event_dom_info['hits_stop_idx'] = stop

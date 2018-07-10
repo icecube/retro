@@ -21,6 +21,7 @@ __all__ = [
     'TimePolCoord',
     'TimeSphCoord',
     'DOM_INFO_T',
+    'EVT_DOM_INFO_T',
     'HIT_T',
     'SD_INDEXER_T',
     'HITS_SUMMARY_T',
@@ -29,7 +30,6 @@ __all__ = [
     'SubtypeID',
     'TRIGGER_T',
     'SRC_T',
-    'EVT_DOM_INFO_T',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -145,6 +145,7 @@ DOM_INFO_T = np.dtype(
 )
 
 EVT_DOM_INFO_T = np.dtype([
+    ('sd_idx', np.uint32),
     ('x', np.float32),
     ('y', np.float32),
     ('z', np.float32),

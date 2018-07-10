@@ -140,19 +140,12 @@ class DiscreteHypo(object):
             get_hypo_param_names(scaling_kernel) if scaling_kernel else ()
         )
 
-        print('generic_param_names:', self.generic_param_names)
-        print('pegleg_param_names:', self.pegleg_param_names)
-        print('scaling_param_names:', self.scaling_param_names)
-
         # Place param names first that are handled by external optimizers (e.g.
         # MultiNest), then include name(s) of paramters handled by pegleg and
         # finally scaling param names. It is required to do this for e.g.
         # MultiNest where the first n_opt_params params are optimized over
         # while the remaining dimensions are left alone.
-        all_param_names = (
-            list(reduce(add(self.generic_param_names)))
-            if self.generic_param_names else []
-        )
+        all_param_names = list(reduce(add, self.generic_param_names, ()))
         for name in self.pegleg_param_names + self.scaling_param_names:
             if name not in all_param_names:
                 all_param_names.append(name)

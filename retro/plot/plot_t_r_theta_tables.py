@@ -97,7 +97,7 @@ for data, name, cmap in zip(datas, names, cmaps):
     #vmax = np.log(data.max())
     vmin = data.min()
     vmax = data.max()
-    for tidx in list(range(data.shape[0]))[::-1]:
+    for tidx in range(data.shape[0], -1, -1):
         #im = plot_2d(data[tidx], [r_bin_edges, theta_bin_edges], ['r','theta'], ax1, 1, 0, log=True, vmax=vmax, vmin=vmin, cb=False)
         xx, yy = np.meshgrid(r_bin_edges, theta_bin_edges)
         im = ax1.pcolormesh(xx, yy, data[tidx].T, cmap=cmap, vmax=vmax, vmin=vmin)
