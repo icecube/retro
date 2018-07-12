@@ -480,6 +480,7 @@ def test_generate_digitizer():
     binning = meta['binning']
 
     for dim, edges in binning.items():
+        assert np.all(np.diff(edges) > 0)
         num_bins = len(edges) - 1
         digitize = generate_digitizer(edges)
         rand = np.random.RandomState(0)

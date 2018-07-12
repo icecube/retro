@@ -260,9 +260,9 @@ class RetroReco(object):
 
         num_operational_doms = np.sum(dom_info['operational'])
 
-        # Array containing only DOMs hit in the event & info relevant to the
-        # hits these DOMs got
-        event_dom_info = np.zeros(shape=num_operational_doms, dtype=EVT_DOM_INFO_T)
+        # Array containing only DOMs operational during the event & info
+        # relevant to the hits these DOMs got (if any)
+        event_dom_info = np.empty(shape=num_operational_doms, dtype=EVT_DOM_INFO_T)
 
         # Array containing all relevant hit info for the event, including a
         # pointer back to the index of the DOM in the `event_dom_info` array
@@ -282,11 +282,15 @@ class RetroReco(object):
 
             # Copy any hit info from `hits_indexer` and total charge from
             # `hits` into `event_hit_info` and `event_dom_info` arrays
-            this_hit_indexer = hits_indexer[hits_indexer['sd_idx'] == sd_idx]
-            if len(this_hit_indexer) == 0:
+            this_hits_indexer = hits_indexer[hits_indexer['sd_idx'] == sd_idx]
+            if len(this_hits_indexer) == 0:
+                this_event_dom_info['hits_start_idx'] = 0
+                this_event_dom_info['hits_stop_idx'] = 0
+                this_event_dom_info['total_observed_charge'] = 0
                 continue
-            start = this_hit_indexer[0]['offset']
-            stop = start + this_hit_indexer[0]['num']
+
+            start = this_hits_indexer[0]['offset']
+            stop = start + this_hits_indexer[0]['num']
             event_hit_info[start:stop]['event_dom_idx'] = dom_idx
             this_event_dom_info['hits_start_idx'] = start
             this_event_dom_info['hits_stop_idx'] = stop

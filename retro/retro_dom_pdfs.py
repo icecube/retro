@@ -188,6 +188,7 @@ if __name__ == '__main__':
     run_info['sim_to_test'] = kwargs['other_kw']['sim_to_test']
     hit_times = (0.5 * (bin_edges[:-1] + bin_edges[1:])).astype(np.float32)
 
+    print('Obtaining light sources from hypothesis')
     generic_sources = hypo_handler.get_generic_sources(sim['mc_true_params'])
     pegleg_sources = hypo_handler.get_pegleg_sources(sim['mc_true_params'])
     scaling_sources = hypo_handler.get_scaling_sources(sim['mc_true_params'])
@@ -210,6 +211,7 @@ if __name__ == '__main__':
         scaling_sources
     ))
 
+    print('Finding expected light in all operational DOMs at all times for those sources')
     run_info['sd_indices'] = dom_tables.loaded_sd_indices
     run_info['hit_times'] = hit_times
     time_window = np.max(bin_edges) - np.min(bin_edges)
@@ -251,8 +253,8 @@ if __name__ == '__main__':
 
         hits_start_idx += num_hit_times
 
-    dom_exp = np.zeros(shape=num_doms_loaded)
-    hit_exp = np.zeros(shape=(num_doms_loaded * num_hit_times))
+    dom_exp = np.zeros(shape=event_dom_info.shape)
+    hit_exp = np.zeros(shape=event_hit_info.shape)
 
     dom_tables._pexp( # pylint: disable=protected-access
         sources=all_sources,
@@ -261,9 +263,9 @@ if __name__ == '__main__':
         event_dom_info=event_dom_info,
         event_hit_info=event_hit_info,
         tables=dom_tables.tables,
-        table_norm=dom_tables.table_norms[0],
+        table_norm=dom_tables.table_norm,
         t_indep_tables=dom_tables.t_indep_tables,
-        t_indep_table_norm=dom_tables.t_indep_table_norms[0],
+        t_indep_table_norm=dom_tables.t_indep_table_norm,
         dom_exp=dom_exp,
         hit_exp=hit_exp,
     )

@@ -48,14 +48,14 @@ LLH_VERSION = 2
 def generate_pexp_5d_function(
         table,
         table_kind,
-        use_residual_time,
+        t_is_residual_time,
         compute_t_indep_exp,
         compute_unhit_doms,
         use_directionality,
         num_phi_samples=None,
         ckv_sigma_deg=None,
-        template_library=None
-    ):
+        template_library=None,
+):
     """Generate a numba-compiled function for computing expected photon counts
     at a DOM, where the table's binning info is used to pre-compute various
     constants for the compiled function to use.
@@ -67,7 +67,7 @@ def generate_pexp_5d_function(
 
     table_kind : str in {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr'}
 
-    use_residual_time : bool
+    t_is_residual_time : bool
         Whether time axis is actually time residual, defined to be
         (actual time) - (fastest time a photon could get to spatial coordinate)
 
@@ -139,9 +139,11 @@ def generate_pexp_5d_function(
         ])),
     ])
 
-    # Replace None with 0
-    num_phi_samples = num_phi_samples or 0
-    ckv_sigma_deg = ckv_sigma_deg or 0
+    # Replace None with 0 for sending to Numba functions
+    if num_phi_samples is None:
+        num_phi_samples = 0
+    if ckv_sigma_deg is None:
+        ckv_sigma_deg = 0
 
     # NOTE: For now, we only support absolute value of deltaphidir (which
     # assumes azimuthal symmetry). In future, this could be revisited (and then
@@ -161,7 +163,7 @@ def generate_pexp_5d_function(
 
     # Digitization functions for each binning dimension
     digitize_r = generate_digitizer(table['r_bin_edges'])
-    digitize_ct = generate_digitizer(table['costheta_bin_edges'])
+    digitize_costheta = generate_digitizer(table['costheta_bin_edges'])
     digitize_t = generate_digitizer(table['t_bin_edges'])
     digitize_costhetadir = generate_digitizer(table['costhetadir_bin_edges'])
     digitize_deltaphidir = generate_digitizer(table['deltaphidir_bin_edges'])
@@ -169,28 +171,46 @@ def generate_pexp_5d_function(
     # Indexing functions for table types omni / directional lookups
     if tbl_is_templ_compr:
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup_mean(tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx):
-            templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
+        def table_lookup_mean(
+            tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx
+        ):
+            templ = tables[table_idx][r_bin_idx, costheta_bin_idx, t_bin_idx]
             return templ['weight'] / template_library[templ['index']].size
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup(tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx,
-                         costhetadir_bin_idx, deltaphidir_bin_idx):
-            templ = tables[table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx]
+        def table_lookup(
+            tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx,
+            costhetadir_bin_idx, deltaphidir_bin_idx
+        ):
+            templ = tables[table_idx][r_bin_idx, costheta_bin_idx, t_bin_idx]
             return (
-                templ['weight']
-                * template_library[templ['index'], costhetadir_bin_idx, deltaphidir_bin_idx]
+                templ['weight'] * template_library[
+                    templ['index'],
+                    costhetadir_bin_idx,
+                    deltaphidir_bin_idx
+                ]
             )
+
     else: # table is not template-compressed
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup_mean(table, r_bin_idx, costheta_bin_idx, t_bin_idx):
-            return np.mean(table[r_bin_idx, costheta_bin_idx, t_bin_idx])
+        def table_lookup_mean(
+            tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx
+        ):
+            return np.mean(tables[table_idx][r_bin_idx, costheta_bin_idx, t_bin_idx])
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def table_lookup(table, r_bin_idx, costheta_bin_idx, t_bin_idx,
-                         costhetadir_bin_idx, deltaphidir_bin_idx):
-            return table[r_bin_idx, costheta_bin_idx, t_bin_idx,
-                         costhetadir_bin_idx, deltaphidir_bin_idx]
+        def table_lookup(
+            tables, table_idx, r_bin_idx, costheta_bin_idx, t_bin_idx,
+            costhetadir_bin_idx, deltaphidir_bin_idx
+        ):
+            return tables[table_idx][
+                r_bin_idx,
+                costheta_bin_idx,
+                t_bin_idx,
+                costhetadir_bin_idx,
+                deltaphidir_bin_idx
+            ]
+
     table_lookup_mean.__doc__ = (
         """Helper function for directionality-averaged table lookup"""
     )
@@ -282,7 +302,7 @@ def generate_pexp_5d_function(
             See above
 
         """
-        num_hit_doms = len(event_dom_info)
+        num_operational_doms = len(event_dom_info)
         for source_idx in range(sources_start, sources_stop):
             src = sources[source_idx]
             src_kind = src['kind']
@@ -295,19 +315,19 @@ def generate_pexp_5d_function(
             src_dir_costheta = src['dir_costheta']
             src_photons = src['photons']
 
-            for evt_dom_idx in range(num_hit_doms):
-                dom = event_dom_info[evt_dom_idx]
+            for operational_dom_idx in range(num_operational_doms):
+                dom = event_dom_info[operational_dom_idx]
                 dom_tbl_idx = dom['table_idx']
                 dom_qe = dom['quantum_efficiency']
                 dom_hits_start_idx = dom['hits_start_idx']
                 dom_hits_stop_idx = dom['hits_stop_idx']
 
-                dx = dom['x'] - src_x
-                dy = dom['y'] - src_y
-                neg_dz = src_z - dom['z']
+                dx = src_x - dom['x']
+                dy = src_y - dom['y']
+                dz = src_z - dom['z']
 
                 rhosquared = dx*dx + dy*dy
-                rsquared = rhosquared + neg_dz*neg_dz
+                rsquared = rhosquared + dz*dz
 
                 # Continue if photon is outside the radial binning limits
                 if rsquared >= rsquared_max:
@@ -316,62 +336,84 @@ def generate_pexp_5d_function(
                 r = math.sqrt(rsquared)
                 if r < MACHINE_EPS:
                     r = MACHINE_EPS
-
                 r_bin_idx = digitize_r(r)
-                costheta_bin_idx = digitize_ct(neg_dz/r)
+
+                costheta_bin_idx = digitize_costheta(dz/r)
 
                 if src_kind == SRC_OMNI:
                     t_indep_surv_prob = np.mean(
-                        t_indep_tables[dom_tbl_idx, r_bin_idx, costheta_bin_idx]
+                        t_indep_tables[dom_tbl_idx][r_bin_idx, costheta_bin_idx, :, :]
                     )
 
                 else: # SRC_CKV_BETA1:
-                    # Note that for these tables, we have to invert the photon
-                    # direction relative to the vector from the DOM to the
-                    # photon's vertex since simulation has photons going
-                    # _away_ from the DOM that in reconstruction will hit the
-                    # DOM if they're moving _towards_ the DOM.
-
                     rho = math.sqrt(rhosquared)
 
-                    # \Delta\phi depends on photon position relative to the
-                    # DOM...
-
-                    # Below is the projection of pdir into the (x, y) plane
-                    # and the projection of that onto the vector in that plane
-                    # connecting the photon source to the DOM. We get the
-                    # cosine of the angle between these vectors by solving the
-                    # identity
-                    #   `a dot b = |a| |b| cos(deltaphi)`
-                    # for cos(deltaphi), where the `a` and `b` vectors are the
-                    # projections of the aforementioned vectors onto the
-                    # xy-plane.
+                    # Note in the following that we need to invert the
+                    # directions of the sources to match the directions that
+                    # Retro simulation comes up with, thus we work with
+                    # -dir_vec. The angles associated with this that we want
+                    # to work with are
+                    #   cos(pi - thetadir) = -cos(thetadir),
+                    #   sin(pi - thetadir) = sin(thetadir),
+                    #   cos(phidir + pi) = -cos(phidir),
+                    #   sin(phidir + pi) = sin(phidir)
+                    #
+                    # We bin cos(pi - thetadir), so need to simply bin the
+                    # quantity `-src_dir_costheta`.
+                    #
+                    # We want to bin abs(deltaphidir), which is described now:
+                    # Just look at vectors in the xy-plane, since we want
+                    # difference of angle in this plane. Use dot product:
+                    #   dot(-dir_vec_xy, pos_vec_xy) = |-dir_vec_xy| |pos_vec_xy| cos(deltaphidir)
+                    # where the length of the directionality vector in the xy-plane is
+                    #   |-dir_vec_xy| = rhodir = rdir * sin(pi - thetadir)
+                    # and since rdir = 1 and the inversion of the angle above
+                    #   |-dir_vec_xy| = rhodir = sin(thetadir).
+                    # The length of the position vector in the xy-plane is
+                    #   |pos_vec_xy| = rho = sqrt(dx^2 + dy^2)
+                    # where dx and dy are src_x - dom_x and src_y - dom_y.
+                    # Solving for cos(deltaphidir):
+                    #   cos(deltaphidir) = dot(-dir_vec_xy, pos_vec_xy) / (rhodir * rho)
+                    # wo we just need to write out the components of the dot
+                    # product in terms of quantites we have:
+                    #   -dir_vec_x = rhodir * cos(phidir + pi)
+                    #   -dir_vec_y = rhodir * sin(phidir + pi)
+                    #   pos_vec_x = dx
+                    #   pos_vec_y = dy
+                    # giving
+                    #   cos(deltaphidir) = (rhodir*cos(phidir+pi)*dx + rhodir*sin(phidir+pi)*dy)/(rhodir*rho)
+                    # cancel rhodir out
+                    #   cos(deltaphidir) = (cos(phidir + pi)*dx + sin(phidir + pi)*dy) / rho
+                    # and substitute the identities above
+                    #   cos(deltaphidir) = (-cos(phidir)*dx - sin(phidir)*dy) / rho
+                    # Finally, solve for deltaphidir
+                    #   deltaphidir = acos((-cos(phidir)*dx - sin(phidir)*dy) / rho)
 
                     if rho <= MACHINE_EPS:
-                        pdir_deltaphi = 0
+                        absdeltaphidir = 0
                     else:
-                        pdir_cosdeltaphi = (src_dir_cosphi*dx + src_dir_sinphi*dy) / rho
+                        cosdeltaphidir = (-src_dir_cosphi*dx - src_dir_sinphi*dy) / rho
 
-                        # Clip pdir_cosdeltaphi to range [-1, 1]
-                        if pdir_cosdeltaphi < -1.0:
-                            pdir_cosdeltaphi = -1.0
-                        elif pdir_cosdeltaphi > 1.0:
-                            pdir_cosdeltaphi = 1.0
+                        # Clip cosdeltaphidir within range [-1, 1]
+                        if cosdeltaphidir < -1.0:
+                            cosdeltaphidir = -1.0
+                        elif cosdeltaphidir > 1.0:
+                            cosdeltaphidir = 1.0
 
-                        pdir_deltaphi = math.acos(pdir_cosdeltaphi)
+                        absdeltaphidir = abs(math.acos(cosdeltaphidir))
 
                     # Find directional bin indices
                     costhetadir_bin_idx = digitize_costhetadir(-src_dir_costheta)
-                    deltaphidir_bin_idx = digitize_deltaphidir(abs(pdir_deltaphi))
+                    deltaphidir_bin_idx = digitize_deltaphidir(absdeltaphidir)
 
                     # Make upper edges inclusive
                     if costhetadir_bin_idx > last_costhetadir_bin_idx:
                         costhetadir_bin_idx = last_costhetadir_bin_idx
+
                     if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
                         deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
-                    t_indep_surv_prob = t_indep_tables[
-                        dom_tbl_idx,
+                    t_indep_surv_prob = t_indep_tables[dom_tbl_idx][
                         r_bin_idx,
                         costheta_bin_idx,
                         costhetadir_bin_idx,
@@ -379,7 +421,7 @@ def generate_pexp_5d_function(
                     ]
 
                 ti_norm = t_indep_table_norm[r_bin_idx]
-                dom_exp[evt_dom_idx] += (
+                dom_exp[operational_dom_idx] += (
                     src_photons * ti_norm * t_indep_surv_prob * dom_qe
                 )
 
@@ -391,12 +433,12 @@ def generate_pexp_5d_function(
                     # time from hit time.
                     dt = event_hit_info[hit_idx]['time'] - src_time
 
-                    if use_residual_time:
+                    if t_is_residual_time:
                         dt -= r * recip_max_group_vel
 
                     # Note the comparison is written such that it will evaluate
                     # to True if hit_time is NaN.
-                    if not dt >= 0 or dt >= t_max:
+                    if (not dt >= 0) or dt >= t_max:
                         continue
 
                     t_bin_idx = digitize_t(dt)
@@ -468,7 +510,7 @@ def generate_pexp_5d_function(
         """
         sum_scaling_exp_charge = np.sum(scaling_dom_exp)
         sum_nonscaling_exp_charge = np.sum(dom_exp) + sum_noise_rate * time_window
-        num_hit_doms = len(event_dom_info)
+        num_operational_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
         # -- Find the best scale factor -- #
@@ -487,12 +529,12 @@ def generate_pexp_5d_function(
 
             """
             grad_llh = -sum_scaling_exp_charge # pylint: disable=invalid-unary-operand-type
-            for evt_dom_idx in range(num_hit_doms):
-                dom = event_dom_info[evt_dom_idx]
+            for operational_dom_idx in range(num_operational_doms):
+                dom = event_dom_info[operational_dom_idx]
                 dom_total_observed_charge = dom['total_observed_charge']
                 if dom_total_observed_charge > 0:
-                    dom_scaling_dom_exp = scaling_dom_exp[evt_dom_idx]
-                    exp = dom_exp[evt_dom_idx] + scalefactor * dom_scaling_dom_exp
+                    dom_scaling_dom_exp = scaling_dom_exp[operational_dom_idx]
+                    exp = dom_exp[operational_dom_idx] + scalefactor * dom_scaling_dom_exp
                     exp += dom['noise_rate_per_ns'] * time_window
                     grad_llh += dom_total_observed_charge / exp * dom_scaling_dom_exp
             return -grad_llh
@@ -517,13 +559,13 @@ def generate_pexp_5d_function(
 
         llh = -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
         # Second time-independent part
-        for evt_dom_idx in range(num_hit_doms):
-            dom = event_dom_info[evt_dom_idx]
+        for operational_dom_idx in range(num_operational_doms):
+            dom = event_dom_info[operational_dom_idx]
             dom_total_observed_charge = dom['total_observed_charge']
             if dom_total_observed_charge > 0:
                 exp = (
-                    dom_exp[evt_dom_idx]
-                    + scalefactor * scaling_dom_exp[evt_dom_idx]
+                    dom_exp[operational_dom_idx]
+                    + scalefactor * scaling_dom_exp[operational_dom_idx]
                     + dom['noise_rate_per_ns'] * time_window
                 )
                 llh += dom_total_observed_charge * math.log(exp)
@@ -531,10 +573,13 @@ def generate_pexp_5d_function(
         # Time-dependent part
         for hit_idx in range(num_hits):
             hit = event_hit_info[hit_idx]
-            evt_dom_idx = hit['event_dom_idx']
+            operational_dom_idx = hit['event_dom_idx']
             hit_charge = hit['charge']
             exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
-            norm = dom_exp[evt_dom_idx] + scalefactor * scaling_dom_exp[evt_dom_idx]
+            norm = (
+                dom_exp[operational_dom_idx]
+                + scalefactor * scaling_dom_exp[operational_dom_idx]
+            )
             if norm > 0:
                 p = exp / norm
             else:
@@ -600,18 +645,18 @@ def generate_pexp_5d_function(
 
         num_pegleg_sources = len(pegleg_sources)
         num_pegleg_llhs = 1 + int(num_pegleg_sources / pegleg_stepsize)
-        num_hit_doms = len(event_dom_info)
+        num_operational_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
         recip_time_window = 1 / time_window
         sum_noise_rate = np.sum(event_dom_info['noise_rate_per_ns'])
 
         # Initialize expectations arrays
-        dom_exp = np.zeros(shape=num_hit_doms, dtype=np.float64)
+        dom_exp = np.zeros(shape=num_operational_doms, dtype=np.float64)
         hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
         # Save the scaling sources expectations in separate arrays
-        scaling_dom_exp = np.zeros(shape=num_hit_doms, dtype=np.float64)
+        scaling_dom_exp = np.zeros(shape=num_operational_doms, dtype=np.float64)
         scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
         # Get scaling sources expectations first for a nominal (e.g. cascade)

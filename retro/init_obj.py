@@ -189,7 +189,7 @@ def setup_dom_tables(
         cluster_idx = -1
         while True:
             cluster_idx += 1
-            dpath = dom_tables_fname_proto.format(cluster_idx)
+            dpath = dom_tables_fname_proto.format(cluster_idx=cluster_idx)
             if not isdir(dpath):
                 break
 

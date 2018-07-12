@@ -270,6 +270,7 @@ class Retro5DTables(object):
         self._get_llh = None
         self.pexp_meta = None
         self.is_stacked = None
+        self.t_is_residual_time = None
 
     def get_llh(self, *args, **kwargs):
         return self._get_llh(*args, **kwargs)
@@ -302,6 +303,8 @@ class Retro5DTables(object):
         self.tables.setflags(write=False, align=True, uic=False)
         num_tables = self.tables.shape[0]
 
+        self.t_is_residual_time = bool(self.table_meta.get('t_is_residual_time', False))
+
         self.t_indep_tables = np.load(
             stacked_t_indep_tables_fpath,
             mmap_mode=t_indep_mmap_mode
@@ -313,7 +316,7 @@ class Retro5DTables(object):
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=self.table_meta,
                 table_kind=self.table_kind,
-                use_residual_time=False,
+                t_is_residual_time=self.t_is_residual_time,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 compute_unhit_doms=True, # TODO: modify when TDI table works
                 use_directionality=self.use_directionality,
@@ -410,8 +413,9 @@ class Retro5DTables(object):
         for k in TABLE_NORM_KEYS:
             self.table_meta[k] = table[k]
         self.table_meta['binning'] = binning
+        self.t_is_residual_time = bool(table['t_is_residual_time'])
 
-        table_norm, t_indep_table_norm = get_table_norm(
+        self.table_norm, self.t_indep_table_norm = get_table_norm(
             avg_angsens=self.avg_angsens,
             quantum_efficiency=1,
             norm_version=self.norm_version,
@@ -422,7 +426,7 @@ class Retro5DTables(object):
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=table,
                 table_kind=self.table_kind,
-                use_residual_time=True,
+                t_is_residual_time=self.t_is_residual_time,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 use_directionality=self.use_directionality,
                 compute_unhit_doms=True, # TODO: modify when TDI works
@@ -434,14 +438,16 @@ class Retro5DTables(object):
             self._get_llh = get_llh
             self.pexp_meta = pexp_meta
 
+        self.is_stacked = False
+
         self.tables.append(table[self.table_name])
-        self.table_norms.append(table_norm)
+        self.table_norms.append(self.table_norm)
         self.n_photons_per_table.append(table['n_photons'])
 
         if self.compute_t_indep_exp:
             t_indep_table = table[self.t_indep_table_name]
             self.t_indep_tables.append(t_indep_table)
-            self.t_indep_table_norms.append(t_indep_table_norm)
+            self.t_indep_table_norms.append(self.t_indep_table_norm)
 
         table_idx = len(self.tables) - 1
         self.sd_idx_table_indexer[sd_indices] = table_idx
@@ -450,8 +456,6 @@ class Retro5DTables(object):
             self.loaded_sd_indices,
             np.atleast_1d(sd_indices).astype(np.uint32)
         ]))
-
-        self.is_stacked = False
 
 
 def get_table_norm(
@@ -587,6 +591,9 @@ def get_table_norm(
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
     assert table_step_length_norm.shape == (counts_per_r.size, counts_per_t.size)
+    #print('table_step_length_norm')
+    #print(table_step_length_norm)
+    #raise Exception()
 
     if norm_version == 'avgsurfarea':
         radial_norm = 1 / surf_area_at_avg_radius
