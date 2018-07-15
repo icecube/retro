@@ -156,8 +156,8 @@ def generate_pexp_5d_function(
 
     # Constants
     rsquared_max = np.max(table['r_bin_edges'])**2
-    last_costhetadir_bin_idx = len(table['costhetadir_bin_edges']) - 1
-    last_deltaphidir_bin_idx = len(table['deltaphidir_bin_edges']) - 1
+    last_costhetadir_bin_idx = len(table['costhetadir_bin_edges']) - 2
+    last_deltaphidir_bin_idx = len(table['deltaphidir_bin_edges']) - 2
     t_max = np.max(table['t_bin_edges'])
     recip_max_group_vel = table['group_refractive_index'] / SPEED_OF_LIGHT_M_PER_NS
 
@@ -348,6 +348,9 @@ def generate_pexp_5d_function(
                 else: # SRC_CKV_BETA1:
                     rho = math.sqrt(rhosquared)
 
+                    # TODO/NOTE: apparently the dir signs are backwards in the
+                    # below explanation. Figure out why & fix the explanation!
+
                     # Note in the following that we need to invert the
                     # directions of the sources to match the directions that
                     # Retro simulation comes up with, thus we work with
@@ -374,7 +377,7 @@ def generate_pexp_5d_function(
                     # where dx and dy are src_x - dom_x and src_y - dom_y.
                     # Solving for cos(deltaphidir):
                     #   cos(deltaphidir) = dot(-dir_vec_xy, pos_vec_xy) / (rhodir * rho)
-                    # wo we just need to write out the components of the dot
+                    # we just need to write out the components of the dot
                     # product in terms of quantites we have:
                     #   -dir_vec_x = rhodir * cos(phidir + pi)
                     #   -dir_vec_y = rhodir * sin(phidir + pi)
@@ -392,9 +395,10 @@ def generate_pexp_5d_function(
                     if rho <= MACHINE_EPS:
                         absdeltaphidir = 0
                     else:
-                        cosdeltaphidir = (-src_dir_cosphi*dx - src_dir_sinphi*dy) / rho
+                        cosdeltaphidir = (src_dir_cosphi*dx + src_dir_sinphi*dy) / rho
 
-                        # Clip cosdeltaphidir within range [-1, 1]
+                        # Clip cosdeltaphidir within range [-1, 1] in case of
+                        # finite precision issues in the above
                         if cosdeltaphidir < -1.0:
                             cosdeltaphidir = -1.0
                         elif cosdeltaphidir > 1.0:
@@ -403,7 +407,7 @@ def generate_pexp_5d_function(
                         absdeltaphidir = abs(math.acos(cosdeltaphidir))
 
                     # Find directional bin indices
-                    costhetadir_bin_idx = digitize_costhetadir(-src_dir_costheta)
+                    costhetadir_bin_idx = digitize_costhetadir(src_dir_costheta)
                     deltaphidir_bin_idx = digitize_deltaphidir(absdeltaphidir)
 
                     # Make upper edges inclusive
