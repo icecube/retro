@@ -46,6 +46,7 @@ TMPL_COMPR_CKV_TABLE_KEYS = [
     'n_photons', 'group_refractive_index', 'phase_refractive_index',
     'r_bin_edges', 'costheta_bin_edges', 't_bin_edges',
     'costhetadir_bin_edges', 'deltaphidir_bin_edges', 'ckv_template_map',
+    't_is_residual_time',
 ]
 
 
@@ -75,6 +76,7 @@ def load_template_compr_ckv_table(fpath, mmap):
         - 'deltaphidir_bin_edges' :
         - 'ckv_template_map' : np.ndarray
         - 't_indep_ckv_table' : np.ndarray (if available)
+        - 't_is_residual_time'
 
     """
     fpath = expand(fpath)
@@ -104,7 +106,7 @@ def load_template_compr_ckv_table(fpath, mmap):
         if isfile(fpath):
             table[key] = np.load(fpath, mmap_mode=mmap_mode)
 
-        elif key != 't_indep_ckv_table':
+        elif key not in ['t_indep_ckv_table']:
             raise ValueError(
                 'Could not find file "{}" for loading table key "{}"'
                 .format(fpath, key)

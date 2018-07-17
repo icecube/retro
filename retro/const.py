@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, range-builtin-not-iterating
 
 """
 Physical constants and constant-for-us values
@@ -8,7 +8,7 @@ Physical constants and constant-for-us values
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'get_sd_idx',
+    'omkeys_to_sd_indices', 'get_sd_idx', 'get_string_dom_pair',
 
     # Constants
     'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS',
@@ -39,6 +39,8 @@ __all__ = [
 
     'EMPTY_HITS', 'EMPTY_SOURCES',
     'SRC_OMNI', 'SRC_CKV_BETA1',
+
+    'PARAM_NAMES', 'PEGLEG_PARAM_NAMES', 'SCALING_PARAM_NAMES',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -70,39 +72,66 @@ from retro import FTYPE
 from retro import retro_types
 
 
-def get_sd_idx(string, dom):
-    """Get a single uint16 index from an IceCube string number (from 1 to 86)
-    and DOM number (from 1 to60).
+def omkeys_to_sd_indices(omkeys):
+    """Get a single integer index from OMKeys.
+
+    Parameters
+    ----------
+    omkeys : array of dtype OMK_T
+        The dtype `OMK_T` must contain "string" and "dom" and can optionally
+        include "pmt".
+
+    Returns
+    -------
+    sd_idx : array of np.uint32
+
+    """
+    if 'pmt' in omkeys.dtype.names:
+        raise NotImplementedError("OMKey field 'pmt' not implemented")
+    return get_sd_idx(string=omkeys['string'], dom=omkeys['dom'])
+
+
+def get_sd_idx(string, dom, pmt=0):
+    """Get a single integer index from an IceCube string number (from 1 to 86)
+    and DOM number (from 1 to 60).
 
     Parameters
     ----------
     string : int in [1, 60]
+        String number
     dom : int in [1, 60]
+        DOM number
+    pmt : int
+        PMT number in the DOM; if == 0, then this is ignored.
 
     Returns
     -------
-    sd_idx : np.uint16 in [0, 5159]
+    sd_idx : int
 
     """
-    #return np.uint16((string-1) * NUM_DOMS_PER_STRING + (dom-1))
-    return np.uint32((dom-1) * NUM_STRINGS + (string-1))
+    if pmt > 0:
+        raise NotImplementedError('PMT != 0 is not implemented')
+    return (dom - 1) * NUM_STRINGS + (string - 1)
 
 
 def get_string_dom_pair(sd_idx):
-    """Get an IceCube string number (1 to 86) and a DOM number(1 to 60) from single
-    uint16 index.
+    """Get an IceCube string number (1 to 86) and a DOM number (1 to 60) from
+    the single-integer index (sd_idx).
 
     Parameters
     ----------
-    sd_idx : np.uint16 in [0, 5159]
+    sd_idx : int in [0, 5159]
 
     Returns
     -------
-    string : int in [1, 60]
+    string : int in [1, 86]
     dom : int in [1, 60]
+
     """
-    pair = divmod(sd_idx, NUM_STRINGS)
-    return pair[1] + 1, pair[0] + 1
+    dom_idx, string_idx = divmod(sd_idx, NUM_STRINGS)
+    string = string_idx + 1
+    dom = dom_idx + 1
+    return string, dom
 
 
 # -- Physical / mathematical constants -- #
@@ -212,13 +241,13 @@ NUM_DOMS_PER_STRING = 60
 NUM_DOMS_TOT = NUM_STRINGS * NUM_DOMS_PER_STRING
 
 
-IC_STRS = np.array(list(range(1, 78+1)), dtype=np.uint8)
-DC_STRS = np.array(list(range(79, 86+1)), dtype=np.uint8)
+IC_STRS = np.array(range(1, 78+1), dtype=np.uint8)
+DC_STRS = np.array(range(79, 86+1), dtype=np.uint8)
 DC_IC_STRS = np.array([26, 27, 35, 36, 37, 45, 46], dtype=np.uint8)
 DC_ALL_STRS = np.concatenate([DC_STRS, DC_IC_STRS], axis=0)
 
-DC_SUBDUST_DOMS = np.array(list(range(11, 60+1)), dtype=np.uint8)
-IC_SUBDUST_DOMS = np.array(list(range(25, 60+1)), dtype=np.uint8)
+DC_SUBDUST_DOMS = np.array(range(11, 60+1), dtype=np.uint8)
+IC_SUBDUST_DOMS = np.array(range(25, 60+1), dtype=np.uint8)
 
 DC_SUBDUST_STRS_DOMS = np.array(
     [get_sd_idx(s, d) for s, d in product(DC_STRS, DC_SUBDUST_DOMS)]
@@ -247,3 +276,17 @@ SRC_OMNI = np.uint32(0)
 
 SRC_CKV_BETA1 = np.uint32(1)
 """Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
+
+
+PARAM_NAMES = [
+    'time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth',
+    'cascade_zenith', 'track_energy', 'cascade_energy', 'cascade_d_zenith',
+    'cascade_d_azimuth'
+]
+"""All possible hypothesis param names"""
+
+PEGLEG_PARAM_NAMES = ['track_energy']
+"""Hypothesis param names handled by pegleg, if it's used"""
+
+SCALING_PARAM_NAMES = ['cascade_energy']
+"""Hypothesis param names handled by scaling, if it's used"""

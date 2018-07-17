@@ -8,7 +8,7 @@ Use CLSim to simulate a particle; for now, just charged leptons (muons,
 electrons, taus, and their antiparticles)
 """
 
-# TODO: *ONLY* do the phton sim here, make hits in another step to keep this as
+# TODO: *ONLY* do the photon sim here, make hits in another step to keep this as
 #       fast as possible
 # TODO: get Geant4 propagation to work (or at least test if it works now...)
 
@@ -17,7 +17,7 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     'MAX_RUN_NUM',
     'simulate_particle',
-    'parse_args'
+    'parse_args',
 ]
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -105,7 +105,6 @@ def simulate_particle(
             self.eventCounter += 1
             if self.eventCounter == self.nEvents:
                 self.RequestSuspension()
-
 
     if verbosity == 0:
         I3Logger.global_logger.set_level(I3LogLevel.LOG_WARN)

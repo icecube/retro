@@ -357,7 +357,7 @@ def convolve_table(
                 num_costheta_bins=n_ctdir,
                 num_deltaphi_bins=n_dpdir
             )
-            num_idxs = len(ctd_idx)
+            num_idxs = len(ctd_idxs)
             assert len(dpd_idxs) == len(weights) == num_idxs
 
             for r_idx, r_lower in enumerate(np.nditer(r_bin_edges[:-1])):
@@ -366,7 +366,7 @@ def convolve_table(
                         max_dist = tbin_max_dist[t_idx]
                         causal = r_lower <= max_dist
                     for ct_idx in range(n_ct):
-                        avg = 0.0
+                        total = 0.0
                         if causal:
                             # Apply the weights to the corresponding entries
                             # (note that weights account for normalization)
@@ -374,13 +374,13 @@ def convolve_table(
                                 ctd_idx = ctd_idxs[i_idx]
                                 dpd_idx = dpd_idxs[i_idx]
                                 weight = weights[i_idx]
-                                avg += weight * src[r_idx, ct_idx, t_idx, ctd_idx, dpd_idx]
-                            #avg = np.sum(
+                                total += weight * src[r_idx, ct_idx, t_idx, ctd_idx, dpd_idx]
+                            #total = np.sum(
                             #    weights *
                             #    src[r_idx, ct_idx, t_idx, ctd_idxs, dpd_idxs]
                             #)
 
-                        dst[r_idx, ct_idx, t_idx, ctdir_idx, dpdir_idx] = avg
+                        dst[r_idx, ct_idx, t_idx, ctdir_idx, dpdir_idx] = total
 
 
 @numba_jit(parallel=False, nogil=False, cache=True) #**DFLT_NUMBA_JIT_KWARGS)

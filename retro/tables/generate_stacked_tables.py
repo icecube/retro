@@ -45,7 +45,7 @@ from retro.utils.misc import expand, mkdir
 
 def generate_stacked_tables(outdir, dom_tables_kw):
     """Stack a set of tables into a single numpy array for use of all tables in
-    numba.
+    Numba.
 
     Currently, only ckv_templ_compr tables are supported.
 
@@ -64,7 +64,7 @@ def generate_stacked_tables(outdir, dom_tables_kw):
             .format(dom_tables_kw['dom_tables_kind'])
         )
 
-    # Use the conveneience function to load the single-DOM tables into a
+    # Use the convenience function to load the single-DOM tables into a
     # retro_5d_tables.Retro5DTables object, and then we can use the loaded
     # tables from there.
     dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)

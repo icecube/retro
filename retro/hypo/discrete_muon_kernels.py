@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, redefined-outer-name, invalid-name
 
 """
 Discrete-time kernels for muons generating photons, to be used as hypo_kernels
@@ -53,7 +53,7 @@ from retro.retro_types import SRC_T
 
 ALL_REALS = (-np.inf, np.inf)
 
-def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt=1.0, n_pegleg=3000):
+def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -65,15 +65,15 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt=1.0, n_pegleg=300
     dt : float
         Time step in nanoseconds
 
-    n_pegleg : int
-        how many segments to supply for pegleg
+    n_segments : int
+        Number of segments to supply for pegleg
 
     Returns
     -------
-    sources : shape (n_pegleg,) numpy.ndarray, dtype SRC_T
+    sources : shape (n_segments,) numpy.ndarray, dtype SRC_T
 
     """
-    sampled_dt = np.arange(dt*0.5, (n_pegleg+0.5)*dt, dt)
+    sampled_dt = np.arange(dt*0.5, (n_segments + 0.5)*dt, dt)
 
     segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
     photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
@@ -117,7 +117,7 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt=1.0, n_pegleg=300
     return sources
 
 
-def const_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zenith, dt=1.0):
+def const_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zenith, dt):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -214,7 +214,9 @@ MULEN_INTERP = interpolate.UnivariateSpline(x=esamps, y=lengths, k=1, s=0)
 MUEN_INTERP = interpolate.UnivariateSpline(y=esamps[1:], x=lengths[1:], k=1, s=0)
 
 
-def table_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zenith, dt=1.0):
+def table_energy_loss_muon(
+        time, x, y, z, track_energy, track_azimuth, track_zenith, dt
+):
     """Discrete-time track hypothesis that calculates dE/dx as the muon travels
     using splined tabulated data.
 
@@ -230,8 +232,8 @@ def table_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zen
     Returns
     -------
     sources : shape (N,) numpy.ndarray, dtype SRC_T
-    """
 
+    """
     # Check for no-track condition
     if track_energy == 0:
         return EMPTY_SOURCES
@@ -292,13 +294,21 @@ def table_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zen
     return sources
 
 
-def pegleg_eval(pegleg_idx, dt=1.0, const_e_loss=False):
-    '''
-    Convert the pegleg index into track energy in GeV
-    '''
-    length = float(pegleg_idx) / dt * SPEED_OF_LIGHT_M_PER_NS
+def pegleg_eval(pegleg_idx, dt, const_e_loss):
+    """Convert a pegleg index into track energy in GeV.
+
+    Parameters
+    ----------
+    pegleg_idx : int
+    dt : float
+    const_e_loss : bool
+
+    Returns
+    -------
+    muon_energy : float
+
+    """
+    length = pegleg_idx / dt * SPEED_OF_LIGHT_M_PER_NS
     if const_e_loss:
         return length * TRACK_M_PER_GEV
-    else:
-        return MUEN_INTERP(length)
-
+    return MUEN_INTERP(length)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, range-builtin-not-iterating
 
 """
 Class for using a set of "raw" 5D (r, costheta, t, costhetadir, deltaphidir)
@@ -33,9 +33,7 @@ limitations under the License.'''
 
 from collections import OrderedDict
 from copy import deepcopy
-from itertools import product
 from os.path import abspath, dirname
-import pickle
 import sys
 
 import numpy as np
@@ -44,13 +42,13 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import FTYPE, load_pickle
+from retro import load_pickle
 from retro.const import (
-    ALL_STRS_DOMS, ALL_STRS_DOMS_SET, NUM_STRINGS, NUM_DOMS_PER_STRING,
-    NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS, PI, TWO_PI, get_sd_idx
+    ALL_STRS_DOMS, ALL_STRS_DOMS_SET, NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS,
+    PI, TWO_PI, get_string_dom_pair
 )
 from retro.i3info.angsens_model import load_angsens_model
-from retro.retro_types import DOM_INFO_T, HIT_T
+from retro.retro_types import DOM_INFO_T
 from retro.tables.pexp_5d import generate_pexp_5d_function
 from retro.utils.geom import spherical_volume
 from retro.utils.misc import expand
@@ -146,25 +144,37 @@ class Retro5DTables(object):
         self.angsens_model = angsens_model
         self.compute_t_indep_exp = compute_t_indep_exp
         self.table_kind = table_kind
+
         self.use_sd_indices = np.asarray(use_sd_indices, dtype=np.uint32)
         if not set(self.use_sd_indices) == ALL_STRS_DOMS_SET:
-            raise ValueError('Using fewer than all DOMs is not yet supported.')
+            raise ValueError('Requesting to use fewer than all DOMs is not supported.')
         self.use_sd_indices_set = set(use_sd_indices)
+        self.loaded_sd_indices = np.empty(shape=0, dtype=np.uint32)
 
-        self.loaded_sd_indices = np.empty(shape=(0,), dtype=np.uint32)
+        self.tbl_is_raw = table_kind in ['raw_uncompr', 'raw_templ_compr']
+        self.tbl_is_ckv = table_kind in ['ckv_uncompr', 'ckv_templ_compr']
 
-        self.tbl_is_raw = table_kind in ['raw_uncompr']
-        self.tbl_is_ckv = table_kind in ['ckv_uncompr']
         self.tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
 
-        if self.tbl_is_templ_compr:
-            if template_library is None:
-                raise ValueError(
-                    'template library is needed to use compressed table'
-                )
+        # xor: either raw or ckv, but not both
+        assert ((self.tbl_is_raw or self.tbl_is_ckv)
+                and not (self.tbl_is_raw and self.tbl_is_ckv))
+
+        if self.tbl_is_templ_compr and template_library is None:
+            raise ValueError('Template library is needed to use compressed table')
         self.template_library = template_library
 
-        if self.tbl_is_raw:
+        if self.tbl_is_templ_compr:
+            if not self.tbl_is_ckv:
+                raise NotImplementedError('Can only handle ckv template-compr tables')
+            from retro.tables.template_compr_ckv_tables import (
+                load_template_compr_ckv_table
+            )
+            self.table_loader_func = load_template_compr_ckv_table
+            self.usable_table_slice = (slice(None),)*3
+            self.t_indep_table_name = 't_indep_ckv_table'
+            self.table_name = 'ckv_template_map'
+        elif self.tbl_is_raw:
             from retro.tables.clsim_tables import load_clsim_table_minimal
             self.table_loader_func = load_clsim_table_minimal
             # NOTE: original tables have underflow (bin 0) and overflow
@@ -173,20 +183,12 @@ class Retro5DTables(object):
             self.usable_table_slice = (slice(1, -1),)*5
             self.t_indep_table_name = 't_indep_table'
             self.table_name = 'table'
-        elif self.tbl_is_ckv:
+        else: # self.tbl_is_ckv:
             from retro.tables.ckv_tables import load_ckv_table
             self.table_loader_func = load_ckv_table
             self.usable_table_slice = (slice(None),)*5
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_table'
-        elif self.tbl_is_templ_compr:
-            from retro.tables.template_compr_ckv_tables import (
-                load_template_compr_ckv_table
-            )
-            self.table_loader_func = load_template_compr_ckv_table
-            self.usable_table_slice = (slice(None),)*3
-            self.t_indep_table_name = 't_indep_ckv_table'
-            self.table_name = 'ckv_template_map'
 
         assert len(geom.shape) == 3
         self.use_directionality = use_directionality
@@ -206,30 +208,37 @@ class Retro5DTables(object):
                 "WARNING: RDE is zero for {} DOMs, NaN for {} DOMs and +/-inf"
                 " for {} DOMs.\n"
                 "These DOMs will be disabled and return 0's for expected"
-                " photon computations."
-                .format(num_zero, num_nan, num_inf)
+                " photon computations. {} DOMs remain."
+                .format(num_zero, num_nan, num_inf,
+                        NUM_DOMS_TOT - num_zero - num_nan - num_inf)
             )
         mask = zero_mask | nan_mask | inf_mask
-
         operational_doms = ~mask
-        rde = rde.astype(np.float32)
-        quantum_efficiency = 0.25 * rde
-        noise_rate_per_ns = noise_rate_hz.astype(np.float32) / 1e9
 
         self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO_T)
-        for s_idx, d_idx in product(list(range(NUM_STRINGS)),
-                                    list(range(NUM_DOMS_PER_STRING))):
-            sd_idx = get_sd_idx(string=s_idx + 1, dom=d_idx + 1)
-            operational = (
-                operational_doms[s_idx, d_idx] and sd_idx in self.use_sd_indices
-            )
-            self.dom_info[sd_idx]['operational'] = operational
-            self.dom_info[sd_idx]['x'] = geom[s_idx, d_idx, 0]
-            self.dom_info[sd_idx]['y'] = geom[s_idx, d_idx, 1]
-            self.dom_info[sd_idx]['z'] = geom[s_idx, d_idx, 2]
-            self.dom_info[sd_idx]['quantum_efficiency'] = quantum_efficiency[s_idx, d_idx]
-            self.dom_info[sd_idx]['noise_rate_per_ns'] = (
-                operational * noise_rate_per_ns[s_idx, d_idx]
+        for sd_idx in range(NUM_DOMS_TOT):
+            string_num, dom_num = get_string_dom_pair(sd_idx)
+            string_idx, dom_idx = string_num - 1, dom_num - 1
+
+            this_dom_info = self.dom_info[sd_idx]
+            this_dom_info['sd_idx'] = sd_idx
+
+            operational = operational_doms[string_idx, dom_idx]
+            if sd_idx in self.use_sd_indices:
+                if not operational:
+                    self.use_sd_indices_set.remove(sd_idx)
+                    self.use_sd_indices = np.array(sorted(self.use_sd_indices_set),
+                                                   dtype=np.uint32)
+            else:
+                operational = False
+            this_dom_info['operational'] = operational
+
+            this_dom_info['x'] = geom[string_idx, dom_idx, 0]
+            this_dom_info['y'] = geom[string_idx, dom_idx, 1]
+            this_dom_info['z'] = geom[string_idx, dom_idx, 2]
+            this_dom_info['quantum_efficiency'] = 0.25 * rde[string_idx, dom_idx]
+            this_dom_info['noise_rate_per_ns'] = (
+                operational * noise_rate_hz[string_idx, dom_idx] / 1e9
             )
 
         self.tables = []
@@ -240,109 +249,74 @@ class Retro5DTables(object):
         self.table_meta = None
         self.table_norm = None
         self.t_indep_table_norm = None
+
+        # Create `sd_idx_table_indexer` which, at each string-dom index
+        # `sd_idx` stores the index `table_idx` that points to the table to use
+        # for that dom. E.g., to retrive the table to use for a given `sd_idx`:
+        #
+        #   table = self.tables[self.sd_idx_table_indexer[sd_idx]]
+        #
+        # Note that the value ``np.iinfo(itype).min`` should be an invalid
+        # index into an array of length <= ``np.iinfo(itype).min`` since there
+        # is one more negative integer than positive in IEEE representations of
+        # integers.
         self.sd_idx_table_indexer = np.full(
-            shape=NUM_DOMS_TOT, fill_value=np.iinfo(np.int32).min, dtype=np.int32
+            shape=NUM_DOMS_TOT,
+            fill_value=np.iinfo(np.int32).min,
+            dtype=np.int32
         )
 
         self._pexp = None
         self._get_llh = None
         self.pexp_meta = None
         self.is_stacked = None
-
-    def pexp(self, sources, hit_times, time_window, include_noise=True,
-             force_quantum_efficiency=None, include_dead_doms=True):
-        """Get expectation for photons arriving at DOMs at particular times.
-
-        Parameters
-        ----------
-        sources
-        hit_times : shape (n_hit_times,) array of floating-point dtype
-        time_window : float
-        include_noise : bool
-        force_quantum_efficiency : None or float
-        include_dead_doms : bool
-
-        Returns
-        -------
-        t_indep_exp : shape (n_doms,) array of float32
-        exp_at_hit_times : shape (n_doms, n_hit_times) array of float32
-
-        """
-        if self._pexp is None:
-            raise ValueError('No tables loaded?')
-
-        dom_info = deepcopy(self.dom_info)
-        if not include_noise:
-            time_window = 0
-            dom_info[self.use_sd_indices]['noise_rate_per_ns'] = 0
-        if force_quantum_efficiency is not None:
-            dom_info[self.use_sd_indices]['quantum_efficiency'] = force_quantum_efficiency
-        if include_dead_doms:
-            dom_info[self.use_sd_indices]['operational'] = True
-
-        num_hit_times = len(hit_times)
-        hits = np.empty(shape=num_hit_times, dtype=HIT_T)
-        hits['time'] = hit_times
-        hits['charge'] = 1
-
-        t_indep_exp = np.zeros(shape=NUM_DOMS_TOT, dtype=np.float32)
-        exp_at_hit_times = np.zeros(shape=(NUM_DOMS_TOT, num_hit_times),
-                                    dtype=np.float32)
-
-        for sd_idx in ALL_STRS_DOMS:
-            table_idx = self.sd_idx_table_indexer[sd_idx]
-            for t_idx in range(num_hit_times):
-                this_t_indep_exp, sum_log_exp_at_hit_times = self._pexp(
-                    sources=sources,
-                    hits=hits[t_idx : t_idx + 1],
-                    dom_info=dom_info[sd_idx],
-                    time_window=time_window,
-                    table=self.tables[table_idx],
-                    table_norm=self.table_norms[table_idx],
-                    t_indep_table=self.t_indep_tables[table_idx],
-                    t_indep_table_norm=self.t_indep_table_norms[table_idx]
-                )
-                exp_at_hit_times[sd_idx, t_idx] = np.exp(sum_log_exp_at_hit_times)
-            t_indep_exp[sd_idx] = this_t_indep_exp
-
-        return t_indep_exp, exp_at_hit_times
+        self.t_is_residual_time = None
 
     def get_llh(self, *args, **kwargs):
         return self._get_llh(*args, **kwargs)
 
-    def load_stacked_tables(self, stacked_tables_meta_fpath,
-                            stacked_tables_fpath, stacked_t_indep_tables_fpath,
-                            mmap_tables=False, mmap_t_indep=False):
+    def pexp(self, *args, **kwargs):
+        if self._pexp is None:
+            raise ValueError('No pexp function initialized. (Are tables loaded?)')
+        return self._pexp(*args, **kwargs)
+
+    def load_stacked_tables(
+            self,
+            stacked_tables_meta_fpath,
+            stacked_tables_fpath,
+            stacked_t_indep_tables_fpath,
+            mmap_tables=False,
+            mmap_t_indep=False,
+    ):
         if self.is_stacked is not None:
             assert self.is_stacked
 
-        if mmap_tables:
-            tables_mmap_mode = 'r'
-        else:
-            tables_mmap_mode = None
+        stacked_tables_meta_fpath = expand(stacked_tables_meta_fpath)
+        stacked_tables_fpath = expand(stacked_tables_fpath)
+        stacked_t_indep_tables_fpath = expand(stacked_t_indep_tables_fpath)
 
-        if mmap_t_indep:
-            t_indep_mmap_mode = 'r'
-        else:
-            t_indep_mmap_mode = None
+        tables_mmap_mode = 'r' if mmap_tables else None
+        t_indep_mmap_mode = 'r' if mmap_t_indep else None
 
         self.table_meta = load_pickle(stacked_tables_meta_fpath)
-
-        self.tables = np.load(
-            expand(stacked_tables_fpath),
-            mmap_mode=tables_mmap_mode
-        )
+        self.tables = np.load(stacked_tables_fpath, mmap_mode=tables_mmap_mode)
         self.tables.setflags(write=False, align=True, uic=False)
+        num_tables = self.tables.shape[0]
+
+        self.t_is_residual_time = bool(self.table_meta.get('t_is_residual_time', False))
+
         self.t_indep_tables = np.load(
-            expand(stacked_t_indep_tables_fpath),
+            stacked_t_indep_tables_fpath,
             mmap_mode=t_indep_mmap_mode
         )
         self.t_indep_tables.setflags(write=False, align=True, uic=False)
+        assert self.t_indep_tables.shape[0] == num_tables
 
         if self._pexp is None:
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=self.table_meta,
                 table_kind=self.table_kind,
+                t_is_residual_time=self.t_is_residual_time,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 compute_unhit_doms=True, # TODO: modify when TDI table works
                 use_directionality=self.use_directionality,
@@ -354,30 +328,36 @@ class Retro5DTables(object):
             self._get_llh = get_llh
             self.pexp_meta = pexp_meta
 
-        self.sd_idx_table_indexer[:] = self.table_meta['sd_idx_table_indexer']
+        self.sd_idx_table_indexer = deepcopy(self.table_meta['sd_idx_table_indexer'])
         self.sd_idx_table_indexer.setflags(write=False, align=True, uic=False)
+
+        self.loaded_sd_indices = np.array([
+            sd_idx for sd_idx in range(NUM_DOMS_TOT)
+            if self.dom_info[sd_idx]['operational']
+        ], dtype=np.uint32)
+        assert set(self.loaded_sd_indices) == self.use_sd_indices_set
+
         self.n_photons_per_table = self.table_meta['n_photons_per_table']
 
         # Note that in creating the stacked tables, each indiividual table
-        # is scaled such that the effective number of photons is one (to avoid
-        # different norms across the tables).
-        table_norm, t_indep_table_norm = get_table_norm(
+        # is scaled such that the effective number of photons used to generate
+        # the table is one (to avoid different norms across the tables if
+        # different number of photons was used originally to create each).
+        self.table_norm, self.t_indep_table_norm = get_table_norm(
             avg_angsens=self.avg_angsens,
             quantum_efficiency=1,
             norm_version=self.norm_version,
             **{k: self.table_meta[k] for k in TABLE_NORM_KEYS}
         )
 
-        self.table_norm = table_norm.astype(FTYPE)
-        self.t_indep_table_norm = t_indep_table_norm.astype(FTYPE)
-
-        self.table_norms = [self.table_norm]*self.tables.shape[0]
-        self.t_indep_table_norms = [self.t_indep_table_norm]*self.t_indep_tables.shape[0]
+        self.table_norms = [self.table_norm] * num_tables
+        self.t_indep_table_norms = [self.t_indep_table_norm] * num_tables
 
         self.is_stacked = True
 
     def load_table(self, fpath, sd_indices, mmap, step_length=None):
-        """Load a table into the set of tables.
+        """Load a single table (possibly applicable to more than one DOM) into
+        the set of tables.
 
         Parameters
         ----------
@@ -386,7 +366,7 @@ class Retro5DTables(object):
             Retro-formatted directory with .npy files).
 
         sd_indices : sd_idx or iterable thereof
-            See utils.misc.get_sd_idx
+            See const.get_sd_idx
 
         mmap : bool
             Whether to attempt to memory map the table (only applicable for
@@ -395,7 +375,7 @@ class Retro5DTables(object):
         step_length : float > 0, optional
             The stepLength parameter (in meters) used in CLSim tabulator code
             for tabulating a single photon as it travels. This is a hard-coded
-            paramter set to 1 meter in the trunk version of the code, but it's
+            parameter set to 1 meter in the trunk version of the code, but it's
             something we might play with to optimize table generation speed, so
             just be warned that this _can_ change. Note that this is only
             required for CLSim .fits tables, which do not record this
@@ -407,6 +387,10 @@ class Retro5DTables(object):
 
         if isinstance(sd_indices, int):
             sd_indices = (sd_indices,)
+
+        sd_indices = sorted(set(sd_indices).intersection(
+            self.dom_info[self.dom_info['operational']]['sd_idx']
+        ))
 
         table = self.table_loader_func(fpath=fpath, mmap=mmap)
         if 'step_length' in table:
@@ -428,23 +412,21 @@ class Retro5DTables(object):
 
         for k in TABLE_NORM_KEYS:
             self.table_meta[k] = table[k]
-
         self.table_meta['binning'] = binning
+        self.t_is_residual_time = bool(table['t_is_residual_time'])
 
-        table_norm, t_indep_table_norm = get_table_norm(
+        self.table_norm, self.t_indep_table_norm = get_table_norm(
             avg_angsens=self.avg_angsens,
             quantum_efficiency=1,
             norm_version=self.norm_version,
             **{k: v for k, v in self.table_meta.items() if k in TABLE_NORM_KEYS}
         )
 
-        table_norm = table_norm.astype(FTYPE)
-        t_indep_table_norm = t_indep_table_norm.astype(FTYPE)
-
         if self._pexp is None:
             pexp, get_llh, pexp_meta = generate_pexp_5d_function(
                 table=table,
                 table_kind=self.table_kind,
+                t_is_residual_time=self.t_is_residual_time,
                 compute_t_indep_exp=self.compute_t_indep_exp,
                 use_directionality=self.use_directionality,
                 compute_unhit_doms=True, # TODO: modify when TDI works
@@ -456,14 +438,16 @@ class Retro5DTables(object):
             self._get_llh = get_llh
             self.pexp_meta = pexp_meta
 
+        self.is_stacked = False
+
         self.tables.append(table[self.table_name])
-        self.table_norms.append(table_norm)
+        self.table_norms.append(self.table_norm)
         self.n_photons_per_table.append(table['n_photons'])
 
         if self.compute_t_indep_exp:
             t_indep_table = table[self.t_indep_table_name]
             self.t_indep_tables.append(t_indep_table)
-            self.t_indep_table_norms.append(t_indep_table_norm)
+            self.t_indep_table_norms.append(self.t_indep_table_norm)
 
         table_idx = len(self.tables) - 1
         self.sd_idx_table_indexer[sd_indices] = table_idx
@@ -472,8 +456,6 @@ class Retro5DTables(object):
             self.loaded_sd_indices,
             np.atleast_1d(sd_indices).astype(np.uint32)
         ]))
-
-        self.is_stacked = False
 
 
 def get_table_norm(
@@ -496,15 +478,16 @@ def get_table_norm(
 
     step_length : float > 0
         Step length used in CLSim tabulator, in units of meters. (Hard-coded to
-        1 m in CLSim, but this is a paramter that ultimately could be changed.)
+        1 m in CLSim, but this is a parameter that ultimately could be
+        changed.)
 
-    r_bin_edges : 1D numpy.ndarray, ascending values => 0 (meters)
+    r_bin_edges : 1D array, ascending non-negative values (meters)
         Radial bin edges in units of meters.
 
-    costheta_bin_edges : 1D numpy.ndarray, ascending values in [-1, 1]
+    costheta_bin_edges : 1D array, ascending values in [-1, 1]
         Cosine of the zenith angle bin edges; all must be equally spaced.
 
-    t_bin_edges : 1D numpy.ndarray, ascending values > 0 (nanoseconds)
+    t_bin_edges : 1D array, ascending values > 0 (nanoseconds)
         Time bin eges in units of nanoseconds.
 
     quantum_efficiency : float in (0, 1], optional
@@ -524,14 +507,14 @@ def get_table_norm(
 
     Returns
     -------
-    table_norm : numpy.ndarray of shape (n_r_bins, n_t_bins), values >= 0
+    table_norm : shape (n_r_bins, n_t_bins) array, values >= 0
         The normalization is a function of both r- and t-bin (we assume
         costheta binning is "regular"). To obtain a survival probability,
         multiply the value in the CLSim table's bin by the appropriate
         `table_norm` entry. I.e.:
         ``survival_prob = raw_bin_val * table_norm[r_bin_idx, t_bin_idx]``.
 
-    t_indep_table_norm : numpy.ndarray of shape (n_r_bins,)
+    t_indep_table_norm : shape (n_r_bins,) array
 
     """
     n_costheta_bins = len(costheta_bin_edges) - 1
@@ -586,14 +569,14 @@ def get_table_norm(
     outer_edges = r_bin_edges[1:]
 
     radial_midpoints = 0.5 * (inner_edges + outer_edges)
-    inner_radius = np.where(inner_edges == 0, 0.01* radial_midpoints, inner_edges)
+    #inner_radius = np.where(inner_edges == 0, 0.01* radial_midpoints, inner_edges)
     avg_radius = (
         3/4 * (outer_edges**4 - inner_edges**4)
         / (outer_edges**3 - inner_edges**3)
     )
 
     surf_area_at_avg_radius = avg_radius**2 * TWO_PI * costheta_bin_width
-    surf_area_at_inner_radius = inner_radius**2 * TWO_PI * costheta_bin_width
+    #surf_area_at_inner_radius = inner_radius**2 * TWO_PI * costheta_bin_width
     surf_area_at_midpoints = radial_midpoints**2 * TWO_PI * costheta_bin_width
 
     bin_vols = np.abs(
@@ -608,6 +591,9 @@ def get_table_norm(
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
     assert table_step_length_norm.shape == (counts_per_r.size, counts_per_t.size)
+    #print('table_step_length_norm')
+    #print(table_step_length_norm)
+    #raise Exception()
 
     if norm_version == 'avgsurfarea':
         radial_norm = 1 / surf_area_at_avg_radius

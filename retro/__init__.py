@@ -127,7 +127,7 @@ def load_pickle(path):
     obj
 
     """
-    with file(expanduser(expandvars(path)), 'rb') as fobj:
+    with open(expanduser(expandvars(path)), 'rb') as fobj:
         if PY2:
             return pickle.load(fobj)
-        return pickle.load(fobj, endocing='latin1')
+        return pickle.load(fobj, encoding='latin1')

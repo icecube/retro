@@ -11,7 +11,7 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'generate_histos',
-    'parse_args'
+    'parse_args',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -155,9 +155,10 @@ def generate_histos(
             if gcd_info is None:
                 gcd_info = gcd_info_from_data
             else:
-                if gcd_info != gcd_info_from_data:
-                    print('WARNING: Using different GCD from the one used'
-                          ' during simulation!')
+                pass
+                #if not np.all(gcd_info == gcd_info_from_data):
+                #    print('WARNING: Using different GCD from the one used'
+                #          ' during simulation!')
 
     if gcd_info is None:
         if photons_file_name is not None:
@@ -191,7 +192,10 @@ def generate_histos(
     # greater than) the peak in the distribution, so is useless for us.
     possible_paths = [
         hole_ice_model,
-        '$I3_SRC/ice-models/resources/models/angsens/' + hole_ice_model
+        '$I3_SRC/ice-models/resources/models/angsens/' + hole_ice_model,
+        '$I3_SRC/ice-models/resources/models/angsens/as.' + hole_ice_model,
+        '$I3_SRC/ice-models/resources/models/angsens_flasher/' + hole_ice_model,
+        '$I3_SRC/ice-models/resources/models/angsens_flasher/as.' + hole_ice_model,
     ]
     coeffs_loaded = False
     for path in possible_paths:

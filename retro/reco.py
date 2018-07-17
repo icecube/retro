@@ -40,8 +40,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
-from retro.const import ALL_STRS_DOMS
-from retro.retro_types import PARAM_NAMES, EVT_DOM_INFO_T, EVT_HIT_INFO_T
+from retro.const import PEGLEG_PARAM_NAMES, SCALING_PARAM_NAMES
+from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.priors import (
     get_prior_def,
@@ -60,22 +60,30 @@ class RetroReco(object):
         self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
         self.events_iterator = init_obj.get_events(**events_kw)
         self.reco_kw = reco_kw
-        self.opt_params_names = self.hypo_handler.params
-        self.n_opt_dim = len(self.opt_params_names)
+
+        self.n_params = self.hypo_handler.n_params
+        self.n_opt_params = self.hypo_handler.n_opt_params
 
         self.out_prefix = None
 
         # Setup priors
         self.prior_defs = OrderedDict()
-        for param in self.opt_params_names:
+        for param in self.hypo_handler.opt_param_names:
             self.prior_defs[param] = get_prior_def(param, reco_kw)
 
         # Remove unused reco kwargs
         reco_kw.pop('spatial_prior')
         reco_kw.pop('cascade_angle_prior')
 
-    def run(self):
-        """Run reconstructions."""
+    def run(self, method):
+        """Run reconstructions.
+
+        Parameters
+        ----------
+        method : str
+            One of "multinest", "nlopt", "scipy", or "skopt".
+
+        """
         print('Running reconstructions...')
         t00 = time.time()
         outdir = self.reco_kw.pop('outdir')
@@ -83,15 +91,10 @@ class RetroReco(object):
         mkdir(outdir)
 
         # Setup LLHP dtype
-        hypo_params = (
-            self.opt_params_names
-            + self.hypo_handler.pegleg_params
-            + self.hypo_handler.scaling_params
-        )
-        hypo_params_sorted = ['llh'] + [dim for dim in PARAM_NAMES if dim in hypo_params]
-        llhp_t = np.dtype([(n, np.float32) for n in hypo_params_sorted])
+        dim_names = list(self.hypo_handler.all_param_names)
+        llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + dim_names])
 
-        for event_idx, event in self.events_iterator: # pylint: disable=unused-variable
+        for event_idx, event in self.events_iterator:
             t0 = time.time()
 
             self.out_prefix = join(outdir, 'evt{}-'.format(event_idx))
@@ -101,41 +104,52 @@ class RetroReco(object):
             param_values = []
             log_likelihoods = []
             t_start = []
-            loglike = self.generate_loglike(event, param_values, log_likelihoods, t_start)
-
-            settings = self.run_multinest(
-                prior=prior,
-                loglike=loglike,
-                **self.reco_kw
+            loglike = self.generate_loglike(
+                event=event,
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                t_start=t_start,
             )
-            #settings = self.run_scipy(
-            #    prior=prior,
-            #    loglike=loglike,
-            #    method='differential_evolution',
-            #    eps=0.02
-            #)
-            #settings = self.run_nlopt(
-            #    prior=prior,
-            #    loglike=loglike,
-            #)
-            ##settings = self.run_skopt(
-            #    prior=prior,
-            #    loglike=loglike,
-            #)
+
+            if method == 'multinest':
+                settings = self.run_multinest(
+                    prior=prior,
+                    loglike=loglike,
+                    **self.reco_kw
+                )
+            elif method == 'scipy':
+                settings = self.run_scipy(
+                    prior=prior,
+                    loglike=loglike,
+                    method='differential_evolution',
+                    eps=0.02
+                )
+            elif method == 'nlopt':
+                settings = self.run_nlopt(
+                    prior=prior,
+                    loglike=loglike,
+                )
+            elif method == 'skopt':
+                settings = self.run_skopt(
+                    prior=prior,
+                    loglike=loglike,
+                )
+            else:
+                raise ValueError('Unknown `Method` {}'.format(method))
 
             t1 = time.time()
 
             # dump
             llhp = np.empty(shape=len(param_values), dtype=llhp_t)
             llhp['llh'] = log_likelihoods
-            llhp[hypo_params] = param_values
+            llhp[dim_names] = param_values
 
             llhp_outf = self.out_prefix + 'llhp.npy'
             print('Saving llhp to "{}"...'.format(llhp_outf))
             np.save(llhp_outf, llhp)
 
             opt_meta = OrderedDict([
-                ('params', hypo_params),
+                ('params', dim_names),
                 ('original_prior_specs', self.prior_defs),
                 ('priors_used', priors_used),
                 ('settings', sort_dict(settings)),
@@ -174,7 +188,9 @@ class RetroReco(object):
         prior_funcs = []
         priors_used = OrderedDict()
 
-        for dim_num, dim_name in enumerate(self.opt_params_names):
+        for dim_num, dim_name in enumerate(self.hypo_handler.all_param_names):
+            if dim_name in PEGLEG_PARAM_NAMES + SCALING_PARAM_NAMES:
+                continue
             prior_fun, prior_def = get_prior_fun(
                 dim_num=dim_num,
                 dim_name=dim_name,
@@ -217,20 +233,19 @@ class RetroReco(object):
         loglike : callable
 
         """
-        report_after = 1000
-
-        hypo_params = (
-            self.opt_params_names
-            + self.hypo_handler.pegleg_params
-            + self.hypo_handler.scaling_params
-        )
-        opt_params_names = self.opt_params_names
-
         # -- Variables to be captured by `loglike` closure -- #
+
+        report_after = 10
+
+        all_param_names = self.hypo_handler.all_param_names
+        n_opt_params = self.n_opt_params
 
         hits = event['hits']
         hits_indexer = event['hits_indexer']
         hypo_handler = self.hypo_handler
+        pegleg_muon_dt = hypo_handler.pegleg_kernel_kwargs.get('dt')
+        pegleg_muon_const_e_loss = False
+
         get_llh = self.dom_tables._get_llh # pylint: disable=protected-access
         dom_info = self.dom_tables.dom_info
         tables = self.dom_tables.tables
@@ -238,43 +253,50 @@ class RetroReco(object):
         t_indep_tables = self.dom_tables.t_indep_tables
         t_indep_table_norm = self.dom_tables.t_indep_table_norm
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
-        time_window = np.float32(
-            event['hits_summary']['time_window_stop'] - event['hits_summary']['time_window_start']
+        time_window = (
+            event['hits_summary']['time_window_stop']
+            - event['hits_summary']['time_window_start']
         )
 
-        n_operational_doms = np.sum(dom_info['operational'])
-        # array containing all relevant DOMs for the event and the hit information
-        event_dom_info = np.zeros(shape=(n_operational_doms,), dtype=EVT_DOM_INFO_T)
-        event_hit_info = np.zeros(shape=hits.shape, dtype=EVT_HIT_INFO_T)
+        num_operational_doms = np.sum(dom_info['operational'])
 
-        event_hit_info['time'][:] = hits['time']
-        event_hit_info['charge'][:] = hits['charge']
+        # Array containing only DOMs operational during the event & info
+        # relevant to the hits these DOMs got (if any)
+        event_dom_info = np.empty(shape=num_operational_doms, dtype=EVT_DOM_INFO_T)
 
-        # Loop through all DOMs to fill array
-        position = 0
-        for sd_idx in ALL_STRS_DOMS:
-            if not dom_info[sd_idx]['operational']:
+        # Array containing all relevant hit info for the event, including a
+        # pointer back to the index of the DOM in the `event_dom_info` array
+        event_hit_info = np.empty(shape=hits.size, dtype=EVT_HIT_INFO_T)
+
+        # Copy 'time' and 'charge' over directly; add 'event_dom_idx' below
+        event_hit_info[['time', 'charge']] = hits[['time', 'charge']]
+
+        copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
+
+        # Fill `event_{hit,dom}_info` arrays only for operational DOMs
+        for dom_idx, this_dom_info in enumerate(dom_info[dom_info['operational']]):
+            this_event_dom_info = event_dom_info[dom_idx:dom_idx+1]
+            this_event_dom_info[copy_fields] = this_dom_info[copy_fields]
+            sd_idx = this_dom_info['sd_idx']
+            this_event_dom_info['table_idx'] = sd_idx_table_indexer[sd_idx]
+
+            # Copy any hit info from `hits_indexer` and total charge from
+            # `hits` into `event_hit_info` and `event_dom_info` arrays
+            this_hits_indexer = hits_indexer[hits_indexer['sd_idx'] == sd_idx]
+            if len(this_hits_indexer) == 0:
+                this_event_dom_info['hits_start_idx'] = 0
+                this_event_dom_info['hits_stop_idx'] = 0
+                this_event_dom_info['total_observed_charge'] = 0
                 continue
-            event_dom_info[position]['x'] = dom_info[sd_idx]['x']
-            event_dom_info[position]['y'] = dom_info[sd_idx]['y']
-            event_dom_info[position]['z'] = dom_info[sd_idx]['z']
-            event_dom_info[position]['quantum_efficiency'] = dom_info[sd_idx]['quantum_efficiency']
-            event_dom_info[position]['noise_rate_per_ns'] = dom_info[sd_idx]['noise_rate_per_ns']
-            event_dom_info[position]['table_idx'] = sd_idx_table_indexer[sd_idx]
 
-            # Add hits indices
-            # super shitty way at the moment, due to legacy way of doing things
-            if sd_idx in hits_indexer['sd_idx']:
-                hit_idx = list(hits_indexer['sd_idx']).index(sd_idx)
-                start = hits_indexer[hit_idx]['offset']
-                stop = start + hits_indexer[hit_idx]['num']
-                event_dom_info[position]['hits_start_idx'] = start
-                event_dom_info[position]['hits_stop_idx'] = stop
-                for h_idx in range(start, stop):
-                    event_hit_info[h_idx]['dom_idx'] = position
-                    event_dom_info[position]['total_observed_charge'] += hits[h_idx]['charge']
-
-            position += 1
+            start = this_hits_indexer[0]['offset']
+            stop = start + this_hits_indexer[0]['num']
+            event_hit_info[start:stop]['event_dom_idx'] = dom_idx
+            this_event_dom_info['hits_start_idx'] = start
+            this_event_dom_info['hits_stop_idx'] = stop
+            this_event_dom_info['total_observed_charge'] = (
+                np.sum(hits[start:stop]['charge'])
+            )
 
         def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Get log likelihood values.
@@ -286,19 +308,29 @@ class RetroReco(object):
             already contains the parameter values scaled to be in their physical
             ranges.
 
+            Parameters
+            ----------
+            cube
+            ndim : int, optional
+            nparams : int, optional
+
+            Returns
+            -------
+            llh : float
+
             """
+            t0 = time.time()
             if not t_start:
                 t_start.append(time.time())
 
-            hypo = OrderedDict(list(zip(opt_params_names, cube)))
+            hypo = OrderedDict(list(zip(all_param_names, cube)))
 
-            sources = hypo_handler.get_sources(hypo)
+            generic_sources = hypo_handler.get_generic_sources(hypo)
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
             scaling_sources = hypo_handler.get_scaling_sources(hypo)
 
-            t0 = time.time()
             llh, pegleg_idx, scalefactor = get_llh(
-                sources=sources,
+                generic_sources=generic_sources,
                 pegleg_sources=pegleg_sources,
                 scaling_sources=scaling_sources,
                 event_hit_info=event_hit_info,
@@ -309,20 +341,18 @@ class RetroReco(object):
                 t_indep_tables=t_indep_tables,
                 t_indep_table_norm=t_indep_table_norm,
             )
-            t1 = time.time()
 
-            # TODO: this is just for testing
-            pegleg_result = pegleg_eval(pegleg_idx)
-
-            log_likelihoods.append(llh)
-            result = tuple(
-                [float(cube[i]) for i in range(len(opt_params_names))]
-                + [pegleg_result]
-                + [scalefactor]
+            pegleg_result = pegleg_eval(
+                pegleg_idx=pegleg_idx,
+                dt=pegleg_muon_dt,
+                const_e_loss=pegleg_muon_const_e_loss,
             )
+            result = tuple(cube[:n_opt_params]) + (pegleg_result, scalefactor)
             param_values.append(result)
 
+            log_likelihoods.append(llh)
             n_calls = len(log_likelihoods)
+            t1 = time.time()
 
             if n_calls % report_after == 0:
                 print('')
@@ -331,11 +361,11 @@ class RetroReco(object):
                 best_llh = log_likelihoods[best_idx]
                 best_p = param_values[best_idx]
                 msg = 'best llh = {:.3f} @ '.format(best_llh)
-                for key, val in zip(hypo_params, best_p):
+                for key, val in zip(all_param_names, best_p):
                     msg += ' %s=%.1f'%(key, val)
                 print(msg)
                 msg = 'this llh = {:.3f} @ '.format(llh)
-                for key, val in zip(hypo_params, result):
+                for key, val in zip(all_param_names, result):
                     msg += ' %s=%.1f'%(key, val)
                 print(msg)
                 print('{} LLH computed'.format(n_calls))
@@ -351,7 +381,7 @@ class RetroReco(object):
         from scipy import optimize
 
         # initial guess
-        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+        x0 = 0.5 * np.ones(shape=self.n_opt_params)
 
         def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
@@ -360,7 +390,7 @@ class RetroReco(object):
             del param_vals
             return -llh
 
-        bounds = [(eps, 1 - eps)]*self.n_opt_dim
+        bounds = [(eps, 1 - eps)]*self.n_opt_params
         settings = OrderedDict()
         settings['eps'] = eps
 
@@ -375,7 +405,7 @@ class RetroReco(object):
         from skopt import gp_minimize #, forest_minimize
 
         # initial guess
-        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+        x0 = 0.5 * np.ones(shape=self.n_opt_params)
 
         def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
@@ -384,7 +414,7 @@ class RetroReco(object):
             del param_vals
             return -llh
 
-        bounds = [(0, 1)]*self.n_opt_dim
+        bounds = [(0, 1)]*self.n_opt_params
         settings = OrderedDict()
 
         _ = gp_minimize(
@@ -411,10 +441,10 @@ class RetroReco(object):
             return -llh
 
         # bounds
-        lower_bounds = np.zeros(shape=(self.n_opt_dim,))
-        upper_bounds = np.ones(shape=(self.n_opt_dim,))
+        lower_bounds = np.zeros(shape=self.n_opt_params)
+        upper_bounds = np.ones(shape=self.n_opt_params)
         # for angles make bigger
-        for i, name in enumerate(self.opt_params_names):
+        for i, name in enumerate(self.hypo_handler.generic_param_names):
             if 'azimuth' in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
@@ -423,45 +453,45 @@ class RetroReco(object):
                 upper_bounds[i] = 1.5
 
         # initial guess
-        x0 = 0.5 * np.ones(shape=(self.n_opt_dim,))
+        x0 = 0.5 * np.ones(shape=self.n_opt_params)
 
         # stepsize
-        dx = np.zeros(shape=(self.n_opt_dim,))
-        for i in range(self.n_opt_dim):
-            if 'azimuth' in self.hypo_handler.params[i]:
+        dx = np.zeros(shape=self.n_opt_params)
+        for i in range(self.n_opt_params):
+            if 'azimuth' in self.hypo_handler.generic_param_names[i]:
                 dx[i] = 0.001
-            elif 'zenith' in self.hypo_handler.params[i]:
+            elif 'zenith' in self.hypo_handler.generic_param_names[i]:
                 dx[i] = 0.001
-            elif self.hypo_handler.params[i] in ('x', 'y'):
+            elif self.hypo_handler.generic_param_names[i] in ('x', 'y'):
                 dx[i] = 0.005
-            elif self.hypo_handler.params[i] == 'z':
+            elif self.hypo_handler.generic_param_names[i] == 'z':
                 dx[i] = 0.002
-            elif self.hypo_handler.params[i] == 'time':
+            elif self.hypo_handler.generic_param_names[i] == 'time':
                 dx[i] = 0.01
 
         # does not converge :/
-        local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
-        local_opt.set_lower_bounds([0.]*self.n_opt_dim)
-        local_opt.set_upper_bounds([1.]*self.n_opt_dim)
+        local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        local_opt.set_lower_bounds([0.]*self.n_opt_params)
+        local_opt.set_upper_bounds([1.]*self.n_opt_params)
         local_opt.set_min_objective(fun)
         #local_opt.set_ftol_abs(0.5)
         #local_opt.set_ftol_abs(100)
         #local_opt.set_xtol_rel(10)
         local_opt.set_ftol_abs(1)
-        opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_dim)
-        opt.set_lower_bounds([0.]*self.n_opt_dim)
-        opt.set_upper_bounds([1.]*self.n_opt_dim)
+        opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
+        opt.set_lower_bounds([0.]*self.n_opt_params)
+        opt.set_upper_bounds([1.]*self.n_opt_params)
         opt.set_min_objective(fun)
         opt.set_local_optimizer(local_opt)
         opt.set_ftol_abs(10)
         opt.set_xtol_rel(1)
         opt.set_maxeval(1111)
 
-        #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_dim)
-        #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_dim)
-        #opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_dim)
-        #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_dim)
-        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+        #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
+        #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
+        #opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
+        #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_params)
+        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
 
         #opt.set_lower_bounds(lower_bounds)
         #opt.set_upper_bounds(upper_bounds)
@@ -477,11 +507,11 @@ class RetroReco(object):
         # polish it up
         #print('***************** polishing ******************')
 
-        #dx = np.ones(shape=(self.n_opt_dim,)) * 0.001
+        #dx = np.ones(shape=self.n_opt_params) * 0.001
         #dx[0] = 0.1
         #dx[1] = 0.1
 
-        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_dim)
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
         #lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
         #upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
         #lower_bounds[0] = 0
@@ -554,12 +584,13 @@ class RetroReco(object):
         # functions / constants in this module will still be import-able w/o it.
         import pymultinest
 
-        # TODO: reintroduce full set of MN params
         settings = OrderedDict([
-            ('n_dims', self.n_opt_dim),
-            ('n_params', self.n_opt_dim),
-            ('n_clustering_params', self.n_opt_dim),
-            ('wrapped_params', [int('azimuth' in p.lower()) for p in self.opt_params_names]),
+            ('n_dims', self.n_opt_params),
+            ('n_params', self.n_params),
+            ('n_clustering_params', self.n_opt_params),
+            ('wrapped_params', [
+                ('azimuth' in p.lower()) for p in self.hypo_handler.all_param_names
+            ]),
             ('importance_nested_sampling', importance_sampling),
             ('multimodal', max_modes > 1),
             ('const_efficiency_mode', const_eff),
@@ -741,4 +772,4 @@ def parse_args(description=__doc__):
 
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
-    my_reco.run()
+    my_reco.run(method='multinest')

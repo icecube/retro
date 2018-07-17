@@ -16,6 +16,7 @@ __all__ = [
     'powerbin',
     'test_powerbin',
     'powerspace',
+    'generate_digitizer',
     'inv_power_2nd_diff',
     'infer_power',
     'test_infer_power',
@@ -59,7 +60,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
+from retro import DFLT_NUMBA_JIT_KWARGS, load_pickle, numba_jit
 from retro.const import SPEED_OF_LIGHT_M_PER_NS
 from retro.retro_types import TimeSphCoord
 from retro.utils.misc import hash_obj
@@ -317,6 +318,186 @@ def test_powerbin():
     #assert isinstance(_powerbin_numpy(1, **kw), int)
 
     print('<< PASS : test_powerbin >>')
+
+
+def generate_digitizer(bin_edges):
+    """Factory to generate a specialized Numba function for "digitizing" data
+    (i.e., returning which bin values fall within).
+
+    Parameters
+    ----------
+    bin_edges : array-like
+
+    Returns
+    -------
+    digitize : callable
+
+    Notes
+    -----
+    The digitizer returned does not fail if a value lies outside the
+    binning boundaries. This condition is indicated by returned indices that
+    are either negative or > num_bins. Therefore a check can be performed on
+    the returned index to check for this, e.g. via .. ::
+
+        idx = digitize(val)
+        if idx < 0 or idx >= num_bins:
+            raise ValueError('val outside binning')
+
+    """
+    # pylint: disable=missing-docstring, function-redefined
+    bin_edges = np.asarray(bin_edges)
+    assert np.all(np.diff(bin_edges) > 0)
+    start = bin_edges[0]
+    stop = bin_edges[-1]
+    num_bin_edges = len(bin_edges)
+    num_bins = num_bin_edges - 1
+
+    power = None
+    bin_widths = np.diff(bin_edges)
+    if np.allclose(bin_widths, bin_widths[0]):
+        power = 1
+    else:
+        try:
+            power = infer_power(bin_edges)
+        except ValueError:
+            pass
+        else:
+            recip_power = 1 / power
+            start_recip_power = start**recip_power
+            stop_recip_power = stop**recip_power
+            power_width = (stop_recip_power - start_recip_power) / num_bins
+            recip_power_width = 1 / power_width
+
+    is_log = False
+    if power is None and start > 0:
+        log_bin_edges = np.log(bin_edges)
+        logwidth = np.diff(log_bin_edges)
+        if np.allclose(logwidth, logwidth[0]):
+            print('log')
+            is_log = True
+            logwidth = (log_bin_edges[-1] - log_bin_edges[0]) / num_bins
+            recip_logwidth = 1 / logwidth
+            log_start = log_bin_edges[0]
+
+    digitize = None
+    bindescr = None
+
+    if power == 1:
+        dx = (stop - start) / num_bins
+        recip_dx = 1 / dx
+        bindescr = (
+            '{} bins linearly spaced from {} to {}'.format(num_bins, start, stop)
+        )
+        def digitize(val):
+            if val < start:
+                return -1
+            if val >= stop:
+                return num_bin_edges
+            return int((val - start) * recip_dx)
+
+    elif power:
+        bindescr = (
+            '{} bins spaced from {} to {} spaced with power of {}'
+            .format(num_bins, start, stop, power)
+        )
+        if np.isclose(power, 2):
+            def digitize(val):
+                if val < start:
+                    return -1
+                if val >= stop:
+                    return num_bin_edges
+                return int((math.sqrt(val) - start_recip_power) * recip_power_width)
+
+        elif num_bins > 1e3: # faster to do binary search if fewer bins
+            def digitize(val):
+                if val < start:
+                    return -1
+                if val >= stop:
+                    return num_bin_edges
+                return int((val**recip_power - start_recip_power) * recip_power_width)
+
+    elif is_log:
+        bindescr = (
+            '{} bins logarithmically spaced from {} to {}'.format(num_bins, start, stop)
+        )
+        if num_bins > 20: # faster to do binary search if fewer bins
+            def digitize(val):
+                if val < start:
+                    return -1
+                if val >= stop:
+                    return num_bin_edges
+                return int((math.log(val) - log_start) * recip_logwidth)
+
+    if bindescr is None:
+        bindescr = (
+            '{} bins unevenly spaced from {} to {}'.format(num_bins, start, stop)
+        )
+
+    if digitize is None:
+        def digitize(val):
+            if val < start:
+                return -1
+            if val >= stop:
+                return num_bin_edges
+            # -- Binary search -- #
+            left_idx = 0
+            right_idx = num_bin_edges
+            while left_idx < right_idx:
+                idx = left_idx + ((right_idx - left_idx) >> 1)
+                if val >= bin_edges[idx]:
+                    left_idx = idx + 1
+                else:
+                    right_idx = idx
+            return left_idx - 1
+
+    digitize.__doc__ = (
+        """Find bin index for a value.
+
+        Binning is set to {}.
+
+        Parameters
+        ----------
+        val : scalar
+            Value for which to find bin index.
+
+        Returns
+        -------
+        idx : int
+			Bin index; `idx < 0` or `idx >= num_bins` indicates `val` is
+            outside binning.
+
+        """.format(bindescr)
+    )
+    digitize = numba_jit(fastmath=True, nogil=True, cache=True)(digitize)
+
+    return digitize
+
+
+def test_generate_digitizer():
+    """Test the functions that `generate_digitizer` produces."""
+    # TODO: use local file for this test
+    meta = load_pickle('/home/icecube/retro/tables/large_5d_notilt_combined/stacked/stacked_ckv_template_map_meta.pkl')
+    binning = meta['binning']
+
+    for dim, edges in binning.items():
+        assert np.all(np.diff(edges) > 0)
+        num_bins = len(edges) - 1
+        digitize = generate_digitizer(edges)
+        rand = np.random.RandomState(0)
+
+        # Check lots of values within the valid range of the binning
+        vals = rand.uniform(low=edges[0], high=edges[-1], size=int(1e5))
+        test = np.array([digitize(v) for v in vals])
+        ref = np.digitize(vals, bins=edges, right=False) - 1
+        assert np.all(test == ref), dim
+
+        # Check edge cases
+        assert digitize(edges[0]) == 0, dim
+        assert digitize(edges[0] - 1e-8) < 0, dim
+        assert digitize(edges[-1]) > num_bins, dim
+        assert digitize(edges[-1] + 1e-8) > num_bins, dim
+
+    print('<< PASS : test_generate_digitizer >>')
 
 
 # TODO: add `endpoint`, `retstep`, and `dtype` kwargs
@@ -645,6 +826,7 @@ def cart2sph(x, y, z, r, theta, phi):
         phi_flat[idx] = math.atan2(yfi, xfi)
         theta_flat[idx] = math.acos(zfi / rfi)
 
+
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def rotsph2cart(p_sintheta, p_costheta, p_phi, rot_sintheta, rot_costheta,
                 rot_phi):
@@ -698,3 +880,4 @@ if __name__ == '__main__':
     test_infer_power()
     test_linbin()
     test_powerbin()
+    test_generate_digitizer()
