@@ -11,18 +11,19 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     'ks_test',
     'plot_run_info',
+    'plot_run_info2',
     'parse_args',
     'main'
 ]
 
 from argparse import ArgumentParser
-from os.path import abspath, dirname, expanduser, expandvars, isdir, join
+from os.path import abspath, dirname, isdir, join
 from os import makedirs
 import sys
 
 import numpy as np
-import matplotlib as mpl
-mpl.use('agg')
+#import matplotlib as mpl
+#mpl.use('agg')
 import matplotlib.pyplot as plt
 
 if __name__ == '__main__' and __package__ is None:
@@ -31,6 +32,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import load_pickle
 from retro.const import get_string_dom_pair, get_sd_idx
+from retro.utils.misc import expand
 
 
 def ks_test(a, b):
@@ -75,7 +77,7 @@ def plot_run_info(
     if isinstance(labels, basestring):
         labels = [labels]
 
-    outdir = expanduser(expandvars(outdir))
+    outdir = expand(outdir)
 
     if fwd_hists is not None:
         fwd_hists = load_pickle(fwd_hists)
@@ -110,7 +112,7 @@ def plot_run_info(
     all_string_dom_pairs = set()
     mc_true_params = None
     for filepath in files:
-        filepath = expanduser(expandvars(filepath))
+        filepath = expand(filepath)
         if isdir(filepath):
             filepath = join(filepath, 'run_info.pkl')
         run_info = load_pickle(filepath)
@@ -417,6 +419,177 @@ def plot_run_info(
                 label
             )
         )
+
+
+def plot_run_info2(
+    fpath,
+    only_string,
+    subtract_noisefloor=True,
+    plot_ref=True,
+    scalefact=None,
+    axes=None,
+):
+    """Plot information from `run_info.pkl` file as produced by
+    `retro_dom_pdfs.py` script.
+
+    Parameters
+    ----------
+    fpath : str
+        Full path to `run_info.pkl` file
+    only_string : int in [1, 86]
+        String to plot
+    subtract_noisefloor : bool, optional
+        Whether to subtract the miniminum value from each distribution, which
+        (usually but not always) is the noise floor
+    plot_ref : bool, optional
+        Plot the forward-simulation distribution
+    scalefact : float, optional
+        If not specified, a scale factor will be derived from the ratio between
+        the forward-simulation and Retro distributions
+    axes : length-3 sequence of matplotlib.axis, optional
+        Provide the axes on which to plot the distributions; otherwise, a new
+        figure with 3 axes will be created
+
+    Returns
+    -------
+    fig : matplotlib.figure
+    axes : length-3 list of matplotlib.axis
+
+    """
+    if axes is None:
+        fig, axes = plt.subplots(3, 1, figsize=(16, 24), dpi=120)
+    else:
+        assert len(axes) == 3
+        fig = axes[0].get_figure()
+
+    subtract_noisefloor = 1 if subtract_noisefloor else 0
+
+    # -- Extract info from files -- #
+
+    fpath = expand(fpath)
+    if isdir(fpath):
+        fpath = join(fpath, 'run_info.pkl')
+    info = load_pickle(fpath)
+
+    sd_indices = info['sd_indices']
+    hit_times = info['hit_times']
+    dom_exp = info['dom_exp']
+    hit_exp = info['hit_exp']
+    dt = np.diff(hit_times)
+
+    fwd = load_pickle(info['sim']['fwd_sim_histo_file'])
+    bin_edges = fwd['bin_edges']
+    fwd_results = fwd['results']
+    dt = np.diff(bin_edges)
+
+    # -- Figure out how many lines are to be plotted -- #
+
+    total_num_lines = 0
+    for idx, sd_idx in enumerate(sd_indices):
+        he = hit_exp[idx, :]
+        string, dom = get_string_dom_pair(sd_idx)
+        if string != only_string or np.sum(he) == 0:
+            continue
+        total_num_lines += 1
+
+    # -- Get info from all distributions -- #
+
+    weights = []
+    rats = []
+    xmin = np.inf
+    ymax = -np.inf
+    ymin_at_3k = np.inf
+    absdiff3k = np.abs(hit_times - 3000)
+    idx_at_3k = np.where(absdiff3k == np.min(absdiff3k))[0][0]
+    for idx, sd_idx in enumerate(sd_indices):
+        he = hit_exp[idx, :] * dt
+        he -= np.min(he)
+        string, dom = get_string_dom_pair(sd_idx)
+        if np.sum(he) == 0 or (string, dom) not in fwd_results:
+            continue
+        ref = fwd_results[(string, dom)]
+        ref -= np.min(ref)
+        mask = (he > 1e-12) & (ref >= 1e-12)
+        rats.append(np.sum((ref[mask] / he[mask])*ref[mask]))
+        weights.append(np.sum(ref[mask]))
+        if string != only_string:
+            continue
+        xmin_idx = np.where(ref > 0)[0][0]
+        xmin = min(xmin, hit_times[xmin_idx])
+        ymax = max(ymax, np.max(ref))
+        ymin_at_3k = min(ymin_at_3k, ref[idx_at_3k])
+    wtdavg_rat = np.sum(rats) / np.sum(weights)
+    xmin -= 50
+    if ymin_at_3k == 0:
+        ymin_at_3k = ymax / 1e6
+
+    if scalefact is None:
+        print('wtdavg_rat:', wtdavg_rat, '(using as scalefact)')
+        scalefact = wtdavg_rat
+    else:
+        print('wtdavg_rat:', wtdavg_rat, '(but using {} as scalefact)'.format(scalefact))
+
+    def innerplot(ax): # pylint: disable=missing-docstring
+        for idx, sd_idx in enumerate(sd_indices):
+            he = hit_exp[idx, :]
+            string, dom = get_string_dom_pair(sd_idx)
+            if string != only_string or np.sum(he) == 0:
+                continue
+            line, = ax.plot(
+                hit_times, scalefact*(he*dt - subtract_noisefloor*np.min(he*dt)),
+                '-', lw=1, label='({}, {})'.format(string, dom)
+            )
+            if not plot_ref or (string, dom) not in fwd_results:
+                continue
+            ref = fwd_results[(string, dom)]
+            ax.plot(
+                hit_times, ref - subtract_noisefloor*np.min(ref),
+                linestyle='--', lw=0.5, color=line.get_color()
+            )
+
+    # -- Plot overview of distributions -- #
+
+    ax = axes[0]
+    num_lines = total_num_lines
+    cm = plt.cm.gist_rainbow
+    ax.set_prop_cycle('color', [cm(1.*i/num_lines) for i in range(num_lines)])
+    innerplot(ax)
+    ax.set_ylim(ymin_at_3k, ymax*2)
+    ax.set_xlim(xmin, min(xmin+2000, 3000))
+    ax.legend(loc='best', fontsize=8, ncol=4, frameon=False)
+
+    # -- Zoom on peaks -- #
+
+    ax = axes[1]
+    num_lines = 20
+    cm = plt.cm.tab20
+    ax.set_prop_cycle('color', [cm(1.*i/num_lines) for i in range(num_lines)])
+    innerplot(ax)
+    ax.set_ylim(ymax/5e3, ymax*3)
+    ax.set_xlim(xmin+25, xmin+750)
+    ax.legend(loc='best', fontsize=7, ncol=14, frameon=False)
+
+    # -- Zoom on tails -- #
+
+    ax = axes[2]
+    num_lines = 20
+    cm = plt.cm.tab20
+    ax.set_prop_cycle('color', [cm(1.*i/num_lines) for i in range(num_lines)])
+    innerplot(ax)
+    ax.set_xlim(xmin+750, 3000)
+    ax.set_ylim(ymin_at_3k/2, ymin_at_3k*1e3)
+    ax.legend(loc='best', fontsize=7, ncol=6, frameon=False)
+
+    # -- Set common plot things -- #
+
+    axes[0].set_title(info['sim_to_test'])
+    axes[-1].set_xlabel('Time (ns)')
+    for ax in axes:
+        ax.set_ylabel('Charge (PE)')
+        ax.set_yscale('log')
+    fig.tight_layout()
+
+    return fig, axes
 
 
 def parse_args(description=__doc__):
