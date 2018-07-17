@@ -88,7 +88,7 @@ def omkeys_to_sd_indices(omkeys):
     """
     if 'pmt' in omkeys.dtype.names:
         raise NotImplementedError("OMKey field 'pmt' not implemented")
-    return get_sd_idx(string=omkeys['string'], dom=omkeys['dom'])
+    return (omkeys['dom'] - 1) * NUM_STRINGS + (omkeys['string'] - 1)
 
 
 def get_sd_idx(string, dom, pmt=0):

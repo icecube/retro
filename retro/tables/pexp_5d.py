@@ -226,9 +226,9 @@ def generate_pexp_5d_function(
             event_dom_info,
             event_hit_info,
             tables,
-            table_norm,
+            table_norms,
             t_indep_tables,
-            t_indep_table_norm,
+            t_indep_table_norms,
             dom_exp,
             hit_exp,
         ):
@@ -269,7 +269,7 @@ def generate_pexp_5d_function(
             while if you use a template-compressed table, this will have shape
                 (n_templates, n_costhetadir, n_deltaphidir)
 
-        table_norm : shape (n_r, n_t) array
+        table_norms : shape (n_tables, n_r, n_t) array
             Normalization to apply to `table`, which is assumed to depend on
             both r- and t-dimensions.
 
@@ -279,7 +279,7 @@ def generate_pexp_5d_function(
                 (n_r, n_costheta, n_costhetadir, n_deltaphidir)
             while if using a
 
-        t_indep_table_norm : shape (n_r,) array
+        t_indep_table_norms : shape (n_tables, n_r) array
             r-dependent normalization (any t-dep normalization is assumed to
             already have been applied to generate the t_indep_table).
 
@@ -424,7 +424,7 @@ def generate_pexp_5d_function(
                         deltaphidir_bin_idx
                     ]
 
-                ti_norm = t_indep_table_norm[r_bin_idx]
+                ti_norm = t_indep_table_norms[dom_tbl_idx][r_bin_idx]
                 dom_exp[operational_dom_idx] += (
                     src_photons * ti_norm * t_indep_surv_prob * dom_qe
                 )
@@ -467,7 +467,7 @@ def generate_pexp_5d_function(
                             deltaphidir_bin_idx,
                         )
 
-                    r_t_bin_norm = table_norm[r_bin_idx, t_bin_idx]
+                    r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
                     hit_exp[hit_idx] += (
                         src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
                     )
