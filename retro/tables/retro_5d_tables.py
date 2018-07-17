@@ -550,7 +550,7 @@ def get_table_norm(
 
     constant_part = (
         # Number of photons, divided equally among the costheta bins
-        1 / n_photons / n_costheta_bins)
+        1 / (n_photons / n_costheta_bins)
 
         # Correction for quantum efficiency of the DOM
         * quantum_efficiency

@@ -964,6 +964,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
             use_sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
         else:
             raise ValueError(use_doms)
+        print('nubmer of doms = {}'.format(len(use_sd_indices)))
         kwargs['use_sd_indices'] = use_sd_indices
         kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
         kwargs['use_directionality'] = not kwargs.pop('no_dir')
