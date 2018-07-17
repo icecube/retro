@@ -11,7 +11,7 @@ sim_to_test="lea_upgoing_muon"
 angsens="9"
 #sim_to_test="mie_upgoing_muon"
 #angsens="h2-50cm"
-norm="binvol2"
+norm="binvol2.5"
 tkernel="table_e_loss"
 tktimestep="1.0"
 ckernel="aligned_one_dim"
@@ -24,24 +24,42 @@ no_noise=""
 # -- Tables -- #
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
+    # -- Mie tables: stacked, template compressed -- #
+
     #proto="/home/icecube/retro/tables/large_5d_notilt_combined/stacked"
     #tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
-
-    #proto="/fastio/icecube/retro/tables/large_5d_notilt_combined/stacked/"
-    #tmpl_lib="--template-library /fastio/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
     #tblkind="ckv_templ_compr"
+
+    # -- Mie tables: separate, template compressed -- #
 
     #proto="/home/icecube/retro/tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
-    #tblkind="ckv_templ_compr"
     #tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
+
+    # -- Lea tables: 80 clusters, uncompressed -- #
 
     #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    #tblkind="ckv_uncompr"
     #tmpl_lib=""
+    #tblkind="ckv_uncompr"
+
+    # -- Lea tables: 80 clusters, template compressed -- #
 
     proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tblkind="ckv_templ_compr"
     tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
+
+    # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80+str81_29-60/cl{cluster_idx}"
+    #tmpl_lib=""
+    #tblkind="ckv_uncompr"
+
+    # -- Lea tables: 1 table used for all DOMs (cluster 0 from above) -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_1/cl{cluster_idx}"
+    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
+
 else
     proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
     tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
