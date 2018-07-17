@@ -55,18 +55,36 @@ from retro.utils.misc import expand
 
 
 TABLE_NORM_KEYS = [
-    'n_photons', 'group_refractive_index', 'step_length', 'r_bin_edges',
-    'costheta_bin_edges', 't_bin_edges'
+    'n_photons',
+    'group_refractive_index',
+    'step_length',
+    'r_bin_edges',
+    'costheta_bin_edges',
+    't_bin_edges',
 ]
 """All besides 'quantum_efficiency' and 'avg_angsens'"""
 
 TABLE_KINDS = [
-    'raw_uncompr', 'raw_templ_compr', 'ckv_uncompr', 'ckv_templ_compr'
+    'raw_uncompr',
+    'raw_templ_compr',
+    'ckv_uncompr',
+    'ckv_templ_compr',
 ]
 
 NORM_VERSIONS = [
-    'avgsurfarea', 'binvol', 'binvol2', 'binvol3', 'binvol4', 'binvol5',
-    'binvol6', 'binvol7', 'pde', 'wtf', 'wtf2'
+    'avgsurfarea',
+    'binvol',
+    'binvol1.5',
+    'binvol2',
+    'binvol2.5',
+    'binvol3',
+    'binvol4',
+    'binvol5',
+    'binvol6',
+    'binvol7',
+    'pde',
+    'wtf',
+    'wtf2',
 ]
 
 
@@ -331,12 +349,7 @@ class Retro5DTables(object):
         self.sd_idx_table_indexer = deepcopy(self.table_meta['sd_idx_table_indexer'])
         self.sd_idx_table_indexer.setflags(write=False, align=True, uic=False)
 
-        self.loaded_sd_indices = np.array([
-            sd_idx for sd_idx in range(NUM_DOMS_TOT)
-            if self.dom_info[sd_idx]['operational']
-        ], dtype=np.uint32)
-        assert set(self.loaded_sd_indices) == self.use_sd_indices_set
-
+        self.loaded_sd_indices = np.where(self.sd_idx_table_indexer >= 0)[0]
         self.n_photons_per_table = self.table_meta['n_photons_per_table']
 
         # Note that in creating the stacked tables, each indiividual table
@@ -382,7 +395,9 @@ class Retro5DTables(object):
             parameter.
 
         """
-        if self.is_stacked is not None:
+        if self.is_stacked is None:
+            self.is_stacked = False
+        else:
             assert not self.is_stacked
 
         if isinstance(sd_indices, int):
@@ -402,24 +417,28 @@ class Retro5DTables(object):
             assert step_length is not None
             table['step_length'] = step_length
 
-        self.table_meta = OrderedDict()
+        table_meta = OrderedDict()
         binning = OrderedDict()
         for key, val in table.items():
             if 'bin_edges' not in key:
                 continue
-            self.table_meta[key] = val
+            table_meta[key] = val
             binning[key] = val
 
         for k in TABLE_NORM_KEYS:
-            self.table_meta[k] = table[k]
-        self.table_meta['binning'] = binning
-        self.t_is_residual_time = bool(table['t_is_residual_time'])
+            table_meta[k] = table[k]
+        table_meta['binning'] = binning
 
-        self.table_norm, self.t_indep_table_norm = get_table_norm(
+        if self.t_is_residual_time is None:
+            self.t_is_residual_time = bool(table['t_is_residual_time'])
+        else:
+            assert bool(table['t_is_residual_time']) == self.t_is_residual_time
+
+        table_norm, t_indep_table_norm = get_table_norm(
             avg_angsens=self.avg_angsens,
             quantum_efficiency=1,
             norm_version=self.norm_version,
-            **{k: v for k, v in self.table_meta.items() if k in TABLE_NORM_KEYS}
+            **{k: table[k] for k in TABLE_NORM_KEYS}
         )
 
         if self._pexp is None:
@@ -438,24 +457,24 @@ class Retro5DTables(object):
             self._get_llh = get_llh
             self.pexp_meta = pexp_meta
 
-        self.is_stacked = False
-
         self.tables.append(table[self.table_name])
-        self.table_norms.append(self.table_norm)
+        self.table_norms.append(table_norm)
         self.n_photons_per_table.append(table['n_photons'])
+        # DEBUG:
+        #print('n_photons: {:.2e}, avg norm: {:.2e}\n'.format(
+        #    self.n_photons_per_table[-1],
+        #    self.table_norms[-1].mean(),
+        #))
 
         if self.compute_t_indep_exp:
             t_indep_table = table[self.t_indep_table_name]
             self.t_indep_tables.append(t_indep_table)
-            self.t_indep_table_norms.append(self.t_indep_table_norm)
+            self.t_indep_table_norms.append(t_indep_table_norm)
 
         table_idx = len(self.tables) - 1
         self.sd_idx_table_indexer[sd_indices] = table_idx
 
-        self.loaded_sd_indices = np.sort(np.concatenate([
-            self.loaded_sd_indices,
-            np.atleast_1d(sd_indices).astype(np.uint32)
-        ]))
+        self.loaded_sd_indices = np.where(self.sd_idx_table_indexer >= 0)[0]
 
 
 def get_table_norm(
@@ -591,9 +610,6 @@ def get_table_norm(
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
     assert table_step_length_norm.shape == (counts_per_r.size, counts_per_t.size)
-    #print('table_step_length_norm')
-    #print(table_step_length_norm)
-    #raise Exception()
 
     if norm_version == 'avgsurfarea':
         radial_norm = 1 / surf_area_at_avg_radius
@@ -612,10 +628,25 @@ def get_table_norm(
         )
         t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) * t_bin_range
 
+    elif norm_version == 'binvol1.5':
+        radial_norm = 1 / bin_vols
+        table_norm = (
+            constant_part / table_step_length_norm * radial_norm[:, np.newaxis]
+        )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) / t_bin_range
+
     elif norm_version == 'binvol2':
         radial_norm = 1 / bin_vols
         table_norm = (
             constant_part * counts_per_t * radial_norm[:, np.newaxis]
+        )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) * t_bin_range
+
+    elif norm_version == 'binvol2.5':
+        radial_norm = 1 / bin_vols
+        table_norm = (
+            #constant_part / t_bin_widths * radial_norm[:, np.newaxis]
+            constant_part / counts_per_t * radial_norm[:, np.newaxis]
         )
         t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) * t_bin_range
 

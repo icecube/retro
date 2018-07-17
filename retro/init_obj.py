@@ -191,13 +191,14 @@ def setup_dom_tables(
             cluster_idx += 1
             dpath = dom_tables_fname_proto.format(cluster_idx=cluster_idx)
             if not isdir(dpath):
+                print('failed to find', dpath)
                 break
 
             # TODO: make the omkeys field generic to all tables & place
             # loading & intersection ops within the `load_table` method.
             omkeys = np.load(join(dpath, 'omkeys.npy'))
             sd_indices = set(const.omkeys_to_sd_indices(omkeys))
-            shared_table_sd_indices = sorted(sd_indices.intersection(use_sd_indices))
+            shared_table_sd_indices = sd_indices.intersection(use_sd_indices)
 
             dom_tables.load_table(
                 fpath=dpath,

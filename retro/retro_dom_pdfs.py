@@ -226,32 +226,35 @@ if __name__ == '__main__':
                               dtype=EVT_HIT_INFO_T)
     event_dom_info = np.empty(shape=num_doms_loaded, dtype=EVT_DOM_INFO_T)
 
-    copy_fields = ['x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
+    copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
 
     hits_start_idx = 0
-    for event_dom_idx, sd_idx in enumerate(dom_tables.loaded_sd_indices):
-        hits_stop_idx = hits_start_idx + num_hit_times
+    event_dom_idx = 0
+    for sd_idx in dom_tables.loaded_sd_indices:
+        table_idx = dom_tables.sd_idx_table_indexer[sd_idx]
 
+        hits_stop_idx = hits_start_idx + num_hit_times
         this_event_hits_info = event_hit_info[hits_start_idx:hits_stop_idx]
 
         this_event_hits_info['time'] = hit_times
-        this_event_hits_info['charge'] = 1 # value shouldn't matter
+        this_event_hits_info['charge'] = 1 # any value > 0 should be ok
         this_event_hits_info['event_dom_idx'] = event_dom_idx
 
         # Note we need to keep a slice of length 1 to be able to update the
         # contents of the array
         this_event_dom_info = event_dom_info[event_dom_idx:event_dom_idx+1]
 
+        # Copy info from the dom_info array...
         this_dom_info = dom_tables.dom_info[sd_idx]
 
         this_event_dom_info[copy_fields] = this_dom_info[copy_fields]
-        this_event_dom_info['sd_idx'] = sd_idx
-        this_event_dom_info['table_idx'] = dom_tables.sd_idx_table_indexer[sd_idx]
+        this_event_dom_info['table_idx'] = table_idx
         this_event_dom_info['hits_start_idx'] = hits_start_idx
         this_event_dom_info['hits_stop_idx'] = hits_stop_idx
         this_event_dom_info['total_observed_charge'] = num_hit_times
 
         hits_start_idx += num_hit_times
+        event_dom_idx += 1
 
     dom_exp = np.zeros(shape=event_dom_info.shape)
     hit_exp = np.zeros(shape=event_hit_info.shape)
@@ -263,9 +266,9 @@ if __name__ == '__main__':
         event_dom_info=event_dom_info,
         event_hit_info=event_hit_info,
         tables=dom_tables.tables,
-        table_norm=dom_tables.table_norm,
+        table_norms=dom_tables.table_norms,
         t_indep_tables=dom_tables.t_indep_tables,
-        t_indep_table_norm=dom_tables.t_indep_table_norm,
+        t_indep_table_norms=dom_tables.t_indep_table_norms,
         dom_exp=dom_exp,
         hit_exp=hit_exp,
     )
