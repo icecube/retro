@@ -258,6 +258,21 @@ class RetroReco(object):
             - event['hits_summary']['time_window_start']
         )
 
+        truth_info = OrderedDict()
+	truth_info['x'] = event['truth']['x']
+	truth_info['y'] = event['truth']['y']
+	truth_info['z'] = event['truth']['z']
+	truth_info['time'] = event['truth']['time']
+	truth_info['zenith'] = np.arccos(event['truth']['coszen'])
+	truth_info['azimuth'] = event['truth']['azimuth']
+	truth_info['track_azimuth'] = event['truth']['longest_daughter_azimuth']
+	truth_info['track_zenith'] = np.arccos(event['truth']['longest_daughter_coszen'])
+	truth_info['track_energy'] = event['truth']['longest_daughter_energy']
+	truth_info['cascade_azimuth'] = event['truth']['cascade_azimuth']
+	truth_info['cascade_zenith'] = np.arccos(event['truth']['cascade_coszen'])
+	truth_info['cascade_energy'] = event['truth']['cascade_energy']
+	truth_info['neutrino_energy'] = event['truth']['energy']
+
         num_operational_doms = np.sum(dom_info['operational'])
 
         # Array containing only DOMs operational during the event & info
@@ -356,6 +371,10 @@ class RetroReco(object):
 
             if n_calls % report_after == 0:
                 print('')
+                msg = 'truth:                '
+                for key, val in zip(all_param_names, result):
+                    msg += ' %s=%.1f'%(key, truth_info[key])
+                print(msg)
                 t_now = time.time()
                 best_idx = np.argmax(log_likelihoods)
                 best_llh = log_likelihoods[best_idx]

@@ -679,6 +679,8 @@ def generate_pexp_5d_function(
             hit_exp=scaling_hit_exp,
         )
 
+        #print('nominal scaling charge ',np.sum(scaling_dom_exp))
+
         # Get expectations for sources handled generically
         pexp_5d(
             sources=generic_sources,

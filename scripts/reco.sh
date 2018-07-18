@@ -108,6 +108,7 @@ consteff=""
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/OfflinePulses" \
-    --angsens-model "h2-50cm"
+    --angsens-model "h2-50cm" \
+    --truth
 
 wait
