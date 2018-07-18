@@ -40,7 +40,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T
 from retro.utils.misc import expand, mkdir
-from retro import init_obj
+from retro import init_obj, const
 
 
 # pylint: disable=line-too-long
@@ -248,7 +248,12 @@ if __name__ == '__main__':
         this_dom_info = dom_tables.dom_info[sd_idx]
 
         this_event_dom_info[copy_fields] = this_dom_info[copy_fields]
-        this_event_dom_info['table_idx'] = table_idx
+        this_event_dom_info['sd_idx'] = sd_idx
+        this_event_dom_info['table_idx'] = dom_tables.sd_idx_table_indexer[sd_idx]
+        #this_event_dom_info['table_idx'] = np.random.randint(80)
+        #this_event_dom_info['table_idx'] = 12
+        #string, dom = const.get_string_dom_pair(sd_idx)
+        #this_event_dom_info['table_idx'] = max(0, 60 - dom)
         this_event_dom_info['hits_start_idx'] = hits_start_idx
         this_event_dom_info['hits_stop_idx'] = hits_stop_idx
         this_event_dom_info['total_observed_charge'] = num_hit_times

@@ -249,9 +249,9 @@ class RetroReco(object):
         get_llh = self.dom_tables._get_llh # pylint: disable=protected-access
         dom_info = self.dom_tables.dom_info
         tables = self.dom_tables.tables
-        table_norm = self.dom_tables.table_norm
+        table_norms = self.dom_tables.table_norms
         t_indep_tables = self.dom_tables.t_indep_tables
-        t_indep_table_norm = self.dom_tables.t_indep_table_norm
+        t_indep_table_norms = self.dom_tables.t_indep_table_norms
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
         time_window = (
             event['hits_summary']['time_window_stop']
@@ -337,9 +337,9 @@ class RetroReco(object):
                 time_window=time_window,
                 event_dom_info=event_dom_info,
                 tables=tables,
-                table_norm=table_norm,
+                table_norms=table_norms,
                 t_indep_tables=t_indep_tables,
-                t_indep_table_norm=t_indep_table_norm,
+                t_indep_table_norms=t_indep_table_norms,
             )
 
             pegleg_result = pegleg_eval(

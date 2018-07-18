@@ -17,13 +17,49 @@ mkdir -p "$outdir"
 #proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
 
+# -- Tables -- #
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
-    proto="/home/icecube/retro/tables/large_5d_notilt_combined/stacked"
+    # -- Mie tables: stacked, template compressed -- #
+
+    #proto="/home/icecube/retro/tables/large_5d_notilt_combined/stacked"
+    #tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
+
+    # -- Mie tables: separate, template compressed -- #
+
+    proto="/home/icecube/retro/tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
     tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
+
+    # -- Lea tables: 80 clusters, uncompressed -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib=""
+    #tblkind="ckv_uncompr"
+
+    # -- Lea tables: 80 clusters, template compressed -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
+
+    # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80+str81_29-60/cl{cluster_idx}"
+    #tmpl_lib=""
+    #tblkind="ckv_uncompr"
+
+    # -- Lea tables: 1 table used for all DOMs (cluster 0 from above) -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_1/cl{cluster_idx}"
+    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
+
 else
     proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
     tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
 fi
 
 #no_noise="--no-noise"
@@ -37,7 +73,7 @@ consteff=""
 
 
 #kernprof -l -v ~/src/retro/retro/reco.py \
-~/src/retro/retro/reco.py \
+~/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
@@ -51,11 +87,11 @@ consteff=""
     --max-iter 10000 \
     --seed 0 \
     \
-    --dom-tables-kind "ckv_templ_compr" \
+    --dom-tables-kind "$tblkind" \
     --dom-tables-fname-proto "$proto" \
     --use-doms "all" \
     --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
-    --norm-version "binvol2" \
+    --norm-version "binvol2.5" \
     $tmpl_lib \
     --step-length 1.0 \
     $no_noise \

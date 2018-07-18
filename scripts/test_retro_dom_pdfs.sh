@@ -4,7 +4,8 @@ timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 extraname=$1
 
-basedir="/data/justin/retro/dom_distributions"
+#basedir="/data/justin/retro/dom_distributions"
+basedir="/data/peller/retro/dom_distributions"
 
 use_doms="all"
 sim_to_test="lea_upgoing_muon"
@@ -32,9 +33,9 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 
     # -- Mie tables: separate, template compressed -- #
 
-    #proto="/home/icecube/retro/tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
-    #tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
-    #tblkind="ckv_templ_compr"
+    proto="/home/icecube/retro/tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
+    tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
 
     # -- Lea tables: 80 clusters, uncompressed -- #
 
@@ -44,9 +45,9 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    tblkind="ckv_templ_compr"
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
 
     # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
 
@@ -72,7 +73,7 @@ fi
 outdir="$basedir/sim=${sim_to_test},as=${angsens},n=${norm},tk=${tkernel},ts=${tktimestep},tbl=${tblkind},noise=${noisebool}${extraname}"
 mkdir -p "$outdir"
 
-~/src/retro/retro/retro_dom_pdfs.py \
+~/retro/retro/retro_dom_pdfs.py \
     --outdir="$outdir" \
     --sim-to-test="$sim_to_test" \
     \

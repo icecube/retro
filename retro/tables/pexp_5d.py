@@ -603,9 +603,9 @@ def generate_pexp_5d_function(
             time_window,
             event_dom_info,
             tables,
-            table_norm,
+            table_norms,
             t_indep_tables,
-            t_indep_table_norm,
+            t_indep_table_norms,
         ):
         """Compute log likelihood for hypothesis sources given an event.
 
@@ -626,12 +626,12 @@ def generate_pexp_5d_function(
         event_dom_info : array of dtype EVT_DOM_INFO_T
         tables
             Stacked tables
-        table_norm
-            Single norm for all stacked tables
+        table_norms
+            Norms for all stacked tables
         t_indep_tables
             Stacked time-independent tables
         t_indep_table_norm
-            Single norm for all stacked time-independent tables
+            Norms for all stacked time-independent tables
 
         Returns
         -------
@@ -672,9 +672,9 @@ def generate_pexp_5d_function(
             event_dom_info=event_dom_info,
             event_hit_info=event_hit_info,
             tables=tables,
-            table_norm=table_norm,
+            table_norms=table_norms,
             t_indep_tables=t_indep_tables,
-            t_indep_table_norm=t_indep_table_norm,
+            t_indep_table_norms=t_indep_table_norms,
             dom_exp=scaling_dom_exp,
             hit_exp=scaling_hit_exp,
         )
@@ -687,9 +687,9 @@ def generate_pexp_5d_function(
             event_dom_info=event_dom_info,
             event_hit_info=event_hit_info,
             tables=tables,
-            table_norm=table_norm,
+            table_norms=table_norms,
             t_indep_tables=t_indep_tables,
-            t_indep_table_norm=t_indep_table_norm,
+            t_indep_table_norms=t_indep_table_norms,
             dom_exp=dom_exp,
             hit_exp=hit_exp,
         )
@@ -725,9 +725,9 @@ def generate_pexp_5d_function(
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
                 tables=tables,
-                table_norm=table_norm,
+                table_norms=table_norms,
                 t_indep_tables=t_indep_tables,
-                t_indep_table_norm=t_indep_table_norm,
+                t_indep_table_norms=t_indep_table_norms,
                 dom_exp=dom_exp,
                 hit_exp=hit_exp,
             )
