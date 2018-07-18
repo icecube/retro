@@ -243,8 +243,7 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
         Python library before passing to `pyfits` for interpreting.
 
     mmap : bool, optional
-        Whether to memory map the table (if it's stored in a directory
-        containing .npy files).
+        Whether to memory map the table
 
     Returns
     -------
@@ -299,15 +298,11 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
     if not isfile(fpath):
         raise ValueError('Table does not exist at path "{}"'.format(fpath))
 
-    if mmap:
-        print('WARNING: Cannot memory map a fits or compressed fits file;'
-              ' ignoring `mmap=True`.')
-
     import pyfits
     t0 = time()
     fobj = get_decompressd_fobj(fpath)
     try:
-        pf_table = pyfits.open(fobj)
+        pf_table = pyfits.open(fobj, memmap=mmap)
 
         table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
         table['n_photons'] = force_little_endian(
