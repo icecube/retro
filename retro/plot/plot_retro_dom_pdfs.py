@@ -513,7 +513,8 @@ def plot_run_info2(
             continue
         ref = fwd_results[(string, dom)]
         ref_tot = np.sum(ref)
-        print('ratio %.2f for (%s, %s)'%(ref_tot/de, string, dom))
+        he_tot = np.sum(he)
+        #print('ratio clsim vs. retro %.2f for (%s, %s)'%(ref_tot/de, string, dom))
         ref -= np.min(ref)
         mask = (he > 1e-12) & (ref >= 1e-12)
         rats.append(np.sum((ref[mask] / he[mask])*ref[mask]))
@@ -539,6 +540,11 @@ def plot_run_info2(
         for idx, sd_idx in enumerate(sd_indices):
             string, dom = get_string_dom_pair(sd_idx)
             he = hit_exp[idx, :]
+            de = dom_exp[idx]
+            if np.sum(he) > 0:
+                norm = de / np.sum(he)
+            else:
+                norm = 1
             if (string, dom) in fwd_results:
                 ref = fwd_results[(string, dom)]
             else:
@@ -556,7 +562,7 @@ def plot_run_info2(
             if string != only_string or np.sum(he) == 0:
                 continue
             line, = ax.plot(
-                hit_times, scale*(he*dt - subtract_noisefloor*np.min(he*dt)),
+                hit_times, scale*(he*norm - subtract_noisefloor*np.min(he*norm)),
                 '-', lw=1, label='({}, {})'.format(string, dom)
             )
             if not plot_ref or (string, dom) not in fwd_results:

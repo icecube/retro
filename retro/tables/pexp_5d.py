@@ -41,7 +41,8 @@ from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI
 from retro.utils.geom import generate_digitizer
 
 
-MACHINE_EPS = 1e-16
+MACHINE_EPS = 1e-8
+MIN_DOM_RADIUS = 0.1
 LLH_VERSION = 2
 
 
@@ -327,10 +328,14 @@ def generate_pexp_5d_function(
                 dz = src_z - dom['z']
 
                 rhosquared = dx*dx + dy*dy
+                rhosquared = max(MACHINE_EPS, rhosquared)
                 rsquared = rhosquared + dz*dz
 
                 # Continue if photon is outside the radial binning limits
                 if rsquared >= rsquared_max:
+                    continue
+
+                if rsquared_max < MIN_DOM_RADIUS**2:
                     continue
 
                 r = math.sqrt(rsquared)
@@ -395,14 +400,15 @@ def generate_pexp_5d_function(
                     if rho <= MACHINE_EPS:
                         absdeltaphidir = 0
                     else:
-                        cosdeltaphidir = (src_dir_cosphi*dx + src_dir_sinphi*dy) / rho
+                        cosdeltaphidir = - (src_dir_cosphi*dx + src_dir_sinphi*dy) / rho
 
                         # Clip cosdeltaphidir within range [-1, 1] in case of
                         # finite precision issues in the above
-                        if cosdeltaphidir < -1.0:
-                            cosdeltaphidir = -1.0
-                        elif cosdeltaphidir > 1.0:
-                            cosdeltaphidir = 1.0
+                        cosdeltaphidir = min(1, max(-1, cosdeltaphidir))
+                        #if cosdeltaphidir < -1.0:
+                        #    cosdeltaphidir = -1.0
+                        #elif cosdeltaphidir > 1.0:
+                        #    cosdeltaphidir = 1.0
 
                         absdeltaphidir = abs(math.acos(cosdeltaphidir))
 
@@ -558,10 +564,12 @@ def generate_pexp_5d_function(
 
         if scalefactor < 0:
             scalefactor = 0
+        if scalefactor > 1000:
+            scalefactor = 1000
 
         # -- Calculate the scale factor -- #
-
-        llh = -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
+        llh = np.float64(0)
+        llh += -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
         # Second time-independent part
         for operational_dom_idx in range(num_operational_doms):
             dom = event_dom_info[operational_dom_idx]
@@ -572,6 +580,7 @@ def generate_pexp_5d_function(
                     + scalefactor * scaling_dom_exp[operational_dom_idx]
                     + dom['noise_rate_per_ns'] * time_window
                 )
+                exp = max(exp, MACHINE_EPS)
                 llh += dom_total_observed_charge * math.log(exp)
 
         # Time-dependent part
@@ -588,8 +597,10 @@ def generate_pexp_5d_function(
                 p = exp / norm
             else:
                 p = 0.
+            exp = p*(1 - recip_time_window) + recip_time_window
+            exp = max(exp, MACHINE_EPS)
             llh += (
-                hit_charge * math.log(p*(1 - recip_time_window) + recip_time_window)
+                hit_charge * math.log(exp)
             )
 
         return llh, scalefactor
@@ -652,7 +663,7 @@ def generate_pexp_5d_function(
         num_operational_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
-        recip_time_window = 1 / time_window
+        recip_time_window = 1. / time_window
         sum_noise_rate = np.sum(event_dom_info['noise_rate_per_ns'])
 
         # Initialize expectations arrays

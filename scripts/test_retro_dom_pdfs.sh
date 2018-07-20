@@ -8,10 +8,12 @@ extraname=$1
 basedir="/data/peller/retro/dom_distributions"
 
 use_doms="all"
-sim_to_test="lea_upgoing_muon"
-angsens="9"
+#sim_to_test="lea_upgoing_muon"
+#angsens="9"
 #sim_to_test="mie_upgoing_muon"
-#angsens="h2-50cm"
+#sim_to_test="mie_horizontal_muon"
+sim_to_test="lea_horizontal_muon"
+angsens="h2-50cm"
 norm="binvol2.5"
 tkernel="table_e_loss"
 tktimestep="1.0"
@@ -33,9 +35,9 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 
     # -- Mie tables: separate, template compressed -- #
 
-    proto="/home/icecube/retro/tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
-    tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
-    tblkind="ckv_templ_compr"
+    #proto="/home/icecube/retro/tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
+    #tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
 
     # -- Lea tables: 80 clusters, uncompressed -- #
 
@@ -45,9 +47,9 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    #tblkind="ckv_templ_compr"
+    proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
 
     # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
 

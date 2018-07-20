@@ -553,8 +553,8 @@ def get_table_norm(
 
     r_bin_widths = np.diff(r_bin_edges)
     costheta_bin_widths = np.diff(costheta_bin_edges)
-    t_bin_widths = np.diff(t_bin_edges)
 
+    t_bin_widths = np.diff(t_bin_edges)
     t_bin_range = np.max(t_bin_edges) - np.min(t_bin_edges)
 
     # We need costheta bins to all have same width for the logic below to hold
@@ -563,7 +563,7 @@ def get_table_norm(
 
     constant_part = (
         # Number of photons, divided equally among the costheta bins
-        n_dir_bins / (n_photons ) #/ n_costheta_bins)
+        0.45 * n_dir_bins / (n_photons ) #/ n_costheta_bins)
 
         # Correction for quantum efficiency of the DOM
         * quantum_efficiency
@@ -660,9 +660,10 @@ def get_table_norm(
 
     elif norm_version == 'binvol2.5':
         table_norm = (
-            constant_part / bin_vols_4d
+            constant_part / bin_vols_4d * t_bin_range_in_m
         )
-        t_indep_table_norm = constant_part / ( bin_vols)
+        # this is basically the same as just one really big time bin
+        t_indep_table_norm = constant_part / (bin_vols)
 
     elif norm_version == 'binvol3':
         radial_norm = 1 / bin_vols / avg_radius

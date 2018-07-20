@@ -106,7 +106,7 @@ SIMULATIONS = dict(
             #cascade_azimuth=0, cascade_zenith=0,
             track_energy=20, cascade_energy=0
         ),
-        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_500bins.pkl',
+        fwd_sim_histo_file='MuMinus_energy20_x0_y0_z-350_cz0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims1000000_step1_photon_histos_0-5000ns_25000bins.pkl',
     ),
     #lea_upgoing_em_cascade=dict(
     #    mc_true_params=dict(
@@ -176,6 +176,7 @@ if __name__ == '__main__':
         fwd_sim_histos = pickle.loads(contents)
         bin_edges = fwd_sim_histos['bin_edges']
         bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        print('%i time bins'%len(bin_centers))
         del contents
     else:
         bin_edges = np.linspace(0, 4000, 401)
