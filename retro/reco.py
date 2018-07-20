@@ -62,6 +62,8 @@ class RetroReco(object):
         for tbl in self.dom_tables.tables:
             assert np.sum(~np.isfinite(tbl['weight'])) == 0, 'table not finite!'
             assert np.sum(tbl['weight'] < 0) == 0, 'table is negative!'
+            assert np.min(tbl['index']) >= 0, 'table has negative index'
+            assert np.max(tbl['index']) < self.dom_tables.template_library.shape[0], 'table too large index'
         assert np.sum(~np.isfinite(self.dom_tables.template_library)) == 0, 'templates not finite!'
         assert np.sum(self.dom_tables.template_library < 0) == 0, 'templates not finite!'
 
@@ -223,6 +225,8 @@ class RetroReco(object):
             """
             for prior_func in prior_funcs:
                 prior_func(cube)
+            #print(cube)
+            #print([cube[i] for i in range(6)])
 
         return prior, priors_used
 
@@ -243,7 +247,7 @@ class RetroReco(object):
         """
         # -- Variables to be captured by `loglike` closure -- #
 
-        report_after = 20
+        report_after = 1
 
         all_param_names = self.hypo_handler.all_param_names
         n_opt_params = self.n_opt_params
@@ -661,7 +665,7 @@ class RetroReco(object):
             outputfiles_basename=self.out_prefix,
             resume=False,
             write_output=False,
-            n_iter_before_update=5000,
+            n_iter_before_update=1,
             **settings
         )
 

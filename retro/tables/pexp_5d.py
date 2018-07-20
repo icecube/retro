@@ -42,6 +42,7 @@ from retro.utils.geom import generate_digitizer
 
 
 MACHINE_EPS = 1e-8
+MIN_DOM_RADIUS = 0.1
 LLH_VERSION = 2
 
 
@@ -327,10 +328,14 @@ def generate_pexp_5d_function(
                 dz = src_z - dom['z']
 
                 rhosquared = dx*dx + dy*dy
+                rhosquared = max(MACHINE_EPS, rhosquared)
                 rsquared = rhosquared + dz*dz
 
                 # Continue if photon is outside the radial binning limits
                 if rsquared >= rsquared_max:
+                    continue
+
+                if rsquared_max < MIN_DOM_RADIUS**2:
                     continue
 
                 r = math.sqrt(rsquared)
