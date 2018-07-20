@@ -340,10 +340,10 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
         loc = spe_fit_val + rel_loc
         cauchy = stats.cauchy(loc=loc, scale=scale)
         if dim_name == 'time':
-            low = spe_fit_val - 3000
-            high = spe_fit_val + 3000
-            #low += hits_summary['time_window_start']
-            #high += hits_summary['time_window_stop']
+            #low = spe_fit_val - 3000
+            #high = spe_fit_val + 3000
+            low += hits_summary['time_window_start']
+            high += hits_summary['time_window_stop']
         prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high): # pylint: disable=missing-docstring
             cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
