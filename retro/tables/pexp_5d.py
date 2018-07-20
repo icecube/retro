@@ -41,7 +41,7 @@ from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI
 from retro.utils.geom import generate_digitizer
 
 
-MACHINE_EPS = 1e-8
+MACHINE_EPS = 1e-10
 MIN_DOM_RADIUS = 0.1
 LLH_VERSION = 2
 

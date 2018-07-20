@@ -621,7 +621,7 @@ def get_table_norm(
         )
     )
 
-    bin_vols_4d = t_bin_widths_in_m * bin_vols[:, np.newaxis]
+    bin_vols_4d = t_bin_widths * bin_vols[:, np.newaxis]
 
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
@@ -660,7 +660,7 @@ def get_table_norm(
 
     elif norm_version == 'binvol2.5':
         table_norm = (
-            constant_part / bin_vols_4d * t_bin_range_in_m
+            constant_part / bin_vols_4d #* t_bin_range_in_m
         )
         # this is basically the same as just one really big time bin
         t_indep_table_norm = constant_part / (bin_vols)
