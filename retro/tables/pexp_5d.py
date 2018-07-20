@@ -597,6 +597,7 @@ def generate_pexp_5d_function(
                 p = exp / norm
             else:
                 p = 0.
+            p = min(max(0, p),1)
             exp = p*(1 - recip_time_window) + recip_time_window
             exp = max(exp, MACHINE_EPS)
             llh += (
