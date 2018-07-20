@@ -57,9 +57,17 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
     #tblkind="ckv_templ_compr"
 
 else
-    proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"
-    tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
+    # -- Lea tables: 80 clusters, template compressed -- #
+
+    proto="/gpfs/scratch/jll1062/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    tmpl_lib="--template-library /gpfs/scratch/jll1062/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
     tblkind="ckv_templ_compr"
+
+    # -- Mie tables: separate, template compressed -- #
+
+    #proto="/gpfs/scratch/pde3/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
+    #tmpl_lib="--template-library /gpfs/scratch/pde3/large_5d_notilt_combined/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
 fi
 
 #no_noise="--no-noise"

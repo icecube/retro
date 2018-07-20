@@ -555,7 +555,7 @@ def generate_pexp_5d_function(
         epsilon = 1e-1
         previous_step = 100
         n = 0
-        while previous_step > epsilon and scalefactor >= 0 and scalefactor < 1000 and n < 100:
+        while previous_step > epsilon and scalefactor > -10 and scalefactor < 1000 and n < 100:
             gradient = grad(scalefactor)
             step = -gamma * gradient
             scalefactor += step

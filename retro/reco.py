@@ -247,7 +247,7 @@ class RetroReco(object):
         """
         # -- Variables to be captured by `loglike` closure -- #
 
-        report_after = 1
+        report_after = 100
 
         all_param_names = self.hypo_handler.all_param_names
         n_opt_params = self.n_opt_params
