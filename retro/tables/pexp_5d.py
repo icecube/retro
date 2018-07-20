@@ -327,9 +327,9 @@ def generate_pexp_5d_function(
                 dy = src_y - dom['y']
                 dz = src_z - dom['z']
 
-                rhosquared = dx*dx + dy*dy
+                rhosquared = dx**2 + dy**2
                 rhosquared = max(MACHINE_EPS, rhosquared)
-                rsquared = rhosquared + dz*dz
+                rsquared = rhosquared + dz**2
 
                 # Continue if photon is outside the radial binning limits
                 if rsquared >= rsquared_max:
@@ -546,7 +546,8 @@ def generate_pexp_5d_function(
                     dom_scaling_dom_exp = scaling_dom_exp[operational_dom_idx]
                     exp = dom_exp[operational_dom_idx] + scalefactor * dom_scaling_dom_exp
                     exp += dom['noise_rate_per_ns'] * time_window
-                    grad_llh += dom_total_observed_charge / exp * dom_scaling_dom_exp
+                    if exp > 0:
+                        grad_llh += dom_total_observed_charge / exp * dom_scaling_dom_exp
             return -grad_llh
 
         # Gradient descent
@@ -555,7 +556,7 @@ def generate_pexp_5d_function(
         epsilon = 1e-1
         previous_step = 100
         n = 0
-        while previous_step > epsilon and scalefactor > -10 and scalefactor < 1000 and n < 100:
+        while previous_step > epsilon and scalefactor > 0 and scalefactor < 1000 and n < 100:
             gradient = grad(scalefactor)
             step = -gamma * gradient
             scalefactor += step
