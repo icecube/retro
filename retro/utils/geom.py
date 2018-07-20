@@ -320,13 +320,17 @@ def test_powerbin():
     print('<< PASS : test_powerbin >>')
 
 
-def generate_digitizer(bin_edges):
+def generate_digitizer(bin_edges, overflow=False):
     """Factory to generate a specialized Numba function for "digitizing" data
     (i.e., returning which bin values fall within).
 
     Parameters
     ----------
     bin_edges : array-like
+
+    overflow : bool
+     if true, return indices of overflow bins
+     else, return bins in range
 
     Returns
     -------
@@ -351,6 +355,13 @@ def generate_digitizer(bin_edges):
     stop = bin_edges[-1]
     num_bin_edges = len(bin_edges)
     num_bins = num_bin_edges - 1
+
+    if overflow:
+        underflow_idx = -1
+        overflow_idx = num_bins
+    else:
+        underflow_idx = 0
+        overflow_idx = num_bins - 1
 
     power = None
     bin_widths = np.diff(bin_edges)
@@ -390,9 +401,9 @@ def generate_digitizer(bin_edges):
         )
         def digitize(val):
             if val < start:
-                return -1
+                return underflow_idx
             if val > stop:
-                return num_bins
+                return overflow_idx
             return int((val - start) * recip_dx)
 
     elif power:
@@ -403,18 +414,20 @@ def generate_digitizer(bin_edges):
         if np.isclose(power, 2):
             def digitize(val):
                 if val < start:
-                    return -1
+                    return underflow_idx
                 if val > stop:
-                    return num_bins
-                return int((math.sqrt(val) - start_recip_power) * recip_power_width)
+                    return overflow_idx
+                idx = int((math.sqrt(val) - start_recip_power) * recip_power_width)
+                return min(max(0, idx), num_bins - 1)
 
         elif num_bins > 1e3: # faster to do binary search if fewer bins
             def digitize(val):
                 if val < start:
-                    return -1
+                    return underflow_idx
                 if val > stop:
-                    return num_bins
-                return int((val**recip_power - start_recip_power) * recip_power_width)
+                    return overflow_idx
+                idx = int((val**recip_power - start_recip_power) * recip_power_width)
+                return min(max(0, idx), num_bins - 1)
 
     elif is_log:
         bindescr = (
@@ -423,10 +436,11 @@ def generate_digitizer(bin_edges):
         if num_bins > 20: # faster to do binary search if fewer bins
             def digitize(val):
                 if val < start:
-                    return -1
+                    return underflow_idx
                 if val > stop:
-                    return num_bins
-                return int((math.log(val) - log_start) * recip_logwidth)
+                    return overflow_idx
+                idx = int((math.log(val) - log_start) * recip_logwidth)
+                return min(max(0, idx), num_bins - 1)
 
     if bindescr is None:
         bindescr = (
@@ -436,9 +450,9 @@ def generate_digitizer(bin_edges):
     if digitize is None:
         def digitize(val):
             if val < start:
-                return -1
+                return underflow_idx
             if val > stop:
-                return num_bins
+                return overflow_idx
             # -- Binary search -- #
             left_idx = 0
             right_idx = num_bins
@@ -448,7 +462,8 @@ def generate_digitizer(bin_edges):
                     left_idx = idx + 1
                 else:
                     right_idx = idx
-            return left_idx - 1
+            idx = left_idx - 1
+            return min(max(0, idx), num_bins - 1)
 
     digitize.__doc__ = (
         """Find bin index for a value.
