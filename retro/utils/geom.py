@@ -391,8 +391,8 @@ def generate_digitizer(bin_edges):
         def digitize(val):
             if val < start:
                 return -1
-            if val >= stop:
-                return num_bin_edges
+            if val > stop:
+                return num_bins
             return int((val - start) * recip_dx)
 
     elif power:
@@ -404,16 +404,16 @@ def generate_digitizer(bin_edges):
             def digitize(val):
                 if val < start:
                     return -1
-                if val >= stop:
-                    return num_bin_edges
+                if val > stop:
+                    return num_bins
                 return int((math.sqrt(val) - start_recip_power) * recip_power_width)
 
         elif num_bins > 1e3: # faster to do binary search if fewer bins
             def digitize(val):
                 if val < start:
                     return -1
-                if val >= stop:
-                    return num_bin_edges
+                if val > stop:
+                    return num_bins
                 return int((val**recip_power - start_recip_power) * recip_power_width)
 
     elif is_log:
@@ -424,8 +424,8 @@ def generate_digitizer(bin_edges):
             def digitize(val):
                 if val < start:
                     return -1
-                if val >= stop:
-                    return num_bin_edges
+                if val > stop:
+                    return num_bins
                 return int((math.log(val) - log_start) * recip_logwidth)
 
     if bindescr is None:
@@ -437,11 +437,11 @@ def generate_digitizer(bin_edges):
         def digitize(val):
             if val < start:
                 return -1
-            if val >= stop:
-                return num_bin_edges
+            if val > stop:
+                return num_bins
             # -- Binary search -- #
             left_idx = 0
-            right_idx = num_bin_edges
+            right_idx = num_bins
             while left_idx < right_idx:
                 idx = left_idx + ((right_idx - left_idx) >> 1)
                 if val >= bin_edges[idx]:
@@ -469,6 +469,8 @@ def generate_digitizer(bin_edges):
         """.format(bindescr)
     )
     digitize = numba_jit(fastmath=True, nogil=True, cache=True)(digitize)
+
+    print(bindescr)
 
     return digitize
 
