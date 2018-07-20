@@ -75,6 +75,7 @@ NORM_VERSIONS = [
     'avgsurfarea',
     'binvol',
     'binvol1.5',
+    'binvol1.6',
     'binvol2',
     'binvol2.5',
     'binvol3',
@@ -609,6 +610,7 @@ def get_table_norm(
 
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
+    table_step_length_norm2 = np.maximum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
     assert table_step_length_norm.shape == (counts_per_r.size, counts_per_t.size)
 
     if norm_version == 'avgsurfarea':
@@ -632,6 +634,13 @@ def get_table_norm(
         radial_norm = 1 / bin_vols
         table_norm = (
             constant_part / table_step_length_norm * radial_norm[:, np.newaxis]
+        )
+        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) / t_bin_range
+
+    elif norm_version == 'binvol1.6':
+        radial_norm = 1 / bin_vols
+        table_norm = (
+            constant_part / table_step_length_norm2 * radial_norm[:, np.newaxis]
         )
         t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) / t_bin_range
 

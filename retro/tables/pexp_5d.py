@@ -404,7 +404,7 @@ def generate_pexp_5d_function(
                         elif cosdeltaphidir > 1.0:
                             cosdeltaphidir = 1.0
 
-                        absdeltaphidir = abs(math.acos(cosdeltaphidir))
+                        absdeltaphidir = abs(math.acos(-cosdeltaphidir))
 
                     # Find directional bin indices
                     costhetadir_bin_idx = digitize_costhetadir(src_dir_costheta)
