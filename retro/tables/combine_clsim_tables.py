@@ -72,14 +72,19 @@ ALL_KEYS = VALIDATE_KEYS + SUM_KEYS + ['t_indep_table']
 """All keys expected to be in tables"""
 
 
-def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
-                         step_length=1.0):
+def combine_clsim_tables(
+    table_fpaths,
+    outdir=None,
+    overwrite=False,
+    step_length=1.0
+):
     """Combine multiple CLSim-produced tables together into a single table.
 
     All tables specified must have the same binnings defined. Tables should
-    also be produced using different random seeds; if corresponding metadata
-    files can be found in the same directories as the CLSim tables, this will
-    be enforced prior to loading and combining the actual tables together.
+    also be produced using different random seeds (if all else besides
+    n_photons is equal); if corresponding metadata files can be found in the
+    same directories as the CLSim tables, this will be enforced prior to
+    loading and combining the actual tables together.
 
     Parameters
     ----------
@@ -92,7 +97,8 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
 
     overwrite : bool
         Overwrite an existing table. If a table is found at the output path and
-        `overwrite` is False, the function simply returns.
+        `overwrite` is False, the function simply returns without raising an
+        exception.
 
     step_length : float > 0 in units of meters
         Needed for computing the normalization to apply to the `table` in order
@@ -160,7 +166,7 @@ def combine_clsim_tables(table_fpaths, outdir=None, overwrite=False,
         if set(table.keys()) != set(SUM_KEYS + VALIDATE_KEYS):
             raise ValueError(
                 'Table keys {} do not match expected keys {}'
-                .format(sorted(table.keys()), sorted(ALL_KEYS))
+                .format(sorted(table.keys()), sorted(SUM_KEYS + VALIDATE_KEYS))
             )
 
         for key in VALIDATE_KEYS:
