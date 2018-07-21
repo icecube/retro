@@ -289,11 +289,11 @@ class RetroReco(object):
 
         # Array containing only DOMs operational during the event & info
         # relevant to the hits these DOMs got (if any)
-        event_dom_info = np.empty(shape=num_operational_doms, dtype=EVT_DOM_INFO_T)
+        event_dom_info = np.zeros(shape=num_operational_doms, dtype=EVT_DOM_INFO_T)
 
         # Array containing all relevant hit info for the event, including a
         # pointer back to the index of the DOM in the `event_dom_info` array
-        event_hit_info = np.empty(shape=hits.size, dtype=EVT_HIT_INFO_T)
+        event_hit_info = np.zeros(shape=hits.size, dtype=EVT_HIT_INFO_T)
 
         # Copy 'time' and 'charge' over directly; add 'event_dom_idx' below
         event_hit_info[['time', 'charge']] = hits[['time', 'charge']]
