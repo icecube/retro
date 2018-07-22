@@ -299,15 +299,12 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
     if not isfile(fpath):
         raise ValueError('Table does not exist at path "{}"'.format(fpath))
 
-    if mmap:
-        print('WARNING: Cannot memory map a fits or compressed fits file;'
-              ' ignoring `mmap=True`.')
-
     import pyfits
     t0 = time()
     fobj = get_decompressd_fobj(fpath)
+    pf_table = None
     try:
-        pf_table = pyfits.open(fobj)
+        pf_table = pyfits.open(fobj, mode='readonly', memmap=mmap)
 
         table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
         table['n_photons'] = force_little_endian(
@@ -351,6 +348,10 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
         table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
 
         wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
+
+    except:
+        wstderr('ERROR: Failed to load "{}"\n'.format(fpath))
+        raise
 
     finally:
         del pf_table

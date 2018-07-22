@@ -77,8 +77,8 @@ def omkeys_to_sd_indices(omkeys):
 
     Parameters
     ----------
-    omkeys : array of dtype OMK_T
-        The dtype `OMK_T` must contain "string" and "dom" and can optionally
+    omkeys : array of dtype OMKEY_T
+        The dtype `OMKEY_T` must contain "string" and "dom" and can optionally
         include "pmt".
 
     Returns
