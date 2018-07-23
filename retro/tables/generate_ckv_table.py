@@ -50,12 +50,19 @@ from retro.utils.misc import expand, mkdir
 
 
 # TODO: allow different directional binning in output table
+# TODO: write all keys of the table that are missing from the target directory
 
 
 def generate_ckv_table(
-        table, t_is_dt, beta, oversample, num_cone_samples, outdir=None,
-        mmap_src=True, mmap_dst=False
-    ):
+    table,
+    beta,
+    oversample,
+    num_cone_samples,
+    t_is_residual_time=None,
+    outdir=None,
+    mmap_src=True,
+    mmap_dst=False
+):
     """
     Parameters
     ----------
@@ -63,10 +70,6 @@ def generate_ckv_table(
         If string, path to table file (or directory in the case of npy table).
         A mapping is assumed to be a table loaded as by
         `retro.table_readers.load_clsim_table_minimal`.
-
-    t_is_dt : bool
-        Whether table time binning is time difference from direct-light (True)
-        or time binning is absolute time from photon creation (False).
 
     beta : float in [0, 1]
         Beta factor, i.e. velocity of the charged particle divided by the speed
@@ -83,6 +86,14 @@ def generate_ckv_table(
 
     num_cone_samples : int > 0
         Number of samples around the circumference of the Cherenkov cone.
+
+    t_is_residual_time : bool, optional
+        Whether table time binning is time difference from direct-light (True)
+        or time binning is absolute time from photon creation (False). If not
+        specified, the value comes from the key "t_is_residual_time" in the
+        loaded table. It is an error if these values disagree, or if neither
+        the argument `t_is_residual_time` is specified or "t_is_residual_time"
+        is not present in the loaded table.
 
     outdir : string or None
         If a string, use this directory to place the .npy file containing the
@@ -120,10 +131,17 @@ def generate_ckv_table(
     costhetadir_bin_edges = full_table['costhetadir_bin_edges']
     deltaphidir_bin_edges = full_table['deltaphidir_bin_edges']
 
+    if 't_is_residual_time' in full_table:
+        if t_is_residual_time is None:
+            t_is_residual_time = full_table['t_is_residual_time']
+        else:
+            assert full_table['t_is_residual_time'] == t_is_residual_time
+    assert t_is_residual_time is not None
+
     # NOTE: we are making output binning same as input binning.
 
-    n_phase = table['phase_refractive_index']
-    n_group = table['group_refractive_index']
+    n_phase = full_table['phase_refractive_index']
+    n_group = full_table['group_refractive_index']
     cos_ckv = 1 / (n_phase * beta)
     if cos_ckv > 1:
         raise ValueError(
@@ -136,7 +154,7 @@ def generate_ckv_table(
 
     # Extract just the "useful" part of the table, i.e., exclude under/overflow
     # bins.
-    table = table['table'][(slice(1, -1),)*5]
+    table = full_table['table'][(slice(1, -1),)*5]
 
     if outdir is None:
         if isdir(input_filename):
@@ -172,7 +190,7 @@ def generate_ckv_table(
             r_bin_edges=r_bin_edges.astype(np.float32),
             ct_bin_edges=costheta_bin_edges.astype(np.float32),
             t_bin_edges=t_bin_edges.astype(np.float32),
-            t_is_dt=t_is_dt,
+            t_is_residual_time=t_is_residual_time,
             ctdir_bin_edges=costhetadir_bin_edges.astype(np.float32),
             dpdir_bin_edges=deltaphidir_bin_edges.astype(np.float32),
             num_cone_samples=num_cone_samples,
@@ -199,7 +217,7 @@ def parse_args(description=__doc__):
         help='''npy-table directories and/or .fits table files'''
     )
     parser.add_argument(
-        '--t-is-dt', action='store_true',
+        '--t-is-residual-time', action='store_true',
         help='''Pass this flag if table's time binning is time difference from
         direct time.'''
     )
