@@ -1,5 +1,5 @@
 #for file in {17..17}
-for file in {0..19}
+for file in {0..9}
 do
 for dir in {0..59}
 do

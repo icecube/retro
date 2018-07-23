@@ -548,6 +548,27 @@ def generate_pexp_5d_function(
                     exp += dom['noise_rate_per_ns'] * time_window
                     if exp > 0:
                         grad_llh += dom_total_observed_charge / exp * dom_scaling_dom_exp
+
+            # time dependent part of gradient (necessary?)
+            for hit_idx in range(num_hits):
+                hit = event_hit_info[hit_idx]
+                operational_dom_idx = hit['event_dom_idx']
+                hit_charge = hit['charge']
+                exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
+                norm = (
+                    dom_exp[operational_dom_idx]
+                    + scalefactor * scaling_dom_exp[operational_dom_idx]
+                )
+                # to calculate derivative (chain and quotient rule)
+                if norm > 0 and exp > 0:
+                    p = exp / norm
+                    p = min(max(0, p),1)
+                    llhterm = p*(1 - recip_time_window) + recip_time_window
+                    llhterm = max(llhterm, MACHINE_EPS)
+                    deriv_num = norm * scaling_hit_exp[hit_idx] - exp * scaling_dom_exp[operational_dom_idx]
+                    deriv_denom = norm**2
+                    grad_llh += (hit_charge / llhterm) * (deriv_num / deriv_denom) * (1 - recip_time_window)
+
             return -grad_llh
 
         # Gradient descent
