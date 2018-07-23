@@ -20,6 +20,7 @@ __all__ = [
     'TimeCart3DCoord',
     'TimePolCoord',
     'TimeSphCoord',
+    'OMKEY_T',
     'DOM_INFO_T',
     'EVT_DOM_INFO_T',
     'HIT_T',
@@ -131,6 +132,13 @@ TimeSphCoord = namedtuple( # pylint: disable=invalid-name
     field_names=('time',) + SphCoord._fields
 )
 """Time and spherical coordinate: t, r, theta, phi."""
+
+OMKEY_T = np.dtype(
+    [
+        ('string', np.uint16),
+        ('dom', np.uint16),
+    ]
+)
 
 DOM_INFO_T = np.dtype(
     [
