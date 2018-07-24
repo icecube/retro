@@ -691,10 +691,24 @@ def generate_pexp_5d_function(
         """
         # TODO: make pegleg_stepsize a kwarg param somehow
         # Each pegleg iteration, include this many more pegleg sources
-        pegleg_stepsize = 1
 
         num_pegleg_sources = len(pegleg_sources)
-        num_pegleg_llhs = 1 + int(num_pegleg_sources / pegleg_stepsize)
+        # take log steps
+        logstep = np.log(num_pegleg_sources) / 300
+        logspace = np.zeros(shape=301, dtype=np.int32)
+        x = -1e-8
+        for i in range(len(logspace)):
+            logspace[i] = np.int32(np.exp(x))
+            x+= logstep
+        pegleg_steps = np.unique(logspace)
+        assert pegleg_steps[0] == 0
+        n_pegleg_steps = len(pegleg_steps)
+        #print(pegleg_steps)
+
+        #pegleg_stepsize = 1
+
+        #num_pegleg_sources = len(pegleg_sources)
+        #num_pegleg_llhs = 1 + int(num_pegleg_sources / pegleg_stepsize)
         num_operational_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
@@ -756,20 +770,19 @@ def generate_pexp_5d_function(
             last_scalefactor=10.,
         )
 
-        llhs = np.full(shape=num_pegleg_llhs, fill_value=llh, dtype=np.float64)
-        scalefactors = np.zeros(shape=num_pegleg_llhs, dtype=np.float64)
+        llhs = np.full(shape=n_pegleg_steps, fill_value=llh, dtype=np.float64)
+        scalefactors = np.zeros(shape=n_pegleg_steps, dtype=np.float64)
         scalefactors[0] = scalefactor
 
-        best_idx = 0
-        llh_at_best_idx = llh
+        #best_idx = 0
+        #llh_at_best_idx = llh
 
-        for i, pegleg_idx in enumerate(range(0, num_pegleg_sources, pegleg_stepsize)):
-            llh_idx = i + 1
+        for pegleg_idx in range(1, n_pegleg_steps):
             # Update pegleg sources with additional segment of sources
             pexp_5d(
                 sources=pegleg_sources,
-                sources_start=pegleg_idx,
-                sources_stop=pegleg_idx + pegleg_stepsize,
+                sources_start=pegleg_steps[pegleg_idx-1],
+                sources_stop=pegleg_steps[pegleg_idx],
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
                 tables=tables,
@@ -795,12 +808,12 @@ def generate_pexp_5d_function(
             )
 
             # Store this pegleg step's llh and best scalefactor
-            llhs[llh_idx] = llh
-            scalefactors[llh_idx] = scalefactor
+            llhs[pegleg_idx] = llh
+            scalefactors[pegleg_idx] = scalefactor
 
-            if llh > llh_at_best_idx:
-                best_idx = pegleg_idx
-                llh_at_best_idx = llh
+            #if llh > llh_at_best_idx:
+            #    best_idx = pegleg_idx
+            #    llh_at_best_idx = llh
 
             # TODO: make this more general, less hacky continue/stop condition
 
@@ -810,13 +823,30 @@ def generate_pexp_5d_function(
             #    #print('no improvement')
             #    break
             # if improvements were small or none, break:
-            if pegleg_idx > 300:
-                delta_llh = llh - llhs[pegleg_idx - 300]
-                if delta_llh < 0.5:
-                    #print('little improvement')
-                    break
+            #if pegleg_idx > 300:
+            #    delta_llh = llh - llhs[pegleg_idx - 300]
+            #    if delta_llh < 0.5:
+            #        #print('little improvement')
+            #        break
 
-        return llh_at_best_idx, best_idx, scalefactors[best_idx]
+
+        # find the best pegleg idx:
+        best_llh = np.max(llhs)
+        n_good_indices = np.sum(llhs > best_llh - 0.1)
+        median_good_idx = np.int(n_good_indices/2)
+        
+        # search for that median pegleg index
+        counter = 0
+        for best_idx in range(n_pegleg_steps):
+            if llhs[best_idx] > best_llh - 0.1:
+                counter +=1
+            if counter == median_good_idx:
+                break
+        
+        #good_indices = np.argwhere(llhs > best_llh - 0.1)
+        #best_idx = np.median(good_indices)
+
+        return llhs[best_idx], pegleg_steps[best_idx], scalefactors[best_idx]
 
     get_llh = get_llh_all_doms
 
