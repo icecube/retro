@@ -246,10 +246,20 @@ def get_cone_map(
 
 @numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
 def convolve_table(
-        src, dst, cos_ckv, sin_ckv, r_bin_edges, ct_bin_edges, t_bin_edges,
-        t_is_dt, ctdir_bin_edges, dpdir_bin_edges, num_cone_samples,
-        oversample, n_group
-    ):
+    src,
+    dst,
+    cos_ckv,
+    sin_ckv,
+    r_bin_edges,
+    ct_bin_edges,
+    t_bin_edges,
+    t_is_residual_time,
+    ctdir_bin_edges,
+    dpdir_bin_edges,
+    num_cone_samples,
+    oversample,
+    n_group,
+):
     """
     Parameters
     ----------
@@ -268,7 +278,7 @@ def convolve_table(
     t_bin_edges
         Time bin edges, units of nanoseconds.
 
-    t_is_dt : bool
+    t_is_residual_time : bool
         Whether time bins represent time residuals (True) or absolute time
         (False).
 
@@ -318,9 +328,9 @@ def convolve_table(
     sdpd_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
 
     # Max distance from the DOM light could be for each time bin
-    if t_is_dt:
+    if t_is_residual_time:
         causal = True
-    if not t_is_dt:
+    else:
         tbin_max_dist = np.array(
             [t*SPEED_OF_LIGHT_M_PER_NS/n_group for t in np.nditer(t_bin_edges[1:])],
             dtype=FLOAT_T
@@ -362,7 +372,7 @@ def convolve_table(
 
             for r_idx, r_lower in enumerate(np.nditer(r_bin_edges[:-1])):
                 for t_idx in range(n_t):
-                    if not t_is_dt:
+                    if not t_is_residual_time:
                         max_dist = tbin_max_dist[t_idx]
                         causal = r_lower <= max_dist
                     for ct_idx in range(n_ct):

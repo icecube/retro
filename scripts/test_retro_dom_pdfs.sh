@@ -4,13 +4,16 @@ timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 extraname=$1
 
-basedir="/data/justin/retro/dom_distributions"
+#basedir="/data/justin/retro/dom_distributions"
+basedir="/data/peller/retro/dom_distributions"
 
 use_doms="all"
-sim_to_test="lea_upgoing_muon"
-angsens="9"
+#sim_to_test="lea_upgoing_muon"
+#angsens="9"
 #sim_to_test="mie_upgoing_muon"
-#angsens="h2-50cm"
+#sim_to_test="mie_horizontal_muon"
+sim_to_test="lea_horizontal_muon"
+angsens="h2-50cm"
 norm="binvol2.5"
 tkernel="table_e_loss"
 tktimestep="1.0"
@@ -72,7 +75,7 @@ fi
 outdir="$basedir/sim=${sim_to_test},as=${angsens},n=${norm},tk=${tkernel},ts=${tktimestep},tbl=${tblkind},noise=${noisebool}${extraname}"
 mkdir -p "$outdir"
 
-~/src/retro/retro/retro_dom_pdfs.py \
+~/retro/retro/retro_dom_pdfs.py \
     --outdir="$outdir" \
     --sim-to-test="$sim_to_test" \
     \

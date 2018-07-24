@@ -61,6 +61,8 @@ TABLE_NORM_KEYS = [
     'r_bin_edges',
     'costheta_bin_edges',
     't_bin_edges',
+    'costhetadir_bin_edges',
+    'deltaphidir_bin_edges',
 ]
 """All besides 'quantum_efficiency' and 'avg_angsens'"""
 
@@ -99,7 +101,10 @@ class Retro5DTables(object):
 
     Parameters
     ----------
-    table_kind
+    table_kind : str
+        Which table kind is to be loaded when `load_table` method is called.
+        Must be one of 'raw_uncompr', 'raw_templ_compr', 'ckv_uncompr', or
+        'ckv_templ_compr'.
 
     geom : shape-(n_strings, n_doms, 3) array
         x, y, z coordinates of all DOMs, in meters relative to the IceCube
@@ -479,7 +484,8 @@ class Retro5DTables(object):
 
 def get_table_norm(
         n_photons, group_refractive_index, step_length, r_bin_edges,
-        costheta_bin_edges, t_bin_edges, quantum_efficiency,
+        costheta_bin_edges, t_bin_edges, costhetadir_bin_edges,
+        deltaphidir_bin_edges, quantum_efficiency,
         avg_angsens, norm_version
     ):
     """Get the normalization array to use a raw CLSim table with Retro reco.
@@ -508,6 +514,12 @@ def get_table_norm(
 
     t_bin_edges : 1D array, ascending values > 0 (nanoseconds)
         Time bin eges in units of nanoseconds.
+
+    costhetadir_bin_edges :  1D array
+        costheta bin edges of directionality
+
+    deltaphidir_bin_edges :  1D array
+        deltaphi bin edges of directionality
 
     quantum_efficiency : float in (0, 1], optional
         Average DOM quantum efficiency for converting photons to
@@ -538,10 +550,12 @@ def get_table_norm(
     """
     n_costheta_bins = len(costheta_bin_edges) - 1
 
+    n_dir_bins = (len(costhetadir_bin_edges) - 1) * (len(deltaphidir_bin_edges) - 1)
+
     r_bin_widths = np.diff(r_bin_edges)
     costheta_bin_widths = np.diff(costheta_bin_edges)
-    t_bin_widths = np.diff(t_bin_edges)
 
+    t_bin_widths = np.diff(t_bin_edges)
     t_bin_range = np.max(t_bin_edges) - np.min(t_bin_edges)
 
     # We need costheta bins to all have same width for the logic below to hold
@@ -550,7 +564,7 @@ def get_table_norm(
 
     constant_part = (
         # Number of photons, divided equally among the costheta bins
-        1 / (n_photons / n_costheta_bins)
+        0.45 * n_dir_bins / (n_photons ) #/ n_costheta_bins)
 
         # Correction for quantum efficiency of the DOM
         * quantum_efficiency
@@ -570,6 +584,7 @@ def get_table_norm(
 
     # t bin edges are in ns and speed_of_light_in_medum is m/ns
     t_bin_widths_in_m = t_bin_widths * speed_of_light_in_medum
+    t_bin_range_in_m = t_bin_range * speed_of_light_in_medum
 
     # TODO: Note that the actual counts will be rounded down (or are one fewer
     # than indicated by this ratio if the ratio comres out to an integer). We
@@ -607,6 +622,8 @@ def get_table_norm(
         )
     )
 
+    bin_vols_4d = t_bin_widths * bin_vols[:, np.newaxis]
+
     # Take the smaller of counts_per_r and counts_per_t
     table_step_length_norm = np.minimum.outer(counts_per_r, counts_per_t) # pylint: disable=no-member
     assert table_step_length_norm.shape == (counts_per_r.size, counts_per_t.size)
@@ -638,17 +655,16 @@ def get_table_norm(
     elif norm_version == 'binvol2':
         radial_norm = 1 / bin_vols
         table_norm = (
-            constant_part * counts_per_t * radial_norm[:, np.newaxis]
-        )
-        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) * t_bin_range
-
-    elif norm_version == 'binvol2.5':
-        radial_norm = 1 / bin_vols
-        table_norm = (
-            #constant_part / t_bin_widths * radial_norm[:, np.newaxis]
             constant_part / counts_per_t * radial_norm[:, np.newaxis]
         )
-        t_indep_table_norm = constant_part * radial_norm / np.sum(1/counts_per_t) * t_bin_range
+        t_indep_table_norm = constant_part * radial_norm * np.sum(1/counts_per_t) * t_bin_range
+
+    elif norm_version == 'binvol2.5':
+        table_norm = (
+            constant_part / bin_vols_4d #* t_bin_range_in_m
+        )
+        # this is basically the same as just one really big time bin
+        t_indep_table_norm = constant_part / (bin_vols)
 
     elif norm_version == 'binvol3':
         radial_norm = 1 / bin_vols / avg_radius
