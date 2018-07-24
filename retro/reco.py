@@ -57,6 +57,16 @@ class RetroReco(object):
 
     def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
         self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+
+        # check tables are finite:
+        for tbl in self.dom_tables.tables:
+            assert np.sum(~np.isfinite(tbl['weight'])) == 0, 'table not finite!'
+            assert np.sum(tbl['weight'] < 0) == 0, 'table is negative!'
+            assert np.min(tbl['index']) >= 0, 'table has negative index'
+            assert np.max(tbl['index']) < self.dom_tables.template_library.shape[0], 'table too large index'
+        assert np.sum(~np.isfinite(self.dom_tables.template_library)) == 0, 'templates not finite!'
+        assert np.sum(self.dom_tables.template_library < 0) == 0, 'templates not finite!'
+
         self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
         self.events_iterator = init_obj.get_events(**events_kw)
         self.reco_kw = reco_kw
@@ -215,6 +225,8 @@ class RetroReco(object):
             """
             for prior_func in prior_funcs:
                 prior_func(cube)
+            #print(cube)
+            #print([cube[i] for i in range(6)])
 
         return prior, priors_used
 
@@ -235,7 +247,7 @@ class RetroReco(object):
         """
         # -- Variables to be captured by `loglike` closure -- #
 
-        report_after = 10
+        report_after = 100
 
         all_param_names = self.hypo_handler.all_param_names
         n_opt_params = self.n_opt_params
@@ -249,29 +261,47 @@ class RetroReco(object):
         get_llh = self.dom_tables._get_llh # pylint: disable=protected-access
         dom_info = self.dom_tables.dom_info
         tables = self.dom_tables.tables
-        table_norm = self.dom_tables.table_norm
+        table_norms = self.dom_tables.table_norms
         t_indep_tables = self.dom_tables.t_indep_tables
-        t_indep_table_norm = self.dom_tables.t_indep_table_norm
+        t_indep_table_norms = self.dom_tables.t_indep_table_norms
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
         time_window = (
             event['hits_summary']['time_window_stop']
             - event['hits_summary']['time_window_start']
         )
 
+        truth_info = OrderedDict()
+        truth_info['x'] = event['truth']['x']
+        truth_info['y'] = event['truth']['y']
+        truth_info['z'] = event['truth']['z']
+        truth_info['time'] = event['truth']['time']
+        truth_info['zenith'] = np.arccos(event['truth']['coszen'])
+        truth_info['azimuth'] = event['truth']['azimuth']
+        truth_info['track_azimuth'] = event['truth']['longest_daughter_azimuth']
+        truth_info['track_zenith'] = np.arccos(event['truth']['longest_daughter_coszen'])
+        truth_info['track_energy'] = event['truth']['longest_daughter_energy']
+        truth_info['cascade_azimuth'] = event['truth']['cascade_azimuth']
+        truth_info['cascade_zenith'] = np.arccos(event['truth']['cascade_coszen'])
+        truth_info['cascade_energy'] = event['truth']['cascade_energy']
+        truth_info['neutrino_energy'] = event['truth']['energy']
+
         num_operational_doms = np.sum(dom_info['operational'])
 
         # Array containing only DOMs operational during the event & info
         # relevant to the hits these DOMs got (if any)
-        event_dom_info = np.empty(shape=num_operational_doms, dtype=EVT_DOM_INFO_T)
+        event_dom_info = np.zeros(shape=num_operational_doms, dtype=EVT_DOM_INFO_T)
 
         # Array containing all relevant hit info for the event, including a
         # pointer back to the index of the DOM in the `event_dom_info` array
-        event_hit_info = np.empty(shape=hits.size, dtype=EVT_HIT_INFO_T)
+        event_hit_info = np.zeros(shape=hits.size, dtype=EVT_HIT_INFO_T)
 
         # Copy 'time' and 'charge' over directly; add 'event_dom_idx' below
         event_hit_info[['time', 'charge']] = hits[['time', 'charge']]
 
         copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
+
+        print('all noise rate %.5f'%np.sum(dom_info['noise_rate_per_ns']))
+        print('DOMs with zero noise %i'%np.sum(dom_info['noise_rate_per_ns'] == 0))
 
         # Fill `event_{hit,dom}_info` arrays only for operational DOMs
         for dom_idx, this_dom_info in enumerate(dom_info[dom_info['operational']]):
@@ -297,6 +327,22 @@ class RetroReco(object):
             this_event_dom_info['total_observed_charge'] = (
                 np.sum(hits[start:stop]['charge'])
             )
+
+        print('this evt. noise rate %.5f'%np.sum(event_dom_info['noise_rate_per_ns']))
+        print('DOMs with zero noise: %i'%np.sum(event_dom_info['noise_rate_per_ns'] == 0))
+        # settings those to minimum noise
+        noise = event_dom_info['noise_rate_per_ns']
+        mask = noise < 1e-7
+        noise[mask] = 1e-7
+        print('this evt. noise rate %.5f'%np.sum(event_dom_info['noise_rate_per_ns']))
+        print('DOMs with zero noise: %i'%np.sum(event_dom_info['noise_rate_per_ns'] == 0))
+        print('min noise: ',np.min(noise))
+        print('mean noise: ',np.mean(noise))
+
+        assert np.sum(event_dom_info['quantum_efficiency'] <= 0) == 0, 'negative QE'
+        assert np.sum(event_dom_info['total_observed_charge']) > 0, 'no charge'
+        assert np.isfinite(np.sum(event_dom_info['total_observed_charge'])), 'inf charge'
+
 
         def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Get log likelihood values.
@@ -337,10 +383,12 @@ class RetroReco(object):
                 time_window=time_window,
                 event_dom_info=event_dom_info,
                 tables=tables,
-                table_norm=table_norm,
+                table_norms=table_norms,
                 t_indep_tables=t_indep_tables,
-                t_indep_table_norm=t_indep_table_norm,
+                t_indep_table_norms=t_indep_table_norms,
             )
+            assert np.isfinite(llh), 'LLH not finite'
+            assert llh < 0, 'LLH positive'
 
             pegleg_result = pegleg_eval(
                 pegleg_idx=pegleg_idx,
@@ -356,6 +404,10 @@ class RetroReco(object):
 
             if n_calls % report_after == 0:
                 print('')
+                msg = 'truth:                '
+                for key, val in zip(all_param_names, result):
+                    msg += ' %s=%.1f'%(key, truth_info[key])
+                print(msg)
                 t_now = time.time()
                 best_idx = np.argmax(log_likelihoods)
                 best_llh = log_likelihoods[best_idx]

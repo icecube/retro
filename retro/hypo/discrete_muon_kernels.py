@@ -247,7 +247,7 @@ def table_energy_loss_muon(
     length = MULEN_INTERP(track_energy)
 
     # Since table cuts off, this can be 0 even for track_energy != 0
-    if length == 0:
+    if length <= 0:
         return EMPTY_SOURCES
 
     sampled_dt = np.arange(dt*0.5, length/SPEED_OF_LIGHT_M_PER_NS, dt)
