@@ -137,6 +137,7 @@ def generate_ckv_table(
         else:
             assert full_table['t_is_residual_time'] == t_is_residual_time
     assert t_is_residual_time is not None
+    print('t_is_residual_time:', t_is_residual_time)
 
     # NOTE: we are making output binning same as input binning.
 
