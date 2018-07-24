@@ -548,8 +548,6 @@ def get_table_norm(
     n_costheta_bins = len(costheta_bin_edges) - 1
 
     n_dir_bins = (len(costhetadir_bin_edges) - 1) * (len(deltaphidir_bin_edges) - 1)
-    #print('n dir bins', n_dir_bins)
-    #print('n costheta bins', n_costheta_bins)
 
     r_bin_widths = np.diff(r_bin_edges)
     costheta_bin_widths = np.diff(costheta_bin_edges)
