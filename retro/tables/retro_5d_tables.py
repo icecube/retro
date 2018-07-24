@@ -99,7 +99,10 @@ class Retro5DTables(object):
 
     Parameters
     ----------
-    table_kind
+    table_kind : str
+        Which table kind is to be loaded when `load_table` method is called.
+        Must be one of 'raw_uncompr', 'raw_templ_compr', 'ckv_uncompr', or
+        'ckv_templ_compr'.
 
     geom : shape-(n_strings, n_doms, 3) array
         x, y, z coordinates of all DOMs, in meters relative to the IceCube
