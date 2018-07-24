@@ -92,11 +92,11 @@ def get_prior_def(param, reco_kw):
         else:
             raise ValueError(str(cascade_angle_prior_name))
 
-    elif 'coszen' in param:
-        return (PRI_COSINE, (-1, 1))
-
     elif 'zenith' in param:
-        return (PRI_UNIFORM, (0, np.pi))
+        return (PRI_COSINE, (0, np.pi))
+
+    elif 'coszen' in param:
+        return (PRI_UNIFORM, (-1, 1))
 
     elif 'azimuth' in param:
         return (PRI_UNIFORM, (0, TWO_PI))
@@ -304,21 +304,9 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
 
     elif prior_kind == PRI_COSINE:
         prior_def = (prior_kind, prior_params)
-        cos_min = np.min(prior_params)
-        cos_max = np.max(prior_params)
-        # Reflection logic below doesn't work if not using [-1, +1] domain
-        assert cos_min == -1
-        assert cos_max == -1
-        cos_width = cos_max - cos_min
-        def prior_func(cube, n=dim_num, cos_width=cos_width, cos_min=cos_min): # pylint: disable=missing-docstring
-            # reflect back hypercube values outside [0, 1] (i.e., cz outside [-1, +1])
-            x = cube[n]
-            while x < 0 or x > 1:
-                if x < 0:
-                    x = -x
-                else:
-                    x = 1 - x
-            cube[n] = acos(x * cos_width + cos_min)
+        def prior_func(cube, n=dim_num): # pylint: disable=missing-docstring
+            x = (2 * cube[n]) - 1
+            cube[n] = acos(x)
 
     elif prior_kind == PRI_GAUSSIAN:
         prior_def = (prior_kind, prior_params)
