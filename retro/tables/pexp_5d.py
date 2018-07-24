@@ -332,9 +332,9 @@ def generate_pexp_5d_function(
                 dy = src_y - dom['y']
                 dz = src_z - dom['z']
 
-                rhosquared = math.square(dx) + math.square(dy)
+                rhosquared = dx**2 + dy**2
                 rhosquared = max(MACHINE_EPS, rhosquared)
-                rsquared = rhosquared + math.square(dz)
+                rsquared = rhosquared + dz**2
 
                 # Continue if photon is outside the radial binning limits
                 if rsquared >= rsquared_max:
@@ -406,11 +406,7 @@ def generate_pexp_5d_function(
 
                         # Clip cosdeltaphidir within range [-1, 1] in case of
                         # finite precision issues in the above
-                        if cosdeltaphidir < -1.0:
-                            cosdeltaphidir = -1.0
-                        elif cosdeltaphidir > 1.0:
-                            cosdeltaphidir = 1.0
-
+                        cosdeltaphidir = min(1, max(-1, cosdeltaphidir))
                         absdeltaphidir = abs(math.acos(cosdeltaphidir))
 
                     # Find directional bin indices
@@ -571,7 +567,7 @@ def generate_pexp_5d_function(
                     logterm = p*(1 - recip_time_window) + recip_time_window
                     logterm = max(logterm, MACHINE_EPS)
                     deriv_num = norm * scaling_hit_exp[hit_idx] - exp * scaling_dom_exp[operational_dom_idx]
-                    deriv_denom = math.square(norm)
+                    deriv_denom = norm**2
                     grad_llh += (hit_charge / logterm) * (deriv_num / deriv_denom) * (1 - recip_time_window)
 
             return -grad_llh
