@@ -32,6 +32,8 @@ import sys
 
 import numpy as np
 
+from scipy import stats
+
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
@@ -168,6 +170,12 @@ def generate_pexp_5d_function(
     digitize_t = generate_digitizer(table['t_bin_edges'])
     digitize_costhetadir = generate_digitizer(table['costhetadir_bin_edges'])
     digitize_deltaphidir = generate_digitizer(table['deltaphidir_bin_edges'])
+
+
+    # to sample for DOM jitter etc
+    jitter_dt = np.arange(-10,11,2)
+    jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
+    jitter_weights /= np.sum(jitter_weights)
 
     # Indexing functions for table types omni / directional lookups
     if tbl_is_templ_compr:
@@ -441,42 +449,46 @@ def generate_pexp_5d_function(
                     # 0; the further in the past the photon started, the
                     # higher the time bin index. Therefore, subract source
                     # time from hit time.
-                    dt = event_hit_info[hit_idx]['time'] - src_time
+                    nominal_dt = event_hit_info[hit_idx]['time'] - src_time
 
                     if t_is_residual_time:
-                        dt -= r * recip_max_group_vel
+                        nominal_dt -= r * recip_max_group_vel
 
-                    # Note the comparison is written such that it will evaluate
-                    # to True if hit_time is NaN.
-                    if (not dt >= 0) or dt >= t_max:
-                        continue
+                    for jitter_idx in range(len(jitter_dt)):
+                        dt = nominal_dt + jitter_dt[jitter_idx]
+                        weight = jitter_weights[jitter_idx]
 
-                    t_bin_idx = digitize_t(dt)
+                        # Note the comparison is written such that it will evaluate
+                        # to True if hit_time is NaN.
+                        if (not dt >= 0) or dt >= t_max:
+                            continue
 
-                    if src_kind == SRC_OMNI:
-                        surv_prob_at_hit_t = table_lookup_mean(
-                            tables,
-                            dom_tbl_idx,
-                            r_bin_idx,
-                            costheta_bin_idx,
-                            t_bin_idx,
+                        t_bin_idx = digitize_t(dt)
+
+                        if src_kind == SRC_OMNI:
+                            surv_prob_at_hit_t = table_lookup_mean(
+                                tables,
+                                dom_tbl_idx,
+                                r_bin_idx,
+                                costheta_bin_idx,
+                                t_bin_idx,
+                            )
+
+                        else: # SRC_CKV_BETA1
+                            surv_prob_at_hit_t = table_lookup(
+                                tables,
+                                dom_tbl_idx,
+                                r_bin_idx,
+                                costheta_bin_idx,
+                                t_bin_idx,
+                                costhetadir_bin_idx,
+                                deltaphidir_bin_idx,
+                            )
+
+                        r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
+                        hit_exp[hit_idx] += weight * (
+                            src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
                         )
-
-                    else: # SRC_CKV_BETA1
-                        surv_prob_at_hit_t = table_lookup(
-                            tables,
-                            dom_tbl_idx,
-                            r_bin_idx,
-                            costheta_bin_idx,
-                            t_bin_idx,
-                            costhetadir_bin_idx,
-                            deltaphidir_bin_idx,
-                        )
-
-                    r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
-                    hit_exp[hit_idx] += (
-                        src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
-                    )
 
     if tbl_is_ckv and compute_t_indep_exp:
         pexp_5d = pexp_5d_ckv_compute_t_indep
@@ -563,11 +575,11 @@ def generate_pexp_5d_function(
                 if norm > 0 and exp > 0:
                     p = exp / norm
                     p = min(max(0, p),1)
-                    llhterm = p*(1 - recip_time_window) + recip_time_window
-                    llhterm = max(llhterm, MACHINE_EPS)
+                    logterm = p*(1 - recip_time_window) + recip_time_window
+                    logterm = max(logterm, MACHINE_EPS)
                     deriv_num = norm * scaling_hit_exp[hit_idx] - exp * scaling_dom_exp[operational_dom_idx]
                     deriv_denom = norm**2
-                    grad_llh += (hit_charge / llhterm) * (deriv_num / deriv_denom) * (1 - recip_time_window)
+                    grad_llh += (hit_charge / logterm) * (deriv_num / deriv_denom) * (1 - recip_time_window)
 
             return -grad_llh
 
