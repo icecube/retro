@@ -668,7 +668,7 @@ class RetroReco(object):
             outputfiles_basename=self.out_prefix,
             resume=False,
             write_output=False,
-            n_iter_before_update=1,
+            n_iter_before_update=5000,
             **settings
         )
 

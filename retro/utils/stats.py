@@ -185,6 +185,16 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
     llhp = llhp[cut]
     #print(llhp)
 
+
+    # create energy
+    
+    new_dtype = np.dtype([(name, np.float32) for name in llhp.dtype.names] + [('energy', np.float32)])
+    new_llhp = np.zeros(shape=llhp.shape, dtype=new_dtype)
+    new_llhp[list(llhp.dtype.names)] = llhp[list(llhp.dtype.names)]
+    llhp = new_llhp
+    llhp['energy'] = llhp['track_energy'] + llhp['cascade_energy']
+    columns += ['energy']
+
     # calculate weights from probabilities
     if prob_weights:
         prob_weights = np.exp(llhp['llh'] - np.max(llhp['llh']))
@@ -205,6 +215,10 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
             for dim in priors.keys():
                 prior = priors[dim]
                 if prior[0] == 'uniform':
+                    # for testing
+                    #if 'zenith' in dim:
+                    #    w = np.clip(np.abs(np.sin(llhp[dim])), 0.01, None)
+                    #else:
                     w = np.ones(len(llhp))
                 elif prior[0] in ['cauchy', 'spefit2']:
                     w = 1./stats.cauchy.pdf(llhp[dim], *prior[1][:2])
@@ -224,8 +238,9 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
                 elif prior[0] == 'log_uniform' and dim == 'track_energy':
                     w = llhp['track_energy']
                 elif prior[0] == 'cosine':
-                    w = 1./np.clip(np.sin(llhp[dim]), 0.01, None)
-                    #w = np.ones(len(llhp))
+                    # we don;t want to unweight that!
+                    #w = 1./np.clip(np.sin(llhp[dim]), 0.01, None)
+                    w = np.ones(len(llhp))
                 elif prior[0] == 'log_normal' and dim == 'cascade_d_zenith':
                     w = 1.
                 else:
@@ -260,6 +275,7 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
         estimate['weighted_best'] = OrderedDict()
 
     for col in columns:
+
         if prob_weights is None and prior_weights is None:
             weights = None
         else:
@@ -278,7 +294,6 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
         #    weights *= cscd_w
 
         var = llhp[col]
-
         # post llh here means including the correction from prior weights in the llh
         best_idx = np.argmax(llhp['llh'])
         estimate['best'][col] = var[best_idx]
@@ -325,6 +340,8 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
             if weights is not None:
                 weighted_mean = np.average(var, weights=weights)
                 weighted_median = weighted_percentile(var, 50, weights)
+
+
         estimate['mean'][col] = mean
         estimate['median'][col] = median
         estimate['low'][col] = low

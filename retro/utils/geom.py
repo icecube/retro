@@ -329,8 +329,8 @@ def generate_digitizer(bin_edges, overflow=False):
     bin_edges : array-like
 
     overflow : bool
-     if true, return indices of overflow bins
-     else, return bins in range
+        If True, return -1 for underflow or `num_bins` for overflow; if False,
+        clip values to valid range, returning 0 and `num_bins - 1`, respectively.
 
     Returns
     -------
@@ -338,6 +338,10 @@ def generate_digitizer(bin_edges, overflow=False):
 
     Notes
     -----
+
+    bin_edges are interpreted as half open, i.e. [), excpet for the last bin,
+    which is closed []
+
     The digitizer returned does not fail if a value lies outside the
     binning boundaries. This condition is indicated by returned indices that
     are either negative or > num_bins. Therefore a check can be performed on
@@ -404,7 +408,8 @@ def generate_digitizer(bin_edges, overflow=False):
                 return underflow_idx
             if val > stop:
                 return overflow_idx
-            return int((val - start) * recip_dx)
+            idx = int((val - start) * recip_dx)
+            return min(max(0, idx), num_bins - 1)
 
     elif power:
         bindescr = (
@@ -500,6 +505,7 @@ def test_generate_digitizer():
         assert np.all(np.diff(edges) > 0)
         num_bins = len(edges) - 1
         digitize = generate_digitizer(edges)
+        digitize_overflow = generate_digitizer(edges, overflow=True)
         rand = np.random.RandomState(0)
 
         # Check lots of values within the valid range of the binning
@@ -510,9 +516,11 @@ def test_generate_digitizer():
 
         # Check edge cases
         assert digitize(edges[0]) == 0, dim
-        assert digitize(edges[0] - 1e-8) < 0, dim
-        assert digitize(edges[-1]) > num_bins, dim
-        assert digitize(edges[-1] + 1e-8) > num_bins, dim
+        assert digitize(edges[0] - 1e-8) == 0, dim
+        assert digitize_overflow(edges[0] - 1e-8) < 0, dim
+        assert digitize(edges[-1]) == num_bins - 1, dim
+        assert digitize(edges[-1] + 1e-8) == num_bins - 1, dim
+        assert digitize_overflow(edges[-1] + 1e-8) == num_bins, dim
 
     print('<< PASS : test_generate_digitizer >>')
 

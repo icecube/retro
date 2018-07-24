@@ -44,9 +44,6 @@ from retro.utils.geom import generate_digitizer
 
 
 MACHINE_EPS = 1e-10
-MIN_DOM_RADIUS = 0.1
-LLH_VERSION = 2
-
 
 def generate_pexp_5d_function(
         table,
@@ -343,9 +340,6 @@ def generate_pexp_5d_function(
                 if rsquared >= rsquared_max:
                     continue
 
-                if rsquared_max < MIN_DOM_RADIUS**2:
-                    continue
-
                 r = math.sqrt(rsquared)
                 if r < MACHINE_EPS:
                     r = MACHINE_EPS
@@ -413,11 +407,6 @@ def generate_pexp_5d_function(
                         # Clip cosdeltaphidir within range [-1, 1] in case of
                         # finite precision issues in the above
                         cosdeltaphidir = min(1, max(-1, cosdeltaphidir))
-                        #if cosdeltaphidir < -1.0:
-                        #    cosdeltaphidir = -1.0
-                        #elif cosdeltaphidir > 1.0:
-                        #    cosdeltaphidir = 1.0
-
                         absdeltaphidir = abs(math.acos(cosdeltaphidir))
 
                     # Find directional bin indices
@@ -598,12 +587,11 @@ def generate_pexp_5d_function(
 
         if scalefactor < 0:
             scalefactor = 0
-        if scalefactor > 1000:
+        elif scalefactor > 1000:
             scalefactor = 1000
 
         # -- Calculate the scale factor -- #
-        llh = np.float64(0)
-        llh += -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
+        llh = -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
         # Second time-independent part
         for operational_dom_idx in range(num_operational_doms):
             dom = event_dom_info[operational_dom_idx]
@@ -676,7 +664,7 @@ def generate_pexp_5d_function(
             Norms for all stacked tables
         t_indep_tables
             Stacked time-independent tables
-        t_indep_table_norm
+        t_indep_table_norms
             Norms for all stacked time-independent tables
 
         Returns
