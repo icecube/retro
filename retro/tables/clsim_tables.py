@@ -54,10 +54,16 @@ from retro.utils.misc import (
 
 
 MY_CLSIM_TABLE_KEYS = [
-    'table_shape', 'n_photons', 'group_refractive_index',
-    'phase_refractive_index', 'r_bin_edges', 'costheta_bin_edges',
-    't_bin_edges', 'costhetadir_bin_edges', 'deltaphidir_bin_edges', 'table',
-    #'t_indep_table'
+    'table_shape',
+    'n_photons',
+    'group_refractive_index',
+    'phase_refractive_index',
+    'r_bin_edges',
+    'costheta_bin_edges',
+    't_bin_edges',
+    'costhetadir_bin_edges',
+    'deltaphidir_bin_edges',
+    'table',
 ]
 
 CLSIM_TABLE_FNAME_PROTO = [
@@ -276,14 +282,14 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
             mmap_mode = 'r'
         else:
             mmap_mode = None
-        for key in MY_CLSIM_TABLE_KEYS + ['t_indep_table']:
+        for key in MY_CLSIM_TABLE_KEYS + ['t_indep_table', 't_is_residual_time']:
             fpath = join(indir, key + '.npy')
             if DEBUG:
                 wstderr('    loading {} from "{}" ...'.format(key, fpath))
             t1 = time()
             if isfile(fpath):
                 table[key] = np.load(fpath, mmap_mode=mmap_mode)
-            elif key != 't_indep_table':
+            elif key not in ['t_indep_table', 't_is_residual_time']:
                 raise ValueError(
                     'Could not find file "{}" for loading table key "{}"'
                     .format(fpath, key)
@@ -299,15 +305,12 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
     if not isfile(fpath):
         raise ValueError('Table does not exist at path "{}"'.format(fpath))
 
-    if mmap:
-        print('WARNING: Cannot memory map a fits or compressed fits file;'
-              ' ignoring `mmap=True`.')
-
     import pyfits
     t0 = time()
     fobj = get_decompressd_fobj(fpath)
+    pf_table = None
     try:
-        pf_table = pyfits.open(fobj)
+        pf_table = pyfits.open(fobj, mode='readonly', memmap=mmap)
 
         table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
         table['n_photons'] = force_little_endian(
@@ -351,6 +354,10 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
         table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
 
         wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
+
+    except:
+        wstderr('ERROR: Failed to load "{}"\n'.format(fpath))
+        raise
 
     finally:
         del pf_table

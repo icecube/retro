@@ -170,7 +170,8 @@ def generate_pexp_5d_function(
 
 
     # to sample for DOM jitter etc
-    jitter_dt = np.arange(-10,11,2)
+    #jitter_dt = np.arange(-10,11,2)
+    jitter_dt =  np.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
     jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
     jitter_weights /= np.sum(jitter_weights)
 
@@ -443,9 +444,11 @@ def generate_pexp_5d_function(
                     if t_is_residual_time:
                         nominal_dt -= r * recip_max_group_vel
 
+                    jitter_surv_probs = np.zeros_like(jitter_dt)
+
                     for jitter_idx in range(len(jitter_dt)):
                         dt = nominal_dt + jitter_dt[jitter_idx]
-                        weight = jitter_weights[jitter_idx]
+                        #weight = jitter_weights[jitter_idx]
 
                         # Note the comparison is written such that it will evaluate
                         # to True if hit_time is NaN.
@@ -473,11 +476,14 @@ def generate_pexp_5d_function(
                                 costhetadir_bin_idx,
                                 deltaphidir_bin_idx,
                             )
+                        jitter_surv_probs[jitter_idx] = surv_prob_at_hit_t
 
-                        r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
-                        hit_exp[hit_idx] += weight * (
-                            src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
-                        )
+                    surv_prob_at_hit_t = np.max(jitter_surv_probs)
+
+                    r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
+                    hit_exp[hit_idx] += (
+                        src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
+                    )
 
     if tbl_is_ckv and compute_t_indep_exp:
         pexp_5d = pexp_5d_ckv_compute_t_indep
@@ -551,24 +557,24 @@ def generate_pexp_5d_function(
                         grad_llh += dom_total_observed_charge / exp * dom_scaling_dom_exp
 
             # time dependent part of gradient (necessary?)
-            for hit_idx in range(num_hits):
-                hit = event_hit_info[hit_idx]
-                operational_dom_idx = hit['event_dom_idx']
-                hit_charge = hit['charge']
-                exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
-                norm = (
-                    dom_exp[operational_dom_idx]
-                    + scalefactor * scaling_dom_exp[operational_dom_idx]
-                )
-                # to calculate derivative (chain and quotient rule)
-                if norm > 0 and exp > 0:
-                    p = exp / norm
-                    p = min(max(0, p),1)
-                    logterm = p*(1 - recip_time_window) + recip_time_window
-                    logterm = max(logterm, MACHINE_EPS)
-                    deriv_num = norm * scaling_hit_exp[hit_idx] - exp * scaling_dom_exp[operational_dom_idx]
-                    deriv_denom = norm**2
-                    grad_llh += (hit_charge / logterm) * (deriv_num / deriv_denom) * (1 - recip_time_window)
+            #for hit_idx in range(num_hits):
+            #    hit = event_hit_info[hit_idx]
+            #    operational_dom_idx = hit['event_dom_idx']
+            #    hit_charge = hit['charge']
+            #    exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
+            #    norm = (
+            #        dom_exp[operational_dom_idx]
+            #        + scalefactor * scaling_dom_exp[operational_dom_idx]
+            #    )
+            #    # to calculate derivative (chain and quotient rule)
+            #    if norm > 0 and exp > 0:
+            #        p = exp / norm
+            #        p = min(max(0, p),1)
+            #        logterm = p*(1 - recip_time_window) + recip_time_window
+            #        logterm = max(logterm, MACHINE_EPS)
+            #        deriv_num = norm * scaling_hit_exp[hit_idx] - exp * scaling_dom_exp[operational_dom_idx]
+            #        deriv_denom = norm**2
+            #        grad_llh += (hit_charge / logterm) * (deriv_num / deriv_denom) * (1 - recip_time_window)
 
             return -grad_llh
 
@@ -763,7 +769,8 @@ def generate_pexp_5d_function(
         scalefactors[0] = scalefactor
 
         #best_idx = 0
-        #llh_at_best_idx = llh
+        best_llh = llh
+        getting_worse_counter = 0
 
         for pegleg_idx in range(1, n_pegleg_steps):
             # Update pegleg sources with additional segment of sources
@@ -799,9 +806,20 @@ def generate_pexp_5d_function(
             llhs[pegleg_idx] = llh
             scalefactors[pegleg_idx] = scalefactor
 
-            #if llh > llh_at_best_idx:
-            #    best_idx = pegleg_idx
-            #    llh_at_best_idx = llh
+            if llh > best_llh:
+                best_llh = llh
+                getting_worse_counter = 0
+
+            elif llh < best_llh - 0.2:
+                getting_worse_counter += 1
+
+            # break condition
+            if getting_worse_counter > 5:
+                for idx in range(pegleg_idx+1,n_pegleg_steps):
+                    # fill up with bad llhs. just to make sure they're not used
+                    llhs[idx] = best_llh - 100
+                #print('break at step ',pegleg_idx)
+                break
 
             # TODO: make this more general, less hacky continue/stop condition
 
@@ -821,7 +839,7 @@ def generate_pexp_5d_function(
         # find the best pegleg idx:
         best_llh = np.max(llhs)
         n_good_indices = np.sum(llhs > best_llh - 0.1)
-        median_good_idx = np.int(n_good_indices/2)
+        median_good_idx = max(1,np.int(n_good_indices/2))
         
         # search for that median pegleg index
         counter = 0

@@ -42,7 +42,9 @@ if __name__ == '__main__' and __package__ is None:
 from retro import init_obj
 from retro.const import PEGLEG_PARAM_NAMES, SCALING_PARAM_NAMES
 from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T
+from retro.utils.geom import rotate_point, add_vectors
 from retro.utils.misc import expand, mkdir, sort_dict
+from retro.utils.stats import estimate_from_llhp
 from retro.priors import (
     get_prior_def,
     get_prior_fun,
@@ -102,7 +104,15 @@ class RetroReco(object):
 
         # Setup LLHP dtype
         dim_names = list(self.hypo_handler.all_param_names)
-        llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + dim_names])
+
+        # add derived quantities
+        derived_dim_names = ['energy', 'azimuth', 'zenith']
+        if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
+            derived_dim_names += ['cascade_zenith', 'cascade_azimuth']
+
+        all_dim_names = dim_names + derived_dim_names
+
+        llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + all_dim_names])
 
         for event_idx, event in self.events_iterator:
             t0 = time.time()
@@ -121,7 +131,13 @@ class RetroReco(object):
                 t_start=t_start,
             )
 
-            if method == 'multinest':
+            if method == 'test':
+                settings = self.run_test(
+                    prior=prior,
+                    loglike=loglike,
+                )
+
+            elif method == 'multinest':
                 settings = self.run_multinest(
                     prior=prior,
                     loglike=loglike,
@@ -154,6 +170,40 @@ class RetroReco(object):
             llhp['llh'] = log_likelihoods
             llhp[dim_names] = param_values
 
+            
+            # create derived dimensions
+            if 'energy' in derived_dim_names:
+                if 'track_energy' in dim_names:
+                    llhp['energy'] += llhp['track_energy']
+                if 'cascade_energy' in dim_names:
+                    llhp['energy'] += llhp['cascade_energy']
+
+            if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
+                # create cascade angles from delta angles
+                rotate_point(llhp['cascade_d_zenith'], llhp['cascade_d_azimuth'],
+                             llhp['track_zenith'], llhp['track_azimuth'],
+                             llhp['cascade_zenith'], llhp['cascade_azimuth'])
+
+            if 'track_zenith' in all_dim_names and 'track_azimuth' in all_dim_names:
+                if 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
+                    # this resulting radius we won't need, but need to supply an array to the function
+                    r_out = np.empty(shape=llhp.shape, dtype=np.float32)
+                    # combine angles:
+                    add_vectors(llhp['track_energy'], llhp['track_zenith'], llhp['track_azimuth'],
+                                llhp['cascade_energy'], llhp['cascade_zenith'], llhp['cascade_azimuth'],
+                                r_out, llhp['zenith'], llhp['azimuth'])
+
+                else:
+                    # in this case there is no cascade angles
+                    llhp['zenith'] = llhp['track_zenith']
+                    llhp['azimuth'] = llhp['track_azimuth']
+
+            elif 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
+                # in this case there are no track angles
+                llhp['zenith'] = llhp['cascade_zenith']
+                llhp['azimuth'] = llhp['cascade_azimuth']
+
+
             llhp_outf = self.out_prefix + 'llhp.npy'
             print('Saving llhp to "{}"...'.format(llhp_outf))
             np.save(llhp_outf, llhp)
@@ -179,6 +229,16 @@ class RetroReco(object):
             n_points = llhp.size
             print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
                   .format(dt, n_points, dt / n_points * 1e3))
+
+            estimate = estimate_from_llhp(llhp, opt_meta)
+            estimate_outf = self.out_prefix + 'estimate.pkl'
+            print('Saving estimate to "{}"'.format(estimate_outf))
+            pickle.dump(
+                estimate,
+                open(estimate_outf, 'wb'),
+                protocol=pickle.HIGHEST_PROTOCOL
+            )
+
 
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
@@ -247,7 +307,7 @@ class RetroReco(object):
         """
         # -- Variables to be captured by `loglike` closure -- #
 
-        report_after = 100
+        report_after = 50
 
         all_param_names = self.hypo_handler.all_param_names
         n_opt_params = self.n_opt_params
@@ -431,6 +491,14 @@ class RetroReco(object):
             return llh
 
         return loglike
+
+    def run_test(self, prior, loglike):
+        rand = np.random.RandomState()
+        for i in range(100):
+            param_vals = rand.uniform(0,1,self.n_opt_params)
+            prior(param_vals)
+            llh = loglike(param_vals)
+        return OrderedDict()
 
     def run_scipy(self, prior, loglike, method, eps):
         from scipy import optimize
@@ -827,4 +895,5 @@ def parse_args(description=__doc__):
 
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
-    my_reco.run(method='multinest')
+    #my_reco.run(method='multinest')
+    my_reco.run(method='test')

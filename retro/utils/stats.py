@@ -188,12 +188,12 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
 
     # create energy
     
-    new_dtype = np.dtype([(name, np.float32) for name in llhp.dtype.names] + [('energy', np.float32)])
-    new_llhp = np.zeros(shape=llhp.shape, dtype=new_dtype)
-    new_llhp[list(llhp.dtype.names)] = llhp[list(llhp.dtype.names)]
-    llhp = new_llhp
-    llhp['energy'] = llhp['track_energy'] + llhp['cascade_energy']
-    columns += ['energy']
+    #new_dtype = np.dtype([(name, np.float32) for name in llhp.dtype.names] + [('energy', np.float32)])
+    #new_llhp = np.zeros(shape=llhp.shape, dtype=new_dtype)
+    #new_llhp[list(llhp.dtype.names)] = llhp[list(llhp.dtype.names)]
+    #llhp = new_llhp
+    #llhp['energy'] = llhp['track_energy'] + llhp['cascade_energy']
+    #columns += ['energy']
 
     # calculate weights from probabilities
     if prob_weights:
