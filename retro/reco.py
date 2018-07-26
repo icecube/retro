@@ -516,17 +516,47 @@ class RetroReco(object):
             return -llh
 
         n = self.n_opt_params
+        n_cart = 6
+        n_spher = 1
+
+        spher_cord = np.dtype([('zen',np.float32),
+                               ('az', np.float32),
+                               ('x', np.float32),
+                               ('y', np.float32),
+                               ('z', np.float32),
+                               ('sinzen', np.float32),
+                               ('coscos', np.float32),
+                               ('sinaz', np.float32),
+                               ('cosaz', np.float32),
+                               ])
+
         N = 10 * (n + 1)
         assert N > n + 2
 
-        S = np.zeros(shape=(N,n))
+        S_cart = np.zeros(shape=(N,n_cart))
+        S_spher = np.zeros(shape=(N,n_spher), dtype=spher_cord)
         fx = np.zeros(shape=(N,))
+
+        def test(x_cart, x_spher):
+            x = np.empty(n)
+            x[:n_cart] = x_cart
+            x[n_cart::2] = x_spher['zen']
+            x[n_cart+1::2] = x_spher['az']
+            return fun(x)
+
 
         # initial population
         for i in range(N):
-            x = rand.uniform(0,1,n)
-            S[i] = x
-            fx[i] = fun(x)
+            x_cart = rand.uniform(0,1,n_cart)
+            S_cart[i] = x_cart
+
+            rand_zen = rand.uniform(0,1,n_spher)
+            rand_az = rand.uniform(0,1,n_spher)
+            S_spher[i]['zen'] = rand_zen
+            S_spher[i]['az'] = rand_az
+
+            fx[i] = test(S_cart[i], S_spher[i])
+
 
 
         for k in range(10000):
@@ -548,36 +578,63 @@ class RetroReco(object):
                 choice[choice >= best_idx] +=1
                 choice[choice >= worst_idx] +=1
 
-            centroid = (np.sum(S[choice[:-1]], axis=0) + S[best_idx]) / n
+            centroid_cart = (np.sum(S_cart[choice[:-1]], axis=0) + S_cart[best_idx]) / n
+            #print(S_spher[choice[:-1]])
+            centroid_zen = (np.sum(S_spher['zen'][choice[:-1]], axis=0) + S_spher['zen'][best_idx]) / n
+            centroid_az = (np.sum(S_spher['az'][choice[:-1]], axis=0) + S_spher['az'][best_idx]) / n
 
-            new_x = 2*centroid - S[choice[-1]]
 
+            new_x_cart = 2*centroid_cart - S_cart[choice[-1]]
             #bounds
-            new_x[new_x < 0] = 0
-            new_x[new_x > 1] = 1
+            new_x_cart[new_x_cart < 0] = 0
+            new_x_cart[new_x_cart > 1] = 1
 
-            new_fx = fun(new_x)
+            new_x_zen = 2*centroid_zen - S_spher['zen'][choice[-1]]
+            new_x_az = 2*centroid_az - S_spher['az'][choice[-1]]
+            new_x_az = new_x_az % 1
+            while np.any(new_x_zen < 0) or np.any(new_x_zen > 1):
+                new_x_zen[new_x_zen > 1] = 1 - new_x_zen[new_x_zen > 1]
+                new_x_zen[new_x_zen < 0 ] = -new_x_zen[new_x_zen < 1]
+
+            new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+            new_x_spher['zen'] = new_x_zen
+            new_x_spher['az'] = new_x_az
+
+            new_fx = test(new_x_cart, new_x_spher)
 
             if new_fx < fx[worst_idx]:
                 # found better point
-                S[worst_idx] = new_x
+                S_cart[worst_idx] = new_x_cart
+                S_spher[worst_idx] = new_x_spher
                 fx[worst_idx] = new_fx
+
             else:
                 # mutation
-                w = rand.uniform(0, 1, n)
-                new_x = (1 + w) * S[best_idx] - w * new_x
-
+                w = rand.uniform(0, 1, n_cart)
+                new_x_cart = (1 + w) * S_cart[best_idx] - w * new_x_cart
                 #bounds
-                new_x[new_x < 0] = 0
-                new_x[new_x > 1] = 1
+                new_x_cart[new_x_cart < 0] = 0
+                new_x_cart[new_x_cart > 1] = 1
 
-                new_fx = fun(new_x)
+                w = rand.uniform(0, 1, n_spher)
+                new_x_zen = (1 + w) * S_spher['zen'][best_idx] - w * new_x_spher['zen']
+                new_x_az = (1 + w) * S_spher['az'][best_idx] - w * new_x_spher['az']
+                new_x_az = new_x_az % 1
+                while np.any(new_x_zen < 0) or np.any(new_x_zen > 1):
+                    new_x_zen[new_x_zen > 1] = 1 - new_x_zen[new_x_zen > 1]
+                    new_x_zen[new_x_zen < 0 ] = -new_x_zen[new_x_zen < 1]
+
+                new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+                new_x_spher['zen'] = new_x_zen
+                new_x_spher['az'] = new_x_az
+
+                new_fx = test(new_x_cart, new_x_spher)
 
                 if new_fx < fx[worst_idx]:
                     # found better point
-                    S[worst_idx] = new_x
+                    S_cart[worst_idx] = new_x_cart
+                    S_spher[worst_idx] = new_x_spher
                     fx[worst_idx] = new_fx
-
 
 
         return OrderedDict()
