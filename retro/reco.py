@@ -516,7 +516,7 @@ class RetroReco(object):
             return -llh
 
         n = self.n_opt_params
-        N = 100
+        N = 10 * (n + 1)
         assert N > n + 2
 
         S = np.zeros(shape=(N,n))
@@ -530,6 +530,12 @@ class RetroReco(object):
 
 
         for k in range(10000):
+
+            # stop?
+            if np.std(fx) < 0.05:
+                print('BREAK!')
+                break
+
             worst_idx = np.argmax(fx)
             best_idx = np.argmin(fx)
 
@@ -551,9 +557,27 @@ class RetroReco(object):
             new_x[new_x > 1] = 1
 
             new_fx = fun(new_x)
+
             if new_fx < fx[worst_idx]:
+                # found better point
                 S[worst_idx] = new_x
                 fx[worst_idx] = new_fx
+            else:
+                # mutation
+                w = rand.uniform(0, 1, n)
+                new_x = (1 + w) * S[best_idx] - w * new_x
+
+                #bounds
+                new_x[new_x < 0] = 0
+                new_x[new_x > 1] = 1
+
+                new_fx = fun(new_x)
+
+                if new_fx < fx[worst_idx]:
+                    # found better point
+                    S[worst_idx] = new_x
+                    fx[worst_idx] = new_fx
+
 
 
         return OrderedDict()
