@@ -85,7 +85,7 @@ class RetroReco(object):
 
         # Remove unused reco kwargs
         reco_kw.pop('spatial_prior')
-        #reco_kw.pop('cascade_angle_prior')
+        reco_kw.pop('cascade_angle_prior')
 
     def run(self, method):
         """Run reconstructions.
@@ -166,7 +166,7 @@ class RetroReco(object):
             t1 = time.time()
 
             # dump
-            llhp = np.empty(shape=len(param_values), dtype=llhp_t)
+            llhp = np.zeros(shape=len(param_values), dtype=llhp_t)
             llhp['llh'] = log_likelihoods
             llhp[dim_names] = param_values
 
@@ -566,8 +566,9 @@ class RetroReco(object):
         # bounds
         lower_bounds = np.zeros(shape=self.n_opt_params)
         upper_bounds = np.ones(shape=self.n_opt_params)
+
         # for angles make bigger
-        for i, name in enumerate(self.hypo_handler.generic_param_names):
+        for i, name in enumerate(self.hypo_handler.opt_param_names):
             if 'azimuth' in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
@@ -581,34 +582,59 @@ class RetroReco(object):
         # stepsize
         dx = np.zeros(shape=self.n_opt_params)
         for i in range(self.n_opt_params):
-            if 'azimuth' in self.hypo_handler.generic_param_names[i]:
+            if 'azimuth' in self.hypo_handler.opt_param_names[i]:
                 dx[i] = 0.001
-            elif 'zenith' in self.hypo_handler.generic_param_names[i]:
+            elif 'zenith' in self.hypo_handler.opt_param_names[i]:
                 dx[i] = 0.001
-            elif self.hypo_handler.generic_param_names[i] in ('x', 'y'):
+            elif self.hypo_handler.opt_param_names[i] in ('x', 'y'):
                 dx[i] = 0.005
-            elif self.hypo_handler.generic_param_names[i] == 'z':
+            elif self.hypo_handler.opt_param_names[i] == 'z':
                 dx[i] = 0.002
-            elif self.hypo_handler.generic_param_names[i] == 'time':
+            elif self.hypo_handler.opt_param_names[i] == 'time':
                 dx[i] = 0.01
 
-        # does not converge :/
-        local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        local_opt.set_lower_bounds([0.]*self.n_opt_params)
-        local_opt.set_upper_bounds([1.]*self.n_opt_params)
-        local_opt.set_min_objective(fun)
-        #local_opt.set_ftol_abs(0.5)
-        #local_opt.set_ftol_abs(100)
-        #local_opt.set_xtol_rel(10)
-        local_opt.set_ftol_abs(1)
-        opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
+        # seed from several angles
+        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
+        #opt = nlopt.opt(nlopt.LN_PRAXIS, self.n_opt_params)
         opt.set_lower_bounds([0.]*self.n_opt_params)
         opt.set_upper_bounds([1.]*self.n_opt_params)
         opt.set_min_objective(fun)
-        opt.set_local_optimizer(local_opt)
-        opt.set_ftol_abs(10)
-        opt.set_xtol_rel(1)
-        opt.set_maxeval(1111)
+        opt.set_ftol_abs(0.1)
+        
+        # initial guess
+
+        angles = np.linspace(0,1,3)
+        angles = 0.5 * (angles[1:] + angles[:-1])
+
+        for zen in angles:
+            for az in angles:
+                x0 = 0.5 * np.ones(shape=self.n_opt_params)
+                
+                for i in range(self.n_opt_params):
+                    if 'azimuth' in self.hypo_handler.opt_param_names[i]:
+                        x0[i] = az
+                    elif 'zenith' in self.hypo_handler.opt_param_names[i]:
+                        x0[i] = zen
+                x = opt.optimize(x0) # pylint: disable=unused-variable
+
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        #local_opt.set_lower_bounds([0.]*self.n_opt_params)
+        #local_opt.set_upper_bounds([1.]*self.n_opt_params)
+        #local_opt.set_min_objective(fun)
+        ##local_opt.set_ftol_abs(0.5)
+        ##local_opt.set_ftol_abs(100)
+        ##local_opt.set_xtol_rel(10)
+        #local_opt.set_ftol_abs(1)
+        # global
+        #opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
+        #opt.set_lower_bounds([0.]*self.n_opt_params)
+        #opt.set_upper_bounds([1.]*self.n_opt_params)
+        #opt.set_min_objective(fun)
+        #opt.set_local_optimizer(local_opt)
+        #opt.set_ftol_abs(10)
+        #opt.set_xtol_rel(1)
+        #opt.set_maxeval(1111)
 
         #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
         #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
@@ -625,7 +651,7 @@ class RetroReco(object):
 
         #local_opt.set_maxeval(10)
 
-        x = opt.optimize(x0) # pylint: disable=unused-variable
+        #x = opt.optimize(x0) # pylint: disable=unused-variable
 
         # polish it up
         #print('***************** polishing ******************')
@@ -896,4 +922,5 @@ def parse_args(description=__doc__):
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run(method='multinest')
-    my_reco.run(method='test')
+    #my_reco.run(method='test')
+    my_reco.run(method='nlopt')
