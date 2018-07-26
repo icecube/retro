@@ -540,8 +540,8 @@ class RetroReco(object):
         def test(x_cart, x_spher):
             x = np.empty(n)
             x[:n_cart] = x_cart
-            x[n_cart::2] = x_spher['zen']
-            x[n_cart+1::2] = x_spher['az']
+            x[n_cart+1::2] = x_spher['zen']
+            x[n_cart::2] = x_spher['az']
             return fun(x)
 
 
@@ -594,7 +594,7 @@ class RetroReco(object):
             new_x_az = new_x_az % 1
             while np.any(new_x_zen < 0) or np.any(new_x_zen > 1):
                 new_x_zen[new_x_zen > 1] = 1 - new_x_zen[new_x_zen > 1]
-                new_x_zen[new_x_zen < 0 ] = -new_x_zen[new_x_zen < 1]
+                new_x_zen[new_x_zen < 0 ] = - new_x_zen[new_x_zen < 0]
 
             new_x_spher = np.zeros(n_spher, dtype=spher_cord)
             new_x_spher['zen'] = new_x_zen
