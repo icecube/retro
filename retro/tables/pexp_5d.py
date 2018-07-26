@@ -45,6 +45,9 @@ from retro.utils.geom import generate_digitizer
 
 MACHINE_EPS = 1e-10
 
+#maximum radius to consider
+MAX_RAD_SQ = 500**2
+
 def generate_pexp_5d_function(
         table,
         table_kind,
@@ -155,7 +158,7 @@ def generate_pexp_5d_function(
     # -- Define things used by `pexp_5d*` closures defined below -- #
 
     # Constants
-    rsquared_max = np.max(table['r_bin_edges'])**2
+    rsquared_max = min(np.max(table['r_bin_edges'])**2, MAX_RAD_SQ)
     last_costhetadir_bin_idx = len(table['costhetadir_bin_edges']) - 2
     last_deltaphidir_bin_idx = len(table['deltaphidir_bin_edges']) - 2
     t_max = np.max(table['t_bin_edges'])
@@ -171,9 +174,10 @@ def generate_pexp_5d_function(
 
     # to sample for DOM jitter etc
     #jitter_dt = np.arange(-10,11,2)
-    jitter_dt =  np.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
-    jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
-    jitter_weights /= np.sum(jitter_weights)
+    #jitter_dt =  np.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
+    jitter_dt =  np.array([0])
+    #jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
+    #jitter_weights /= np.sum(jitter_weights)
 
     # Indexing functions for table types omni / directional lookups
     if tbl_is_templ_compr:
@@ -334,7 +338,7 @@ def generate_pexp_5d_function(
                 dz = src_z - dom['z']
 
                 rhosquared = dx**2 + dy**2
-                rhosquared = max(MACHINE_EPS, rhosquared)
+                #rhosquared = max(MACHINE_EPS, rhosquared)
                 rsquared = rhosquared + dz**2
 
                 # Continue if photon is outside the radial binning limits
