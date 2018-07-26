@@ -137,6 +137,12 @@ class RetroReco(object):
                     loglike=loglike,
                 )
 
+            if method == 'mymini':
+                settings = self.run_mymini(
+                    prior=prior,
+                    loglike=loglike,
+                )
+
             elif method == 'multinest':
                 settings = self.run_multinest(
                     prior=prior,
@@ -498,6 +504,58 @@ class RetroReco(object):
             param_vals = rand.uniform(0,1,self.n_opt_params)
             prior(param_vals)
             llh = loglike(param_vals)
+        return OrderedDict()
+
+    def run_mymini(self, prior, loglike):
+        rand = np.random.RandomState()
+        def fun(x): 
+            param_vals = np.copy(x)
+            prior(param_vals)
+            llh = loglike(param_vals)
+            del param_vals
+            return -llh
+
+        n = self.n_opt_params
+        N = 100
+        assert N > n + 2
+
+        S = np.zeros(shape=(N,n))
+        fx = np.zeros(shape=(N,))
+
+        # initial population
+        for i in range(N):
+            x = rand.uniform(0,1,n)
+            S[i] = x
+            fx[i] = fun(x)
+
+
+        for k in range(10000):
+            worst_idx = np.argmax(fx)
+            best_idx = np.argmin(fx)
+
+            # choose n random points but neither best or worst
+            choice = rand.choice(N-2, n, replace=False)
+            if worst_idx < best_idx:
+                choice[choice >= worst_idx] +=1
+                choice[choice >= best_idx] +=1
+            else:
+                choice[choice >= best_idx] +=1
+                choice[choice >= worst_idx] +=1
+
+            centroid = (np.sum(S[choice[:-1]], axis=0) + S[best_idx]) / n
+
+            new_x = 2*centroid - S[choice[-1]]
+
+            #bounds
+            new_x[new_x < 0] = 0
+            new_x[new_x > 1] = 1
+
+            new_fx = fun(new_x)
+            if new_fx < fx[worst_idx]:
+                S[worst_idx] = new_x
+                fx[worst_idx] = new_fx
+
+
         return OrderedDict()
 
     def run_scipy(self, prior, loglike, method, eps):
@@ -923,4 +981,5 @@ if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run(method='multinest')
     #my_reco.run(method='test')
-    my_reco.run(method='nlopt')
+    my_reco.run(method='mymini')
+    #my_reco.run(method='nlopt')
