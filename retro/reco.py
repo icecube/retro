@@ -556,7 +556,7 @@ class RetroReco(object):
             s['z'] = s['coszen']
 
         def fill_from_cart(s):
-            radius = np.sqrt(centroid_spher['x']**2 + centroid_spher['y']**2 + centroid_spher['z']**2)
+            radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
 
             if not radius == 0:
                 # make sure they're length 1
@@ -565,11 +565,14 @@ class RetroReco(object):
                 s['z'] /= radius
                 s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
                 s['coszen'] = s['z']
+                if s['coszen'] > 1: print('naaaay ',s, radius)
+                if s['coszen'] < -1: print('noooohooo', s, radius)
                 s['zen'] = np.arccos(s['coszen'])
                 s['sinzen'] = np.sin(s['zen'])
                 s['sinaz'] = np.sin(s['az'])
                 s['cosaz'] = np.cos(s['az'])
             else:
+                s['z'] = 1
                 s['az'] = 0
                 s['zen'] = 0
                 s['coszen'] = 1
@@ -651,33 +654,28 @@ class RetroReco(object):
                 # found better point
                 S_cart[worst_idx] = new_x_cart
                 S_spher[worst_idx] = new_x_spher
-                fill_shperical_vals(S_spher[worst_idx])
+                #fill_shperical_vals(S_spher[worst_idx])
                 fx[worst_idx] = new_fx
 
-            #else:
-            #    # mutation
-            #    w = rand.uniform(0, 1, n_cart)
-            #    new_x_cart = (1 + w) * S_cart[best_idx] - w * new_x_cart
+            else:
+                # mutation
+                w = rand.uniform(0, 1, n_cart)
+                new_x_cart = (1 + w) * S_cart[best_idx] - w * new_x_cart
 
-            #    w = rand.uniform(0, 1, n_spher)
-            #    new_x_zen = (1 + w) * S_spher['zen'][best_idx] - w * new_x_spher['zen']
-            #    new_x_az = (1 + w) * S_spher['az'][best_idx] - w * new_x_spher['az']
-            #    new_x_az = new_x_az % (2 * np.pi)
-            #    while np.any(new_x_zen < 0) or np.any(new_x_zen > np.pi):
-            #        new_x_zen[new_x_zen > np.pi] = np.pi - new_x_zen[new_x_zen > np.pi]
-            #        new_x_zen[new_x_zen < 0 ] = - new_x_zen[new_x_zen < 0]
+                w = rand.uniform(0, 1, n_spher)
+                new_x_spher['x'] = (1 + w) * S_spher[best_idx]['x'] - w * new_x_spher['x']
+                new_x_spher['y'] = (1 + w) * S_spher[best_idx]['y'] - w * new_x_spher['y']
+                new_x_spher['z'] = (1 + w) * S_spher[best_idx]['z'] - w * new_x_spher['z']
 
-            #    new_x_spher = np.zeros(n_spher, dtype=spher_cord)
-            #    new_x_spher['zen'] = new_x_zen
-            #    new_x_spher['az'] = new_x_az
+                fill_from_cart(new_x_spher)
 
-            #    new_fx = test(new_x_cart, new_x_spher)
+                new_fx = test(new_x_cart, new_x_spher)
 
-            #    if new_fx < fx[worst_idx]:
-            #        # found better point
-            #        S_cart[worst_idx] = new_x_cart
-            #        S_spher[worst_idx] = new_x_spher
-            #        fx[worst_idx] = new_fx
+                if new_fx < fx[worst_idx]:
+                    # found better point
+                    S_cart[worst_idx] = new_x_cart
+                    S_spher[worst_idx] = new_x_spher
+                    fx[worst_idx] = new_fx
 
 
         return OrderedDict()
