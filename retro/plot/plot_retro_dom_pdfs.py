@@ -426,6 +426,7 @@ def plot_run_info2(
     only_string,
     subtract_noisefloor=True,
     plot_ref=True,
+    normalize=False,
     scalefact=None,
     axes=None,
 ):
@@ -475,12 +476,14 @@ def plot_run_info2(
     hit_times = info['hit_times']
     dom_exp = info['dom_exp']
     hit_exp = info['hit_exp']
-    dt = np.diff(hit_times)
+    #dt = np.diff(hit_times)
 
     fwd = load_pickle(info['sim']['fwd_sim_histo_file'])
     bin_edges = fwd['bin_edges']
     fwd_results = fwd['results']
+    # why?
     dt = np.diff(bin_edges)
+    dt = np.ones_like(dt)
 
     # -- Figure out how many lines are to be plotted -- #
 
@@ -502,12 +505,16 @@ def plot_run_info2(
     absdiff3k = np.abs(hit_times - 3000)
     idx_at_3k = np.where(absdiff3k == np.min(absdiff3k))[0][0]
     for idx, sd_idx in enumerate(sd_indices):
-        he = hit_exp[idx, :] * dt
+        he = hit_exp[idx, :]
+        de = dom_exp[idx]
         he -= np.min(he)
         string, dom = get_string_dom_pair(sd_idx)
         if np.sum(he) == 0 or (string, dom) not in fwd_results:
             continue
         ref = fwd_results[(string, dom)]
+        ref_tot = np.sum(ref)
+        he_tot = np.sum(he)
+        #print('ratio clsim vs. retro %.2f for (%s, %s)'%(ref_tot/de, string, dom))
         ref -= np.min(ref)
         mask = (he > 1e-12) & (ref >= 1e-12)
         rats.append(np.sum((ref[mask] / he[mask])*ref[mask]))
@@ -531,17 +538,35 @@ def plot_run_info2(
 
     def innerplot(ax): # pylint: disable=missing-docstring
         for idx, sd_idx in enumerate(sd_indices):
-            he = hit_exp[idx, :]
             string, dom = get_string_dom_pair(sd_idx)
+            he = hit_exp[idx, :]
+            de = dom_exp[idx]
+            if np.sum(he) > 0:
+                norm = de / np.sum(he)
+            else:
+                norm = 1
+            if (string, dom) in fwd_results:
+                ref = fwd_results[(string, dom)]
+            else:
+                ref = he
+            if normalize:
+                mask = (he > 1e-12) & (ref >= 1e-12)
+                tot_ref = np.sum(ref[mask]/dt[mask])
+                tot_he = np.sum(he[mask])
+                if tot_he == 0.:
+                    scale = 1.
+                else:
+                    scale = tot_ref/tot_he
+            else:
+                scale = scalefact
             if string != only_string or np.sum(he) == 0:
                 continue
             line, = ax.plot(
-                hit_times, scalefact*(he*dt - subtract_noisefloor*np.min(he*dt)),
+                hit_times, scale*(he*norm - subtract_noisefloor*np.min(he*norm)),
                 '-', lw=1, label='({}, {})'.format(string, dom)
             )
             if not plot_ref or (string, dom) not in fwd_results:
                 continue
-            ref = fwd_results[(string, dom)]
             ax.plot(
                 hit_times, ref - subtract_noisefloor*np.min(ref),
                 linestyle='--', lw=0.5, color=line.get_color()
