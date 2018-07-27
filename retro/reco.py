@@ -513,7 +513,7 @@ class RetroReco(object):
             '''
             callable for minimizer
             '''
-            llh = loglike(param_vals)
+            llh = loglike(x)
             return -llh
 
         n = self.n_opt_params
@@ -532,7 +532,8 @@ class RetroReco(object):
                                ('cosaz', np.float32),
                                ])
 
-        N = 10 * (n + 1)
+        #N = 10 * (n + 1)
+        N = 160
         assert N > n + 2
 
         S_cart = np.zeros(shape=(N,n_cart))
@@ -628,7 +629,8 @@ class RetroReco(object):
             # minimizer loop
 
             # break condition
-            if np.std(fx) < 0.05:
+            print(np.std(fx))
+            if np.std(fx) < 0.1:
                 break
 
             worst_idx = np.argmax(fx)
