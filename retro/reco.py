@@ -581,7 +581,7 @@ class RetroReco(object):
                 s['sinaz'] = 0
 
 
-        def refelect(old, centroid, new):
+        def reflect(old, centroid, new):
             '''
             reflect the old point arund the centroid into the new point
             '''
@@ -616,7 +616,7 @@ class RetroReco(object):
 
 
 
-        for k in range(10000):
+        for k in range(20000):
 
             # stop?
             if np.std(fx) < 0.05:
@@ -646,7 +646,7 @@ class RetroReco(object):
             fill_from_cart(centroid_spher)
 
             new_x_spher = np.zeros(n_spher, dtype=spher_cord)
-            refelect(S_spher[choice[-1]], centroid_spher, new_x_spher)
+            reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
 
             new_fx = test(new_x_cart, new_x_spher)
 
@@ -662,10 +662,16 @@ class RetroReco(object):
                 w = rand.uniform(0, 1, n_cart)
                 new_x_cart = (1 + w) * S_cart[best_idx] - w * new_x_cart
 
+
+                # first reflect at best point
+                reflected_new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+                reflect(new_x_spher, S_spher[best_idx], reflected_new_x_spher)
+
+                # now do a combination of best and reflected point with weight w
                 w = rand.uniform(0, 1, n_spher)
-                new_x_spher['x'] = (1 + w) * S_spher[best_idx]['x'] - w * new_x_spher['x']
-                new_x_spher['y'] = (1 + w) * S_spher[best_idx]['y'] - w * new_x_spher['y']
-                new_x_spher['z'] = (1 + w) * S_spher[best_idx]['z'] - w * new_x_spher['z']
+                new_x_spher['x'] = (1 - w) * S_spher[best_idx]['x'] + w * reflected_new_x_spher['x']
+                new_x_spher['y'] = (1 - w) * S_spher[best_idx]['y'] + w * reflected_new_x_spher['y']
+                new_x_spher['z'] = (1 - w) * S_spher[best_idx]['z'] + w * reflected_new_x_spher['z']
 
                 fill_from_cart(new_x_spher)
 
