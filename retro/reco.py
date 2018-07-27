@@ -508,16 +508,19 @@ class RetroReco(object):
 
     def run_mymini(self, prior, loglike):
         rand = np.random.RandomState()
+
         def fun(x): 
-            param_vals = np.copy(x)
+            '''
+            callable for minimizer
+            '''
             llh = loglike(param_vals)
-            del param_vals
             return -llh
 
         n = self.n_opt_params
         n_cart = 4
         n_spher = 1
 
+        # type to store spherical coordinates and handy quantities
         spher_cord = np.dtype([('zen',np.float32),
                                ('az', np.float32),
                                ('x', np.float32),
@@ -536,17 +539,21 @@ class RetroReco(object):
         S_spher = np.zeros(shape=(N,n_spher), dtype=spher_cord)
         fx = np.zeros(shape=(N,))
 
-        def test(x_cart, x_spher):
-            return fun(create_x(x_cart, x_spher))
-
         def create_x(x_cart, x_spher):
+            '''
+            patch back together the cartesian and spherical coordinates into one array
+            '''
+            # ToDO: make proper
             x = np.empty(n)
             x[:n_cart] = x_cart
             x[n_cart+1::2] = x_spher['zen']
             x[n_cart::2] = x_spher['az']
             return x
 
-        def fill_shperical_vals(s):
+        def fill_from_spher(s):
+            '''
+            fill in the remaining values giving the two angles `zen` and `az`
+            '''
             s['sinzen'] = np.sin(s['zen'])
             s['coszen'] = np.cos(s['zen'])
             s['sinaz'] = np.sin(s['az'])
@@ -556,6 +563,9 @@ class RetroReco(object):
             s['z'] = s['coszen']
 
         def fill_from_cart(s):
+            '''
+            fill in the remaining values giving the cart, coords. `x`, `y` and `z`
+            '''
             radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
 
             if not radius == 0:
@@ -565,8 +575,6 @@ class RetroReco(object):
                 s['z'] /= radius
                 s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
                 s['coszen'] = s['z']
-                if s['coszen'] > 1: print('naaaay ',s, radius)
-                if s['coszen'] < -1: print('noooohooo', s, radius)
                 s['zen'] = np.arccos(s['coszen'])
                 s['sinzen'] = np.sin(s['zen'])
                 s['sinaz'] = np.sin(s['az'])
@@ -583,7 +591,7 @@ class RetroReco(object):
 
         def reflect(old, centroid, new):
             '''
-            reflect the old point arund the centroid into the new point
+            reflect the old point around the centroid into the new point on the sphere
             '''
 
             x = old['x']
@@ -607,20 +615,20 @@ class RetroReco(object):
             x = rand.uniform(0,1,n)
             prior(x)
 
+            # break up into cartesiand and spherical coordinates
+            # ToDO: make proper
             S_cart[i] = x[:n_cart]
             S_spher[i]['zen'] = x[n_cart+1::2]
             S_spher[i]['az'] = x[n_cart::2]
-            fill_shperical_vals(S_spher[i])
-
+            fill_from_spher(S_spher[i])
             fx[i] = fun(x)
 
 
-
         for k in range(20000):
+            # minimizer loop
 
-            # stop?
+            # break condition
             if np.std(fx) < 0.05:
-                print('BREAK!')
                 break
 
             worst_idx = np.argmax(fx)
@@ -635,7 +643,9 @@ class RetroReco(object):
                 choice[choice >= best_idx] +=1
                 choice[choice >= worst_idx] +=1
 
+            # cardtesian centroid
             centroid_cart = (np.sum(S_cart[choice[:-1]], axis=0) + S_cart[best_idx]) / n
+            # reflect point
             new_x_cart = 2*centroid_cart - S_cart[choice[-1]]
 
             # spherical centroid
@@ -644,45 +654,42 @@ class RetroReco(object):
             centroid_spher['y'] = (np.sum(S_spher['y'][choice[:-1]], axis=0) + S_spher['y'][best_idx]) / n
             centroid_spher['z'] = (np.sum(S_spher['z'][choice[:-1]], axis=0) + S_spher['z'][best_idx]) / n
             fill_from_cart(centroid_spher)
-
+            # reflect point
             new_x_spher = np.zeros(n_spher, dtype=spher_cord)
             reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
 
-            new_fx = test(new_x_cart, new_x_spher)
+            new_fx = fun(create_x(new_x_cart, new_x_spher))
 
             if new_fx < fx[worst_idx]:
                 # found better point
                 S_cart[worst_idx] = new_x_cart
                 S_spher[worst_idx] = new_x_spher
-                #fill_shperical_vals(S_spher[worst_idx])
                 fx[worst_idx] = new_fx
+                continue
 
-            else:
-                # mutation
-                w = rand.uniform(0, 1, n_cart)
-                new_x_cart = (1 + w) * S_cart[best_idx] - w * new_x_cart
+            # mutation
+            w = rand.uniform(0, 1, n_cart)
+            new_x_cart = (1 + w) * S_cart[best_idx] - w * new_x_cart
 
+            # first reflect at best point
+            reflected_new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+            reflect(new_x_spher, S_spher[best_idx], reflected_new_x_spher)
 
-                # first reflect at best point
-                reflected_new_x_spher = np.zeros(n_spher, dtype=spher_cord)
-                reflect(new_x_spher, S_spher[best_idx], reflected_new_x_spher)
+            # now do a combination of best and reflected point with weight w
+            w = rand.uniform(0, 1, n_spher)
+            new_x_spher['x'] = (1 - w) * S_spher[best_idx]['x'] + w * reflected_new_x_spher['x']
+            new_x_spher['y'] = (1 - w) * S_spher[best_idx]['y'] + w * reflected_new_x_spher['y']
+            new_x_spher['z'] = (1 - w) * S_spher[best_idx]['z'] + w * reflected_new_x_spher['z']
+            fill_from_cart(new_x_spher)
 
-                # now do a combination of best and reflected point with weight w
-                w = rand.uniform(0, 1, n_spher)
-                new_x_spher['x'] = (1 - w) * S_spher[best_idx]['x'] + w * reflected_new_x_spher['x']
-                new_x_spher['y'] = (1 - w) * S_spher[best_idx]['y'] + w * reflected_new_x_spher['y']
-                new_x_spher['z'] = (1 - w) * S_spher[best_idx]['z'] + w * reflected_new_x_spher['z']
+            new_fx = fun(create_x(new_x_cart, new_x_spher))
 
-                fill_from_cart(new_x_spher)
-
-                new_fx = test(new_x_cart, new_x_spher)
-
-                if new_fx < fx[worst_idx]:
-                    # found better point
-                    S_cart[worst_idx] = new_x_cart
-                    S_spher[worst_idx] = new_x_spher
-                    fx[worst_idx] = new_fx
-
+            if new_fx < fx[worst_idx]:
+                # found better point
+                S_cart[worst_idx] = new_x_cart
+                S_spher[worst_idx] = new_x_spher
+                fx[worst_idx] = new_fx
+                continue
 
         return OrderedDict()
 
