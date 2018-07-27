@@ -44,7 +44,8 @@ def combine_table_clusters(
     source_path_proto,
     basedir,
     cluster_idx,
-    overwrite=False
+    t_is_residual_time=None,
+    overwrite=False,
 ):
     """Combine clustered tables together.
 
@@ -62,7 +63,8 @@ def combine_table_clusters(
     source_path_proto : str
     basedir : str
     cluster_idx : int
-    overwrite : bool
+    t_is_residual_time : bool, optional
+    overwrite : bool, optional
 
     """
     cluster_file = expand(cluster_file)
@@ -87,6 +89,7 @@ def combine_table_clusters(
 
     combine_clsim_tables(
         table_fpaths=table_fpaths,
+        t_is_residual_time=t_is_residual_time,
         outdir=outdir,
         overwrite=overwrite,
     )
@@ -113,6 +116,10 @@ def parse_args(description=__doc__):
     parser.add_argument(
         '--source-path-proto', required=True,
         help='''Prototype for finding source table files (or directories)'''
+    )
+    parser.add_argument(
+        '--t-is-residual-time', action='store_true',
+        help='''Whether time dimension represents residual time'''
     )
     parser.add_argument(
         '--basedir', required=True,

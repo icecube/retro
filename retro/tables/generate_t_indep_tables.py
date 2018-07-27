@@ -34,8 +34,8 @@ from retro.utils.misc import expand, mkdir
 
 def generate_time_indep_tables(
         table,
+        kind,
         outdir=None,
-        kinds=('clsim', 'ckv'),
         overwrite=False
     ):
     """Generate and save to disk time independent table(s) from the original
@@ -44,8 +44,8 @@ def generate_time_indep_tables(
     Parameters
     ----------
     table : string
+    kind : string in {"ckv", "clsim"} or iterable of one or more
     outdir : string, optional
-    kinds : string, optional
     overwrite : bool, optional
 
     Returns
@@ -53,9 +53,9 @@ def generate_time_indep_tables(
     t_indep_table : numpy.ndarray of size (n_r, n_costheta, n_costhetadir, n_deltaphidir)
 
     """
-    if isinstance(kinds, basestring):
-        kinds = [kinds]
-    kinds = [k.strip().lower() for k in kinds]
+    if isinstance(kind, basestring):
+        kind = [kind]
+    kinds = [k.strip().lower() for k in kind]
 
     clsim_table_path = None
     ckv_table_path = None
@@ -179,10 +179,9 @@ def parse_args(description=__doc__):
         .npy-file directory corresponding to the input.'''
     )
     parser.add_argument(
-        '--kinds', choices=['clsim', 'ckv'], default=['clsim', 'ckv'],
-        nargs='+',
-        help='''If `table` is a dir containing tables, process the specified
-        kinds of tables within that dir.'''
+        '--kind', required=True, choices=['clsim', 'ckv'], action='append',
+        help='''Process the specified kind(s) of table(s) within that dir.
+        Repeat --kind for multiple.'''
     )
     parser.add_argument(
         '--overwrite', action='store_true',
