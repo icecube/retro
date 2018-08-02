@@ -56,6 +56,18 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
     #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
     #tblkind="ckv_templ_compr"
 
+    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; uncompressed (low stats) -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60/cl{cluster_idx}"
+    #tmpl_lib=""
+    #tblkind="ckv_uncompr"
+
+    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; uncompressed (high stats) -- #
+
+    #proto="/home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
+    #tmpl_lib=""
+    #tblkind="ckv_uncompr"
+
 else
     # -- Lea tables: 80 clusters, template compressed -- #
 
@@ -80,7 +92,7 @@ importance_sampling="--importance-sampling"
 consteff=""
 
 
-#kernprof -l -v ~/src/retro/retro/reco.py \
+#kernprof -l -v ~/retro/retro/reco.py \
 ~/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
