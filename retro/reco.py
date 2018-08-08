@@ -210,9 +210,11 @@ class RetroReco(object):
                 llhp['azimuth'] = llhp['cascade_azimuth']
 
 
-            llhp_outf = self.out_prefix + 'llhp.npy'
-            print('Saving llhp to "{}"...'.format(llhp_outf))
-            np.save(llhp_outf, llhp)
+            if False:
+                # save full info
+                llhp_outf = self.out_prefix + 'llhp.npy'
+                print('Saving llhp to "{}"...'.format(llhp_outf))
+                np.save(llhp_outf, llhp)
 
             opt_meta = OrderedDict([
                 ('params', dim_names),
@@ -223,6 +225,7 @@ class RetroReco(object):
 
             opt_meta['num_llhp'] = len(param_values)
             opt_meta['run_time'] = t1 - t0
+
             opt_meta_outf = self.out_prefix + 'opt_meta.pkl'
             print('Saving metadata to "{}"'.format(opt_meta_outf))
             pickle.dump(
@@ -231,12 +234,14 @@ class RetroReco(object):
                 protocol=pickle.HIGHEST_PROTOCOL
             )
 
-            dt = time.time() - t1
-            n_points = llhp.size
-            print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
-                  .format(dt, n_points, dt / n_points * 1e3))
+            if False:
+                dt = time.time() - t1
+                n_points = llhp.size
+                print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
+                      .format(dt, n_points, dt / n_points * 1e3))
 
-            estimate = estimate_from_llhp(llhp, opt_meta)
+            #estimate = estimate_from_llhp(llhp, opt_meta)
+            estimate = estimate_from_llhp(llhp)
             estimate_outf = self.out_prefix + 'estimate.pkl'
             print('Saving estimate to "{}"'.format(estimate_outf))
             pickle.dump(
@@ -534,7 +539,7 @@ class RetroReco(object):
 
         #N = 10 * (n + 1)
         N = 160
-        assert N > n + 2
+        assert N > n + 1
 
         S_cart = np.zeros(shape=(N,n_cart))
         S_spher = np.zeros(shape=(N,n_spher), dtype=spher_cord)
@@ -625,25 +630,39 @@ class RetroReco(object):
             fx[i] = fun(x)
 
 
-        for k in range(20000):
+        best_llh = np.min(fx)
+        no_improvement_counter = -1
+
+        for k in range(100000):
             # minimizer loop
 
             # break condition
-            print(np.std(fx))
-            if np.std(fx) < 0.1:
+            #print(np.std(fx))
+            #if np.std(fx) < 0.1:
+            #    print('std below threshold, stopping.')
+            #    break
+
+            if no_improvement_counter > 10000:
+                print('no improvement found, stopping.')
                 break
+
+            new_best_llh = np.min(fx)
+            if new_best_llh < best_llh:
+                best_llh = new_best_llh
+                no_improvement_counter = 0
+            else:
+                no_improvement_counter += 1
 
             worst_idx = np.argmax(fx)
             best_idx = np.argmin(fx)
 
-            # choose n random points but neither best or worst
-            choice = rand.choice(N-2, n, replace=False)
-            if worst_idx < best_idx:
-                choice[choice >= worst_idx] +=1
-                choice[choice >= best_idx] +=1
-            else:
-                choice[choice >= best_idx] +=1
-                choice[choice >= worst_idx] +=1
+            # choose n random points but not best
+            choice = rand.choice(N-1, n, replace=False)
+            choice[choice >= best_idx] +=1
+
+            # maybe we'll need to actualy reflect the worst point in the simplex?
+            # or choose random, not last?
+            # also, not necessary to exclude worst point from simplex?
 
             # cardtesian centroid
             centroid_cart = (np.sum(S_cart[choice[:-1]], axis=0) + S_cart[best_idx]) / n
@@ -668,6 +687,9 @@ class RetroReco(object):
                 S_spher[worst_idx] = new_x_spher
                 fx[worst_idx] = new_fx
                 continue
+
+            # skip mutation
+            #continue
 
             # mutation
             w = rand.uniform(0, 1, n_cart)
