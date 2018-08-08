@@ -26,6 +26,7 @@ __all__ = [
     'HIT_T',
     'SD_INDEXER_T',
     'HITS_SUMMARY_T',
+    'EVT_HIT_INFO_T',
     'TypeID',
     'SourceID',
     'SubtypeID',
