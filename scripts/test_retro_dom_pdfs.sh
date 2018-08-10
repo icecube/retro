@@ -4,17 +4,22 @@ timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 extraname=$1
 
-#basedir="/data/justin/retro/dom_distributions"
-basedir="/data/peller/retro/dom_distributions"
+basedir=~/retro/dom_distributions
 
 use_doms="all"
+
 #sim_to_test="lea_upgoing_muon"
-#angsens="9"
+#sim_to_test="lea_horizontal_muon"
+sim_to_test="lea_downgoing_muon"
+angsens="9"
+
 #sim_to_test="mie_upgoing_muon"
 #sim_to_test="mie_horizontal_muon"
-sim_to_test="lea_horizontal_muon"
-angsens="h2-50cm"
+#sim_to_test="mie_downgoing_muon"
+#angsens="h2-50cm"
+
 norm="binvol2.5"
+
 tkernel="table_e_loss"
 tktimestep="1.0"
 ckernel="aligned_one_dim"
@@ -47,9 +52,9 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    tblkind="ckv_templ_compr"
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
 
     # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
 
@@ -62,6 +67,18 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
     #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_1/cl{cluster_idx}"
     #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
     #tblkind="ckv_templ_compr"
+
+    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; uncompressed (low stats) -- #
+
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60/cl{cluster_idx}"
+    #tmpl_lib=""
+    #tblkind="ckv_uncompr"
+
+    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; uncompressed (high stats) -- #
+
+    proto="/home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
+    tmpl_lib=""
+    tblkind="ckv_uncompr"
 
 else
     proto="/gpfs/group/dfc13/default/retro/tables/large_5d_notilt_combined/stacked/"

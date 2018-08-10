@@ -234,7 +234,12 @@ def interpret_clsim_table_fname(fname):
     return ordered_info
 
 
-def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
+def load_clsim_table_minimal(
+    fpath,
+    t_is_residual_time=None,
+    step_length=None,
+    mmap=False
+):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Similar to the `load_clsim_table` function but the full table, including
@@ -247,6 +252,17 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
         Path to file to be loaded. If the file has extension 'zst', 'zstd', or
         'zstandard', the file will be decompressed using the `python-zstandard`
         Python library before passing to `pyfits` for interpreting.
+
+    t_is_residual_time : bool, optional
+        Whether time dimension in table represents residual time. If a value is
+        passed and it doesn't match the key of the same name in the table, a
+        ValueError will be raised. If a value is passed and the key does not
+        exist in the table, this key will be added. If a value is not passed,
+        no modification to the loaded table will be made.
+
+    step_length : float, optional
+        Step length parameter used during tabulation of photons while
+        generating the table.
 
     mmap : bool, optional
         Whether to memory map the table (if it's stored in a directory
@@ -268,20 +284,21 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
         - 'deltaphidir_bin_edges' :
 
     """
-    table = OrderedDict()
+    t0 = time()
 
+    table = OrderedDict()
     fpath = expand(fpath)
 
     if DEBUG:
         wstderr('Loading table from {} ...\n'.format(fpath))
 
     if isdir(fpath):
-        t0 = time()
         indir = fpath
         if mmap:
             mmap_mode = 'r'
         else:
             mmap_mode = None
+
         for key in MY_CLSIM_TABLE_KEYS + ['t_indep_table', 't_is_residual_time']:
             fpath = join(indir, key + '.npy')
             if DEBUG:
@@ -296,77 +313,84 @@ def load_clsim_table_minimal(fpath, step_length=None, mmap=False):
                 )
             if DEBUG:
                 wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
-        if step_length is not None and 'step_length' in table:
-            assert step_length == table['step_length']
-        if DEBUG:
-            wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
-        return table
 
-    if not isfile(fpath):
+    elif isfile(fpath):
+        import pyfits
+        fobj = get_decompressd_fobj(fpath)
+        pf_table = None
+        try:
+            pf_table = pyfits.open(fobj, mode='readonly', memmap=mmap)
+
+            table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
+            table['n_photons'] = force_little_endian(
+                pf_table[0].header['_i3_n_photons'] # pylint: disable=no-member
+            )
+            table['group_refractive_index'] = force_little_endian(
+                pf_table[0].header['_i3_n_group'] # pylint: disable=no-member
+            )
+            table['phase_refractive_index'] = force_little_endian(
+                pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
+            )
+
+            n_dims = len(table['table_shape'])
+            if n_dims == 5:
+                # Space-time dimensions
+                table['r_bin_edges'] = force_little_endian(
+                    pf_table[1].data # meters # pylint: disable=no-member
+                )
+                table['costheta_bin_edges'] = force_little_endian(
+                    pf_table[2].data # pylint: disable=no-member
+                )
+                table['t_bin_edges'] = force_little_endian(
+                    pf_table[3].data # nanoseconds # pylint: disable=no-member
+                )
+
+                # Photon directionality
+                table['costhetadir_bin_edges'] = force_little_endian(
+                    pf_table[4].data # pylint: disable=no-member
+                )
+                table['deltaphidir_bin_edges'] = force_little_endian(
+                    pf_table[5].data # pylint: disable=no-member
+                )
+
+            else:
+                raise NotImplementedError(
+                    '{}-dimensional table not handled'.format(n_dims)
+                )
+
+            table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
+
+            wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
+
+        except:
+            wstderr('ERROR: Failed to load "{}"\n'.format(fpath))
+            raise
+
+        finally:
+            del pf_table
+            if hasattr(fobj, 'close'):
+                fobj.close()
+            del fobj
+
+    else: # fpath is neither dir nor file
         raise ValueError('Table does not exist at path "{}"'.format(fpath))
 
-    import pyfits
-    t0 = time()
-    fobj = get_decompressd_fobj(fpath)
-    pf_table = None
-    try:
-        pf_table = pyfits.open(fobj, mode='readonly', memmap=mmap)
-
-        table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
-        table['n_photons'] = force_little_endian(
-            pf_table[0].header['_i3_n_photons'] # pylint: disable=no-member
-        )
-        table['group_refractive_index'] = force_little_endian(
-            pf_table[0].header['_i3_n_group'] # pylint: disable=no-member
-        )
-        table['phase_refractive_index'] = force_little_endian(
-            pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
-        )
-        if step_length is not None:
+    if step_length is not None:
+        if 'step_length' in table:
+            assert step_length == table['step_length']
+        else:
             table['step_length'] = step_length
 
-        n_dims = len(table['table_shape'])
-        if n_dims == 5:
-            # Space-time dimensions
-            table['r_bin_edges'] = force_little_endian(
-                pf_table[1].data # meters # pylint: disable=no-member
-            )
-            table['costheta_bin_edges'] = force_little_endian(
-                pf_table[2].data # pylint: disable=no-member
-            )
-            table['t_bin_edges'] = force_little_endian(
-                pf_table[3].data # nanoseconds # pylint: disable=no-member
-            )
-
-            # Photon directionality
-            table['costhetadir_bin_edges'] = force_little_endian(
-                pf_table[4].data # pylint: disable=no-member
-            )
-            table['deltaphidir_bin_edges'] = force_little_endian(
-                pf_table[5].data # pylint: disable=no-member
-            )
-
+    if t_is_residual_time is not None:
+        if 't_is_residual_time' in table:
+            assert t_is_residual_time == table['t_is_residual_time']
         else:
-            raise NotImplementedError(
-                '{}-dimensional table not handled'.format(n_dims)
-            )
+            table['t_is_residual_time'] = t_is_residual_time
 
-        table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
-
-        wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
-
-    except:
-        wstderr('ERROR: Failed to load "{}"\n'.format(fpath))
-        raise
-
-    finally:
-        del pf_table
-        if hasattr(fobj, 'close'):
-            fobj.close()
-        del fobj
+    if DEBUG:
+        wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
 
     return table
-
 
 def load_clsim_table(fpath, step_length, angular_acceptance_fract,
                      quantum_efficiency):
