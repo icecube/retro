@@ -137,7 +137,14 @@ class RetroReco(object):
                     loglike=loglike,
                 )
 
-            if method == 'mymini':
+            if method == 'truth':
+                settings = self.run_with_truth(
+                    prior=prior,
+                    loglike=loglike,
+                    truth=event['truth'],
+                )
+
+            elif method == 'mymini':
                 settings = self.run_mymini(
                     prior=prior,
                     loglike=loglike,
@@ -504,6 +511,9 @@ class RetroReco(object):
         return loglike
 
     def run_test(self, prior, loglike):
+        '''
+        Random sampling instead of an actual minimizer
+        '''
         rand = np.random.RandomState()
         for i in range(100):
             param_vals = rand.uniform(0,1,self.n_opt_params)
@@ -511,14 +521,61 @@ class RetroReco(object):
             llh = loglike(param_vals)
         return OrderedDict()
 
-    def run_mymini(self, prior, loglike):
+    def run_with_truth(self, prior, loglike, truth):
+        true_params = np.zeros(self.n_opt_params)
+
+        for i,name in enumerate(self.hypo_handler.opt_param_names):
+            if name in ['x', 'y', 'z', 'time']:
+                true_params[i] = truth[name]
+            elif name == 'track_zenith':
+                true_params[i] = np.arccos(truth['coszen'])
+            elif name == 'track_azimuth':
+                true_params[i] = truth['azimuth']
+            else:
+                raise NotImplementedError()
+        # now random values for these dimension
+        rand_dims = [4,5]
         rand = np.random.RandomState()
+        for i in range(10000):
+            rand_params = rand.uniform(0,1,self.n_opt_params)
+            prior(rand_params)
+            param_vals = np.zeros(self.n_opt_params)
+            param_vals[:] = true_params[:]
+            param_vals[rand_dims] = rand_params[rand_dims]
+            llh = loglike(param_vals)
+
+        return OrderedDict()
+
+    def run_mymini(self, prior, loglike):
+        '''
+        Implementation of the CRS2 algoriyhm with local mutation as described in
+        JOURNAL OF OPTIMIZATION THEORY AND APPLICATIONS: Vol. 130, No. 2, pp. 253–264,
+        August 2006 (C 2006) DOI: 10.1007/s10957-006-9101-0
+
+        Adapted to work with spherical corrdinates (correct centroid calculation, reflection and mutation)
+
+        At the moment the number of cartesian (standard) parameters `n_cart` and spherical parameters `n_spher` is hard coded
+        Furthermore, all cartesian coordinates must come first followed by `azimuth_1, zenith_1, azimuth_2, zenith_2, ...`
+
+        '''
+        rand = np.random.RandomState()
+
+        # if true: use priors (for cartesian coordinates only) during minimization
+        # if false: use priors only to generate initial population, then perform minimization on actual parameter values
+        use_priors = True
 
         def fun(x): 
             '''
             callable for minimizer
             '''
-            llh = loglike(x)
+            if use_priors:
+                param_vals = np.zeros_like(x)
+                param_vals[:n_cart] = x[:n_cart]
+                prior(param_vals)
+                param_vals[n_cart:] = x[n_cart:]
+            else:
+                param_vals = x
+            llh = loglike(param_vals)
             return -llh
 
         n = self.n_opt_params
@@ -619,7 +676,10 @@ class RetroReco(object):
         # initial population
         for i in range(N):
             x = rand.uniform(0,1,n)
-            prior(x)
+            if use_priors:
+                param_vals = np.copy(x)
+                prior(param_vals)
+                x[n_cart:] = param_vals[n_cart:]
 
             # break up into cartesiand and spherical coordinates
             # ToDO: make proper
@@ -633,16 +693,16 @@ class RetroReco(object):
         best_llh = np.min(fx)
         no_improvement_counter = -1
 
-        for k in range(100000):
+        for k in range(50000):
             # minimizer loop
 
             # break condition
             #print(np.std(fx))
-            #if np.std(fx) < 0.1:
-            #    print('std below threshold, stopping.')
-            #    break
+            if np.std(fx) < 0.1:
+                print('std below threshold, stopping.')
+                break
 
-            if no_improvement_counter > 10000:
+            if no_improvement_counter > 2000:
                 print('no improvement found, stopping.')
                 break
 
@@ -679,6 +739,9 @@ class RetroReco(object):
             new_x_spher = np.zeros(n_spher, dtype=spher_cord)
             reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
 
+            if use_priors:
+                new_x_cart[new_x_cart < 0] = 0
+                new_x_cart[new_x_cart > 1] = 1
             new_fx = fun(create_x(new_x_cart, new_x_spher))
 
             if new_fx < fx[worst_idx]:
@@ -706,6 +769,9 @@ class RetroReco(object):
             new_x_spher['z'] = (1 - w) * S_spher[best_idx]['z'] + w * reflected_new_x_spher['z']
             fill_from_cart(new_x_spher)
 
+            if use_priors:
+                new_x_cart[new_x_cart < 0] = 0
+                new_x_cart[new_x_cart > 1] = 1
             new_fx = fun(create_x(new_x_cart, new_x_spher))
 
             if new_fx < fx[worst_idx]:
@@ -1140,5 +1206,6 @@ if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run(method='multinest')
     #my_reco.run(method='test')
-    my_reco.run(method='mymini')
+    #my_reco.run(method='mymini')
+    my_reco.run(method='truth')
     #my_reco.run(method='nlopt')
