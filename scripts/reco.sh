@@ -71,8 +71,8 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 else
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/gpfs/scratch/jll1062/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /gpfs/scratch/jll1062/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    proto="/gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    tmpl_lib="--template-library /gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
     tblkind="ckv_templ_compr"
 
     # -- Mie tables: separate, template compressed -- #
