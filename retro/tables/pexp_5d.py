@@ -49,15 +49,15 @@ MACHINE_EPS = 1e-10
 MAX_RAD_SQ = 500**2
 
 def generate_pexp_5d_function(
-        table,
-        table_kind,
-        t_is_residual_time,
-        compute_t_indep_exp,
-        compute_unhit_doms,
-        use_directionality,
-        num_phi_samples=None,
-        ckv_sigma_deg=None,
-        template_library=None,
+    table,
+    table_kind,
+    t_is_residual_time,
+    compute_t_indep_exp,
+    compute_unhit_doms,
+    use_directionality,
+    num_phi_samples=None,
+    ckv_sigma_deg=None,
+    template_library=None,
 ):
     """Generate a numba-compiled function for computing expected photon counts
     at a DOM, where the table's binning info is used to pre-compute various
@@ -231,18 +231,17 @@ def generate_pexp_5d_function(
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def pexp_5d_ckv_compute_t_indep(
-            sources,
-            sources_start,
-            sources_stop,
-            event_dom_info,
-            event_hit_info,
-            tables,
-            table_norms,
-            t_indep_tables,
-            t_indep_table_norms,
-            dom_exp,
-            hit_exp,
-        ):
+        sources,
+        sources_start,
+        sources_stop,
+        event_dom_info,
+        event_hit_info,
+        tables,
+        table_norms,
+        t_indep_tables,
+        t_indep_table_norms,
+        hit_exp,
+    ):
         r"""For a set of generated photons `sources`, compute the expected
         photons in a particular DOM at `hit_time` and the total expected
         photons, independent of time.
@@ -294,26 +293,25 @@ def generate_pexp_5d_function(
             r-dependent normalization (any t-dep normalization is assumed to
             already have been applied to generate the t_indep_table).
 
-        dom_exp : shape (n_operational_doms,) array of floats
-            Expectation of total hits for each operational DOM; initialize
-            outside of calls to this function, as values are incremented within
-            this function.
-
         hit_exp : shape (n_hits,) array of floats
             Time-dependent hit expectation at each (actual) hit time;
             initialize outside of this function, as values are incremented
             within this function. Values in `hit_exp` correspond to the values
             in `event_hit_info`.
 
+        Returns
+        -------
+        t_indep_exp : float
+            Expectation of total hits for all operational DOMs
+
         Out
         ---
-        dom_exp
-            See above
         hit_exp
             See above
 
         """
         num_operational_doms = len(event_dom_info)
+        t_indep_exp = 0.
         for source_idx in range(sources_start, sources_stop):
             src = sources[source_idx]
             src_kind = src['kind']
@@ -326,8 +324,8 @@ def generate_pexp_5d_function(
             src_dir_costheta = src['dir_costheta']
             src_photons = src['photons']
 
-            for operational_dom_idx in range(num_operational_doms):
-                dom = event_dom_info[operational_dom_idx]
+            for op_dom_idx in range(num_operational_doms):
+                dom = event_dom_info[op_dom_idx]
                 dom_tbl_idx = dom['table_idx']
                 dom_qe = dom['quantum_efficiency']
                 dom_hits_start_idx = dom['hits_start_idx']
@@ -433,9 +431,7 @@ def generate_pexp_5d_function(
                     ]
 
                 ti_norm = t_indep_table_norms[dom_tbl_idx][r_bin_idx]
-                dom_exp[operational_dom_idx] += (
-                    src_photons * ti_norm * t_indep_surv_prob * dom_qe
-                )
+                t_indep_exp += src_photons * ti_norm * t_indep_surv_prob * dom_qe
 
                 for hit_idx in range(dom_hits_start_idx, dom_hits_stop_idx):
                     # A photon that starts immediately in the past (before the
@@ -489,56 +485,62 @@ def generate_pexp_5d_function(
                         src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
                     )
 
+        return t_indep_exp
+
     if tbl_is_ckv and compute_t_indep_exp:
         pexp_5d = pexp_5d_ckv_compute_t_indep
     else:
         raise NotImplementedError()
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def eval_llh(
-            event_dom_info,
-            event_hit_info,
-            dom_exp,
-            hit_exp,
-            scaling_dom_exp,
-            scaling_hit_exp,
-            sum_noise_rate,
-            time_window,
-            recip_time_window,
-            last_scalefactor
+    def get_optimal_scalefactor(
+        event_dom_info,
+        event_hit_info,
+        nonscaling_hit_exp,
+        nonscaling_t_indep_exp,
+        nominal_scaling_hit_exp,
+        nominal_scaling_t_indep_exp,
+        initial_scalefactor,
     ):
-        """Helper function to calculate llh value
+        """Find optimal (highest-likelihood) `scalefactor` for scaling sources.
 
         Parameters:
         -----------
-        event_dom_info : array
+        event_dom_info : array of dtype EVT_DOM_INFO_T
             containing all relevant event per DOM info
-        dom_exp : array
-            containing the expectations for a given hypo
-        scaling_exp : array
-            containing the expectations for a scaling hypo
-        sum_noise_rate
-        time_window : float
-            event time_window in ns
-        last_scalefactor : float
-            starting pint for minimizer
+        event_hit_info : array of dtype EVT_HIT_INFO_T
+        nominal_scaling_t_indep_exp : float
+            Total charge expected across the detector due to scaling sources (Lambda^s
+            in `likelihood_function_derivation.ipynb`)
+        nominal_scaling_hit_exp : shape (n_hits,) array of dtype float
+            Detected-charge-rate expectation at each hit time due to scaling sources at
+            nominal values (i.e., with `scalefactor = 1`); this quantity is
+            lambda_d^s(t_{k_d}) in `likelihood_function_derivation.ipynb`
+        pegleg_hit_exp : shape (n_hits,) array of dtype float
+            Detected-charge-rate expectation at each hit time due to pegleg sources;
+            this is lambda_d^p(t_{k_d}) in `likelihood_function_derivation.ipynb`
+        generic_hit_exp : shape (n_hits,) array of dtype float
+            Detected-charge-rate expectation at each hit time due to generic sources;
+            this is lambda_d^g(t_{k_d}) in `likelihood_function_derivation.ipynb`
+        initial_scalefactor : float > 0
+            Starting point for minimizer
 
         Returns
         -------
-        llh
         scalefactor
+        llh
 
         """
-        sum_scaling_exp_charge = np.sum(scaling_dom_exp)
-        sum_nonscaling_exp_charge = np.sum(dom_exp) + sum_noise_rate * time_window
-        num_operational_doms = len(event_dom_info)
-        num_hits = len(event_hit_info)
+        # Note: defining as closure is faster than as external function
+        def get_grad_neg_llh_wrt_scalefactor(scalefactor):
+            """Compute the gradient of -LLH with respect to `scalefactor`.
 
-        # -- Find the best scale factor -- #
+            Typically we use `scalefactor` with cascade energy, .. ::
 
-        # Note `grad` defined as closure is faster than as external function
-        def grad(scalefactor):
-            """Gradient of time independent LLH part used for finding cascade energy.
+                cascade_energy = scalefactor * nominal_cascade_energy
+
+            so the gradient is proportional to cascade energy by a factor of
+            `nominal_cascade_energy`.
 
             Parameters
             ----------
@@ -546,111 +548,76 @@ def generate_pexp_5d_function(
 
             Returns
             -------
-            neg_grad_llh : float
+            grad_neg_llh : float
 
             """
-            grad_llh = -sum_scaling_exp_charge # pylint: disable=invalid-unary-operand-type
-            for operational_dom_idx in range(num_operational_doms):
-                dom = event_dom_info[operational_dom_idx]
-                dom_total_observed_charge = dom['total_observed_charge']
-                if dom_total_observed_charge > 0:
-                    dom_scaling_dom_exp = scaling_dom_exp[operational_dom_idx]
-                    exp = dom_exp[operational_dom_idx] + scalefactor * dom_scaling_dom_exp
-                    exp += dom['noise_rate_per_ns'] * time_window
-                    if exp > 0:
-                        grad_llh += dom_total_observed_charge / exp * dom_scaling_dom_exp
+            # Time- and DOM-independent part of grad(-LLH)
+            grad_neg_llh = nominal_scaling_t_indep_exp
 
-            # time dependent part of gradient (necessary?)
-            #for hit_idx in range(num_hits):
-            #    hit = event_hit_info[hit_idx]
-            #    operational_dom_idx = hit['event_dom_idx']
-            #    hit_charge = hit['charge']
-            #    exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
-            #    norm = (
-            #        dom_exp[operational_dom_idx]
-            #        + scalefactor * scaling_dom_exp[operational_dom_idx]
-            #    )
-            #    # to calculate derivative (chain and quotient rule)
-            #    if norm > 0 and exp > 0:
-            #        p = exp / norm
-            #        p = min(max(0, p),1)
-            #        logterm = p*(1 - recip_time_window) + recip_time_window
-            #        logterm = max(logterm, MACHINE_EPS)
-            #        deriv_num = norm * scaling_hit_exp[hit_idx] - exp * scaling_dom_exp[operational_dom_idx]
-            #        deriv_denom = norm**2
-            #        grad_llh += (hit_charge / logterm) * (deriv_num / deriv_denom) * (1 - recip_time_window)
+            # Time-dependent part of grad(-LLH) (i.e., at hit times)
+            for hit_idx, hit_info in enumerate(event_hit_info):
+                grad_neg_llh -= (
+                    hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                    / (
+                        event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                        + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                        + nonscaling_hit_exp[hit_idx]
+                      )
+                )
 
-            return -grad_llh
+            return grad_neg_llh
 
-        # Gradient descent
-        scalefactor = last_scalefactor
-        gamma = 10.
-        epsilon = 1e-1
-        previous_step = 100
-        n = 0
-        while previous_step > epsilon and scalefactor > -100 and scalefactor < 1000 and n < 100:
-            gradient = grad(scalefactor)
+        # -- Perform gradient descent on -LLH -- #
+
+        # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
+
+        scalefactor = initial_scalefactor
+        gamma = 10. # step size multiplier
+        epsilon = 1e-1 # tolerance
+        iters = 0 # iteration counter
+        while True:
+            gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
             step = -gamma * gradient
             scalefactor += step
-            previous_step = abs(step)
-            n += 1
+            iters += 1
+            if (
+                abs(step) < epsilon
+                or scalefactor <= -100
+                or scalefactor >= 1000
+                or iters >= 100
+            ):
+                break
 
-        if scalefactor < 0:
-            scalefactor = 0
-        elif scalefactor > 1000:
-            scalefactor = 1000
+        scalefactor = max(0., min(1000., scalefactor))
 
-        # -- Calculate the scale factor -- #
-        llh = -sum_nonscaling_exp_charge - scalefactor * sum_scaling_exp_charge
-        # Second time-independent part
-        for operational_dom_idx in range(num_operational_doms):
-            dom = event_dom_info[operational_dom_idx]
-            dom_total_observed_charge = dom['total_observed_charge']
-            if dom_total_observed_charge > 0:
-                exp = (
-                    dom_exp[operational_dom_idx]
-                    + scalefactor * scaling_dom_exp[operational_dom_idx]
-                    + dom['noise_rate_per_ns'] * time_window
-                )
-                exp = max(exp, MACHINE_EPS)
-                llh += dom_total_observed_charge * math.log(exp)
+        # -- Calculate llh at the optimal `scalefactor` found -- #
 
-        # Time-dependent part
-        for hit_idx in range(num_hits):
-            hit = event_hit_info[hit_idx]
-            operational_dom_idx = hit['event_dom_idx']
-            hit_charge = hit['charge']
-            exp = hit_exp[hit_idx] + scalefactor * scaling_hit_exp[hit_idx]
-            norm = (
-                dom_exp[operational_dom_idx]
-                + scalefactor * scaling_dom_exp[operational_dom_idx]
-            )
-            if norm > 0:
-                p = exp / norm
-            else:
-                p = 0.
-            p = min(max(0, p),1)
-            exp = p*(1 - recip_time_window) + recip_time_window
-            exp = max(exp, MACHINE_EPS)
-            llh += (
-                hit_charge * math.log(exp)
+        # Time- and DOM-independent part of LLH
+        llh = -scalefactor * nominal_scaling_t_indep_exp - nonscaling_t_indep_exp
+
+        # Time-dependent part of LLH (i.e., at hit times)
+        for hit_idx, hit_info in enumerate(event_hit_info):
+            llh += hit_info['charge'] * math.log(
+                event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                + nonscaling_hit_exp[hit_idx]
             )
 
-        return llh, scalefactor
+        return scalefactor, llh
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def get_llh_all_doms(
-            generic_sources,
-            pegleg_sources,
-            scaling_sources,
-            event_hit_info,
-            time_window,
-            event_dom_info,
-            tables,
-            table_norms,
-            t_indep_tables,
-            t_indep_table_norms,
-        ):
+    def get_llh(
+        generic_sources,
+        pegleg_sources,
+        scaling_sources,
+        event_hit_info,
+        event_dom_info,
+        tables,
+        table_norms,
+        t_indep_tables,
+        t_indep_table_norms,
+        pegleg_stepsize,
+    ):
         """Compute log likelihood for hypothesis sources given an event.
 
         This version of get_llh is specialized to compute log-likelihoods for
@@ -660,14 +627,22 @@ def generate_pexp_5d_function(
 
         Parameters
         ----------
-        generic_sources : shape (n_sources,) array of dtype SRC_T
-        pegleg_sources : shape (n_sources,) array of dtype SRC_T
-            over these sources will be maximized in order
-        scaling_sources : shape (n_sources,) array of dtype SRC_T
-            over these sources will be maximized using a scalefactor
-        event_hit_info : shape (n_event_hit_info_total,) array of dtype HIT_T
-        time_window : float64
-        event_dom_info : array of dtype EVT_DOM_INFO_T
+        generic_sources : shape (n_generic_sources,) array of dtype SRC_T
+            If NOT using the pegleg/scaling procedure, all light sources are placed in
+            this array; when using the pegleg/scaling procedure, `generic_sources` will
+            be empty (i.e., `n_generic_sources = 0`)
+        pegleg_sources : shape (n_pegleg_sources,) array of dtype SRC_T
+            If using the pegleg/scaling procedure, the likelihood is maximized by
+            including more and more of these sources (in the order given); if not using
+            the pegleg/scaling procedures, `pegleg_sources` will be an empty array
+            (i.e., `n_pegleg_sources = 0`)
+        scaling_sources : shape (n_scaling_sources,) array of dtype SRC_T
+            If using the pegleg/scaling procedure, the likelihood is maximized by
+            scaling the luminosity of these sources; if not using the pegleg/scaling
+            procedure, `scaling_sources` will be an empty array (i.e.,
+            `n_scaling_sources = 0`)
+        event_hit_info : shape (n_hits,) array of dtype EVT_HIT_INFO_T
+        event_dom_info : shape (n_operational_doms,) array of dtype EVT_DOM_INFO_T
         tables
             Stacked tables
         table_norms
@@ -676,13 +651,17 @@ def generate_pexp_5d_function(
             Stacked time-independent tables
         t_indep_table_norms
             Norms for all stacked time-independent tables
+        pegleg_stepsize : int > 0
+            Number of pegleg sources to add each time around the pegleg loop; ignored if
+            pegleg/scaling procedure is not performed
 
         Returns
         -------
         llh : float
             Log-likelihood value at best pegleg hypo
-        pegleg_idx : int
-            Index for best pegleg hypo
+        pegleg_stop_idx : int
+            Stop index for `pegleg_sources` to obtain optimal LLH .. ::
+                pegleg_sources[:pegleg_stop_idx]
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
 
@@ -710,20 +689,12 @@ def generate_pexp_5d_function(
         num_operational_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
-        recip_time_window = 1. / time_window
-        sum_noise_rate = np.sum(event_dom_info['noise_rate_per_ns'])
+        # -- Expectations due to nominal (`scalefactor = 1`) scaling sources -- #
 
-        # Initialize expectations arrays
-        dom_exp = np.zeros(shape=num_operational_doms, dtype=np.float64)
-        hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
+        nominal_scaling_t_indep_exp = 0.
+        nominal_scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
-        # Save the scaling sources expectations in separate arrays
-        scaling_dom_exp = np.zeros(shape=num_operational_doms, dtype=np.float64)
-        scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
-
-        # Get scaling sources expectations first for a nominal (e.g. cascade)
-        # hypothesis that will then be scaled below
-        pexp_5d(
+        nominal_scaling_t_indep_exp += pexp_5d(
             sources=scaling_sources,
             sources_start=0,
             sources_stop=len(scaling_sources),
@@ -733,14 +704,16 @@ def generate_pexp_5d_function(
             table_norms=table_norms,
             t_indep_tables=t_indep_tables,
             t_indep_table_norms=t_indep_table_norms,
-            dom_exp=scaling_dom_exp,
-            hit_exp=scaling_hit_exp,
+            hit_exp=nominal_scaling_hit_exp,
         )
 
-        #print('nominal scaling charge ',np.sum(scaling_dom_exp))
+        # -- Storage for exp due to generic + pegleg (non-scaling) sources -- #
 
-        # Get expectations for sources handled generically
-        pexp_5d(
+        nonscaling_t_indep_exp = 0.
+        nonscaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
+
+        # Expectations for generic-only sources (i.e. pegleg=0 at this point)
+        nonscaling_t_indep_exp += pexp_5d(
             sources=generic_sources,
             sources_start=0,
             sources_stop=len(generic_sources),
@@ -750,35 +723,35 @@ def generate_pexp_5d_function(
             table_norms=table_norms,
             t_indep_tables=t_indep_tables,
             t_indep_table_norms=t_indep_table_norms,
-            dom_exp=dom_exp,
-            hit_exp=hit_exp,
+            hit_exp=nonscaling_hit_exp,
         )
 
-        # Compute initial LLH (and set all elements to that one)
-        llh, scalefactor = eval_llh(
+        # Compute initial scalefactor & LLH for generic-only (no pegleg) sources
+        scalefactor, llh = get_optimal_scalefactor(
             event_dom_info=event_dom_info,
             event_hit_info=event_hit_info,
-            dom_exp=dom_exp,
-            hit_exp=hit_exp,
-            scaling_dom_exp=scaling_dom_exp,
-            scaling_hit_exp=scaling_hit_exp,
-            sum_noise_rate=sum_noise_rate,
-            time_window=time_window,
-            recip_time_window=recip_time_window,
-            last_scalefactor=10.,
+            nonscaling_hit_exp=nonscaling_hit_exp,
+            nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+            nominal_scaling_hit_exp=nominal_scaling_hit_exp,
+            nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
+            initial_scalefactor=10.,
         )
 
         llhs = np.full(shape=n_pegleg_steps, fill_value=llh, dtype=np.float64)
+        llhs[0] = llh
+
         scalefactors = np.zeros(shape=n_pegleg_steps, dtype=np.float64)
         scalefactors[0] = scalefactor
 
-        #best_idx = 0
         best_llh = llh
+        best_llh_idx = 0
         getting_worse_counter = 0
+
+        # -- Pegleg loop -- #
 
         for pegleg_idx in range(1, n_pegleg_steps):
             # Update pegleg sources with additional segment of sources
-            pexp_5d(
+            nonscaling_t_indep_exp += pexp_5d(
                 sources=pegleg_sources,
                 sources_start=pegleg_steps[pegleg_idx-1],
                 sources_stop=pegleg_steps[pegleg_idx],
@@ -788,22 +761,18 @@ def generate_pexp_5d_function(
                 table_norms=table_norms,
                 t_indep_tables=t_indep_tables,
                 t_indep_table_norms=t_indep_table_norms,
-                dom_exp=dom_exp,
-                hit_exp=hit_exp,
+                hit_exp=nonscaling_hit_exp,
             )
 
-            # Get new best scaling factor & llh for the scaling sources
-            llh, scalefactor = eval_llh(
+            # Find optimal scalefactor at this pegleg step
+            scalefactor, llh = get_optimal_scalefactor(
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
-                dom_exp=dom_exp,
-                hit_exp=hit_exp,
-                scaling_dom_exp=scaling_dom_exp,
-                scaling_hit_exp=scaling_hit_exp,
-                sum_noise_rate=sum_noise_rate,
-                time_window=time_window,
-                recip_time_window=recip_time_window,
-                last_scalefactor=scalefactor,
+                nonscaling_hit_exp=nonscaling_hit_exp,
+                nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+                nominal_scaling_hit_exp=nominal_scaling_hit_exp,
+                nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
+                initial_scalefactor=scalefactor,
             )
 
             # Store this pegleg step's llh and best scalefactor
@@ -825,20 +794,6 @@ def generate_pexp_5d_function(
                 #print('break at step ',pegleg_idx)
                 break
 
-            # TODO: make this more general, less hacky continue/stop condition
-
-            #still improving?
-            # if we weren't improving for the last 30 steps, break
-            #if pegleg_idx > best_idx + 300:
-            #    #print('no improvement')
-            #    break
-            # if improvements were small or none, break:
-            #if pegleg_idx > 300:
-            #    delta_llh = llh - llhs[pegleg_idx - 300]
-            #    if delta_llh < 0.5:
-            #        #print('little improvement')
-            #        break
-
 
         # find the best pegleg idx:
         best_llh = np.max(llhs)
@@ -857,7 +812,5 @@ def generate_pexp_5d_function(
         #best_idx = np.median(good_indices)
 
         return llhs[best_idx], pegleg_steps[best_idx], scalefactors[best_idx]
-
-    get_llh = get_llh_all_doms
 
     return pexp_5d, get_llh, meta

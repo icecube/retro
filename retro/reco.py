@@ -343,10 +343,6 @@ class RetroReco(object):
         t_indep_tables = self.dom_tables.t_indep_tables
         t_indep_table_norms = self.dom_tables.t_indep_table_norms
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
-        time_window = (
-            event['hits_summary']['time_window_stop']
-            - event['hits_summary']['time_window_start']
-        )
 
         truth_info = OrderedDict()
         truth_info['x'] = event['truth']['x']
@@ -414,8 +410,8 @@ class RetroReco(object):
         noise[mask] = 1e-7
         print('this evt. noise rate %.5f'%np.sum(event_dom_info['noise_rate_per_ns']))
         print('DOMs with zero noise: %i'%np.sum(event_dom_info['noise_rate_per_ns'] == 0))
-        print('min noise: ',np.min(noise))
-        print('mean noise: ',np.mean(noise))
+        print('min noise: ', np.min(noise))
+        print('mean noise: ', np.mean(noise))
 
         assert np.sum(event_dom_info['quantum_efficiency'] <= 0) == 0, 'negative QE'
         assert np.sum(event_dom_info['total_observed_charge']) > 0, 'no charge'
@@ -458,12 +454,12 @@ class RetroReco(object):
                 pegleg_sources=pegleg_sources,
                 scaling_sources=scaling_sources,
                 event_hit_info=event_hit_info,
-                time_window=time_window,
                 event_dom_info=event_dom_info,
                 tables=tables,
                 table_norms=table_norms,
                 t_indep_tables=t_indep_tables,
                 t_indep_table_norms=t_indep_table_norms,
+                pegleg_stepsize=1,
             )
             assert np.isfinite(llh), 'LLH not finite'
             assert llh < 0, 'LLH positive'

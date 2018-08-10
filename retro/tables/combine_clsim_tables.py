@@ -14,7 +14,6 @@ __all__ = [
     'ALL_KEYS',
     'combine_clsim_tables',
     'parse_args',
-    'main'
 ]
 
 __author__ = 'J.L. Lanfranchi'
@@ -58,13 +57,14 @@ VALIDATE_KEYS = [
     't_bin_edges',
     'costhetadir_bin_edges',
     'deltaphidir_bin_edges',
+    't_is_residual_time',
     'step_length',
 ] # yapf: disable
 """Values corresponding to these keys must match in all loaded tables"""
 
 SUM_KEYS = [
     'n_photons',
-    'table'
+    'table',
 ] # yapf: disable
 """Sum together values corresponding to these keys in all tables"""
 
@@ -74,6 +74,7 @@ ALL_KEYS = VALIDATE_KEYS + SUM_KEYS + ['t_indep_table']
 
 def combine_clsim_tables(
     table_fpaths,
+    t_is_residual_time=None,
     outdir=None,
     overwrite=False,
     step_length=1.0
@@ -90,6 +91,13 @@ def combine_clsim_tables(
     ----------
     table_fpaths : string or iterable thereof
         Each string is glob-expanded
+
+    t_is_residual_time : bool, optional
+        Whether time dimension in table represents residual time. If a value is
+        passed and it doesn't match the key of the same name in the table, a
+        ValueError will be raised. If a value is passed and the key does not
+        exist in the table, this key will be added. If a value is not passed,
+        no modification to the loaded table will be made.
 
     outdir : string, optional
         Directory to which to save the combined table; if not specified, the
@@ -143,7 +151,7 @@ def combine_clsim_tables(
         )
         output_fpaths['source_tables'] = join(outdir, 'source_tables.txt')
         if not overwrite:
-            for fpath in output_fpaths:
+            for fpath in output_fpaths.values():
                 if isfile(fpath):
                     raise IOError('File {} exists'.format(fpath))
         wstderr(
@@ -156,7 +164,10 @@ def combine_clsim_tables(
     combined_table = None
     for fpath in table_fpaths:
         table = load_clsim_table_minimal(
-            fpath, step_length=step_length, mmap=True
+            fpath,
+            t_is_residual_time=t_is_residual_time,
+            step_length=step_length,
+            mmap=True,
         )
 
         if combined_table is None:
@@ -240,6 +251,10 @@ def parse_args(description=__doc__):
         glob-expanded.'''
     )
     parser.add_argument(
+        '--t-is-residual-time', action='store_true',
+        help='''Whether time dimension represents residual time'''
+    )
+    parser.add_argument(
         '--outdir', required=True,
         help='''Directory to which to save the combined table. Defaults to same
         directory as the first file path specified by --table-fpaths.'''
@@ -247,12 +262,5 @@ def parse_args(description=__doc__):
     return parser.parse_args()
 
 
-def main():
-    """Main function for calling combine_clsim_tables as a script"""
-    args = parse_args()
-    kwargs = vars(args)
-    combine_clsim_tables(**kwargs)
-
-
 if __name__ == '__main__':
-    main()
+    combine_clsim_tables(**vars(parse_args()))
