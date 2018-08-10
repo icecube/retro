@@ -8,7 +8,7 @@ survive from a 5D CLSim table.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['MACHINE_EPS', 'generate_pexp_5d_function']
+__all__ = ['MACHINE_EPS', 'generate_pexp_function']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -32,28 +32,23 @@ import sys
 
 import numpy as np
 
-from scipy import stats
-
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
-from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI
+from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 from retro.utils.geom import generate_digitizer
 
 
 MACHINE_EPS = 1e-10
 
-def generate_pexp_5d_function(
-    table,
+
+def generate_pexp_function(
+    table_meta,
     table_kind,
     t_is_residual_time,
-    compute_t_indep_exp,
-    compute_unhit_doms,
-    use_directionality,
-    num_phi_samples=None,
-    ckv_sigma_deg=None,
+    tdi_table_meta=None,
     template_library=None,
 ):
     """Generate a numba-compiled function for computing expected photon counts
@@ -62,7 +57,7 @@ def generate_pexp_5d_function(
 
     Parameters
     ----------
-    table : mapping
+    table_meta : mapping
         As returned by `load_clsim_table_minimal`
 
     table_kind : str in {'raw_uncompr', 'ckv_uncompr', 'ckv_templ_compr'}
@@ -71,108 +66,118 @@ def generate_pexp_5d_function(
         Whether time axis is actually time residual, defined to be
         (actual time) - (fastest time a photon could get to spatial coordinate)
 
-    compute_t_indep_exp : bool
-        Whether to use the single-DOM tables for computing time-independent
-        expectations. Set to True unless e.g. you use a TDI table to get this
-        information.
-
-    compute_unhit_doms : bool
-        Whether to compute expecations for unhit DOMs. Set to False e.g. if you
-        get this information from a TDI table. If `compute_t_indep_exp` is
-        False, this must also be False.
-
-    use_directionality : bool
-        If the source photons have directionality, use it in computing photon
-        expectations at the DOM.
-
-    num_phi_samples : int
-        Number of samples in the phi_dir to average over bin counts.
-        (Irrelevant if `use_directionality` is False or if you use a Cherenkov
-        table, which already has this parameter integrated into it.)
-
-    ckv_sigma_deg : float
-        Standard deviation in degrees for Cherenkov angle. (Irrelevant if
-        `use_directionality` is False or if you use a Cherenkov table, which
-        already has this parameter integrated into it.)
+    tdi_table_meta : sequence of two mappings, optional
+        If provided, sequence _must_ contain two mappings, where the first corresponds
+        to the finest-binned TDI table and the second corresponds to the coarsest-binned
+        table (the first table takes priority over the second for looking up sources).
+        Each mapping must contain keys "x_bin_edges", "y_bin_edges", "z_bin_edges",
+        "costhetadir_bin_edges", and "phidir_bin_edges"; values are arrays of the bin
+        edges in each of these dimensions
 
     template_library : shape-(n_templates, n_dir_theta, n_dir_deltaphi) array
         Containing the directionality templates for compressed tables
 
     Returns
     -------
-    pexp_5d : callable
+    pexp : callable
         Function usable to extract photon expectations from a table of
-        `table_kind` and with the binning of `table`. Note that this returns
-        two values (photon expectation at hit time and time-independent photon
-        expectation) even if `compute_t_indep_exp` is False (whereupon the
-        latter number should be ignored.
+        `table_kind` and with the binning of `table_meta` (and optionally
+        `tdi_table_meta`).
 
     get_llh : callable
 
     meta : OrderedDict
         Parameters, including the binning, that uniquely identify what the
-        capabilities of the returned `pexp_5d`. (Use this to eliminate
-        redundant pexp_5d functions.)
+        capabilities of the returned `pexp`. (Use this to eliminate
+        redundant pexp functions.)
 
     """
     # pylint: disable=missing-docstring
-    tbl_is_raw = table_kind in ['raw_uncompr', 'raw_templ_compr']
     tbl_is_ckv = table_kind in ['ckv_uncompr', 'ckv_templ_compr']
     tbl_is_templ_compr = table_kind in ['raw_templ_compr', 'ckv_templ_compr']
-    assert tbl_is_raw or tbl_is_ckv
+    if not tbl_is_ckv:
+        raise NotImplementedError('Only Ckv tables are implemented.')
 
-    if not compute_t_indep_exp:
-        assert not compute_unhit_doms
+    meta = OrderedDict()
+    meta['table_kind'] = table_kind
+    meta['table_binning'] = OrderedDict()
+    for key in (
+        'r_bin_edges', 'costhetadir_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
+        'deltaphidir_bin_edges'
+    ):
+        meta['table_binning'][key] = table_meta[key]
 
-    meta = OrderedDict([
-        ('table_kind', table_kind),
-        ('compute_t_indep_exp', compute_t_indep_exp),
-        ('use_directionality', use_directionality),
-        ('num_phi_samples', None if tbl_is_ckv or not use_directionality else num_phi_samples),
-        ('ckv_sigma_deg', None if tbl_is_ckv or not use_directionality else ckv_sigma_deg),
-        ('binning', OrderedDict([
-            ('r_bin_edges', table['r_bin_edges']),
-            ('costheta_bin_edges', table['costheta_bin_edges']),
-            ('t_bin_edges', table['t_bin_edges']),
-            ('costhetadir_bin_edges', table['costhetadir_bin_edges']),
-            ('deltaphidir_bin_edges', table['deltaphidir_bin_edges']),
-        ])),
-    ])
+    if tdi_table_meta is not None:
+        assert tdi_table_meta['phidir_bin_edges'][0] == -np.pi
+        assert tdi_table_meta['phidir_bin_edges'][-1] == np.pi
 
-    # Replace None with 0 for sending to Numba functions
-    if num_phi_samples is None:
-        num_phi_samples = 0
-    if ckv_sigma_deg is None:
-        ckv_sigma_deg = 0
+        meta['tdi_table_binning'] = OrderedDict()
+        for key in (
+            'x_bin_edges', 'y_bin_edges', 'z_bin_edges', 'costhetadir_bin_edges',
+            'phidir_bin_edges'
+        ):
+            meta['tdi_table_binning'][key] = tdi_table_meta[key]
 
     # NOTE: For now, we only support absolute value of deltaphidir (which
     # assumes azimuthal symmetry). In future, this could be revisited (and then
     # the abs(...) applied before binning in the pexp code will have to be
     # removed or replaced with behavior that depend on the range of the
     # deltaphidir_bin_edges).
-    assert np.min(table['deltaphidir_bin_edges']) >= 0, 'only abs(deltaphidir) supported'
+    assert table_meta['deltaphidir_bin_edges'][0] == 0, 'only abs(deltaphidir) supported'
+    assert table_meta['deltaphidir_bin_edges'][-1] == np.pi
 
-    # -- Define things used by `pexp_5d*` closures defined below -- #
+    # -- Define things used by `pexp*` closures defined below -- #
 
     # Constants
-    rsquared_max = np.max(table['r_bin_edges'])**2
-    last_costhetadir_bin_idx = len(table['costhetadir_bin_edges']) - 2
-    last_deltaphidir_bin_idx = len(table['deltaphidir_bin_edges']) - 2
-    t_max = np.max(table['t_bin_edges'])
-    recip_max_group_vel = table['group_refractive_index'] / SPEED_OF_LIGHT_M_PER_NS
+    rsquared_max = np.max(table_meta['r_bin_edges'])**2
+    t_max = np.max(table_meta['t_bin_edges'])
+    recip_max_group_vel = table_meta['group_refractive_index'] / SPEED_OF_LIGHT_M_PER_NS
 
     # Digitization functions for each binning dimension
-    digitize_r = generate_digitizer(table['r_bin_edges'])
-    digitize_costheta = generate_digitizer(table['costheta_bin_edges'])
-    digitize_t = generate_digitizer(table['t_bin_edges'])
-    digitize_costhetadir = generate_digitizer(table['costhetadir_bin_edges'])
-    digitize_deltaphidir = generate_digitizer(table['deltaphidir_bin_edges'])
+    digitize_r = generate_digitizer(table_meta['r_bin_edges'], clip=True)
+    digitize_costheta = generate_digitizer(table_meta['costheta_bin_edges'], clip=True)
+    digitize_t = generate_digitizer(table_meta['t_bin_edges'], clip=True)
+    digitize_costhetadir = generate_digitizer(
+        table_meta['costhetadir_bin_edges'], clip=True
+    )
+    digitize_deltaphidir = generate_digitizer(
+        np.sin(table_meta['deltaphidir_bin_edges']), clip=True
+    )
 
+    x_edges = tdi_table_meta[0]['x_bin_edges']
+    y_edges = tdi_table_meta[0]['y_bin_edges']
+    z_edges = tdi_table_meta[0]['z_bin_edges']
+    tdi0_xmin, tdi0_xmax = x_edges[0, -1]
+    tdi0_ymin, tdi0_ymax = y_edges[0, -1]
+    tdi0_zmin, tdi0_zmax = z_edges[0, -1]
+    digitize_tdi0_x = generate_digitizer(x_edges, clip=True)
+    digitize_tdi0_y = generate_digitizer(y_edges, clip=True)
+    digitize_tdi0_z = generate_digitizer(z_edges, clip=True)
+    digitize_tdi0_costhetadir = generate_digitizer(
+        tdi_table_meta[0]['costhetadir_bin_edges'], clip=True
+    )
+    digitize_tdi0_sinphidir = generate_digitizer(
+        np.sin(tdi_table_meta[0]['phidir_bin_edges']), clip=True
+    )
 
-    # to sample for DOM jitter etc
-    jitter_dt = np.arange(-10, 11, 2)
-    jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
-    jitter_weights /= np.sum(jitter_weights)
+    x_edges = tdi_table_meta[1]['x_bin_edges']
+    y_edges = tdi_table_meta[1]['y_bin_edges']
+    z_edges = tdi_table_meta[1]['z_bin_edges']
+    tdi1_xmin, tdi1_xmax = x_edges[0, -1]
+    tdi1_ymin, tdi1_ymax = y_edges[0, -1]
+    tdi1_zmin, tdi1_zmax = z_edges[0, -1]
+    digitize_tdi1_x = generate_digitizer(x_edges, clip=True)
+    digitize_tdi1_y = generate_digitizer(y_edges, clip=True)
+    digitize_tdi1_z = generate_digitizer(z_edges, clip=True)
+    digitize_tdi1_costhetadir = generate_digitizer(
+        tdi_table_meta[1]['costhetadir_bin_edges'], clip=True
+    )
+    digitize_tdi1_sinphidir = generate_digitizer(
+        np.sin(tdi_table_meta[1]['phidir_bin_edges']), clip=True
+    )
+
+    # Model clock jitter and transit time spread (TTS)
+    jitter_timeshifts = np.arange(-10, 11, 2)
 
     # Indexing functions for table types omni / directional lookups
     if tbl_is_templ_compr:
@@ -222,10 +227,61 @@ def generate_pexp_5d_function(
     )
     table_lookup.__doc__ = """Helper function for directional table lookup"""
 
-    # -- Define `pexp_5d*` closures (functions that use things defined above) -- #
+    # -- Define `pexp*` closures (functions that use things defined above) -- #
+
+    # Note in the following that we need to invert the costheta
+    # direction of the sources to match the directions that
+    # Retro simulation comes up with. Thus the angles
+    # associated with this that we want to work with are
+    #   cos(pi - thetadir) = -cos(thetadir),
+    #   sin(pi - thetadir) = sin(thetadir),
+    #   cos(phidir) = cos(-phidir),
+    #   sin(phidir) = -sin(-phidir)
+    #
+    # This should be seen as a bug, but not sure how to address
+    # it without modifying existing tables, so sticking with it
+    # for now.
+    #
+    # We bin cos(pi - thetadir), so need to simply bin the
+    # quantity `-src_dir_costheta`.
+    #
+    # We want to bin abs(deltaphidir), which is described now:
+    # Just look at vectors in the xy-plane, since we want
+    # difference of angle in this plane. Use dot product:
+    #   dot(dir_vec_xy, pos_vec_xy) = |dir_vec_xy| |pos_vec_xy| cos(deltaphidir)
+    # where the length of the directionality vector in the xy-plane is
+    #   |dir_vec_xy| = rhodir = rdir * sin(pi - thetadir)
+    # and since rdir = 1 and the inversion of the angle above
+    #   |dir_vec_xy| = rhodir = sin(thetadir).
+    # The length of the position vector in the xy-plane is
+    #   |pos_vec_xy| = rho = sqrt(dx^2 + dy^2)
+    # where dx and dy are src_x - dom_x and src_y - dom_y.
+    # Solving for cos(deltaphidir):
+    #   cos(deltaphidir) = dot(dir_vec_xy, pos_vec_xy) / (rhodir * rho)
+    # we just need to write out the components of the dot
+    # product in terms of quantites we have:
+    #   dir_vec_x = rhodir * cos(phidir)
+    #   dir_vec_y = rhodir * sin(phidir)
+    #   pos_vec_x = dx
+    #   pos_vec_y = dy
+    # giving
+    #   cos(deltaphidir) = -(rhodir*cos(phidir)*dx + rhodir*sin(phidir)*dy)/(rhodir*rho)
+    # (where we use the negative to account for the inverted
+    # costhetadir in the tables); cancel rhodir out
+    #   cos(deltaphidir) = (cos(phidirpi)*dx + sin(phidirpi)*dy) / rho
+    # and substitute the identities above
+    #   cos(deltaphidir) = (cos(phidir)*dx + sin(phidir)*dy) / rho
+    # Finally, solve for deltaphidir
+    #   deltaphidir = acos((cos(phidir)*dx + sin(phidir)*dy) / rho)
+
+    # A photon that starts immediately in the past (before the
+    # DOM was hit) will show up in the Retro DOM tables in bin
+    # 0; the further in the past the photon started, the
+    # higher the time bin index. Therefore, subract source
+    # time from hit time.
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def pexp_5d_ckv_compute_t_indep(
+    def pexp_sensor_dep_t_indep_tables(
         sources,
         sources_start,
         sources_stop,
@@ -320,27 +376,23 @@ def generate_pexp_5d_function(
             src_photons = src['photons']
 
             for op_dom_idx in range(num_operational_doms):
-                dom = event_dom_info[op_dom_idx]
-                dom_tbl_idx = dom['table_idx']
-                dom_qe = dom['quantum_efficiency']
-                dom_hits_start_idx = dom['hits_start_idx']
-                dom_hits_stop_idx = dom['hits_stop_idx']
+                dom_info = event_dom_info[op_dom_idx]
+                dom_tbl_idx = dom_info['table_idx']
+                dom_qe = dom_info['quantum_efficiency']
+                dom_hits_start_idx = dom_info['hits_start_idx']
+                dom_hits_stop_idx = dom_info['hits_stop_idx']
 
-                dx = src_x - dom['x']
-                dy = src_y - dom['y']
-                dz = src_z - dom['z']
+                dx = src_x - dom_info['x']
+                dy = src_y - dom_info['y']
+                dz = src_z - dom_info['z']
 
-                rhosquared = dx**2 + dy**2
-                rhosquared = max(MACHINE_EPS, rhosquared)
+                rhosquared = max(MACHINE_EPS, dx**2 + dy**2)
                 rsquared = rhosquared + dz**2
 
-                # Continue if photon is outside the radial binning limits
-                if rsquared >= rsquared_max:
+                if rsquared > rsquared_max:
                     continue
 
-                r = math.sqrt(rsquared)
-                if r < MACHINE_EPS:
-                    r = MACHINE_EPS
+                r = max(MACHINE_EPS, math.sqrt(rsquared))
                 r_bin_idx = digitize_r(r)
 
                 costheta_bin_idx = digitize_costheta(dz/r)
@@ -353,70 +405,15 @@ def generate_pexp_5d_function(
                 else: # SRC_CKV_BETA1:
                     rho = math.sqrt(rhosquared)
 
-                    # TODO/NOTE: apparently the dir signs are backwards in the
-                    # below explanation. Figure out why & fix the explanation!
-
-                    # Note in the following that we need to invert the
-                    # directions of the sources to match the directions that
-                    # Retro simulation comes up with, thus we work with
-                    # -dir_vec. The angles associated with this that we want
-                    # to work with are
-                    #   cos(pi - thetadir) = -cos(thetadir),
-                    #   sin(pi - thetadir) = sin(thetadir),
-                    #   cos(phidir + pi) = -cos(phidir),
-                    #   sin(phidir + pi) = sin(phidir)
-                    #
-                    # We bin cos(pi - thetadir), so need to simply bin the
-                    # quantity `-src_dir_costheta`.
-                    #
-                    # We want to bin abs(deltaphidir), which is described now:
-                    # Just look at vectors in the xy-plane, since we want
-                    # difference of angle in this plane. Use dot product:
-                    #   dot(-dir_vec_xy, pos_vec_xy) = |-dir_vec_xy| |pos_vec_xy| cos(deltaphidir)
-                    # where the length of the directionality vector in the xy-plane is
-                    #   |-dir_vec_xy| = rhodir = rdir * sin(pi - thetadir)
-                    # and since rdir = 1 and the inversion of the angle above
-                    #   |-dir_vec_xy| = rhodir = sin(thetadir).
-                    # The length of the position vector in the xy-plane is
-                    #   |pos_vec_xy| = rho = sqrt(dx^2 + dy^2)
-                    # where dx and dy are src_x - dom_x and src_y - dom_y.
-                    # Solving for cos(deltaphidir):
-                    #   cos(deltaphidir) = dot(-dir_vec_xy, pos_vec_xy) / (rhodir * rho)
-                    # we just need to write out the components of the dot
-                    # product in terms of quantites we have:
-                    #   -dir_vec_x = rhodir * cos(phidir + pi)
-                    #   -dir_vec_y = rhodir * sin(phidir + pi)
-                    #   pos_vec_x = dx
-                    #   pos_vec_y = dy
-                    # giving
-                    #   cos(deltaphidir) = (rhodir*cos(phidir+pi)*dx + rhodir*sin(phidir+pi)*dy)/(rhodir*rho)
-                    # cancel rhodir out
-                    #   cos(deltaphidir) = (cos(phidir + pi)*dx + sin(phidir + pi)*dy) / rho
-                    # and substitute the identities above
-                    #   cos(deltaphidir) = (-cos(phidir)*dx - sin(phidir)*dy) / rho
-                    # Finally, solve for deltaphidir
-                    #   deltaphidir = acos((-cos(phidir)*dx - sin(phidir)*dy) / rho)
-
                     if rho <= MACHINE_EPS:
-                        absdeltaphidir = 0
+                        absdeltaphidir = 0.
                     else:
-                        cosdeltaphidir = - (src_dir_cosphi*dx + src_dir_sinphi*dy) / rho
+                        absdeltaphidir = abs(math.acos(
+                            min(1., max(-1., -(src_dir_cosphi*dx + src_dir_sinphi*dy) / rho))
+                        ))
 
-                        # Clip cosdeltaphidir within range [-1, 1] in case of
-                        # finite precision issues in the above
-                        cosdeltaphidir = min(1, max(-1, cosdeltaphidir))
-                        absdeltaphidir = abs(math.acos(cosdeltaphidir))
-
-                    # Find directional bin indices
                     costhetadir_bin_idx = digitize_costhetadir(src_dir_costheta)
                     deltaphidir_bin_idx = digitize_deltaphidir(absdeltaphidir)
-
-                    # Make upper edges inclusive
-                    if costhetadir_bin_idx > last_costhetadir_bin_idx:
-                        costhetadir_bin_idx = last_costhetadir_bin_idx
-
-                    if deltaphidir_bin_idx > last_deltaphidir_bin_idx:
-                        deltaphidir_bin_idx = last_deltaphidir_bin_idx
 
                     t_indep_surv_prob = t_indep_tables[dom_tbl_idx][
                         r_bin_idx,
@@ -429,38 +426,234 @@ def generate_pexp_5d_function(
                 t_indep_exp += src_photons * ti_norm * t_indep_surv_prob * dom_qe
 
                 for hit_idx in range(dom_hits_start_idx, dom_hits_stop_idx):
-                    # A photon that starts immediately in the past (before the
-                    # DOM was hit) will show up in the Retro DOM tables in bin
-                    # 0; the further in the past the photon started, the
-                    # higher the time bin index. Therefore, subract source
-                    # time from hit time.
-                    nominal_dt = event_hit_info[hit_idx]['time'] - src_time
-
+                    hit_info = event_hit_info[hit_idx]
                     if t_is_residual_time:
-                        nominal_dt -= r * recip_max_group_vel
+                        nominal_dt = hit_info['time'] - src_time - r * recip_max_group_vel
+                    else:
+                        nominal_dt = hit_info['time'] - src_time
 
-                    for jitter_idx in range(len(jitter_dt)):
-                        dt = nominal_dt + jitter_dt[jitter_idx]
-                        weight = jitter_weights[jitter_idx]
+                    surv_prob_at_hit_t = 0.
+                    for timeshift in jitter_timeshifts:
+                        shifted_dt = nominal_dt + timeshift
 
                         # Note the comparison is written such that it will evaluate
                         # to True if hit_time is NaN.
-                        if (not dt >= 0) or dt >= t_max:
+                        if (not shifted_dt >= 0) or shifted_dt > t_max:
                             continue
 
-                        t_bin_idx = digitize_t(dt)
+                        t_bin_idx = digitize_t(shifted_dt)
 
                         if src_kind == SRC_OMNI:
-                            surv_prob_at_hit_t = table_lookup_mean(
+                            surv_prob_at_hit_t = max(
+                                surv_prob_at_hit_t,
+                                table_lookup_mean(
+                                    tables,
+                                    dom_tbl_idx,
+                                    r_bin_idx,
+                                    costheta_bin_idx,
+                                    t_bin_idx,
+                                )
+                            )
+
+                        else: # SRC_CKV_BETA1
+                            surv_prob_at_hit_t = max(
+                                surv_prob_at_hit_t,
+                                table_lookup(
+                                    tables,
+                                    dom_tbl_idx,
+                                    r_bin_idx,
+                                    costheta_bin_idx,
+                                    t_bin_idx,
+                                    costhetadir_bin_idx,
+                                    deltaphidir_bin_idx,
+                                )
+                            )
+
+                        r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
+                        hit_exp[hit_idx] += (
+                            src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
+                        )
+
+        return t_indep_exp
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def pexp_tdi_tables(
+        sources,
+        sources_start,
+        sources_stop,
+        event_dom_info,
+        event_hit_info,
+        tables,
+        table_norms,
+        tdi_tables,
+        hit_exp,
+    ):
+        r"""For a set of generated photons `sources`, compute the expected
+        photons in a particular DOM at `hit_time` and the total expected
+        photons, independent of time.
+
+        This function utilizes the relative space-time coordinates _and_
+        directionality of the generated photons (via "raw" 5D CLSim tables) to
+        determine how many photons are expected to arrive at the DOM.
+
+        Retro DOM tables applied to the generated photon info `sources`,
+        and the total expected photon count (time integrated) -- the
+        normalization of the pdf.
+
+        Parameters
+        ----------
+        sources : shape (num_sources,) array of dtype SRC_T
+            A discrete sequence of points describing expected sources of
+            photons that result from a hypothesized event.
+
+        sources_start, sources_stop : int, int
+            Starting and stopping indices for the part of the array on which to
+            work. Note that the latter is exclusive, i.e., following Python
+            range / slice syntx. Hence, the following section of `sources` will
+            be operated upon: .. ::
+
+                sources[sources_start:sources_stop]
+
+        event_dom_info : shape (n_operational_doms,) array of dtype EVT_DOM_INFO_T
+
+        event_hit_info : shape (n_hits,) array of dtype EVT_HIT_INFO_T
+
+        tables : array or list of arrays
+            Time-dependent photon survival probability table. If using an
+            uncompressed table, this will have shape
+                (n_r, n_costheta, n_t, n_costhetadir, n_deltaphidir)
+            while if you use a template-compressed table, this will have shape
+                (n_templates, n_costhetadir, n_deltaphidir)
+
+        table_norms : shape (n_tables, n_r, n_t) array
+            Normalization to apply to `table`, which is assumed to depend on
+            both r- and t-dimensions.
+
+        tdi_tables : length n_tdi_tables list of arrays
+            Time- and DOM-independent photon survival probability tables.
+
+        hit_exp : shape (n_hits,) array of floats
+            Time-dependent hit expectation at each (actual) hit time;
+            initialize outside of this function, as values are incremented
+            within this function. Values in `hit_exp` correspond to the values
+            in `event_hit_info`.
+
+        Returns
+        -------
+        t_indep_exp : float
+            Expectation of total hits for all operational DOMs
+
+        Out
+        ---
+        hit_exp
+            See above
+
+        """
+        t_indep_exp = 0.
+        for source_idx in range(sources_start, sources_stop):
+            src = sources[source_idx]
+            src_kind = src['kind']
+            src_x = src['x']
+            src_y = src['y']
+            src_z = src['z']
+            src_time = src['time']
+            src_dir_cosphi = src['dir_cosphi']
+            src_dir_sinphi = src['dir_sinphi']
+            src_dir_costheta = src['dir_costheta']
+            src_photons = src['photons']
+
+            if (
+                tdi0_xmin <= src_x <= tdi0_xmax
+                and tdi0_ymin <= src_y <= tdi0_ymax
+                and tdi0_zmin <= src_z <= tdi0_zmax
+            ):
+                t_indep_exp += src_photons * tdi_tables[0][
+                    digitize_tdi0_x(src_x),
+                    digitize_tdi0_y(src_x),
+                    digitize_tdi0_z(src_x),
+                    digitize_tdi0_costhetadir(src_dir_costheta),
+                    digitize_tdi0_sinphidir(src_dir_sinphi),
+                ]
+            elif (
+                tdi1_xmin <= src_x <= tdi1_xmax
+                and tdi1_ymin <= src_y <= tdi1_ymax
+                and tdi1_zmin <= src_z <= tdi1_zmax
+            ):
+                t_indep_exp += src_photons * tdi_tables[1][
+                    digitize_tdi1_x(src_x),
+                    digitize_tdi1_y(src_x),
+                    digitize_tdi1_z(src_x),
+                    digitize_tdi1_costhetadir(src_dir_costheta),
+                    digitize_tdi1_sinphidir(src_dir_sinphi),
+                ]
+            else:
+                continue
+
+            for hit_idx, hit_info in enumerate(event_hit_info):
+                dom_info = event_dom_info[hit_info['event_dom_idx']]
+                dom_tbl_idx = dom_info['table_idx']
+                dom_qe = dom_info['quantum_efficiency']
+
+                dx = src_x - dom_info['x']
+                dy = src_y - dom_info['y']
+                dz = src_z - dom_info['z']
+
+                rhosquared = max(MACHINE_EPS, dx**2 + dy**2)
+                rsquared = rhosquared + dz**2
+
+                if rsquared > rsquared_max:
+                    continue
+
+                r = max(MACHINE_EPS, math.sqrt(rsquared))
+                r_bin_idx = digitize_r(r)
+
+                costheta_bin_idx = digitize_costheta(dz/r)
+
+                if src_kind == SRC_CKV_BETA1:
+                    rho = math.sqrt(rhosquared)
+
+                    if rho <= MACHINE_EPS:
+                        absdeltaphidir = 0.
+                    else:
+                        absdeltaphidir = abs(math.acos(
+                            min(1., max(-1., -(src_dir_cosphi*dx + src_dir_sinphi*dy) / rho))
+                        ))
+
+                    costhetadir_bin_idx = digitize_costhetadir(src_dir_costheta)
+                    deltaphidir_bin_idx = digitize_deltaphidir(absdeltaphidir)
+
+                if t_is_residual_time:
+                    nominal_dt = hit_info['time'] - src_time - r * recip_max_group_vel
+                else:
+                    nominal_dt = hit_info['time'] - src_time
+
+                surv_prob_at_hit_t = 0.
+                for timeshift in jitter_timeshifts:
+                    shifted_dt = nominal_dt + timeshift
+
+                    # Note the comparison is written such that it will evaluate
+                    # to True if hit_time is NaN.
+                    if (not shifted_dt >= 0) or shifted_dt > t_max:
+                        continue
+
+                    t_bin_idx = digitize_t(shifted_dt)
+
+                    if src_kind == SRC_OMNI:
+                        surv_prob_at_hit_t = max(
+                            surv_prob_at_hit_t,
+                            table_lookup_mean(
                                 tables,
                                 dom_tbl_idx,
                                 r_bin_idx,
                                 costheta_bin_idx,
                                 t_bin_idx,
                             )
+                        )
 
-                        else: # SRC_CKV_BETA1
-                            surv_prob_at_hit_t = table_lookup(
+                    else: # SRC_CKV_BETA1
+                        surv_prob_at_hit_t = max(
+                            surv_prob_at_hit_t,
+                            table_lookup(
                                 tables,
                                 dom_tbl_idx,
                                 r_bin_idx,
@@ -469,18 +662,19 @@ def generate_pexp_5d_function(
                                 costhetadir_bin_idx,
                                 deltaphidir_bin_idx,
                             )
-
-                        r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
-                        hit_exp[hit_idx] += weight * (
-                            src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
                         )
+
+                    r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
+                    hit_exp[hit_idx] += (
+                        src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
+                    )
 
         return t_indep_exp
 
-    if tbl_is_ckv and compute_t_indep_exp:
-        pexp_5d = pexp_5d_ckv_compute_t_indep
+    if tdi_table_meta:
+        pexp = pexp_tdi_tables
     else:
-        raise NotImplementedError()
+        pexp = pexp_sensor_dep_t_indep_tables
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_optimal_scalefactor(
@@ -552,7 +746,7 @@ def generate_pexp_5d_function(
                         event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
                         + scalefactor * nominal_scaling_hit_exp[hit_idx]
                         + nonscaling_hit_exp[hit_idx]
-                      )
+                    )
                 )
 
             return grad_neg_llh
@@ -665,7 +859,7 @@ def generate_pexp_5d_function(
         nominal_scaling_t_indep_exp = 0.
         nominal_scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
-        nominal_scaling_t_indep_exp += pexp_5d(
+        nominal_scaling_t_indep_exp += pexp(
             sources=scaling_sources,
             sources_start=0,
             sources_stop=len(scaling_sources),
@@ -684,7 +878,7 @@ def generate_pexp_5d_function(
         nonscaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
         # Expectations for generic-only sources (i.e. pegleg=0 at this point)
-        nonscaling_t_indep_exp += pexp_5d(
+        nonscaling_t_indep_exp += pexp(
             sources=generic_sources,
             sources_start=0,
             sources_stop=len(generic_sources),
@@ -726,7 +920,7 @@ def generate_pexp_5d_function(
             pegleg_start_idx = pegleg_stop_idx - pegleg_stepsize
 
             # Add to expectations by including another "batch" of pegleg sources
-            nonscaling_t_indep_exp += pexp_5d(
+            nonscaling_t_indep_exp += pexp(
                 sources=pegleg_sources,
                 sources_start=pegleg_start_idx,
                 sources_stop=pegleg_stop_idx,
@@ -764,4 +958,4 @@ def generate_pexp_5d_function(
 
         return best_llh, best_llh_idx * pegleg_stepsize, scalefactors[best_llh_idx]
 
-    return pexp_5d, get_llh, meta
+    return pexp, get_llh, meta

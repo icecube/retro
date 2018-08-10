@@ -320,17 +320,18 @@ def test_powerbin():
     print('<< PASS : test_powerbin >>')
 
 
-def generate_digitizer(bin_edges, overflow=False):
+def generate_digitizer(bin_edges, clip=True):
     """Factory to generate a specialized Numba function for "digitizing" data
-    (i.e., returning which bin values fall within).
+    (i.e., returning which bin a value fall within).
 
     Parameters
     ----------
     bin_edges : array-like
 
-    overflow : bool
-        If True, return -1 for underflow or `num_bins` for overflow; if False,
-        clip values to valid range, returning 0 and `num_bins - 1`, respectively.
+    clip : bool
+        If `True`, clip values to valid range: return 0 for underflow or `num_bins - 1`
+        for overflow; if `False`, return -1 and `num_bins` for underflow and overflow,
+        respectively.
 
     Returns
     -------
@@ -338,18 +339,12 @@ def generate_digitizer(bin_edges, overflow=False):
 
     Notes
     -----
+    All bins except the last are half open (i.e., include their lower edges but exclude
+    their upper edges), except for the last bin, which is closed (i.e., include both
+    lower and upper edges).
 
-    bin_edges are interpreted as half open, i.e. [), excpet for the last bin,
-    which is closed []
-
-    The digitizer returned does not fail if a value lies outside the
-    binning boundaries. This condition is indicated by returned indices that
-    are either negative or > num_bins. Therefore a check can be performed on
-    the returned index to check for this, e.g. via .. ::
-
-        idx = digitize(val)
-        if idx < 0 or idx >= num_bins:
-            raise ValueError('val outside binning')
+    The digitizer returned does NOT fail if a value lies outside the
+    binning boundaries.
 
     """
     # pylint: disable=missing-docstring, function-redefined
@@ -360,7 +355,7 @@ def generate_digitizer(bin_edges, overflow=False):
     num_bin_edges = len(bin_edges)
     num_bins = num_bin_edges - 1
 
-    if overflow:
+    if not clip:
         underflow_idx = -1
         overflow_idx = num_bins
     else:
@@ -505,7 +500,7 @@ def test_generate_digitizer():
         assert np.all(np.diff(edges) > 0)
         num_bins = len(edges) - 1
         digitize = generate_digitizer(edges)
-        digitize_overflow = generate_digitizer(edges, overflow=True)
+        digitize_overflow = generate_digitizer(edges, clip=False)
         rand = np.random.RandomState(0)
 
         # Check lots of values within the valid range of the binning
