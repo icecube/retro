@@ -59,8 +59,8 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 else
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/gpfs/scratch/jll1062/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /gpfs/scratch/jll1062/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    proto="/gpfs/scratch/pde3/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    tmpl_lib="--template-library /gpfs/scratch/pde3/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
     tblkind="ckv_templ_compr"
 
     # -- Mie tables: separate, template compressed -- #
@@ -121,3 +121,5 @@ consteff=""
 
 wait
 #    --cascade-kernel "scaling_one_dim_delta" \
+#    --spatial-prior dc_subdust \
+#    --temporal-prior uniform \
