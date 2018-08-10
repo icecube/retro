@@ -736,16 +736,19 @@ class RetroReco(object):
             reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
 
             if use_priors:
-                new_x_cart[new_x_cart < 0] = 0
-                new_x_cart[new_x_cart > 1] = 1
-            new_fx = fun(create_x(new_x_cart, new_x_spher))
+                outside = np.any(new_x_cart > 0) or np.any(new_x_cart < 0)
+            else:
+                outside = False
 
-            if new_fx < fx[worst_idx]:
-                # found better point
-                S_cart[worst_idx] = new_x_cart
-                S_spher[worst_idx] = new_x_spher
-                fx[worst_idx] = new_fx
-                continue
+            if not outside:
+                new_fx = fun(create_x(new_x_cart, new_x_spher))
+
+                if new_fx < fx[worst_idx]:
+                    # found better point
+                    S_cart[worst_idx] = new_x_cart
+                    S_spher[worst_idx] = new_x_spher
+                    fx[worst_idx] = new_fx
+                    continue
 
             # skip mutation
             #continue
@@ -766,16 +769,19 @@ class RetroReco(object):
             fill_from_cart(new_x_spher)
 
             if use_priors:
-                new_x_cart[new_x_cart < 0] = 0
-                new_x_cart[new_x_cart > 1] = 1
-            new_fx = fun(create_x(new_x_cart, new_x_spher))
+                outside = np.any(new_x_cart > 0) or np.any(new_x_cart < 0)
+            else:
+                outside = False
 
-            if new_fx < fx[worst_idx]:
-                # found better point
-                S_cart[worst_idx] = new_x_cart
-                S_spher[worst_idx] = new_x_spher
-                fx[worst_idx] = new_fx
-                continue
+            if not outside:
+                new_fx = fun(create_x(new_x_cart, new_x_spher))
+
+                if new_fx < fx[worst_idx]:
+                    # found better point
+                    S_cart[worst_idx] = new_x_cart
+                    S_spher[worst_idx] = new_x_spher
+                    fx[worst_idx] = new_fx
+                    continue
 
         return OrderedDict()
 
@@ -1202,6 +1208,6 @@ if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run(method='multinest')
     #my_reco.run(method='test')
-    #my_reco.run(method='mymini')
-    my_reco.run(method='truth')
+    my_reco.run(method='mymini')
+    #my_reco.run(method='truth')
     #my_reco.run(method='nlopt')
