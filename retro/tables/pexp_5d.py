@@ -781,6 +781,7 @@ def generate_pexp_5d_function(
 
             if llh > best_llh:
                 best_llh = llh
+                best_llh_idx = pegleg_idx
                 getting_worse_counter = 0
 
             elif llh < best_llh - 0.2:
@@ -788,29 +789,28 @@ def generate_pexp_5d_function(
 
             # break condition
             if getting_worse_counter > 5:
-                for idx in range(pegleg_idx+1,n_pegleg_steps):
-                    # fill up with bad llhs. just to make sure they're not used
-                    llhs[idx] = best_llh - 100
+                #for idx in range(pegleg_idx+1,n_pegleg_steps):
+                #    # fill up with bad llhs. just to make sure they're not used
+                #    llhs[idx] = best_llh - 100
                 #print('break at step ',pegleg_idx)
                 break
 
-
         # find the best pegleg idx:
-        best_llh = np.max(llhs)
-        n_good_indices = np.sum(llhs > best_llh - 0.1)
-        median_good_idx = max(1,np.int(n_good_indices/2))
+        #best_llh = np.max(llhs)
+        #n_good_indices = np.sum(llhs > best_llh - 0.1)
+        #median_good_idx = max(1,np.int(n_good_indices/2))
         
         # search for that median pegleg index
-        counter = 0
-        for best_idx in range(n_pegleg_steps):
-            if llhs[best_idx] > best_llh - 0.1:
-                counter +=1
-            if counter == median_good_idx:
-                break
+        #counter = 0
+        #for best_idx in range(n_pegleg_steps):
+        #    if llhs[best_idx] > best_llh - 0.1:
+        #        counter +=1
+        #    if counter == median_good_idx:
+        #        break
         
         #good_indices = np.argwhere(llhs > best_llh - 0.1)
         #best_idx = np.median(good_indices)
 
-        return llhs[best_idx], pegleg_steps[best_idx], scalefactors[best_idx]
+        return llhs[best_llh_idx], pegleg_steps[best_llh_idx], scalefactors[best_llh_idx]
 
     return pexp_5d, get_llh, meta

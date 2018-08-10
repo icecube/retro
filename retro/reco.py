@@ -530,15 +530,20 @@ class RetroReco(object):
             else:
                 raise NotImplementedError()
         # now random values for these dimension
-        rand_dims = [4,5]
+        rand_dims = []
+        #rand_dims = [4,5]
         rand = np.random.RandomState()
-        for i in range(10000):
-            rand_params = rand.uniform(0,1,self.n_opt_params)
-            prior(rand_params)
-            param_vals = np.zeros(self.n_opt_params)
-            param_vals[:] = true_params[:]
-            param_vals[rand_dims] = rand_params[rand_dims]
-            llh = loglike(param_vals)
+        if len(rand_dims) > 1:
+            for i in range(10000):
+                rand_params = rand.uniform(0,1,self.n_opt_params)
+                prior(rand_params)
+                param_vals = np.zeros(self.n_opt_params)
+                param_vals[:] = true_params[:]
+                param_vals[rand_dims] = rand_params[rand_dims]
+                llh = loglike(param_vals)
+        else:
+            llh = loglike(true_params)
+
 
         return OrderedDict()
 
@@ -1208,6 +1213,6 @@ if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run(method='multinest')
     #my_reco.run(method='test')
-    my_reco.run(method='mymini')
-    #my_reco.run(method='truth')
+    #my_reco.run(method='mymini')
+    my_reco.run(method='truth')
     #my_reco.run(method='nlopt')
