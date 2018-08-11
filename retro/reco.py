@@ -325,7 +325,7 @@ class RetroReco(object):
         """
         # -- Variables to be captured by `loglike` closure -- #
 
-        report_after = 50
+        report_after = 100
 
         all_param_names = self.hypo_handler.all_param_names
         n_opt_params = self.n_opt_params
@@ -595,14 +595,6 @@ class RetroReco(object):
                                ('cosaz', np.float32),
                                ])
 
-        #N = 10 * (n + 1)
-        N = 160
-        assert N > n + 1
-
-        S_cart = np.zeros(shape=(N,n_cart))
-        S_spher = np.zeros(shape=(N,n_spher), dtype=spher_cord)
-        fx = np.zeros(shape=(N,))
-
         def create_x(x_cart, x_spher):
             '''
             patch back together the cartesian and spherical coordinates into one array
@@ -673,9 +665,20 @@ class RetroReco(object):
 
             fill_from_cart(new)
 
+        #N = 10 * (n + 1)
+        N = 250
+        assert N > n + 1
+
+        # that many more initial individuals (didn;t seem to help realy)
+        initial_factor = 1
+
+        S_cart = np.zeros(shape=(N*initial_factor,n_cart))
+        S_spher = np.zeros(shape=(N*initial_factor,n_spher), dtype=spher_cord)
+        fx = np.zeros(shape=(N*initial_factor,))
+
 
         # initial population
-        for i in range(N):
+        for i in range(N*initial_factor):
             x = rand.uniform(0,1,n)
             if use_priors:
                 param_vals = np.copy(x)
@@ -689,6 +692,14 @@ class RetroReco(object):
             S_spher[i]['az'] = x[n_cart::2]
             fill_from_spher(S_spher[i])
             fx[i] = fun(x)
+
+
+        if initial_factor > 1:
+            # cut down to best N
+            mask = fx <= np.percentile(fx, 100./initial_factor)
+            S_cart = S_cart[mask]
+            S_spher = S_spher[mask]
+            fx = fx[mask]
 
 
         best_llh = np.min(fx)
@@ -741,7 +752,7 @@ class RetroReco(object):
             reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
 
             if use_priors:
-                outside = np.any(new_x_cart > 0) or np.any(new_x_cart < 0)
+                outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
             else:
                 outside = False
 
@@ -774,7 +785,7 @@ class RetroReco(object):
             fill_from_cart(new_x_spher)
 
             if use_priors:
-                outside = np.any(new_x_cart > 0) or np.any(new_x_cart < 0)
+                outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
             else:
                 outside = False
 
@@ -1213,6 +1224,6 @@ if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run(method='multinest')
     #my_reco.run(method='test')
-    #my_reco.run(method='mymini')
-    my_reco.run(method='truth')
+    my_reco.run(method='mymini')
+    #my_reco.run(method='truth')
     #my_reco.run(method='nlopt')

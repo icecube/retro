@@ -173,11 +173,11 @@ def generate_pexp_5d_function(
 
 
     # to sample for DOM jitter etc
-    #jitter_dt = np.arange(-10,11,2)
+    jitter_dt = np.arange(-10,11,2)
     #jitter_dt =  np.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
     jitter_dt =  np.array([0])
-    #jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
-    #jitter_weights /= np.sum(jitter_weights)
+    jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
+    jitter_weights /= np.sum(jitter_weights)
 
     # Indexing functions for table types omni / directional lookups
     if tbl_is_templ_compr:
@@ -336,7 +336,7 @@ def generate_pexp_5d_function(
                 dz = src_z - dom['z']
 
                 rhosquared = dx**2 + dy**2
-                #rhosquared = max(MACHINE_EPS, rhosquared)
+                rhosquared = max(MACHINE_EPS, rhosquared)
                 rsquared = rhosquared + dz**2
 
                 # Continue if photon is outside the radial binning limits
@@ -444,11 +444,11 @@ def generate_pexp_5d_function(
                     if t_is_residual_time:
                         nominal_dt -= r * recip_max_group_vel
 
-                    jitter_surv_probs = np.zeros_like(jitter_dt)
+                    #jitter_surv_probs = np.zeros_like(jitter_dt)
 
                     for jitter_idx in range(len(jitter_dt)):
                         dt = nominal_dt + jitter_dt[jitter_idx]
-                        #weight = jitter_weights[jitter_idx]
+                        weight = jitter_weights[jitter_idx]
 
                         # Note the comparison is written such that it will evaluate
                         # to True if hit_time is NaN.
@@ -476,14 +476,14 @@ def generate_pexp_5d_function(
                                 costhetadir_bin_idx,
                                 deltaphidir_bin_idx,
                             )
-                        jitter_surv_probs[jitter_idx] = surv_prob_at_hit_t
 
-                    surv_prob_at_hit_t = np.max(jitter_surv_probs)
+                        #jitter_surv_probs[jitter_idx] = surv_prob_at_hit_t
+                        #surv_prob_at_hit_t = np.max(jitter_surv_probs)
 
-                    r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
-                    hit_exp[hit_idx] += (
-                        src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
-                    )
+                        r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
+                        hit_exp[hit_idx] += weight * (
+                            src_photons * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
+                        )
 
         return t_indep_exp
 
@@ -572,8 +572,8 @@ def generate_pexp_5d_function(
         # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
 
         scalefactor = initial_scalefactor
-        gamma = 10. # step size multiplier
-        epsilon = 1e-1 # tolerance
+        gamma = 1. # step size multiplier
+        epsilon = 1e-2 # tolerance
         iters = 0 # iteration counter
         while True:
             gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
@@ -670,17 +670,23 @@ def generate_pexp_5d_function(
         # Each pegleg iteration, include this many more pegleg sources
 
         num_pegleg_sources = len(pegleg_sources)
+
         # take log steps
-        logstep = np.log(num_pegleg_sources) / 300
-        logspace = np.zeros(shape=301, dtype=np.int32)
-        x = -1e-8
-        for i in range(len(logspace)):
-            logspace[i] = np.int32(np.exp(x))
-            x+= logstep
-        pegleg_steps = np.unique(logspace)
-        assert pegleg_steps[0] == 0
+        #logstep = np.log(num_pegleg_sources) / 300
+        #logspace = np.zeros(shape=301, dtype=np.int32)
+        #x = -1e-8
+        #for i in range(len(logspace)):
+        #    logspace[i] = np.int32(np.exp(x))
+        #    x+= logstep
+        #pegleg_steps = np.unique(logspace)
+        #assert pegleg_steps[0] == 0
+        #n_pegleg_steps = len(pegleg_steps)
+
+        # take linear steps
+        pegleg_steps = np.arange(num_pegleg_sources)
         n_pegleg_steps = len(pegleg_steps)
-        #print(pegleg_steps)
+        num_llhs = n_pegleg_steps + 1
+
 
         #pegleg_stepsize = 1
 
@@ -737,13 +743,14 @@ def generate_pexp_5d_function(
             initial_scalefactor=10.,
         )
 
-        llhs = np.full(shape=n_pegleg_steps, fill_value=llh, dtype=np.float64)
+        llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
         llhs[0] = llh
 
-        scalefactors = np.zeros(shape=n_pegleg_steps, dtype=np.float64)
+        scalefactors = np.zeros(shape=num_llhs, dtype=np.float64)
         scalefactors[0] = scalefactor
 
         best_llh = llh
+        previous_llh = best_llh - 100
         best_llh_idx = 0
         getting_worse_counter = 0
 
@@ -779,16 +786,19 @@ def generate_pexp_5d_function(
             llhs[pegleg_idx] = llh
             scalefactors[pegleg_idx] = scalefactor
 
+
             if llh > best_llh:
                 best_llh = llh
                 best_llh_idx = pegleg_idx
                 getting_worse_counter = 0
 
-            elif llh < best_llh - 0.2:
+            elif llh < previous_llh:
                 getting_worse_counter += 1
 
+            previous_llh = llh
+
             # break condition
-            if getting_worse_counter > 5:
+            if getting_worse_counter > 100:
                 #for idx in range(pegleg_idx+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100
@@ -810,6 +820,10 @@ def generate_pexp_5d_function(
         
         #good_indices = np.argwhere(llhs > best_llh - 0.1)
         #best_idx = np.median(good_indices)
+
+        #print(llhs[:10])
+        #print(scalefactors[:10])
+        #print(pegleg_steps[:10])
 
         return llhs[best_llh_idx], pegleg_steps[best_llh_idx], scalefactors[best_llh_idx]
 
