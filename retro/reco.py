@@ -34,6 +34,7 @@ import sys
 import time
 
 import numpy as np
+from scipy import stats
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -563,7 +564,7 @@ class RetroReco(object):
 
         # if true: use priors (for cartesian coordinates only) during minimization
         # if false: use priors only to generate initial population, then perform minimization on actual parameter values
-        use_priors = True
+        use_priors = False
 
         def fun(x): 
             '''
@@ -666,7 +667,7 @@ class RetroReco(object):
             fill_from_cart(new)
 
         #N = 10 * (n + 1)
-        N = 250
+        N = 160
         assert N > n + 1
 
         # that many more initial individuals (didn;t seem to help realy)
@@ -680,10 +681,11 @@ class RetroReco(object):
         # initial population
         for i in range(N*initial_factor):
             x = rand.uniform(0,1,n)
-            if use_priors:
+            if not use_priors:
                 param_vals = np.copy(x)
                 prior(param_vals)
-                x[n_cart:] = param_vals[n_cart:]
+                #x[n_cart:] = param_vals[n_cart:]
+                x[:n_cart] = param_vals[:n_cart]
 
             # break up into cartesiand and spherical coordinates
             # ToDO: make proper
@@ -798,6 +800,63 @@ class RetroReco(object):
                     S_spher[worst_idx] = new_x_spher
                     fx[worst_idx] = new_fx
                     continue
+
+
+        # now let's do some sampling
+
+        # first create array without dtype (otherwise covariance doesn't work)
+
+        # bigger arrays to also contain sampled points 
+        S = np.zeros(shape=(2*N,n))
+        f = np.full(2*N, np.inf)
+
+        # set the first half
+        for i in range(N):
+            S[i] = create_x(S_cart[i], S_spher[i])
+        f[:N] = fx
+        
+        az_dim = 4
+        zen_dim = 5
+
+        for k in range(42):
+            print('Sampling round %i'%k)
+
+            # calculate mean and covariance
+            mean = np.mean(S[:N], axis=0)
+
+            az_values = S[:N,az_dim]
+
+            circmean = stats.circmean(az_values)
+            oppo_mean = (circmean + np.pi) % (2 * np.pi)
+
+            # move the azimuths
+            az_values[az_values < oppo_mean] += (2 * np.pi)
+
+            cov = np.cov(S[:N].T)
+
+            # sample the second half
+            S[N:] = np.random.multivariate_normal(mean, cov, N)
+
+            # make sure boundaries are ok?
+            S[:,az_dim] = S[:,az_dim] % (2 * np.pi)
+            
+            # fold in zeniths
+            zen_values = S[:,zen_dim]
+            while np.any(zen_values < 0) or np.any(zen_values > np.pi):
+                zen_values[zen_values < 0] = -zen_values[zen_values < 0]
+                zen_values[zen_values > np.pi] = np.pi - zen_values[zen_values > np.pi]
+
+            # evaluate LLH
+            for i in range(N,2*N):
+                f[i] = fun(S[i])
+            
+            # find best half
+            mask = f <= np.median(f)
+
+            # reset first half
+            S[:N] = S[mask]
+            f[:N] = f[mask]
+
 
         return OrderedDict()
 
