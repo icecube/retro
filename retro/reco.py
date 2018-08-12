@@ -821,8 +821,6 @@ class RetroReco(object):
         for k in range(42):
             print('Sampling round %i'%k)
 
-            # calculate mean and covariance
-            mean = np.mean(S[:N], axis=0)
 
             az_values = S[:N,az_dim]
 
@@ -832,6 +830,8 @@ class RetroReco(object):
             # move the azimuths
             az_values[az_values < oppo_mean] += (2 * np.pi)
 
+            # calculate mean and covariance
+            mean = np.mean(S[:N], axis=0)
             cov = np.cov(S[:N].T)
 
             # sample the second half
