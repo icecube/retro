@@ -824,11 +824,12 @@ class RetroReco(object):
 
             az_values = S[:N,az_dim]
 
-            circmean = stats.circmean(az_values)
-            oppo_mean = (circmean + np.pi) % (2 * np.pi)
-
             # move the azimuths
-            az_values[az_values < oppo_mean] += (2 * np.pi)
+            circmean = stats.circmean(az_values)
+            if circmean > np.pi:
+                az_values[az_values < circmean - np.pi] += (2 * np.pi)
+            else:
+                az_values[az_values > circmean + np.pi] -= (2 * np.pi)
 
             # calculate mean and covariance
             mean = np.mean(S[:N], axis=0)
@@ -837,14 +838,18 @@ class RetroReco(object):
             # sample the second half
             S[N:] = np.random.multivariate_normal(mean, cov, N)
 
-            # make sure boundaries are ok?
-            S[:,az_dim] = S[:,az_dim] % (2 * np.pi)
-            
-            # fold in zeniths
+            # fold in zeniths and flip azimuths
             zen_values = S[:,zen_dim]
+            az_values = S[:,az_dim]
             while np.any(zen_values < 0) or np.any(zen_values > np.pi):
+                az_values[zen_values < 0] += np.pi
+                az_values[zen_values > np.pi] += np.pi
                 zen_values[zen_values < 0] = -zen_values[zen_values < 0]
                 zen_values[zen_values > np.pi] = np.pi - zen_values[zen_values > np.pi]
+
+            # make sure boundaries are ok?
+            az_values = az_values % (2 * np.pi)
+            
 
             # evaluate LLH
             for i in range(N,2*N):
