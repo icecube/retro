@@ -855,7 +855,7 @@ def parse_args(description=__doc__):
     )
     parser.add_argument(
         '--compress', action='store_true',
-        help='Compress with zstd the table'
+        help='Compress the table with zstd when complete'
     )
 
     parser.add_argument(
@@ -894,60 +894,134 @@ def parse_args(description=__doc__):
         help='Random seed to use, in range of 32 bit uint: [0, 2**32-1]'
     )
 
-    #parser.add_argument(
-    #    '--binning-order', nargs='+'
-    #)
+    subparsers = parser.add_subparsers(
+        dest='command',
+        help='Choose the nature of the binning: spherical or cartesian'
+    )
 
-    parser.add_argument(
+    # -- Spherical (phi optional) + time + directionality binning -- #
+
+    sph_parser = subparsers.add_parser(
+        'spherical',
+        help='Use spherical binning about the DOM',
+    )
+
+    sph_parser.add_argument(
         '--n-r-bins', type=int, required=True,
         help='Number of radial bins'
     )
-    parser.add_argument(
+    sph_parser.add_argument(
         '--n-t-bins', type=int, required=True,
         help='Number of time bins (relative to direct time)'
     )
-    parser.add_argument(
+    sph_parser.add_argument(
         '--n-costheta-bins', type=int, required=True,
         help='Number of costheta (cosine of position zenith angle) bins'
     )
-    parser.add_argument(
+    sph_parser.add_argument(
         '--n-phi-bins', type=int, required=True,
         help='Number of phi (position azimuth) bins'
     )
-    parser.add_argument(
+    sph_parser.add_argument(
         '--n-costhetadir-bins', type=int, required=True,
         help='Number of costhetadir bins'
     )
-    parser.add_argument(
+    sph_parser.add_argument(
         '--n-deltaphidir-bins', type=int, required=True,
         help='''Number of deltaphidir bins (Note: span from 0 to pi; code
         assumes symmetry about 0)'''
     )
 
-    parser.add_argument(
+    sph_parser.add_argument(
         '--r-max', type=float, required=False,
         help='Radial binning maximum value, in meters'
     )
-    parser.add_argument(
+    sph_parser.add_argument(
         '--r-power', type=int, required=False,
         help='Radial binning is regular in raidus to this power'
     )
 
-    parser.add_argument(
+    sph_parser.add_argument(
         '--t-max', type=float, required=False,
         help='Time binning maximum value, in nanoseconds'
     )
-    parser.add_argument(
+    sph_parser.add_argument(
         '--t-power', type=int, required=False,
         help='Time binning is regular in time to this power'
     )
 
-    parser.add_argument(
+    sph_parser.add_argument(
         '--deltaphidir-power', type=int, required=False,
         help='deltaphidir binning is regular in deltaphidir to this power'
     )
 
-    return parser.parse_args()
+    # -- Cartesian + (optional time) + directionality binning -- #
+
+    cart_parser = subparsers.add_parser(
+        'cartesian',
+        help='Use Cartesian binning in IceCube coord system',
+    )
+
+    cart_parser.add_argument(
+        '--n-x-bins', type=int, required=True,
+        help='Number of x bins'
+    )
+    cart_parser.add_argument(
+        '--n-y-bins', type=int, required=True,
+        help='Number of y bins'
+    )
+    cart_parser.add_argument(
+        '--n-z-bins', type=int, required=True,
+        help='Number of z bins'
+    )
+    cart_parser.add_argument(
+        '--n-costhetadir-bins', type=int, required=True,
+        help='Number of costhetadir bins'
+    )
+    cart_parser.add_argument(
+        '--n-phidir-bins', type=int, required=True,
+        help='''Number of phidir bins (Note: span from -pi to pi)'''
+    )
+
+    # -- Binning limits -- #
+
+    cart_parser.add_argument(
+        '--x-min', type=float, required=True,
+        help='x binning minimum value, IceCube coordinate system, in meters'
+    )
+    cart_parser.add_argument(
+        '--x-max', type=float, required=True,
+        help='x binning maximum value, IceCube coordinate system, in meters'
+    )
+
+    cart_parser.add_argument(
+        '--y-min', type=float, required=True,
+        help='y binning minimum value, IceCube coordinate system, in meters'
+    )
+    cart_parser.add_argument(
+        '--y-max', type=float, required=True,
+        help='y binning maximum value, IceCube coordinate system, in meters'
+    )
+
+    cart_parser.add_argument(
+        '--z-min', type=float, required=True,
+        help='z binning minimum value, IceCube coordinate system, in meters'
+    )
+    cart_parser.add_argument(
+        '--z-max', type=float, required=True,
+        help='z binning maximum value, IceCube coordinate system, in meters'
+    )
+
+    all_kw = vars(parser.parse_args())
+
+    general_kw = OrderedDict()
+    for key in (
+        'outdir', 'overwrite', 'compress', 'gcd', 'ice_model',
+        'hole_ice_model', 'disable_tilt', 'disable_anisotropy', 'string',
+        'dom', 'n_events', 'seed'
+    ):
+        general_kw[key] = all_kw.pop(key)
+    binning_kw = all_kw
 
 
 if __name__ == '__main__':
