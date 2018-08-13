@@ -427,19 +427,10 @@ def generate_clsim_table(
         dom,
         n_events,
         seed,
-        n_r_bins,
-        n_t_bins,
-        n_costheta_bins,
-        n_phi_bins,
-        n_costhetadir_bins,
-        n_deltaphidir_bins,
-        r_max=None,
-        r_power=None,
-        t_max=None,
-        t_power=None,
-        deltaphidir_power=None,
+        coordinate_system,
+        binning,
         overwrite=False,
-        compress=False
+        compress=False,
     ):
     """Generate a CLSim table.
 
@@ -450,17 +441,6 @@ def generate_clsim_table(
     outdir : string
 
     gcd : string
-
-    string : int in [1, 86]
-
-    dom : int in [1, 60]
-
-    n_events : int > 0
-        Note that the number of photons is much larger than the number of
-        events (related to the "brightness" of the defined source).
-
-    seed : int in [0, 2**32)
-        Seed for CLSim's random number generator
 
     ice_model : str
         E.g. "spice_mie", "spice_lea", ...
@@ -476,23 +456,54 @@ def generate_clsim_table(
         Whether to force no bulk ice anisotropy (if anisotropy is present in
         bulk ice model; otherwise, this has no effect)
 
-    n_t_bins, n_r_bins, n_costheta_bins, n_phi_bins, n_costhetadir_bins, n_deltaphidir_bins : int >= 0
-        Any number of bins set to 0 disables binning in that dimension.
+    string : int in [1, 86]
 
-    r_max : float > 0
-        Must specify if n_r_bins > 0
+    dom : int in [1, 60]
 
-    r_power : int > 0
-        Must specify if n_r_bins > 0
+    n_events : int > 0
+        Note that the number of photons is much larger than the number of
+        events (related to the "brightness" of the defined source).
 
-    t_max : float > 0
-        Must specify if n_t_bins > 0
+    seed : int in [0, 2**32)
+        Seed for CLSim's random number generator
 
-    t_power : int > 0
-        Must specify if n_t_bins > 0
+    coordinate_system : string in {"spherical", "cartesian"}
+        If spherical, base coordinate system is .. ::
 
-    deltaphidir_power : int > 0
-        Must specify if n_deltaphidir_bins > 0
+            (r, theta, phi, t, costhetadir, absdeltaphidir)
+
+        If Cartesian, base coordinate system is .. ::
+
+            (x, y, z, costhetadir, phidir)
+
+        but if any of the coordinate axes are specified to have 0 bins, they
+        will be omitted (but the overall order is maintained).
+
+    binning : mapping
+        If `coordinate_system` is "spherical", keys should be:
+            "n_r_bins"
+            "n_t_bins"
+            "n_costheta_bins"
+            "n_phi_bins"
+            "n_costhetadir_bins"
+            "n_deltaphidir_bins"
+            "r_max"
+            "r_power"
+            "t_max"
+            "t_power"
+            "deltaphidir_power"
+        If `coordinate_system` is "cartesian", keys should be:
+            "n_x_bins"
+            "n_y_bins"
+            "n_z_bins"
+            "n_costhetadir_bins"
+            "n_phidir_bins"
+            "x_min"
+            "x_max"
+            "y_min"
+            "y_max"
+            "z_min"
+            "z_max"
 
     overwrite : bool, optional
         Whether to overwrite an existing table (default: False)
@@ -895,8 +906,9 @@ def parse_args(description=__doc__):
     )
 
     subparsers = parser.add_subparsers(
-        dest='command',
-        help='Choose the nature of the binning: spherical or cartesian'
+        dest='coordinate_system',
+        help='''Choose the coordinate system for binning: "spherical" or
+        "cartesian"'''
     )
 
     # -- Spherical (phi optional) + time + directionality binning -- #
@@ -1018,11 +1030,14 @@ def parse_args(description=__doc__):
     for key in (
         'outdir', 'overwrite', 'compress', 'gcd', 'ice_model',
         'hole_ice_model', 'disable_tilt', 'disable_anisotropy', 'string',
-        'dom', 'n_events', 'seed'
+        'dom', 'n_events', 'seed', 'coordinate_system',
     ):
         general_kw[key] = all_kw.pop(key)
-    binning_kw = all_kw
+    binning = all_kw
+
+    return general_kw, binning
 
 
 if __name__ == '__main__':
-    generate_clsim_table(**vars(parse_args()))
+    general_kw, binning = parse_args()
+    generate_clsim_table(binning=binning, **general_kw)
