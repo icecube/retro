@@ -1,27 +1,22 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, invalid-name, no-member, no-name-in-module, import-error
+# pylint: disable=wrong-import-position, invalid-name, no-member, no-name-in-module
+# pylint: disable=import-error
 
 """
 Create a Retro table: Prpagate light outwards from a DOM and tabulate the
 photons. Uses CLSim (tabulator) to do the work of photon propagation.
 """
 
-# TODO: add angular sensitivity model to the values used to produce a hash
-#       (currently "as.h2-50cm")
 # TODO: command-line option to simply return the metadata for a config to e.g.
 #       extract a hash value one would expect from the given params
-# TODO: include detector geometry (probably original full detector geom...) in
-#       hash value
-# TODO: does x and y coordinate make a difference if we turn ice tilt on? if
-#       so, we should be able to specify (str,om) coordinate for simulation
 
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'get_average_dom_z_coords',
     'generate_clsim_table',
-    'parse_args'
+    'parse_args',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -67,22 +62,23 @@ from icecube.clsim import (
     I3CLSimFlasherPulseSeries,
     I3CLSimLightSourceToStepConverterGeant4,
     I3CLSimLightSourceToStepConverterPPC,
-    I3CLSimSpectrumTable
+    I3CLSimSpectrumTable,
 )
 from icecube.clsim.tabulator import (
+    Axes,
     LinearAxis,
     PowerAxis,
-    SphericalAxes
+    SphericalAxes,
 )
 from icecube.clsim.traysegments.common import (
     configureOpenCLDevices,
-    parseIceModel
+    parseIceModel,
 )
 from icecube import dataclasses
 from icecube.dataclasses import (
     I3Direction,
     I3Particle,
-    I3Position
+    I3Position,
 )
 from icecube.icetray import I3Frame, I3Module, I3Units, logging, traysegment
 from icecube.photospline.photonics import FITSTable
@@ -95,16 +91,34 @@ if __name__ == '__main__' and __package__ is None:
 from retro.i3info.extract_gcd import extract_gcd
 from retro.utils.misc import expand, hash_obj, mkdir
 from retro.tables.clsim_tables import (
-    CLSIM_TABLE_FNAME_PROTO, CLSIM_TABLE_METANAME_PROTO
+    CLSIM_TABLE_FNAME_PROTO,
+    CLSIM_TABLE_METANAME_PROTO,
+    CLSIM_TABLE_TILE_FNAME_PROTO,
+    CLSIM_TABLE_TILE_METANAME_PROTO,
 )
 
 
 DOM_RADIUS = 0.16510*I3Units.m # 13" diameter
 DOM_SURFACE_AREA = np.pi * DOM_RADIUS**2
 
-BINNING_ORDER = [
-    'r', 'costheta', 'phi', 't', 'costhetadir', 'deltaphidir'
-]
+BINNING_ORDER = {
+    'spherical': [
+        'r',
+        'costheta',
+        'phi',
+        't',
+        'costhetadir',
+        'deltaphidir',
+    ],
+    'cartesian': [
+        'x',
+        'y',
+        'z',
+        't',
+        'costhetadir',
+        'phidir',
+    ]
+}
 
 
 def get_average_dom_z_coords(geo):
@@ -202,7 +216,7 @@ def unpin_threads(delay=60):
         p = subprocess.Popen(
             [which('ps'), '-Lo', 'tid', '--no-headers', '%d'%main_pid],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
         for tid in p.communicate()[0].split():
             tid = tid.strip()
@@ -221,27 +235,28 @@ def unpin_threads(delay=60):
 
 @traysegment
 def TabulateRetroSources(
-        tray,
-        name,
-        source_gcd_i3_md5,
-        binning_kw,
-        axes,
-        ice_model,
-        hole_ice_model,
-        disable_tilt,
-        disable_anisotropy,
-        hash_val,
-        dom_spec,
-        dom_x,
-        dom_y,
-        dom_z,
-        dom_zenith,
-        dom_azimuth,
-        seed,
-        n_events,
-        tablepath,
-        record_errors=False
-    ):
+    tray,
+    name,
+    source_gcd_i3_md5,
+    binning_kw,
+    axes,
+    ice_model,
+    hole_ice_model,
+    disable_tilt,
+    disable_anisotropy,
+    hash_val,
+    dom_spec,
+    dom_x,
+    dom_y,
+    dom_z,
+    dom_zenith,
+    dom_azimuth,
+    seed,
+    n_events,
+    tablepath,
+    tile=None,
+    record_errors=False,
+):
     dom_x = dom_x * I3Units.m
     dom_y = dom_y * I3Units.m
     dom_z = dom_z * I3Units.m
@@ -288,6 +303,9 @@ def TabulateRetroSources(
             self.AddOutBox('OutBox')
             self.AddParameter('source_function', '', lambda: None)
             self.AddParameter('n_events', '', 100)
+            self.reference_source = None
+            self.n_events = None
+            self.emitted_events = None
 
         def Configure(self):
             self.reference_source = self.GetParameter('source_function')
@@ -301,7 +319,7 @@ def TabulateRetroSources(
                 y=dom_y,
                 z=dom_z,
                 zenith=dom_zenith,
-                azimuth=dom_azimuth
+                azimuth=dom_azimuth,
             )
             pulseseries.append(pulse)
             frame[flasher_pulse_series_name] = pulseseries
@@ -311,7 +329,7 @@ def TabulateRetroSources(
                 z=dom_z,
                 zenith=dom_zenith,
                 azimuth=dom_azimuth,
-                scale=1.0
+                scale=1.0,
             )
             self.PushFrame(frame)
             self.emitted_events += 1
@@ -321,20 +339,24 @@ def TabulateRetroSources(
     tray.AddModule(
         MakeParticle,
         source_function=reference_source,
-        n_events=n_events
+        n_events=n_events,
     )
 
     header = OrderedDict(FITSTable.empty_header)
     header['type'] = 'Retro DOM table'
     header['source_gcd_i3_md5'] = source_gcd_i3_md5
     #header['axes'] = ','.join(binning_kw.keys())
-    #for n, axname in enumerate(binning_kw.keys()):
-    #    header['axis{:d}'.format(n)] = axname
+    for n, axname in enumerate(binning_kw.keys()):
+        header['axis{:d}'.format(n)] = axname
+    if 't' in binning_kw:
+        header['t_is_residual_time'] = True
     header['ice_model'] = ice_model
     header['hole_ice_model'] = hole_ice_model
     header['disable_tilt'] = disable_tilt
     header['disable_anisotropy'] = disable_anisotropy
     header['hash_val'] = hash_val
+    if tile is not None:
+        header['tile'] = tile
     for key, value in dom_spec.items():
         header[key] = value
     header['dom_x'] = dom_x
@@ -360,8 +382,10 @@ def TabulateRetroSources(
     ppc_converter = I3CLSimLightSourceToStepConverterPPC(photonsPerStep=200)
     # Is this even necessary?
     ppc_converter.SetUseCascadeExtension(False)
-    particle_parameterizations = GetDefaultParameterizationList(ppc_converter,
-                                                                muonOnly=False)
+    particle_parameterizations = GetDefaultParameterizationList(
+        ppc_converter,
+        muonOnly=False,
+    )
 
     # need a spectrum table in order to pass spectra to OpenCL
     spectrum_table = I3CLSimSpectrumTable()
@@ -369,7 +393,8 @@ def TabulateRetroSources(
 
     logging.log_debug(
         'number of spectra (1x Cherenkov + Nx flasher): %d'
-        % len(spectrum_table), unit='clsim'
+        % len(spectrum_table),
+        unit='clsim',
     )
 
     opencl_devices = configureOpenCLDevices(
@@ -377,14 +402,13 @@ def TabulateRetroSources(
         UseCPUs=True,
         OverrideApproximateNumberOfWorkItems=None,
         DoNotParallelize=True,
-        UseOnlyDeviceNumber=None
+        UseOnlyDeviceNumber=None,
     )
 
     medium_properties = parseIceModel(
         expandvars('$I3_SRC/clsim/resources/ice/' + ice_model),
         disableTilt=disable_tilt,
-        disableAnisotropy=disable_anisotropy
-
+        disableAnisotropy=disable_anisotropy,
     )
 
     tray.AddModule(
@@ -412,26 +436,28 @@ def TabulateRetroSources(
     unpin_threads()
 
 
-# TODO: add parmeters for detector geometry, bulk ice model, hole ice model
-# (i.e. this means angular sensitivity curve in its current implementation,
-# though more advanced hole ice models could mean different things), and
-# whether to use time difference from direct time
+# TODO: add to CLSim invocation parmeters for detector geometry, bulk ice model, hole
+# ice model (i.e. this means angular sensitivity curve in its current implementation,
+# though more advanced hole ice models could mean different things), and whether to use
+# time difference from direct time
 def generate_clsim_table(
-        outdir,
-        gcd,
-        ice_model,
-        hole_ice_model,
-        disable_tilt,
-        disable_anisotropy,
-        string,
-        dom,
-        n_events,
-        seed,
-        coordinate_system,
-        binning,
-        overwrite=False,
-        compress=False,
-    ):
+    outdir,
+    gcd,
+    ice_model,
+    hole_ice_model,
+    disable_tilt,
+    disable_anisotropy,
+    string,
+    dom,
+    n_events,
+    seed,
+    coordinate_system,
+    binning,
+    tableset_hash=None,
+    tile=None,
+    overwrite=False,
+    compress=False,
+):
     """Generate a CLSim table.
 
     See wiki.icecube.wisc.edu/index.php/Ice for information about ice models.
@@ -505,6 +531,12 @@ def generate_clsim_table(
             "z_min"
             "z_max"
 
+    tableset_hash : str, optional
+        Specify if the table is a tile used to generate a larger table
+
+    tile : int >= 0, optional
+        Specify if the table is a tile used to generate a larger table
+
     overwrite : bool, optional
         Whether to overwrite an existing table (default: False)
 
@@ -558,14 +590,34 @@ def generate_clsim_table(
     """
     assert isinstance(n_events, Integral) and n_events > 0
     assert isinstance(seed, Integral) and 0 <= seed < 2**32
-    assert isinstance(n_r_bins, Integral) and n_r_bins >= 0
-    assert isinstance(n_t_bins, Integral) and n_t_bins >= 0
-    assert isinstance(n_costheta_bins, Integral) and n_costheta_bins >= 0
-    assert isinstance(n_phi_bins, Integral) and n_phi_bins >= 0
-    assert isinstance(n_costhetadir_bins, Integral) and n_costhetadir_bins >= 0
-    assert isinstance(n_deltaphidir_bins, Integral) and n_deltaphidir_bins >= 0
+    assert (
+        (tableset_hash is not None and tile is not None)
+        or (tableset_hash is None and tile is None)
+    )
 
-    # For now, hole ice model is hard coded to "9" (i.e., as.9 aka new25)
+    n_bins_per_dim = []
+    for key, val in binning.items():
+        if not key.startswith('n_'):
+            continue
+        assert isinstance(val, Integral), '{} not an integer'.format(key)
+        assert val >= 0, '{} must be >= 0'.format(key)
+        n_bins_per_dim.append(val)
+
+    # Note: + 2 accounts for under & overflow bins in each dimension
+    n_bins = np.product([n + 2 for n in n_bins_per_dim if n > 0])
+
+    assert n_bins > 0
+
+    if n_bins > 2**32:
+        raise ValueError(
+            'The flattened bin index in CLSim is represented by uint32 which'
+            ' has a max of 4 294 967 296, but the binning specified comes to'
+            ' {} bins ({} times too many).'
+            .format(n_bins, n_bins / 2**32)
+        )
+
+    # For now, hole ice model is hard-coded in our CLSim branch to "9"
+    # (i.e., as.9, aka new25)
     assert hole_ice_model == '9'
 
     ice_model = ice_model.strip()
@@ -581,140 +633,197 @@ def generate_clsim_table(
     outdir = expand(outdir)
     mkdir(outdir)
 
-    each_n_bins = (
-        n_r_bins,
-        n_costheta_bins,
-        n_phi_bins,
-        n_t_bins,
-        n_costhetadir_bins,
-        n_deltaphidir_bins
-    )
-
-    # Note: + 2 accounts for under/overflow bins in each dimension
-    n_bins = np.product([n + 2 for n in each_n_bins if n > 0])
-
-    assert n_bins > 0
-
-    if n_bins > 2**32:
-        raise ValueError(
-            'The flattened bin index in CLSim is represented by uint32 which'
-            ' has a max of 4 294 967 296, but the binning specified comes to'
-            ' {} bins ({} times too many).'
-            .format(n_bins, n_bins / 2**32)
-        )
-
-    t_min = 0 # ns
-    r_min = 0 # meters
-    costheta_min, costheta_max = -1.0, 1.0
-    phi_min, phi_max = -np.pi, np.pi # rad
-    costhetadir_min, costhetadir_max = -1.0, 1.0
-    deltaphidir_min, deltaphidir_max = 0.0, np.pi # rad
-
-    binning = OrderedDict()
+    axes = OrderedDict()
     binning_kw = OrderedDict()
 
-    if n_r_bins > 0:
-        assert isinstance(r_power, Integral) and r_power > 0
-        r_binning_kw = OrderedDict([
-            ('min', float(r_min)),
-            ('max', float(r_max)),
-            ('n_bins', int(n_r_bins))
-        ])
-        if r_power == 1:
-            binning['r'] = LinearAxis(**r_binning_kw)
-        else:
-            r_binning_kw['power'] = int(r_power)
-            binning['r'] = PowerAxis(**r_binning_kw)
-        binning_kw['r'] = r_binning_kw
+    if coordinate_system == 'spherical':
+        binning['t_min'] = 0 # ns
+        binning['r_min'] = 0 # meters
+        costheta_min, costheta_max = -1.0, 1.0
+        phi_min, phi_max = -np.pi, np.pi # rad
+        binning['costhetadir_min'], binning['costhetadir_max'] = -1.0, 1.0
+        binning['deltaphidir_min'], binning['deltaphidir_max'] = 0.0, np.pi # rad
 
-    if n_costheta_bins > 0:
-        costheta_binning_kw = OrderedDict([
-            ('min', float(costheta_min)),
-            ('max', float(costheta_max)),
-            ('n_bins', int(n_costheta_bins))
-        ])
-        binning['costheta'] = LinearAxis(**costheta_binning_kw)
-        binning_kw['costheta'] = costheta_binning_kw
+        if binning['n_r_bins'] > 0:
+            assert isinstance(binning['r_power'], Integral) and binning['r_power'] > 0
+            r_binning_kw = OrderedDict([
+                ('min', float(binning['r_min'])),
+                ('max', float(binning['r_max'])),
+                ('n_bins', int(binning['n_r_bins']))
+            ])
+            if binning['r_power'] == 1:
+                axes['r'] = LinearAxis(**r_binning_kw)
+            else:
+                r_binning_kw['power'] = int(binning['r_power'])
+                axes['r'] = PowerAxis(**r_binning_kw)
+            binning_kw['r'] = r_binning_kw
 
-    if n_phi_bins > 0:
-        phi_binning_kw = OrderedDict([
-            ('min', float(phi_min)),
-            ('max', float(phi_max)),
-            ('n_bins', int(n_phi_bins))
-        ])
-        binning['phi'] = LinearAxis(**phi_binning_kw)
-        binning_kw['phi'] = phi_binning_kw
+        if binning['n_costheta_bins'] > 0:
+            costheta_binning_kw = OrderedDict([
+                ('min', float(costheta_min)),
+                ('max', float(costheta_max)),
+                ('n_bins', int(binning['n_costheta_bins']))
+            ])
+            axes['costheta'] = LinearAxis(**costheta_binning_kw)
+            binning_kw['costheta'] = costheta_binning_kw
 
-    if n_t_bins > 0:
-        assert isinstance(t_power, Integral) and t_power > 0
-        t_binning_kw = OrderedDict([
-            ('min', float(t_min)),
-            ('max', float(t_max)),
-            ('n_bins', int(n_t_bins))
-        ])
-        if t_power == 1:
-            binning['t'] = LinearAxis(**t_binning_kw)
-        else:
-            t_binning_kw['power'] = int(t_power)
-            binning['t'] = PowerAxis(**t_binning_kw)
-        binning_kw['t'] = t_binning_kw
+        if binning['n_phi_bins'] > 0:
+            phi_binning_kw = OrderedDict([
+                ('min', float(phi_min)),
+                ('max', float(phi_max)),
+                ('n_bins', int(binning['n_phi_bins']))
+            ])
+            axes['phi'] = LinearAxis(**phi_binning_kw)
+            binning_kw['phi'] = phi_binning_kw
 
-    if n_costhetadir_bins > 0:
-        costhetadir_binning_kw = OrderedDict([
-            ('min', float(costhetadir_min)),
-            ('max', float(costhetadir_max)),
-            ('n_bins', int(n_costhetadir_bins))
-        ])
-        binning['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
-        binning_kw['costhetadir'] = costheta_binning_kw
+        if binning['n_t_bins'] > 0:
+            assert isinstance(binning['t_power'], Integral) and binning['t_power'] > 0
+            t_binning_kw = OrderedDict([
+                ('min', float(binning['t_min'])),
+                ('max', float(binning['t_max'])),
+                ('n_bins', int(binning['n_t_bins']))
+            ])
+            if binning['t_power'] == 1:
+                axes['t'] = LinearAxis(**t_binning_kw)
+            else:
+                t_binning_kw['power'] = int(binning['t_power'])
+                axes['t'] = PowerAxis(**t_binning_kw)
+            binning_kw['t'] = t_binning_kw
 
-    if n_deltaphidir_bins > 0:
-        assert isinstance(deltaphidir_power, Integral) and deltaphidir_power > 0
-        deltaphidir_binning_kw = OrderedDict([
-            ('min', float(deltaphidir_min)),
-            ('max', float(deltaphidir_max)),
-            ('n_bins', int(n_deltaphidir_bins))
-        ])
-        if deltaphidir_power == 1:
-            binning['deltaphidir'] = LinearAxis(**deltaphidir_binning_kw)
-        else:
-            deltaphidir_binning_kw['power'] = int(deltaphidir_power)
-            binning['deltaphidir'] = PowerAxis(**deltaphidir_binning_kw)
-        binning_kw['deltaphidir'] = deltaphidir_binning_kw
+        if binning['n_costhetadir_bins'] > 0:
+            costhetadir_binning_kw = OrderedDict([
+                ('min', float(binning['costhetadir_min'])),
+                ('max', float(binning['costhetadir_max'])),
+                ('n_bins', int(binning['n_costhetadir_bins']))
+            ])
+            axes['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
+            binning_kw['costhetadir'] = costheta_binning_kw
 
-    binning_order = BINNING_ORDER
+        if binning['n_deltaphidir_bins'] > 0:
+            assert (
+                isinstance(binning['deltaphidir_power'], Integral)
+                and binning['deltaphidir_power'] > 0
+            )
+            deltaphidir_binning_kw = OrderedDict([
+                ('min', float(binning['deltaphidir_min'])),
+                ('max', float(binning['deltaphidir_max'])),
+                ('n_bins', int(binning['n_deltaphidir_bins']))
+            ])
+            if binning['deltaphidir_power'] == 1:
+                axes['deltaphidir'] = LinearAxis(**deltaphidir_binning_kw)
+            else:
+                deltaphidir_binning_kw['power'] = int(binning['deltaphidir_power'])
+                axes['deltaphidir'] = PowerAxis(**deltaphidir_binning_kw)
+            binning_kw['deltaphidir'] = deltaphidir_binning_kw
 
-    missing_dims = set(binning.keys()).difference(binning_order)
+    elif coordinate_system == 'cartesian':
+        binning['t_min'] = 0 # ns
+        binning['costhetadir_min'], binning['costhetadir_max'] = -1.0, 1.0
+        binning['phidir_min'], binning['phidir_max'] = -np.pi, np.pi # rad
+
+        if binning['n_x_bins'] > 0:
+            x_binning_kw = OrderedDict([
+                ('min', float(binning['x_min'])),
+                ('max', float(binning['x_max'])),
+                ('n_bins', int(binning['n_x_bins']))
+            ])
+            axes['x'] = LinearAxis(**x_binning_kw)
+            binning_kw['x'] = x_binning_kw
+
+        if binning['n_y_bins'] > 0:
+            y_binning_kw = OrderedDict([
+                ('min', float(binning['y_min'])),
+                ('max', float(binning['y_max'])),
+                ('n_bins', int(binning['n_y_bins']))
+            ])
+            axes['y'] = LinearAxis(**y_binning_kw)
+            binning_kw['y'] = y_binning_kw
+
+        if binning['n_z_bins'] > 0:
+            z_binning_kw = OrderedDict([
+                ('min', float(binning['z_min'])),
+                ('max', float(binning['z_max'])),
+                ('n_bins', int(binning['n_z_bins']))
+            ])
+            axes['z'] = LinearAxis(**z_binning_kw)
+            binning_kw['z'] = x_binning_kw
+
+        if binning['n_t_bins'] > 0:
+            assert isinstance(binning['t_power'], Integral) and binning['t_power'] > 0
+            t_binning_kw = OrderedDict([
+                ('min', float(binning['t_min'])),
+                ('max', float(binning['t_max'])),
+                ('n_bins', int(binning['n_t_bins']))
+            ])
+            if binning['t_power'] == 1:
+                axes['t'] = LinearAxis(**t_binning_kw)
+            else:
+                t_binning_kw['power'] = int(binning['t_power'])
+                axes['t'] = PowerAxis(**t_binning_kw)
+            binning_kw['t'] = t_binning_kw
+
+        if binning['n_costhetadir_bins'] > 0:
+            costhetadir_binning_kw = OrderedDict([
+                ('min', float(binning['costhetadir_min'])),
+                ('max', float(binning['costhetadir_max'])),
+                ('n_bins', int(binning['n_costhetadir_bins']))
+            ])
+            axes['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
+            binning_kw['costhetadir'] = costheta_binning_kw
+
+        if binning['n_phidir_bins'] > 0:
+            phidir_binning_kw = OrderedDict([
+                ('min', float(binning['phidir_min'])),
+                ('max', float(binning['phidir_max'])),
+                ('n_bins', int(binning['n_phidir_bins']))
+            ])
+            axes['phidir'] = LinearAxis(**phidir_binning_kw)
+            binning_kw['phidir'] = phidir_binning_kw
+
+    binning_order = BINNING_ORDER[coordinate_system]
+
+    missing_dims = set(axes.keys()).difference(binning_order)
     if missing_dims:
         raise ValueError(
             '`binning_order` specified is {} but is missing dimension(s) {}'
             .format(binning_order, missing_dims)
         )
 
-    binning_ = OrderedDict()
+    axes_ = OrderedDict()
     binning_kw_ = OrderedDict()
     for dim in binning_order:
-        if dim in binning:
-            binning_[dim] = binning[dim]
+        if dim in axes:
+            axes_[dim] = axes[dim]
             binning_kw_[dim] = binning_kw[dim]
-    binning = binning_
+    axes = axes_
     binning_kw = binning_kw_
 
-    axes = SphericalAxes(binning.values())
+    if coordinate_system == 'spherical':
+        axes = SphericalAxes(axes.values())
+    elif coordinate_system == 'cartesian':
+        axes = Axes(axes.values())
 
     # Construct metadata initially with items that will be hashed
     metadata = OrderedDict([
         ('source_gcd_i3_md5', gcd_info['source_gcd_i3_md5']),
+        ('coordinate_system', coordinate_system),
         ('binning_kw', binning_kw),
         ('ice_model', ice_model),
         ('hole_ice_model', hole_ice_model),
         ('disable_tilt', disable_tilt),
         ('disable_anisotropy', disable_anisotropy)
     ])
+    # TODO: this is hard-coded in our branch of CLSim; make parameter & fix here!
+    if 't' in binning:
+        metadata['t_is_residual_time'] = True
 
-    hash_val = hash_obj(metadata, fmt='hex')[:8]
-
+    if tableset_hash is None:
+        hash_val = hash_obj(metadata, fmt='hex')[:8]
+    else:
+        hash_val = tableset_hash
     metadata['hash_val'] = hash_val
+    if tile is not None:
+        metadata['tile'] = tile
 
     dom_spec = OrderedDict([('string', string), ('dom', dom)])
 
@@ -742,6 +851,12 @@ def generate_clsim_table(
         metadata['string'] = string
         metadata['depth_idx'] = depth_idx
 
+        if tile is not None:
+            raise ValueError(
+                'Cannot produce tiled tables using "depth_idx"-style table groupings;'
+                ' use "string"/"dom"-style tables instead.'
+            )
+
         clsim_table_fname_proto = CLSIM_TABLE_FNAME_PROTO[1]
         clsim_table_metaname_proto = CLSIM_TABLE_METANAME_PROTO[0]
 
@@ -756,8 +871,12 @@ def generate_clsim_table(
         metadata['string'] = string
         metadata['dom'] = dom
 
-        clsim_table_fname_proto = CLSIM_TABLE_FNAME_PROTO[2]
-        clsim_table_metaname_proto = CLSIM_TABLE_METANAME_PROTO[1]
+        if tile is None:
+            clsim_table_fname_proto = CLSIM_TABLE_FNAME_PROTO[2]
+            clsim_table_metaname_proto = CLSIM_TABLE_METANAME_PROTO[1]
+        else:
+            clsim_table_fname_proto = CLSIM_TABLE_TILE_FNAME_PROTO[-1]
+            clsim_table_metaname_proto = CLSIM_TABLE_TILE_METANAME_PROTO[-1]
 
         print('GCD = "{}"\nString {}, dom {}: (x, y, z) = ({}, {}, {}) m'
               .format(gcd, string, dom, dom_x, dom_y, dom_z))
@@ -829,7 +948,8 @@ def generate_clsim_table(
         seed=seed,
         n_events=n_events,
         tablepath=tablepath,
-        record_errors=False
+        tile=tile,
+        record_errors=False,
     )
 
     logging.set_level_for_unit('I3CLSimStepToTableConverter', 'TRACE')
@@ -923,16 +1043,16 @@ def parse_args(description=__doc__):
         help='Number of radial bins'
     )
     sph_parser.add_argument(
-        '--n-t-bins', type=int, required=True,
-        help='Number of time bins (relative to direct time)'
-    )
-    sph_parser.add_argument(
         '--n-costheta-bins', type=int, required=True,
         help='Number of costheta (cosine of position zenith angle) bins'
     )
     sph_parser.add_argument(
         '--n-phi-bins', type=int, required=True,
         help='Number of phi (position azimuth) bins'
+    )
+    sph_parser.add_argument(
+        '--n-t-bins', type=int, required=True,
+        help='Number of time bins (relative to direct time)'
     )
     sph_parser.add_argument(
         '--n-costhetadir-bins', type=int, required=True,
@@ -954,17 +1074,17 @@ def parse_args(description=__doc__):
     )
 
     sph_parser.add_argument(
+        '--deltaphidir-power', type=int, required=False,
+        help='deltaphidir binning is regular in deltaphidir to this power'
+    )
+
+    sph_parser.add_argument(
         '--t-max', type=float, required=False,
         help='Time binning maximum value, in nanoseconds'
     )
     sph_parser.add_argument(
         '--t-power', type=int, required=False,
         help='Time binning is regular in time to this power'
-    )
-
-    sph_parser.add_argument(
-        '--deltaphidir-power', type=int, required=False,
-        help='deltaphidir binning is regular in deltaphidir to this power'
     )
 
     # -- Cartesian + (optional time) + directionality binning -- #
@@ -987,6 +1107,10 @@ def parse_args(description=__doc__):
         help='Number of z bins'
     )
     cart_parser.add_argument(
+        '--n-t-bins', type=int, required=True,
+        help='Number of time bins (relative to direct time)'
+    )
+    cart_parser.add_argument(
         '--n-costhetadir-bins', type=int, required=True,
         help='Number of costhetadir bins'
     )
@@ -998,30 +1122,39 @@ def parse_args(description=__doc__):
     # -- Binning limits -- #
 
     cart_parser.add_argument(
-        '--x-min', type=float, required=True,
+        '--x-min', type=float, required=False,
         help='x binning minimum value, IceCube coordinate system, in meters'
     )
     cart_parser.add_argument(
-        '--x-max', type=float, required=True,
+        '--x-max', type=float, required=False,
         help='x binning maximum value, IceCube coordinate system, in meters'
     )
 
     cart_parser.add_argument(
-        '--y-min', type=float, required=True,
+        '--y-min', type=float, required=False,
         help='y binning minimum value, IceCube coordinate system, in meters'
     )
     cart_parser.add_argument(
-        '--y-max', type=float, required=True,
+        '--y-max', type=float, required=False,
         help='y binning maximum value, IceCube coordinate system, in meters'
     )
 
     cart_parser.add_argument(
-        '--z-min', type=float, required=True,
+        '--z-min', type=float, required=False,
         help='z binning minimum value, IceCube coordinate system, in meters'
     )
     cart_parser.add_argument(
-        '--z-max', type=float, required=True,
+        '--z-max', type=float, required=False,
         help='z binning maximum value, IceCube coordinate system, in meters'
+    )
+
+    cart_parser.add_argument(
+        '--t-max', type=float, required=False,
+        help='Time binning maximum value, in nanoseconds'
+    )
+    cart_parser.add_argument(
+        '--t-power', type=int, required=False,
+        help='Time binning is regular in time to this power'
     )
 
     all_kw = vars(parser.parse_args())
@@ -1039,5 +1172,5 @@ def parse_args(description=__doc__):
 
 
 if __name__ == '__main__':
-    general_kw, binning = parse_args()
-    generate_clsim_table(binning=binning, **general_kw)
+    _general_kw, _binning = parse_args()
+    generate_clsim_table(binning=_binning, **_general_kw)
