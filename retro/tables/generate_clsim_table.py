@@ -697,7 +697,7 @@ def generate_clsim_table(
                 ('n_bins', int(binning['n_costhetadir_bins']))
             ])
             axes['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
-            binning_kw['costhetadir'] = costheta_binning_kw
+            binning_kw['costhetadir'] = costhetadir_binning_kw
 
         if binning['n_deltaphidir_bins'] > 0:
             assert (
@@ -769,7 +769,7 @@ def generate_clsim_table(
                 ('n_bins', int(binning['n_costhetadir_bins']))
             ])
             axes['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
-            binning_kw['costhetadir'] = costheta_binning_kw
+            binning_kw['costhetadir'] = costhetadir_binning_kw
 
         if binning['n_phidir_bins'] > 0:
             phidir_binning_kw = OrderedDict([
@@ -798,10 +798,10 @@ def generate_clsim_table(
     axes = axes_
     binning_kw = binning_kw_
 
-    if coordinate_system == 'spherical':
-        axes = SphericalAxes(axes.values())
-    elif coordinate_system == 'cartesian':
-        axes = Axes(axes.values())
+    #if coordinate_system == 'spherical':
+    axes = SphericalAxes(axes.values())
+    #elif coordinate_system == 'cartesian':
+    #    axes = axes.values()
 
     # Construct metadata initially with items that will be hashed
     metadata = OrderedDict([
@@ -819,8 +819,10 @@ def generate_clsim_table(
 
     if tableset_hash is None:
         hash_val = hash_obj(metadata, fmt='hex')[:8]
+        print('derived hash:', hash_val)
     else:
         hash_val = tableset_hash
+        print('tableset_hash:', hash_val)
     metadata['hash_val'] = hash_val
     if tile is not None:
         metadata['tile'] = tile
@@ -1095,6 +1097,16 @@ def parse_args(description=__doc__):
     )
 
     cart_parser.add_argument(
+        '--tableset-hash', required=False,
+        help='''Hash for a larger table(set) of which this is one tile (i.e.,
+        if --tile is provided)'''
+    )
+    cart_parser.add_argument(
+        '--tile', type=int, required=False,
+        help='Tile number; provide if this is a tile in a larger table'
+    )
+
+    cart_parser.add_argument(
         '--n-x-bins', type=int, required=True,
         help='Number of x bins'
     )
@@ -1163,9 +1175,11 @@ def parse_args(description=__doc__):
     for key in (
         'outdir', 'overwrite', 'compress', 'gcd', 'ice_model',
         'hole_ice_model', 'disable_tilt', 'disable_anisotropy', 'string',
-        'dom', 'n_events', 'seed', 'coordinate_system',
+        'dom', 'n_events', 'seed', 'coordinate_system', 'tableset_hash',
+        'tile',
     ):
-        general_kw[key] = all_kw.pop(key)
+        if key in all_kw:
+            general_kw[key] = all_kw.pop(key)
     binning = all_kw
 
     return general_kw, binning
