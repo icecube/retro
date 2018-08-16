@@ -13,15 +13,23 @@ parser = ArgumentParser()
 parser.add_argument('--n-clusters', type=int,
                     default=4000,
                     help='number of clusters')
+parser.add_argument('-d', '--dir', type=str,
+                    metavar='directory', default=None,
+                    help='parent directory of the tables')
 args = parser.parse_args()
 
-if not os.path.isfile('spicelea_cluster_data.fp32.npy'):
+if not os.path.isfile(os.path.join(args.dir, 'cluster_data.fp32.npy')):
     all_tables = []
     length_list = []
-    for cluster_idx in range(80):
-        all_tables.append(np.load('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/pca_reduced_table.npy'%(cluster_idx),  mmap_mode='r'))
-        # figure out how many element does each table have
-        length_list.append(all_tables[-1].shape[0])
+
+    for item in os.listdir(args.dir):
+        path = os.path.join(args.dir, item)
+        if os.path.isdir(path):
+            table = os.path.join(path, 'pca_reduced_table.npy')
+            if os.path.isfile(table):
+                all_tables.append(np.load(table,  mmap_mode='r'))
+                # figure out how many element does each table have
+                length_list.append(all_tables[-1].shape[0])
 
     length_list = np.array(length_list)
 
@@ -29,10 +37,10 @@ if not os.path.isfile('spicelea_cluster_data.fp32.npy'):
     data = np.concatenate(all_tables)
     print('data created')
     data = data.astype(np.float32)
-    np.save('cluster_data.fp32.npy', data)
+    np.save(os.path.join(args.dir, 'cluster_data.fp32.npy'), data)
 else:
     print('loading exisiting data')
-    data = np.load('spicelea_cluster_data.fp32.npy') #, mmap_mode='r')
+    data = np.load(os.path.join(args.path, 'cluster_data.fp32.npy'))
 
 # random subsample
 #print('subsampling')
@@ -51,5 +59,5 @@ centroids, assignments = kmeans_cuda(data, args.n_clusters, verbosity=2, seed=3,
 #centroids, assignments = kmeans_cuda(data, args.n_clusters, verbosity=2, seed=3, device=1, yinyang_t=0, tolerance=0.5, init='random')
 
 print('clustering done')
-np.save('spicelea_kmcuda_%i_clusters_centroids_rand.npy'%args.n_clusters, centroids)
-np.save('spicelea_kmcuda_%i_clusters_assignements_rand.npy'%args.n_clusters, assignments)
+np.save(os.path.join(args.dir, 'kmcuda_%i_clusters_centroids_rand.npy'%args.n_clusters), centroids)
+np.save(os.path.join(args.dir, 'kmcuda_%i_clusters_assignements_rand.npy'%args.n_clusters), assignments)
