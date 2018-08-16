@@ -65,7 +65,6 @@ from icecube.clsim import (
     I3CLSimSpectrumTable,
 )
 from icecube.clsim.tabulator import (
-    Axes,
     LinearAxis,
     PowerAxis,
     SphericalAxes,
@@ -241,7 +240,7 @@ def TabulateRetroSources(
     binning_kw,
     axes,
     ice_model,
-    hole_ice_model,
+    angular_sensitivity,
     disable_tilt,
     disable_anisotropy,
     hash_val,
@@ -343,18 +342,19 @@ def TabulateRetroSources(
     )
 
     header = OrderedDict(FITSTable.empty_header)
-    header['type'] = 'Retro DOM table'
-    header['source_gcd_i3_md5'] = source_gcd_i3_md5
-    #header['axes'] = ','.join(binning_kw.keys())
+    header['retro_dom_table'] = 0
+    header['gcd_i3_md5_{:s}'.format(source_gcd_i3_md5)] = 0
     for n, axname in enumerate(binning_kw.keys()):
-        header['axis{:d}'.format(n)] = axname
-    if 't' in binning_kw:
-        header['t_is_residual_time'] = True
-    header['ice_model'] = ice_model
-    header['hole_ice_model'] = hole_ice_model
+        header['ax_{:s}'.format(axname)] = n
+        for key, val in binning_kw[axname].items():
+            header['{}_{}'.format(axname, key)] = val
+        if axname == 't':
+            header['t_is_residual_time'] = 1
+    header['ice_{:s}'.format(ice_model.replace('.', '_'))] = 0
+    header['angsens_{:s}'.format(angular_sensitivity.replace('.', '_'))] = 0
     header['disable_tilt'] = disable_tilt
     header['disable_anisotropy'] = disable_anisotropy
-    header['hash_val'] = hash_val
+    header['hash_{:s}'.format(hash_val)] = 0
     if tile is not None:
         header['tile'] = tile
     for key, value in dom_spec.items():
@@ -444,7 +444,7 @@ def generate_clsim_table(
     outdir,
     gcd,
     ice_model,
-    hole_ice_model,
+    angular_sensitivity,
     disable_tilt,
     disable_anisotropy,
     string,
@@ -471,7 +471,7 @@ def generate_clsim_table(
     ice_model : str
         E.g. "spice_mie", "spice_lea", ...
 
-    hole_ice_model : str
+    angular_sensitivity : str
         E.g. "h2-50cm", "9" (which is equivalent to "new25" because, like, duh)
 
     disable_tilt : bool
@@ -618,11 +618,11 @@ def generate_clsim_table(
 
     # For now, hole ice model is hard-coded in our CLSim branch to "9"
     # (i.e., as.9, aka new25)
-    assert hole_ice_model == '9'
+    assert angular_sensitivity == '9'
 
     ice_model = ice_model.strip()
-    hole_ice_model = hole_ice_model.strip()
-    assert hole_ice_model in ['9', 'new25']
+    angular_sensitivity = angular_sensitivity.strip()
+    assert angular_sensitivity in ['9', 'new25']
 
     gcd_info = extract_gcd(gcd)
 
@@ -798,10 +798,10 @@ def generate_clsim_table(
     axes = axes_
     binning_kw = binning_kw_
 
-    #if coordinate_system == 'spherical':
+    # NOTE: use SphericalAxes even if we're actually binning Cartesian since we
+    # don't care how it handles e.g. volumes, and Cartesian isn't implemented
+    # in CLSim yet
     axes = SphericalAxes(axes.values())
-    #elif coordinate_system == 'cartesian':
-    #    axes = axes.values()
 
     # Construct metadata initially with items that will be hashed
     metadata = OrderedDict([
@@ -809,7 +809,7 @@ def generate_clsim_table(
         ('coordinate_system', coordinate_system),
         ('binning_kw', binning_kw),
         ('ice_model', ice_model),
-        ('hole_ice_model', hole_ice_model),
+        ('angular_sensitivity', angular_sensitivity),
         ('disable_tilt', disable_tilt),
         ('disable_anisotropy', disable_anisotropy)
     ])
@@ -937,7 +937,7 @@ def generate_clsim_table(
         binning_kw=binning_kw,
         axes=axes,
         ice_model=ice_model,
-        hole_ice_model=hole_ice_model,
+        angular_sensitivity=angular_sensitivity,
         disable_tilt=disable_tilt,
         disable_anisotropy=disable_anisotropy,
         hash_val=hash_val,
@@ -979,7 +979,7 @@ def parse_args(description=__doc__):
     """
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        '--outdir', default='./',
+        '--outdir', required=True,
         help='Save table to this directory (default: "./")'
     )
     parser.add_argument(
@@ -998,7 +998,7 @@ def parse_args(description=__doc__):
         '--ice-model', required=True
     )
     parser.add_argument(
-        '--hole-ice-model', required=True
+        '--angular-sensitivity', required=True
     )
 
     parser.add_argument(
@@ -1173,9 +1173,20 @@ def parse_args(description=__doc__):
 
     general_kw = OrderedDict()
     for key in (
-        'outdir', 'overwrite', 'compress', 'gcd', 'ice_model',
-        'hole_ice_model', 'disable_tilt', 'disable_anisotropy', 'string',
-        'dom', 'n_events', 'seed', 'coordinate_system', 'tableset_hash',
+        'outdir',
+        'overwrite',
+        'compress',
+        'gcd',
+        'ice_model',
+        'angular_sensitivity',
+        'disable_tilt',
+        'disable_anisotropy',
+        'string',
+        'dom',
+        'n_events',
+        'seed',
+        'coordinate_system',
+        'tableset_hash',
         'tile',
     ):
         if key in all_kw:
