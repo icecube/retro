@@ -707,6 +707,7 @@ class RetroReco(object):
         best_llh = np.min(fx)
         no_improvement_counter = -1
 
+        #for k in range(5):
         for k in range(50000):
             # minimizer loop
 
@@ -807,22 +808,25 @@ class RetroReco(object):
         # first create array without dtype (otherwise covariance doesn't work)
 
         # bigger arrays to also contain sampled points 
-        S = np.zeros(shape=(2*N,n))
-        f = np.full(2*N, np.inf)
+        S = np.zeros(shape=(N,n))
+        #f = np.full(2*N, np.inf)
 
         # set the first half
         for i in range(N):
             S[i] = create_x(S_cart[i], S_spher[i])
-        f[:N] = fx
+        #f[:N] = fx
         
         az_dim = 4
         zen_dim = 5
 
-        for k in range(42):
-            print('Sampling round %i'%k)
+        N_sampling = 10000
+        counter = 0
 
+        while counter < N_sampling:
+            #print('Sampling round %i'%k)
 
-            az_values = S[:N,az_dim]
+            
+            az_values = S[:,az_dim]
 
             # move the azimuths
             circmean = stats.circmean(az_values)
@@ -830,37 +834,74 @@ class RetroReco(object):
                 az_values[az_values < circmean - np.pi] += (2 * np.pi)
             else:
                 az_values[az_values > circmean + np.pi] -= (2 * np.pi)
+            
+            worst_idx = np.argmax(fx)
+            worst_llh = fx[worst_idx]
+
+            best_idx = np.argmin(fx)
+
+            weights = np.exp(fx - np.max(fx))
 
             # calculate mean and covariance
-            mean = np.mean(S[:N], axis=0)
-            cov = np.cov(S[:N].T)
+            #mean = np.average(S, axis=0, weights=weights)
+            #print(mean)
+            mean = S[best_idx]
+            cov = np.cov(S.T[:az_dim])
 
-            # sample the second half
-            S[N:] = np.random.multivariate_normal(mean, cov, N)
-
-            # fold in zeniths and flip azimuths
-            zen_values = S[:,zen_dim]
-            az_values = S[:,az_dim]
-            while np.any(zen_values < 0) or np.any(zen_values > np.pi):
-                az_values[zen_values < 0] += np.pi
-                az_values[zen_values > np.pi] += np.pi
-                zen_values[zen_values < 0] = -zen_values[zen_values < 0]
-                zen_values[zen_values > np.pi] = np.pi - zen_values[zen_values > np.pi]
-
-            # make sure boundaries are ok?
             az_values = az_values % (2 * np.pi)
+
+            for j in range(100):
+                new_x = np.zeros(n)
+                for i in range(n):
+                    new_x[i] = rand.randn(1) * np.std(S[:,i]) + mean[i]
+
+                #new_x[:az_dim] = rand.multivariate_normal(mean[:az_dim], cov, 1)[0]
+                #new_x[az_dim] = rand.randn(1) * np.std(az_values) + mean[az_dim]
+                #new_x[zen_dim] = rand.randn(1) * np.std(S[:,zen_dim]) + mean[zen_dim]
+
+                while new_x[zen_dim] < 0 or new_x[zen_dim] > np.pi:
+                    new_x[az_dim] += np.pi
+                    if new_x[zen_dim] < 0:
+                        new_x[zen_dim] = -new_x[zen_dim]
+                    else:
+                        new_x[zen_dim] = np.pi - new_x[zen_dim]
+
+                new_x[az_dim] = new_x[az_dim] % (2 * np.pi)
+                new_llh = fun(new_x)
+                counter += 1
+                if new_llh < worst_llh:
+                    S[worst_idx] = new_x
+                    fx[worst_idx] = new_llh
+                    #print('found better point after %i trials'%j)
+                    break
+                else:
+                    if j == 99:
+                        print('failed to find better point in 100 trials')
+
+                
+            # fold in zeniths and flip azimuths
+            #zen_values = S[:,zen_dim]
+            #az_values = S[:,az_dim]
+            #while np.any(zen_values < 0) or np.any(zen_values > np.pi):
+            #    az_values[zen_values < 0] += np.pi
+            #    az_values[zen_values > np.pi] += np.pi
+            #    zen_values[zen_values < 0] = -zen_values[zen_values < 0]
+            #    zen_values[zen_values > np.pi] = np.pi - zen_values[zen_values > np.pi]
+
+            ## make sure boundaries are ok?
+            #az_values = az_values % (2 * np.pi)
             
 
             # evaluate LLH
-            for i in range(N,2*N):
-                f[i] = fun(S[i])
-            
-            # find best half
-            mask = f <= np.median(f)
+            #for i in range(N,2*N):
+            #    f[i] = fun(S[i])
+            #
+            ## find best half
+            #mask = f <= np.median(f)
 
-            # reset first half
-            S[:N] = S[mask]
-            f[:N] = f[mask]
+            ## reset first half
+            #S[:N] = S[mask]
+            #f[:N] = f[mask]
 
 
         return OrderedDict()
