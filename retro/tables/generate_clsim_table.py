@@ -649,7 +649,7 @@ def generate_clsim_table(
             r_binning_kw = OrderedDict([
                 ('min', float(binning['r_min'])),
                 ('max', float(binning['r_max'])),
-                ('n_bins', int(binning['n_r_bins']))
+                ('n_bins', int(binning['n_r_bins'])),
             ])
             if binning['r_power'] == 1:
                 axes['r'] = LinearAxis(**r_binning_kw)
@@ -662,7 +662,7 @@ def generate_clsim_table(
             costheta_binning_kw = OrderedDict([
                 ('min', float(costheta_min)),
                 ('max', float(costheta_max)),
-                ('n_bins', int(binning['n_costheta_bins']))
+                ('n_bins', int(binning['n_costheta_bins'])),
             ])
             axes['costheta'] = LinearAxis(**costheta_binning_kw)
             binning_kw['costheta'] = costheta_binning_kw
@@ -671,7 +671,7 @@ def generate_clsim_table(
             phi_binning_kw = OrderedDict([
                 ('min', float(phi_min)),
                 ('max', float(phi_max)),
-                ('n_bins', int(binning['n_phi_bins']))
+                ('n_bins', int(binning['n_phi_bins'])),
             ])
             axes['phi'] = LinearAxis(**phi_binning_kw)
             binning_kw['phi'] = phi_binning_kw
@@ -681,7 +681,7 @@ def generate_clsim_table(
             t_binning_kw = OrderedDict([
                 ('min', float(binning['t_min'])),
                 ('max', float(binning['t_max'])),
-                ('n_bins', int(binning['n_t_bins']))
+                ('n_bins', int(binning['n_t_bins'])),
             ])
             if binning['t_power'] == 1:
                 axes['t'] = LinearAxis(**t_binning_kw)
@@ -694,7 +694,7 @@ def generate_clsim_table(
             costhetadir_binning_kw = OrderedDict([
                 ('min', float(binning['costhetadir_min'])),
                 ('max', float(binning['costhetadir_max'])),
-                ('n_bins', int(binning['n_costhetadir_bins']))
+                ('n_bins', int(binning['n_costhetadir_bins'])),
             ])
             axes['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
             binning_kw['costhetadir'] = costhetadir_binning_kw
@@ -707,7 +707,7 @@ def generate_clsim_table(
             deltaphidir_binning_kw = OrderedDict([
                 ('min', float(binning['deltaphidir_min'])),
                 ('max', float(binning['deltaphidir_max'])),
-                ('n_bins', int(binning['n_deltaphidir_bins']))
+                ('n_bins', int(binning['n_deltaphidir_bins'])),
             ])
             if binning['deltaphidir_power'] == 1:
                 axes['deltaphidir'] = LinearAxis(**deltaphidir_binning_kw)
@@ -725,7 +725,7 @@ def generate_clsim_table(
             x_binning_kw = OrderedDict([
                 ('min', float(binning['x_min'])),
                 ('max', float(binning['x_max'])),
-                ('n_bins', int(binning['n_x_bins']))
+                ('n_bins', int(binning['n_x_bins'])),
             ])
             axes['x'] = LinearAxis(**x_binning_kw)
             binning_kw['x'] = x_binning_kw
@@ -734,7 +734,7 @@ def generate_clsim_table(
             y_binning_kw = OrderedDict([
                 ('min', float(binning['y_min'])),
                 ('max', float(binning['y_max'])),
-                ('n_bins', int(binning['n_y_bins']))
+                ('n_bins', int(binning['n_y_bins'])),
             ])
             axes['y'] = LinearAxis(**y_binning_kw)
             binning_kw['y'] = y_binning_kw
@@ -743,17 +743,17 @@ def generate_clsim_table(
             z_binning_kw = OrderedDict([
                 ('min', float(binning['z_min'])),
                 ('max', float(binning['z_max'])),
-                ('n_bins', int(binning['n_z_bins']))
+                ('n_bins', int(binning['n_z_bins'])),
             ])
             axes['z'] = LinearAxis(**z_binning_kw)
-            binning_kw['z'] = x_binning_kw
+            binning_kw['z'] = z_binning_kw
 
         if binning['n_t_bins'] > 0:
             assert isinstance(binning['t_power'], Integral) and binning['t_power'] > 0
             t_binning_kw = OrderedDict([
                 ('min', float(binning['t_min'])),
                 ('max', float(binning['t_max'])),
-                ('n_bins', int(binning['n_t_bins']))
+                ('n_bins', int(binning['n_t_bins'])),
             ])
             if binning['t_power'] == 1:
                 axes['t'] = LinearAxis(**t_binning_kw)
@@ -766,7 +766,7 @@ def generate_clsim_table(
             costhetadir_binning_kw = OrderedDict([
                 ('min', float(binning['costhetadir_min'])),
                 ('max', float(binning['costhetadir_max'])),
-                ('n_bins', int(binning['n_costhetadir_bins']))
+                ('n_bins', int(binning['n_costhetadir_bins'])),
             ])
             axes['costhetadir'] = LinearAxis(**costhetadir_binning_kw)
             binning_kw['costhetadir'] = costhetadir_binning_kw
@@ -775,7 +775,7 @@ def generate_clsim_table(
             phidir_binning_kw = OrderedDict([
                 ('min', float(binning['phidir_min'])),
                 ('max', float(binning['phidir_max'])),
-                ('n_bins', int(binning['n_phidir_bins']))
+                ('n_bins', int(binning['n_phidir_bins'])),
             ])
             axes['phidir'] = LinearAxis(**phidir_binning_kw)
             binning_kw['phidir'] = phidir_binning_kw
