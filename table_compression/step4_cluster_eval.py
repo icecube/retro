@@ -11,16 +11,19 @@ import cPickle as pickle
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 parser = ArgumentParser()
+parser.add_argument('-d', '--dir', type=str,
+                    metavar='directory', default=None,
+                    help='parent directory of the tables')
 parser.add_argument('--cluster-idx', type=int,
                     help='cluster index (0,79)')
-parser.add_argument('--nfs', action='store_true',
-                    help='also acces over NFS')
 parser.add_argument('--overwrite', action='store_true',
                     help='overwrite existing file')
+parser.add_argument('--centroids', type=str, default=None,
+                    help='centroids file')
 args = parser.parse_args()
 
 # load the latest, greates kmeans centroids
-centroids = np.load('spicelea_kmcuda_4000_clusters_centroids_rand.npy')
+centroids = np.load(args.centroids)
 centroids = np.nan_to_num(centroids)
 k_means = KMeans(centroids.shape[0])
 k_means.cluster_centers_ = centroids
@@ -29,24 +32,17 @@ k_means.cluster_centers_ = centroids
 
 print 'table cluster %s'%(args.cluster_idx)
 
-path = 'tilt_on_anisotropy_on_noazimuth_80/cl%s/'%(args.cluster_idx)
+fname = os.path.join(args.dir, 'cl%s/ckv_table.npy'%(args.cluster_idx))
+pcaname = os.path.join(args.dir, 'cl%s/pca_reduced_table.npy'%(args.cluster_idx))
+outname = os.path.join(args.dir, 'cl%s/templates.npy'%(args.cluster_idx))
 
-if os.path.isfile('/data/icecube/retro_tables/' + path + 'templates.npy'):
+if os.path.isfile(outname):
     if args.overwrite:
-        print 'overwritting existing file'
+        print('overwritting existing file')
     else:
-        print 'file exists, abort'
+        print('file exists, abort')
         sys.exit()
 
-# try files on fastio first
-fname = '/fastio/icecube/retro/tables/' + path + 'ckv_table.npy'
-if not os.path.isfile(fname):
-    fname = '/fastio2/icecube/retro/tables/' + path + 'ckv_table.npy'
-if not os.path.isfile(fname):
-    if args.nfs:
-        fname = '/data/icecube/retro_tables/' + path + 'ckv_table.npy'
-    else:
-        sys.exit()
 table_5d = np.load(fname)
 print 'table loaded'
 # create 3d table
@@ -56,7 +52,7 @@ print '3d table created'
 mask = table_3d < 1000.
 print 'mask created'
 
-reduced_data = np.load('/data/icecube/retro_tables/' + path + 'pca_reduced_table.npy')
+reduced_data = np.load(pcaname)
 print 'reduced data loaded'
 
 length = np.product(table_5d.shape[:3])-np.sum(mask)
@@ -86,4 +82,4 @@ for i in xrange(length):
 
 print 'templates computed'
 
-np.save('/data/icecube/retro_tables/'+path+'/templates.npy', templates)
+np.save(outname, templates)
