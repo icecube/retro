@@ -681,10 +681,11 @@ class RetroReco(object):
         # initial population
         for i in range(N*initial_factor):
             x = rand.uniform(0,1,n)
+            param_vals = np.copy(x)
+            prior(param_vals)
+            # always transform angles!
+            x[n_cart:] = param_vals[n_cart:]
             if not use_priors:
-                param_vals = np.copy(x)
-                prior(param_vals)
-                #x[n_cart:] = param_vals[n_cart:]
                 x[:n_cart] = param_vals[:n_cart]
 
             # break up into cartesiand and spherical coordinates
