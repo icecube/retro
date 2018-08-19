@@ -683,8 +683,9 @@ class RetroReco(object):
 
         # initial population
         for i in range(N*initial_factor):
-            x = rand.uniform(0,1,n)
-            #x, _ = i4_sobol(n, i+1)
+            #x = rand.uniform(0,1,n)
+            # sobol seems to do slightly better
+            x, _ = i4_sobol(n, i+1)
             param_vals = np.copy(x)
             prior(param_vals)
             # always transform angles!
@@ -785,8 +786,8 @@ class RetroReco(object):
                     continue
 
             # mutation
-            #w = rand.uniform(0, 1, n_cart)
-            w = rand.uniform(-0.5, 1.5, n_cart)
+            w = rand.uniform(0, 1, n_cart)
+            #w = rand.uniform(-0.5, 1.5, n_cart)
             new_x_cart2 = (1 + w) * S_cart[best_idx] - w * new_x_cart
 
             # first reflect at best point
@@ -797,22 +798,22 @@ class RetroReco(object):
 
             # now do a combination of best and reflected point with weight w
             for dim in ['x', 'y', 'z']:
-                w = rand.uniform(-0.5, 1.5, n_spher)
-                #w = rand.uniform(0, 1, n_spher)
+                #w = rand.uniform(-0.5, 1.5, n_spher)
+                w = rand.uniform(0, 1, n_spher)
                 new_x_spher2[dim] = (1 - w) * S_spher[best_idx][dim] + w * reflected_new_x_spher[dim]
             fill_from_cart(new_x_spher2)
 
 
             # fuck up angles a little
-            for dim in range(n_spher):
-                new_x_spher2[dim]['az'] += rand.randn(1)
-                new_x_spher2[dim]['az'] = new_x_spher2[dim]['az'] % (2 * np.pi) 
-                new_x_spher2[dim]['zen'] += rand.randn(1) * 0.5
-                while new_x_spher2['zen'] < 0 or new_x_spher2['zen'] > np.pi:
-                    if new_x_spher2['zen'] < 0:
-                        new_x_spher2['zen'] = -new_x_spher2['zen']
-                    else:
-                        new_x_spher2['zen'] = np.pi - new_x_spher2['zen']
+            #for dim in range(n_spher):
+            #    new_x_spher2[dim]['az'] += rand.randn(1)
+            #    new_x_spher2[dim]['az'] = new_x_spher2[dim]['az'] % (2 * np.pi) 
+            #    new_x_spher2[dim]['zen'] += rand.randn(1) * 0.5
+            #    while new_x_spher2['zen'] < 0 or new_x_spher2['zen'] > np.pi:
+            #        if new_x_spher2['zen'] < 0:
+            #            new_x_spher2['zen'] = -new_x_spher2['zen']
+            #        else:
+            #            new_x_spher2['zen'] = np.pi - new_x_spher2['zen']
 
 
             if use_priors:
@@ -834,30 +835,40 @@ class RetroReco(object):
 
 
 
-            '''
             # do own blah
+            # sample new cartesian coordinates
+            mean_cart = np.average(S_cart, axis=0)
+            cov_cart = np.cov(S_cart.T)
+            new_x_cart = rand.multivariate_normal(mean_cart, cov_cart, 1)[0]
+            # random new angle
+            new_x_spher['az'] = rand.uniform(0,2*np.pi,n_spher)
+            new_x_spher['zen'] = np.arccos(rand.uniform(-1,1,n_spher))
+            fill_from_spher(new_x_spher)
+
+
+
             # random combination from individuals
-            for dim in range(n_cart):
-                new_x_cart[dim] = S_cart[rand.choice(N), dim]
-            for dim in range(n_spher):
-                new_x_spher[dim]['az'] = S_spher[rand.choice(N), dim]['az']
-                new_x_spher[dim]['az'] += rand.randn(1)
-                new_x_spher[dim]['az'] = new_x_spher[dim]['az'] % (2 * np.pi) 
-                new_x_spher[dim]['zen'] = S_spher[rand.choice(N), dim]['zen']
-                new_x_spher[dim]['zen'] += rand.randn(1) * 0.5
-                while new_x_spher['zen'] < 0 or new_x_spher['zen'] > np.pi:
-                    if new_x_spher['zen'] < 0:
-                        new_x_spher['zen'] = -new_x_spher['zen']
-                    else:
-                        new_x_spher['zen'] = np.pi - new_x_spher['zen']
+            #for dim in range(n_cart):
+            #    new_x_cart[dim] = S_cart[rand.choice(N), dim]
+            #for dim in range(n_spher):
+            #    new_x_spher[dim]['az'] = S_spher[rand.choice(N), dim]['az']
+            #    new_x_spher[dim]['az'] += rand.randn(1)
+            #    new_x_spher[dim]['az'] = new_x_spher[dim]['az'] % (2 * np.pi) 
+            #    new_x_spher[dim]['zen'] = S_spher[rand.choice(N), dim]['zen']
+            #    new_x_spher[dim]['zen'] += rand.randn(1) * 0.5
+            #    while new_x_spher['zen'] < 0 or new_x_spher['zen'] > np.pi:
+            #        if new_x_spher['zen'] < 0:
+            #            new_x_spher['zen'] = -new_x_spher['zen']
+            #        else:
+            #            new_x_spher['zen'] = np.pi - new_x_spher['zen']
 
-                fill_from_spher(new_x_spher)
+            #    fill_from_spher(new_x_spher)
 
-                # now fuck up angles a little
-                #new_x_spher[dim]['x'] += rand.rand(1) * 2 - 1
-                #new_x_spher[dim]['y'] += rand.rand(1) * 2 - 1
-                #new_x_spher[dim]['z'] += rand.rand(1) * 2 - 1
-                
+            #    # now fuck up angles a little
+            #    #new_x_spher[dim]['x'] += rand.rand(1) * 2 - 1
+            #    #new_x_spher[dim]['y'] += rand.rand(1) * 2 - 1
+            #    #new_x_spher[dim]['z'] += rand.rand(1) * 2 - 1
+            #    
 
             new_fx = fun(create_x(new_x_cart, new_x_spher))
             #print(new_fx, new_x_cart, new_x_spher)
@@ -869,7 +880,6 @@ class RetroReco(object):
                 fx[worst_idx] = new_fx
                 whateverido += 1
                 continue
-            '''
             # skip mutation
             #continue
             # try flipping the angles
