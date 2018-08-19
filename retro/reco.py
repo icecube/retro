@@ -55,6 +55,7 @@ from retro.priors import (
 )
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 
+report_after = 100
 
 class RetroReco(object):
 
@@ -326,7 +327,6 @@ class RetroReco(object):
         """
         # -- Variables to be captured by `loglike` closure -- #
 
-        report_after = 100
 
         all_param_names = self.hypo_handler.all_param_names
         n_opt_params = self.n_opt_params
@@ -709,7 +709,16 @@ class RetroReco(object):
         no_improvement_counter = -1
 
         #for k in range(5):
+
+        simplex_success = 0
+        mutation_success = 0
+        whateverido = 0
+        failure = 0
         for k in range(50000):
+
+            if k % report_after == 0:
+                print('simplex: %i, mutation: %i, mine: %i, failed: %i'%(simplex_success, mutation_success, whateverido, failure))
+
             # minimizer loop
 
             # break condition
@@ -768,41 +777,112 @@ class RetroReco(object):
                     S_cart[worst_idx] = new_x_cart
                     S_spher[worst_idx] = new_x_spher
                     fx[worst_idx] = new_fx
+                    simplex_success += 1
                     continue
 
-            # skip mutation
-            #continue
 
             # mutation
-            w = rand.uniform(0, 1, n_cart)
-            new_x_cart = (1 + w) * S_cart[best_idx] - w * new_x_cart
+            #w = rand.uniform(0, 1, n_cart)
+            w = rand.uniform(-0.5, 1.5, n_cart)
+            new_x_cart2 = (1 + w) * S_cart[best_idx] - w * new_x_cart
 
             # first reflect at best point
             reflected_new_x_spher = np.zeros(n_spher, dtype=spher_cord)
             reflect(new_x_spher, S_spher[best_idx], reflected_new_x_spher)
 
+            new_x_spher2 = np.zeros_like(new_x_spher)
+
             # now do a combination of best and reflected point with weight w
-            w = rand.uniform(0, 1, n_spher)
-            new_x_spher['x'] = (1 - w) * S_spher[best_idx]['x'] + w * reflected_new_x_spher['x']
-            new_x_spher['y'] = (1 - w) * S_spher[best_idx]['y'] + w * reflected_new_x_spher['y']
-            new_x_spher['z'] = (1 - w) * S_spher[best_idx]['z'] + w * reflected_new_x_spher['z']
-            fill_from_cart(new_x_spher)
+            for dim in ['x', 'y', 'z']:
+                w = rand.uniform(-0.5, 1.5, n_spher)
+                #w = rand.uniform(0, 1, n_spher)
+                new_x_spher2[dim] = (1 - w) * S_spher[best_idx][dim] + w * reflected_new_x_spher[dim]
+            fill_from_cart(new_x_spher2)
 
             if use_priors:
-                outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
+                outside = np.any(new_x_cart2 < 0) or np.any(new_x_cart2 > 1)
             else:
                 outside = False
 
             if not outside:
-                new_fx = fun(create_x(new_x_cart, new_x_spher))
+                new_fx = fun(create_x(new_x_cart2, new_x_spher2))
 
                 if new_fx < fx[worst_idx]:
+                    #print('-> MUT accepted')
                     # found better point
-                    S_cart[worst_idx] = new_x_cart
-                    S_spher[worst_idx] = new_x_spher
+                    S_cart[worst_idx] = new_x_cart2
+                    S_spher[worst_idx] = new_x_spher2
                     fx[worst_idx] = new_fx
+                    mutation_success += 1
                     continue
 
+            # do own blah
+            # random combination from individuals
+            #for dim in range(n_cart):
+            #    new_x_cart[dim] = S_cart[rand.choice(N), dim]
+            #for dim in range(n_spher):
+            #    new_x_spher[dim]['az'] = S_spher[rand.choice(N), dim]['az']
+            #    new_x_spher[dim]['zen'] = S_spher[rand.choice(N), dim]['zen']
+            #    fill_from_spher(new_x_spher)
+
+            #    # now fuck up angles a little
+            #    new_x_spher[dim]['x'] += rand.rand(1) * 2 - 1
+            #    new_x_spher[dim]['y'] += rand.rand(1) * 2 - 1
+            #    new_x_spher[dim]['z'] += rand.rand(1) * 2 - 1
+            #    
+
+            #new_fx = fun(create_x(new_x_cart, new_x_spher))
+            ##print(new_fx, new_x_cart, new_x_spher)
+
+            #if new_fx < fx[worst_idx]:
+            #    # found better point
+            #    S_cart[worst_idx] = new_x_cart
+            #    S_spher[worst_idx] = new_x_spher
+            #    fx[worst_idx] = new_fx
+            #    whateverido += 1
+            #    continue
+
+            # skip mutation
+            #continue
+            # try flipping the angles
+            #new_x_spher['zen'] = np.pi - new_x_spher['zen']
+            #new_x_spher['az'] = (new_x_spher['az'] + np.pi) % (2 * np.pi)
+            #new_fx = fun(create_x(new_x_cart, new_x_spher))
+
+            #if new_fx < fx[worst_idx]:
+            #    # found better point
+            #    print('->FLIP accepted')
+            #    S_cart[worst_idx] = new_x_cart
+            #    S_spher[worst_idx] = new_x_spher
+            #    fx[worst_idx] = new_fx
+            #    continue
+
+
+            
+            failure += 1
+
+        #return OrderedDict()
+        
+        # test a few timings:
+        #print('test timing')
+        #best_x_cart = np.copy(S_cart[best_idx])
+        #best_x_spher = np.copy(S_spher[best_idx])
+
+        #dt = np.arange(-40,41,5)
+        #dx = - dt * best_x_spher['cosaz'] * best_x_spher['sinzen']
+        #dy = - dt * best_x_spher['sinaz'] * best_x_spher['sinzen']
+        #dz = - dt * best_x_spher['coszen']
+
+        #for i in range(len(dt)):
+        #    new_x_cart  = np.copy(best_x_cart)
+        #    new_x_cart[0] += dt[i]
+        #    new_x_cart[1] += dx[i]
+        #    new_x_cart[2] += dy[i]
+        #    new_x_cart[3] += dz[i]
+        #    new_fx = fun(create_x(new_x_cart, best_x_spher))
+        #    print(new_fx)
+
+        return OrderedDict()
 
         # now let's do some sampling
         import emcee
