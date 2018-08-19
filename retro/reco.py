@@ -564,6 +564,9 @@ class RetroReco(object):
 
         # if true: use priors (for cartesian coordinates only) during minimization
         # if false: use priors only to generate initial population, then perform minimization on actual parameter values
+
+        from sobol import i4_sobol
+
         use_priors = False
 
         def fun(x): 
@@ -680,7 +683,8 @@ class RetroReco(object):
 
         # initial population
         for i in range(N*initial_factor):
-            x = rand.uniform(0,1,n)
+            #x = rand.uniform(0,1,n)
+            x, _ = i4_sobol(n, i+1)
             param_vals = np.copy(x)
             prior(param_vals)
             # always transform angles!
@@ -780,7 +784,7 @@ class RetroReco(object):
                     simplex_success += 1
                     continue
 
-
+            '''
             # mutation
             #w = rand.uniform(0, 1, n_cart)
             w = rand.uniform(-0.5, 1.5, n_cart)
@@ -856,7 +860,7 @@ class RetroReco(object):
             #    S_spher[worst_idx] = new_x_spher
             #    fx[worst_idx] = new_fx
             #    continue
-
+            '''
 
             
             failure += 1
