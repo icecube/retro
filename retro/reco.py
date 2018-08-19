@@ -670,7 +670,8 @@ class RetroReco(object):
             fill_from_cart(new)
 
         #N = 10 * (n + 1)
-        N = 160
+        #N = 160
+        N = 250
         assert N > n + 1
 
         # that many more initial individuals (didn;t seem to help realy)
@@ -819,32 +820,31 @@ class RetroReco(object):
                     mutation_success += 1
                     continue
 
-            '''
             # do own blah
             # random combination from individuals
-            #for dim in range(n_cart):
-            #    new_x_cart[dim] = S_cart[rand.choice(N), dim]
-            #for dim in range(n_spher):
-            #    new_x_spher[dim]['az'] = S_spher[rand.choice(N), dim]['az']
-            #    new_x_spher[dim]['zen'] = S_spher[rand.choice(N), dim]['zen']
-            #    fill_from_spher(new_x_spher)
+            for dim in range(n_cart):
+                new_x_cart[dim] = S_cart[rand.choice(N), dim]
+            for dim in range(n_spher):
+                new_x_spher[dim]['az'] = S_spher[rand.choice(N), dim]['az']
+                new_x_spher[dim]['zen'] = S_spher[rand.choice(N), dim]['zen']
+                fill_from_spher(new_x_spher)
 
-            #    # now fuck up angles a little
-            #    new_x_spher[dim]['x'] += rand.rand(1) * 2 - 1
-            #    new_x_spher[dim]['y'] += rand.rand(1) * 2 - 1
-            #    new_x_spher[dim]['z'] += rand.rand(1) * 2 - 1
-            #    
+                # now fuck up angles a little
+                #new_x_spher[dim]['x'] += rand.rand(1) * 2 - 1
+                #new_x_spher[dim]['y'] += rand.rand(1) * 2 - 1
+                #new_x_spher[dim]['z'] += rand.rand(1) * 2 - 1
+                
 
-            #new_fx = fun(create_x(new_x_cart, new_x_spher))
-            ##print(new_fx, new_x_cart, new_x_spher)
+            new_fx = fun(create_x(new_x_cart, new_x_spher))
+            #print(new_fx, new_x_cart, new_x_spher)
 
-            #if new_fx < fx[worst_idx]:
-            #    # found better point
-            #    S_cart[worst_idx] = new_x_cart
-            #    S_spher[worst_idx] = new_x_spher
-            #    fx[worst_idx] = new_fx
-            #    whateverido += 1
-            #    continue
+            if new_fx < fx[worst_idx]:
+                # found better point
+                S_cart[worst_idx] = new_x_cart
+                S_spher[worst_idx] = new_x_spher
+                fx[worst_idx] = new_fx
+                whateverido += 1
+                continue
 
             # skip mutation
             #continue
@@ -860,7 +860,6 @@ class RetroReco(object):
             #    S_spher[worst_idx] = new_x_spher
             #    fx[worst_idx] = new_fx
             #    continue
-            '''
 
             
             failure += 1
