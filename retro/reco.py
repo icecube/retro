@@ -784,7 +784,6 @@ class RetroReco(object):
                     simplex_success += 1
                     continue
 
-            '''
             # mutation
             #w = rand.uniform(0, 1, n_cart)
             w = rand.uniform(-0.5, 1.5, n_cart)
@@ -820,6 +819,7 @@ class RetroReco(object):
                     mutation_success += 1
                     continue
 
+            '''
             # do own blah
             # random combination from individuals
             #for dim in range(n_cart):
