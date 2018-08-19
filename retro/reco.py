@@ -670,8 +670,7 @@ class RetroReco(object):
             fill_from_cart(new)
 
         #N = 10 * (n + 1)
-        #N = 160
-        N = 250
+        N = 160
         assert N > n + 1
 
         # that many more initial individuals (didn;t seem to help realy)
@@ -684,8 +683,8 @@ class RetroReco(object):
 
         # initial population
         for i in range(N*initial_factor):
-            #x = rand.uniform(0,1,n)
-            x, _ = i4_sobol(n, i+1)
+            x = rand.uniform(0,1,n)
+            #x, _ = i4_sobol(n, i+1)
             param_vals = np.copy(x)
             prior(param_vals)
             # always transform angles!
@@ -803,6 +802,19 @@ class RetroReco(object):
                 new_x_spher2[dim] = (1 - w) * S_spher[best_idx][dim] + w * reflected_new_x_spher[dim]
             fill_from_cart(new_x_spher2)
 
+
+            # fuck up angles a little
+            for dim in range(n_spher):
+                new_x_spher2[dim]['az'] += rand.randn(1)
+                new_x_spher2[dim]['az'] = new_x_spher2[dim]['az'] % (2 * np.pi) 
+                new_x_spher2[dim]['zen'] += rand.randn(1) * 0.5
+                while new_x_spher2['zen'] < 0 or new_x_spher2['zen'] > np.pi:
+                    if new_x_spher2['zen'] < 0:
+                        new_x_spher2['zen'] = -new_x_spher2['zen']
+                    else:
+                        new_x_spher2['zen'] = np.pi - new_x_spher2['zen']
+
+
             if use_priors:
                 outside = np.any(new_x_cart2 < 0) or np.any(new_x_cart2 > 1)
             else:
@@ -820,13 +832,25 @@ class RetroReco(object):
                     mutation_success += 1
                     continue
 
+
+
+            '''
             # do own blah
             # random combination from individuals
             for dim in range(n_cart):
                 new_x_cart[dim] = S_cart[rand.choice(N), dim]
             for dim in range(n_spher):
                 new_x_spher[dim]['az'] = S_spher[rand.choice(N), dim]['az']
+                new_x_spher[dim]['az'] += rand.randn(1)
+                new_x_spher[dim]['az'] = new_x_spher[dim]['az'] % (2 * np.pi) 
                 new_x_spher[dim]['zen'] = S_spher[rand.choice(N), dim]['zen']
+                new_x_spher[dim]['zen'] += rand.randn(1) * 0.5
+                while new_x_spher['zen'] < 0 or new_x_spher['zen'] > np.pi:
+                    if new_x_spher['zen'] < 0:
+                        new_x_spher['zen'] = -new_x_spher['zen']
+                    else:
+                        new_x_spher['zen'] = np.pi - new_x_spher['zen']
+
                 fill_from_spher(new_x_spher)
 
                 # now fuck up angles a little
@@ -845,7 +869,7 @@ class RetroReco(object):
                 fx[worst_idx] = new_fx
                 whateverido += 1
                 continue
-
+            '''
             # skip mutation
             #continue
             # try flipping the angles
