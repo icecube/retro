@@ -672,19 +672,21 @@ def generate_pexp_5d_function(
         num_pegleg_sources = len(pegleg_sources)
 
         # take log steps
-        #logstep = np.log(num_pegleg_sources) / 300
-        #logspace = np.zeros(shape=301, dtype=np.int32)
-        #x = -1e-8
-        #for i in range(len(logspace)):
-        #    logspace[i] = np.int32(np.exp(x))
-        #    x+= logstep
-        #pegleg_steps = np.unique(logspace)
-        #assert pegleg_steps[0] == 0
-        #n_pegleg_steps = len(pegleg_steps)
+        logstep = np.log(num_pegleg_sources) / 300
+        logspace = np.zeros(shape=301, dtype=np.int32)
+        x = -1e-8
+        for i in range(len(logspace)):
+            logspace[i] = np.int32(np.exp(x))
+            x+= logstep
+        pegleg_steps = np.unique(logspace)
+        assert pegleg_steps[0] == 0
+        n_pegleg_steps = len(pegleg_steps)
 
         # take linear steps
-        pegleg_steps = np.arange(num_pegleg_sources)
-        n_pegleg_steps = len(pegleg_steps)
+        #pegleg_steps = np.arange(num_pegleg_sources)
+        #n_pegleg_steps = len(pegleg_steps)
+
+
         num_llhs = n_pegleg_steps + 1
 
 
@@ -798,7 +800,7 @@ def generate_pexp_5d_function(
             previous_llh = llh
 
             # break condition
-            if getting_worse_counter > 100:
+            if getting_worse_counter > 10:
                 #for idx in range(pegleg_idx+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100

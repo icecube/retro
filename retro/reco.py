@@ -567,7 +567,19 @@ class RetroReco(object):
 
         from sobol import i4_sobol
 
+
+        # number of live points
+        n_live = 250
+        # maximumm iterations
+        max_iter = 50000
+        # maximum iterations with no improvemet of best point
+        max_noimprovement = 5000
+        # break if stddev of function values accross all livepoints drops below
+        fn_std = 0.1
+        # use priors during minimization
         use_priors = False
+        # use sobol sequence
+        sobol = True
 
         def fun(x): 
             '''
@@ -670,7 +682,7 @@ class RetroReco(object):
             fill_from_cart(new)
 
         #N = 10 * (n + 1)
-        N = 160
+        N = n_live
         assert N > n + 1
 
         # that many more initial individuals (didn;t seem to help realy)
@@ -683,9 +695,11 @@ class RetroReco(object):
 
         # initial population
         for i in range(N*initial_factor):
-            #x = rand.uniform(0,1,n)
             # sobol seems to do slightly better
-            x, _ = i4_sobol(n, i+1)
+            if sobol:
+                x, _ = i4_sobol(n, i+1)
+            else:
+                x = rand.uniform(0,1,n)
             param_vals = np.copy(x)
             prior(param_vals)
             # always transform angles!
@@ -713,13 +727,12 @@ class RetroReco(object):
         best_llh = np.min(fx)
         no_improvement_counter = -1
 
-        #for k in range(5):
-
         simplex_success = 0
         mutation_success = 0
         whateverido = 0
         failure = 0
-        for k in range(50000):
+        stopping_flag = 0
+        for k in range(max_iter):
 
             if k % report_after == 0:
                 print('simplex: %i, mutation: %i, mine: %i, failed: %i'%(simplex_success, mutation_success, whateverido, failure))
@@ -727,13 +740,14 @@ class RetroReco(object):
             # minimizer loop
 
             # break condition
-            #print(np.std(fx))
-            if np.std(fx) < 0.1:
+            if np.std(fx) < fn_std:
                 print('std below threshold, stopping.')
+                stopping_flag = 1
                 break
 
-            if no_improvement_counter > 2000:
+            if no_improvement_counter > max_noimprovement:
                 print('no improvement found, stopping.')
+                stopping_flag = 2
                 break
 
             new_best_llh = np.min(fx)
@@ -749,10 +763,6 @@ class RetroReco(object):
             # choose n random points but not best
             choice = rand.choice(N-1, n, replace=False)
             choice[choice >= best_idx] +=1
-
-            # maybe we'll need to actualy reflect the worst point in the simplex?
-            # or choose random, not last?
-            # also, not necessary to exclude worst point from simplex?
 
             # cardtesian centroid
             centroid_cart = (np.sum(S_cart[choice[:-1]], axis=0) + S_cart[best_idx]) / n
@@ -803,19 +813,6 @@ class RetroReco(object):
                 new_x_spher2[dim] = (1 - w) * S_spher[best_idx][dim] + w * reflected_new_x_spher[dim]
             fill_from_cart(new_x_spher2)
 
-
-            # fuck up angles a little
-            #for dim in range(n_spher):
-            #    new_x_spher2[dim]['az'] += rand.randn(1)
-            #    new_x_spher2[dim]['az'] = new_x_spher2[dim]['az'] % (2 * np.pi) 
-            #    new_x_spher2[dim]['zen'] += rand.randn(1) * 0.5
-            #    while new_x_spher2['zen'] < 0 or new_x_spher2['zen'] > np.pi:
-            #        if new_x_spher2['zen'] < 0:
-            #            new_x_spher2['zen'] = -new_x_spher2['zen']
-            #        else:
-            #            new_x_spher2['zen'] = np.pi - new_x_spher2['zen']
-
-
             if use_priors:
                 outside = np.any(new_x_cart2 < 0) or np.any(new_x_cart2 > 1)
             else:
@@ -833,10 +830,9 @@ class RetroReco(object):
                     mutation_success += 1
                     continue
 
+            # random sampling of new point
 
-
-            # do own blah
-            # sample new cartesian coordinates
+            # sample new cartesian coordinates from distribution given the livepoints
             mean_cart = np.average(S_cart, axis=0)
             cov_cart = np.cov(S_cart.T)
             new_x_cart = rand.multivariate_normal(mean_cart, cov_cart, 1)[0]
@@ -845,33 +841,7 @@ class RetroReco(object):
             new_x_spher['zen'] = np.arccos(rand.uniform(-1,1,n_spher))
             fill_from_spher(new_x_spher)
 
-
-
-            # random combination from individuals
-            #for dim in range(n_cart):
-            #    new_x_cart[dim] = S_cart[rand.choice(N), dim]
-            #for dim in range(n_spher):
-            #    new_x_spher[dim]['az'] = S_spher[rand.choice(N), dim]['az']
-            #    new_x_spher[dim]['az'] += rand.randn(1)
-            #    new_x_spher[dim]['az'] = new_x_spher[dim]['az'] % (2 * np.pi) 
-            #    new_x_spher[dim]['zen'] = S_spher[rand.choice(N), dim]['zen']
-            #    new_x_spher[dim]['zen'] += rand.randn(1) * 0.5
-            #    while new_x_spher['zen'] < 0 or new_x_spher['zen'] > np.pi:
-            #        if new_x_spher['zen'] < 0:
-            #            new_x_spher['zen'] = -new_x_spher['zen']
-            #        else:
-            #            new_x_spher['zen'] = np.pi - new_x_spher['zen']
-
-            #    fill_from_spher(new_x_spher)
-
-            #    # now fuck up angles a little
-            #    #new_x_spher[dim]['x'] += rand.rand(1) * 2 - 1
-            #    #new_x_spher[dim]['y'] += rand.rand(1) * 2 - 1
-            #    #new_x_spher[dim]['z'] += rand.rand(1) * 2 - 1
-            #    
-
             new_fx = fun(create_x(new_x_cart, new_x_spher))
-            #print(new_fx, new_x_cart, new_x_spher)
 
             if new_fx < fx[worst_idx]:
                 # found better point
@@ -880,46 +850,26 @@ class RetroReco(object):
                 fx[worst_idx] = new_fx
                 whateverido += 1
                 continue
-            # skip mutation
-            #continue
-            # try flipping the angles
-            #new_x_spher['zen'] = np.pi - new_x_spher['zen']
-            #new_x_spher['az'] = (new_x_spher['az'] + np.pi) % (2 * np.pi)
-            #new_fx = fun(create_x(new_x_cart, new_x_spher))
-
-            #if new_fx < fx[worst_idx]:
-            #    # found better point
-            #    print('->FLIP accepted')
-            #    S_cart[worst_idx] = new_x_cart
-            #    S_spher[worst_idx] = new_x_spher
-            #    fx[worst_idx] = new_fx
-            #    continue
-
             
+            # if we get here no method was successful in replacing worst point -> start over
             failure += 1
 
-        #return OrderedDict()
-        
-        # test a few timings:
-        #print('test timing')
-        #best_x_cart = np.copy(S_cart[best_idx])
-        #best_x_spher = np.copy(S_spher[best_idx])
 
-        #dt = np.arange(-40,41,5)
-        #dx = - dt * best_x_spher['cosaz'] * best_x_spher['sinzen']
-        #dy = - dt * best_x_spher['sinaz'] * best_x_spher['sinzen']
-        #dz = - dt * best_x_spher['coszen']
-
-        #for i in range(len(dt)):
-        #    new_x_cart  = np.copy(best_x_cart)
-        #    new_x_cart[0] += dt[i]
-        #    new_x_cart[1] += dx[i]
-        #    new_x_cart[2] += dy[i]
-        #    new_x_cart[3] += dz[i]
-        #    new_fx = fun(create_x(new_x_cart, best_x_spher))
-        #    print(new_fx)
-
-        return OrderedDict()
+        res = OrderedDict()
+        res['method'] = 'CRS2spherical+lm+sampling'
+        res['n_live'] = n_live
+        res['max_iter'] = max_iter
+        res['max_noimprovement'] = max_noimprovement
+        res['fn_std'] = fn_std
+        res['use_priors'] = use_priors
+        res['sobol'] = sobol
+        res['stopping_flag'] = stopping_flag
+        res['num_simplex'] = simplex_success
+        res['num_mutation'] = mutation_success
+        res['num_sampling'] = whateverido
+        res['num_failure'] = failure
+        res['num+tot'] = k
+        return res
 
         # now let's do some sampling
         import emcee
