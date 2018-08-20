@@ -308,7 +308,7 @@ def pegleg_eval(pegleg_idx, dt, const_e_loss):
     muon_energy : float
 
     """
-    length = pegleg_idx / dt * SPEED_OF_LIGHT_M_PER_NS
+    length = pegleg_idx * dt * SPEED_OF_LIGHT_M_PER_NS
     if const_e_loss:
         return length * TRACK_M_PER_GEV
     return MUEN_INTERP(length)
