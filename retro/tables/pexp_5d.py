@@ -175,7 +175,7 @@ def generate_pexp_5d_function(
     # to sample for DOM jitter etc
     jitter_dt = np.arange(-10,11,2)
     #jitter_dt =  np.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
-    jitter_dt =  np.array([0])
+    #jitter_dt =  np.array([0])
     jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
     jitter_weights /= np.sum(jitter_weights)
 
