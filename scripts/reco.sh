@@ -143,6 +143,7 @@ consteff=""
     --truth
 
 wait
+#    --cascade-kernel "scaling_aligned_one_dim" \
 #    --cascade-kernel "scaling_one_dim_delta" \
 #    --spatial-prior dc_subdust \
 #    --temporal-prior uniform \

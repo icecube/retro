@@ -29,6 +29,7 @@ from collections import OrderedDict
 import math
 from os.path import abspath, dirname
 import sys
+import time
 
 import numpy as np
 
@@ -47,6 +48,7 @@ MACHINE_EPS = 1e-10
 
 #maximum radius to consider
 MAX_RAD_SQ = 500**2
+#MAX_RAD_SQ = 100**2
 
 def generate_pexp_5d_function(
     table,
@@ -618,6 +620,8 @@ def generate_pexp_5d_function(
         t_indep_table_norms,
         pegleg_stepsize,
     ):
+        t_tot = 0
+        t_pexp = 0
         """Compute log likelihood for hypothesis sources given an event.
 
         This version of get_llh is specialized to compute log-likelihoods for

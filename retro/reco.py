@@ -569,11 +569,11 @@ class RetroReco(object):
 
 
         # number of live points
-        n_live = 250
+        n_live = 160
         # maximumm iterations
         max_iter = 50000
         # maximum iterations with no improvemet of best point
-        max_noimprovement = 5000
+        max_noimprovement = 2000
         # break if stddev of function values accross all livepoints drops below
         fn_std = 0.1
         # use priors during minimization
@@ -596,8 +596,14 @@ class RetroReco(object):
             return -llh
 
         n = self.n_opt_params
+        names = self.hypo_handler.opt_param_names
+        assert set(names[:4]) == set(['time','x', 'y', 'z'])
         n_cart = 4
-        n_spher = 1
+        if n > 4:
+            n_spher = int((n-4)/2)
+        for spher in range(n_spher):
+            assert 'az' in names[4+spher*2]
+            assert 'zen' in names[4+spher*2+1]
 
         # type to store spherical coordinates and handy quantities
         spher_cord = np.dtype([('zen',np.float32),
@@ -634,31 +640,32 @@ class RetroReco(object):
             s['y'] = s['sinzen'] * s['sinaz']
             s['z'] = s['coszen']
 
-        def fill_from_cart(s):
+        def fill_from_cart(s_vector):
             '''
             fill in the remaining values giving the cart, coords. `x`, `y` and `z`
             '''
-            radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
 
-            if not radius == 0:
-                # make sure they're length 1
-                s['x'] /= radius
-                s['y'] /= radius
-                s['z'] /= radius
-                s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
-                s['coszen'] = s['z']
-                s['zen'] = np.arccos(s['coszen'])
-                s['sinzen'] = np.sin(s['zen'])
-                s['sinaz'] = np.sin(s['az'])
-                s['cosaz'] = np.cos(s['az'])
-            else:
-                s['z'] = 1
-                s['az'] = 0
-                s['zen'] = 0
-                s['coszen'] = 1
-                s['sinzen'] = 0
-                s['cosaz'] = 1
-                s['sinaz'] = 0
+            for s in s_vector:
+                radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
+                if not radius == 0:
+                    # make sure they're length 1
+                    s['x'] /= radius
+                    s['y'] /= radius
+                    s['z'] /= radius
+                    s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
+                    s['coszen'] = s['z']
+                    s['zen'] = np.arccos(s['coszen'])
+                    s['sinzen'] = np.sin(s['zen'])
+                    s['sinaz'] = np.sin(s['az'])
+                    s['cosaz'] = np.cos(s['az'])
+                else:
+                    s['z'] = 1
+                    s['az'] = 0
+                    s['zen'] = 0
+                    s['coszen'] = 1
+                    s['sinzen'] = 0
+                    s['cosaz'] = 1
+                    s['sinaz'] = 0
 
 
         def reflect(old, centroid, new):
@@ -830,6 +837,7 @@ class RetroReco(object):
                     mutation_success += 1
                     continue
 
+            '''
             # random sampling of new point
 
             # sample new cartesian coordinates from distribution given the livepoints
@@ -850,6 +858,7 @@ class RetroReco(object):
                 fx[worst_idx] = new_fx
                 whateverido += 1
                 continue
+            '''
             
             # if we get here no method was successful in replacing worst point -> start over
             failure += 1
