@@ -103,7 +103,8 @@ importance_sampling="--importance-sampling"
 consteff=""
 
 
-#kernprof -l -v ~/retro/retro/reco.py \
+#python -m cProfile  \
+#kernprof -l -v \
 ~/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
@@ -130,7 +131,7 @@ consteff=""
     --cascade-kernel "scaling_aligned_one_dim" \
     --cascade-angle-prior "log_normal" \
     --track-kernel "pegleg" \
-    --track-time-step 1.0 \
+    --track-time-step 2.0 \
     \
     --events-base "$events_base" \
     --start-idx "$start_idx" \

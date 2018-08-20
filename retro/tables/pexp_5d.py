@@ -47,8 +47,8 @@ from retro.utils.geom import generate_digitizer
 MACHINE_EPS = 1e-10
 
 #maximum radius to consider
-MAX_RAD_SQ = 500**2
-#MAX_RAD_SQ = 100**2
+#MAX_RAD_SQ = 500**2
+MAX_RAD_SQ = 80**2
 
 def generate_pexp_5d_function(
     table,
@@ -804,7 +804,8 @@ def generate_pexp_5d_function(
             previous_llh = llh
 
             # break condition
-            if getting_worse_counter > 10:
+            #if getting_worse_counter > 10:
+            if getting_worse_counter > 3:
                 #for idx in range(pegleg_idx+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100
