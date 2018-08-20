@@ -571,11 +571,11 @@ class RetroReco(object):
         # number of live points
         n_live = 160
         # maximumm iterations
-        max_iter = 50000
+        max_iter = 20000
         # maximum iterations with no improvemet of best point
-        max_noimprovement = 2000
+        max_noimprovement = 1000
         # break if stddev of function values accross all livepoints drops below
-        fn_std = 0.1
+        fn_std = 0.3
         # use priors during minimization
         use_priors = False
         # use sobol sequence
