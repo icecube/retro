@@ -15,6 +15,7 @@ __all__ = [
     'PRI_COSINE',
     'PRI_GAUSSIAN',
     'PRI_SPEFIT2',
+    'PRI_SPEFIT2TIGHT',
     'PRI_CAUCHY',
     'get_prior_def',
     'get_prior_fun',
@@ -56,6 +57,7 @@ PRI_LOG_NORMAL = 'log_normal'
 PRI_COSINE = 'cosine'
 PRI_GAUSSIAN = 'gaussian'
 PRI_SPEFIT2 = 'spefit2'
+PRI_SPEFIT2TIGHT = 'spefit2tight'
 PRI_CAUCHY = 'cauchy'
 
 
@@ -120,6 +122,16 @@ def get_prior_def(param, reco_kw):
                     -600, 750
                 )
             )
+        elif spatial_prior_name == 'spefit2tight':
+            return (
+                PRI_SPEFIT2TIGHT,
+                (
+                    # scipy.stats.cauchy loc, scale parameters
+                    -0.19687812829978152, 14.282171566308806,
+                    # Hard limits
+                    -150, 270
+                )
+            )
         else:
             raise ValueError('Spatial prior "{}" not recognized'
                              .format(spatial_prior_orig))
@@ -141,6 +153,16 @@ def get_prior_def(param, reco_kw):
                     -0.2393645701205161, 15.049528023495354,
                     # Hard limits
                     -750, 650
+                )
+            )
+        elif spatial_prior_name == 'spefit2tight':
+            return (
+                PRI_SPEFIT2TIGHT,
+                (
+                    # scipy.stats.cauchy loc, scale parameters
+                    -0.2393645701205161, 15.049528023495354,
+                    # Hard limits
+                    -210, 150
                 )
             )
         else:
@@ -166,6 +188,16 @@ def get_prior_def(param, reco_kw):
                     -1200, 200
                 )
             )
+        elif spatial_prior_name == 'spefit2tight':
+            return (
+                PRI_SPEFIT2TIGHT,
+                (
+                    # scipy.stats.cauchy loc, scale parameters
+                    -5.9170661027492546, 12.089399308036718,
+                    # Hard limits
+                    -610, -60
+                )
+            )
         else:
             raise ValueError('Spatial prior "{}" not recognized'
                              .format(spatial_prior_orig))
@@ -174,7 +206,8 @@ def get_prior_def(param, reco_kw):
         temporal_prior_orig = reco_kw.pop('temporal_prior').strip()
         temporal_prior_name = temporal_prior_orig.lower()
         if temporal_prior_name == PRI_UNIFORM:
-            return (PRI_UNIFORM, (-4e3, 0.0))
+            #return (PRI_UNIFORM, (-4e3, 0.0))
+            return (PRI_UNIFORM, (-1e3, 0.0))
         elif temporal_prior_name == PRI_SPEFIT2:
             return (
                 PRI_SPEFIT2,
@@ -183,7 +216,18 @@ def get_prior_def(param, reco_kw):
                     -82.631395081663754, 75.619895703067343,
                     # Hard limits (relative to left, right edges of window,
                     # respectively)
-                    -4e3, 0.0
+                    -1e3, 0.0
+                )
+            )
+        elif temporal_prior_name == PRI_SPEFIT2TIGHT:
+            return (
+                PRI_SPEFIT2TIGHT,
+                (
+                    # scipy.stats.cauchy loc (rel to SPEFit2 time), scale
+                    -82.631395081663754, 75.619895703067343,
+                    # Hard limits (relative to left, right edges of window,
+                    # respectively)
+                    0., 0.
                 )
             )
         else:
@@ -328,14 +372,23 @@ def get_prior_fun(dim_num, dim_name, prior_def, event):
         loc = spe_fit_val + rel_loc
         cauchy = stats.cauchy(loc=loc, scale=scale)
         if dim_name == 'time':
-            #low = spe_fit_val - 3000
-            #high = spe_fit_val + 3000
             low += hits_summary['time_window_start']
             high += hits_summary['time_window_stop']
         prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high): # pylint: disable=missing-docstring
             cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
 
+    elif prior_kind == PRI_SPEFIT2TIGHT:
+        spe_fit_val = event['recos']['SPEFit2'][dim_name]
+        rel_loc, scale, low, high = prior_params
+        loc = spe_fit_val + rel_loc
+        cauchy = stats.cauchy(loc=loc, scale=scale)
+        if dim_name == 'time':
+            low = spe_fit_val - 2000
+            high = spe_fit_val + 2000
+        prior_def = (PRI_CAUCHY, (loc, scale, low, high))
+        def prior_func(cube, cauchy=cauchy, n=dim_num, low=low, high=high): # pylint: disable=missing-docstring
+            cube[n] = np.clip(cauchy.isf(cube[n]), a_min=low, a_max=high)
     else:
         raise NotImplementedError('Prior "{}" not implemented.'
                                   .format(prior_kind))

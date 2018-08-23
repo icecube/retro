@@ -1,3 +1,4 @@
+from __future__ import print_function, division
 '''
 Script to assign a template to each table bin and save a mixed type table with (n_photons, idx) for every bin
 '''
@@ -10,10 +11,11 @@ import cPickle as pickle
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 parser = ArgumentParser()
+parser.add_argument('-d', '--dir', type=str,
+                    metavar='directory', default=None,
+                    help='parent directory of the tables')
 parser.add_argument('--cluster-idx', type=int,
                     help='cluster index (0,59)')
-parser.add_argument('--nfs', action='store_true',
-                    help='also acces over NFS')
 parser.add_argument('--overwrite', action='store_true',
                     help='overwrite existing file')
 args = parser.parse_args()
@@ -55,7 +57,7 @@ def fill_index_table(table_5d_normed, templates):
     index_table = np.zeros(table_5d_normed.shape[:3], dtype=np.uint16)
     chi2s = np.zeros(table_5d_normed.shape[:3], dtype=np.float32)
     for i in range(index_table.shape[0]):
-        print i
+        print('index ',i)
         for j in range(index_table.shape[1]):
             for k in range(index_table.shape[2]):
 		idx, chi2 = find_best_template(table_5d_normed[i,j,k], templates)
@@ -75,46 +77,41 @@ def fill_template_map(index_table, table_3d):
                 template_map[i,j,k]['weight'] = table_3d[i,j,k]
     return template_map
 
-print 'table cluster %s'%(args.cluster_idx)
 
-path = 'tilt_on_anisotropy_on_noazimuth_80/cl%s/'%(args.cluster_idx)
+fname = os.path.join(args.dir, 'cl%s/ckv_table.npy'%(args.cluster_idx))
+outname = os.path.join(args.dir, 'cl%s/ckv_template_map.npy'%(args.cluster_idx))
+chiname = os.path.join(args.dir, 'cl%s/template_chi2s.npy'%(args.cluster_idx))
 
-if os.path.isfile('/data/icecube/retro_tables/' + path + 'ckv_template_map.npy'):
+templates = np.load(os.path.join(args.dir,'ckv_dir_templates.npy'))
+templates = templates.astype(np.float32)
+templates = SmartArray(templates)
+
+
+if os.path.isfile(outname):
     if args.overwrite:
-        print 'overwritting existing file'
+        print('overwritting existing file')
     else:
-        print 'file exists, abort'
+        print('file exists, abort')
         sys.exit()
 
-# try files on fastio first
-fname = '/fastio/icecube/retro/tables/' + path + 'ckv_table.npy'
-if not os.path.isfile(fname):
-    fname = '/fastio2/icecube/retro/tables/' + path + 'ckv_table.npy'
-if not os.path.isfile(fname):
-    if args.nfs:
-        fname = '/data/icecube/retro_tables/' + path + 'ckv_table.npy'
-    else:
-        sys.exit()
+print('table cluster %s'%(args.cluster_idx))
 
 table_5d = np.load(fname)
-print 'table loaded'
+print('table loaded')
 table_3d = np.sum(table_5d, axis=(3,4))
 
 # normalize the tables such that all directionality maps sum to 1
 table_5d_normed = np.nan_to_num(table_5d / table_3d[:,:,:,np.newaxis,np.newaxis])
 del table_5d
-print 'table normed'
-
-templates = np.load('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/final_templates.npy')
-templates = templates.astype(np.float32)
-templates = SmartArray(templates)
+print('table normed')
 
 index_table, chi2s = fill_index_table(table_5d_normed, templates)
-print 'indices found'
+print('indices found')
 
 template_map = fill_template_map(index_table, table_3d)
 
 
+np.save(outname, template_map)
+np.save(chiname, chi2s)
 
-np.save('/data/icecube/retro_tables/'+path+'ckv_template_map.npy', template_map)
-np.save('/data/icecube/retro_tables/'+path+'template_chi2s.npy', chi2s)
+

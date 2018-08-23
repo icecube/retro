@@ -29,6 +29,7 @@ from collections import OrderedDict
 import math
 from os.path import abspath, dirname
 import sys
+import time
 
 import numpy as np
 
@@ -44,6 +45,9 @@ from retro.utils.geom import generate_digitizer
 
 
 MACHINE_EPS = 1e-10
+
+#maximum radius to consider
+MAX_RAD_SQ = 500**2
 
 def generate_pexp_5d_function(
     table,
@@ -155,7 +159,7 @@ def generate_pexp_5d_function(
     # -- Define things used by `pexp_5d*` closures defined below -- #
 
     # Constants
-    rsquared_max = np.max(table['r_bin_edges'])**2
+    rsquared_max = min(np.max(table['r_bin_edges'])**2, MAX_RAD_SQ)
     last_costhetadir_bin_idx = len(table['costhetadir_bin_edges']) - 2
     last_deltaphidir_bin_idx = len(table['deltaphidir_bin_edges']) - 2
     t_max = np.max(table['t_bin_edges'])
@@ -170,7 +174,9 @@ def generate_pexp_5d_function(
 
 
     # to sample for DOM jitter etc
-    jitter_dt = np.arange(-10, 11, 2)
+    jitter_dt = np.arange(-10,11,2)
+    #jitter_dt =  np.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
+    #jitter_dt =  np.array([0])
     jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
     jitter_weights /= np.sum(jitter_weights)
 
@@ -439,6 +445,8 @@ def generate_pexp_5d_function(
                     if t_is_residual_time:
                         nominal_dt -= r * recip_max_group_vel
 
+                    #jitter_surv_probs = np.zeros_like(jitter_dt)
+
                     for jitter_idx in range(len(jitter_dt)):
                         dt = nominal_dt + jitter_dt[jitter_idx]
                         weight = jitter_weights[jitter_idx]
@@ -469,6 +477,9 @@ def generate_pexp_5d_function(
                                 costhetadir_bin_idx,
                                 deltaphidir_bin_idx,
                             )
+
+                        #jitter_surv_probs[jitter_idx] = surv_prob_at_hit_t
+                        #surv_prob_at_hit_t = np.max(jitter_surv_probs)
 
                         r_t_bin_norm = table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
                         hit_exp[hit_idx] += weight * (
@@ -562,8 +573,8 @@ def generate_pexp_5d_function(
         # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
 
         scalefactor = initial_scalefactor
-        gamma = 10. # step size multiplier
-        epsilon = 1e-1 # tolerance
+        gamma = 1. # step size multiplier
+        epsilon = 1e-2 # tolerance
         iters = 0 # iteration counter
         while True:
             gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
@@ -656,8 +667,35 @@ def generate_pexp_5d_function(
             Best scale factor for `scaling_sources` at best pegleg hypo
 
         """
+        # TODO: make pegleg_stepsize a kwarg param somehow
+        # Each pegleg iteration, include this many more pegleg sources
+
         num_pegleg_sources = len(pegleg_sources)
-        num_pegleg_llhs = 1 + int(num_pegleg_sources / pegleg_stepsize)
+
+        # take log steps
+        logstep = np.log(num_pegleg_sources) / 300
+        logspace = np.zeros(shape=301, dtype=np.int32)
+        x = -1e-8
+        for i in range(len(logspace)):
+            logspace[i] = np.int32(np.exp(x))
+            x+= logstep
+        pegleg_steps = np.unique(logspace)
+        assert pegleg_steps[0] == 0
+        n_pegleg_steps = len(pegleg_steps)
+
+        # take linear steps
+        #pegleg_steps = np.arange(num_pegleg_sources)
+        #n_pegleg_steps = len(pegleg_steps)
+
+
+        num_llhs = n_pegleg_steps + 1
+
+
+        #pegleg_stepsize = 1
+
+        #num_pegleg_sources = len(pegleg_sources)
+        #num_pegleg_llhs = 1 + int(num_pegleg_sources / pegleg_stepsize)
+        num_operational_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
         # -- Expectations due to nominal (`scalefactor = 1`) scaling sources -- #
@@ -708,28 +746,25 @@ def generate_pexp_5d_function(
             initial_scalefactor=10.,
         )
 
-        # -- Loop initialization -- #
-
-        llhs = np.full(shape=num_pegleg_llhs, fill_value=-np.inf, dtype=np.float64)
+        llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
         llhs[0] = llh
 
-        scalefactors = np.zeros(shape=num_pegleg_llhs, dtype=np.float64)
+        scalefactors = np.zeros(shape=num_llhs, dtype=np.float64)
         scalefactors[0] = scalefactor
 
         best_llh = llh
+        previous_llh = best_llh - 100
         best_llh_idx = 0
+        getting_worse_counter = 0
 
         # -- Pegleg loop -- #
 
-        for llh_idx in range(1, num_pegleg_llhs):
-            pegleg_stop_idx = llh_idx * pegleg_stepsize
-            pegleg_start_idx = pegleg_stop_idx - pegleg_stepsize
-
-            # Add to expectations by including another "batch" of pegleg sources
+        for pegleg_idx in range(1, n_pegleg_steps):
+            # Update pegleg sources with additional segment of sources
             nonscaling_t_indep_exp += pexp_5d(
                 sources=pegleg_sources,
-                sources_start=pegleg_start_idx,
-                sources_stop=pegleg_stop_idx,
+                sources_start=pegleg_steps[pegleg_idx-1],
+                sources_stop=pegleg_steps[pegleg_idx],
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
                 tables=tables,
@@ -750,18 +785,50 @@ def generate_pexp_5d_function(
                 initial_scalefactor=scalefactor,
             )
 
-            # Store this pegleg step's LLH and best scalefactor
-            llhs[llh_idx] = llh
-            scalefactors[llh_idx] = scalefactor
+            # Store this pegleg step's llh and best scalefactor
+            llhs[pegleg_idx] = llh
+            scalefactors[pegleg_idx] = scalefactor
+
 
             if llh > best_llh:
                 best_llh = llh
-                best_llh_idx = llh_idx
+                best_llh_idx = pegleg_idx
+                getting_worse_counter = 0
 
-            # TODO: make this more general, less hacky continue/stop condition
-            if pegleg_start_idx > 300 and llh - llhs[pegleg_start_idx - 300] < 0.5:
+            elif llh < previous_llh:
+                getting_worse_counter += 1
+
+            previous_llh = llh
+
+            # break condition
+            #if getting_worse_counter > 10:
+            if getting_worse_counter > 30:
+                #for idx in range(pegleg_idx+1,n_pegleg_steps):
+                #    # fill up with bad llhs. just to make sure they're not used
+                #    llhs[idx] = best_llh - 100
+                #print('break at step ',pegleg_idx)
                 break
 
-        return best_llh, best_llh_idx * pegleg_stepsize, scalefactors[best_llh_idx]
+        # find the best pegleg idx:
+        #best_llh = np.max(llhs)
+        #n_good_indices = np.sum(llhs > best_llh - 0.1)
+        #median_good_idx = max(1,np.int(n_good_indices/2))
+        
+        # search for that median pegleg index
+        #counter = 0
+        #for best_idx in range(n_pegleg_steps):
+        #    if llhs[best_idx] > best_llh - 0.1:
+        #        counter +=1
+        #    if counter == median_good_idx:
+        #        break
+        
+        #good_indices = np.argwhere(llhs > best_llh - 0.1)
+        #best_idx = np.median(good_indices)
+
+        #print(llhs[:10])
+        #print(scalefactors[:10])
+        #print(pegleg_steps[:10])
+
+        return llhs[best_llh_idx], pegleg_steps[best_llh_idx], scalefactors[best_llh_idx]
 
     return pexp_5d, get_llh, meta

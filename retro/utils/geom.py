@@ -30,6 +30,8 @@ __all__ = [
     'cart2pol',
     'cart2sph',
     'rotsph2cart',
+    'rotate_point',
+    'add_vectors',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -900,6 +902,73 @@ def rotsph2cart(p_sintheta, p_costheta, p_phi, rot_sintheta, rot_costheta,
 
     return q_x, q_y, q_z
 
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def rotate_point(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
+    """
+    Rotate a point `p` by `rot` resulting in a new point `q` 
+
+    Parameters
+    ----------
+    p_theta :  array of float
+        theta coordinate.
+        
+    p_phi : array of float
+        Azimuth  on the circle
+        
+    rot_theta :  array of float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+        
+    rot_phi :  array of float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    q_theta : array of float
+        theta coordinate of rotated point
+        
+    q_phi : array of float
+        phi coordinate of rotated point
+
+    """
+    for i in range(len(p_theta)):
+
+        sin_rot_theta = math.sin(rot_theta[i])
+        cos_rot_theta = math.cos(rot_theta[i])
+        
+        sin_rot_phi = math.sin(rot_phi[i])
+        cos_rot_phi = math.cos(rot_phi[i])
+
+        sin_p_theta = math.sin(p_theta[i])
+        cos_p_theta = math.cos(p_theta[i])
+
+        sin_p_phi = math.sin(p_phi[i])
+        cos_p_phi = math.cos(p_phi[i])
+        
+        q_theta[i] = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
+        q_phi[i] = math.atan2(
+            (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
+            (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+        )
+
+        q_phi[i] = q_phi[i] % (2 * math.pi)
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def add_vectors(r1, theta1, phi1, r2, theta2, phi2, r3, theta3, phi3):
+    '''
+    add two vectors v1 + v2 = v3 in spherical coordinates
+    '''
+    for i in range(len(r1)):
+        x1 = r1[i] * math.sin(theta1[i]) * math.cos(phi1[i])
+        y1 = r1[i] * math.sin(theta1[i]) * math.sin(phi1[i])
+        z1 = r1[i] * math.cos(theta1[i])
+        x2 = r2[i] * math.sin(theta2[i]) * math.cos(phi2[i])
+        y2 = r2[i] * math.sin(theta2[i]) * math.sin(phi2[i])
+        z2 = r2[i] * math.cos(theta2[i])
+        x3 = x1 + x2
+        y3 = y1 + y2
+        z3 = z1 + z2
+        r3[i] = math.sqrt(x3**2 + y3**2 + z3**2)
+        theta3[i] = math.acos(z3/r3[i])
+        phi3[i] = math.atan2(y3, x3) % (2 * math.pi)
 
 if __name__ == '__main__':
     test_infer_power()

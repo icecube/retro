@@ -34,6 +34,7 @@ import sys
 import time
 
 import numpy as np
+from scipy import stats
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -42,7 +43,9 @@ if __name__ == '__main__' and __package__ is None:
 from retro import init_obj
 from retro.const import PEGLEG_PARAM_NAMES, SCALING_PARAM_NAMES
 from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T
+from retro.utils.geom import rotate_point, add_vectors
 from retro.utils.misc import expand, mkdir, sort_dict
+from retro.utils.stats import estimate_from_llhp
 from retro.priors import (
     get_prior_def,
     get_prior_fun,
@@ -52,6 +55,10 @@ from retro.priors import (
 )
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 
+report_after = 100
+SAVE_FULL_INFO = False
+#USE_PRIOR_UNWEIGHTING = False
+USE_PRIOR_UNWEIGHTING = True
 
 class RetroReco(object):
 
@@ -102,7 +109,15 @@ class RetroReco(object):
 
         # Setup LLHP dtype
         dim_names = list(self.hypo_handler.all_param_names)
-        llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + dim_names])
+
+        # add derived quantities
+        derived_dim_names = ['energy', 'azimuth', 'zenith']
+        if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
+            derived_dim_names += ['cascade_zenith', 'cascade_azimuth']
+
+        all_dim_names = dim_names + derived_dim_names
+
+        llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + all_dim_names])
 
         for event_idx, event in self.events_iterator:
             t0 = time.time()
@@ -121,7 +136,26 @@ class RetroReco(object):
                 t_start=t_start,
             )
 
-            if method == 'multinest':
+            if method == 'test':
+                settings = self.run_test(
+                    prior=prior,
+                    loglike=loglike,
+                )
+
+            if method == 'truth':
+                settings = self.run_with_truth(
+                    prior=prior,
+                    loglike=loglike,
+                    truth=event['truth'],
+                )
+
+            elif method == 'mymini':
+                settings = self.run_mymini(
+                    prior=prior,
+                    loglike=loglike,
+                )
+
+            elif method == 'multinest':
                 settings = self.run_multinest(
                     prior=prior,
                     loglike=loglike,
@@ -150,13 +184,49 @@ class RetroReco(object):
             t1 = time.time()
 
             # dump
-            llhp = np.empty(shape=len(param_values), dtype=llhp_t)
+            llhp = np.zeros(shape=len(param_values), dtype=llhp_t)
             llhp['llh'] = log_likelihoods
             llhp[dim_names] = param_values
 
-            llhp_outf = self.out_prefix + 'llhp.npy'
-            print('Saving llhp to "{}"...'.format(llhp_outf))
-            np.save(llhp_outf, llhp)
+            
+            # create derived dimensions
+            if 'energy' in derived_dim_names:
+                if 'track_energy' in dim_names:
+                    llhp['energy'] += llhp['track_energy']
+                if 'cascade_energy' in dim_names:
+                    llhp['energy'] += llhp['cascade_energy']
+
+            if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
+                # create cascade angles from delta angles
+                rotate_point(p_theta = llhp['cascade_d_zenith'], p_phi = llhp['cascade_d_azimuth'],
+                             rot_theta = llhp['track_zenith'], rot_phi = llhp['track_azimuth'],
+                             q_theta = llhp['cascade_zenith'], q_phi = llhp['cascade_azimuth'])
+
+            if 'track_zenith' in all_dim_names and 'track_azimuth' in all_dim_names:
+                if 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
+                    # this resulting radius we won't need, but need to supply an array to the function
+                    r_out = np.empty(shape=llhp.shape, dtype=np.float32)
+                    # combine angles:
+                    add_vectors(r1 = llhp['track_energy'], theta1 = llhp['track_zenith'], phi1 = llhp['track_azimuth'],
+                                r2 = llhp['cascade_energy'], theta2 = llhp['cascade_zenith'], phi2 = llhp['cascade_azimuth'],
+                                r3 = r_out, theta3 = llhp['zenith'], phi3 = llhp['azimuth'])
+
+                else:
+                    # in this case there is no cascade angles
+                    llhp['zenith'] = llhp['track_zenith']
+                    llhp['azimuth'] = llhp['track_azimuth']
+
+            elif 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
+                # in this case there are no track angles
+                llhp['zenith'] = llhp['cascade_zenith']
+                llhp['azimuth'] = llhp['cascade_azimuth']
+
+
+            if SAVE_FULL_INFO:
+                # save full info
+                llhp_outf = self.out_prefix + 'llhp.npy'
+                print('Saving llhp to "{}"...'.format(llhp_outf))
+                np.save(llhp_outf, llhp)
 
             opt_meta = OrderedDict([
                 ('params', dim_names),
@@ -167,6 +237,7 @@ class RetroReco(object):
 
             opt_meta['num_llhp'] = len(param_values)
             opt_meta['run_time'] = t1 - t0
+
             opt_meta_outf = self.out_prefix + 'opt_meta.pkl'
             print('Saving metadata to "{}"'.format(opt_meta_outf))
             pickle.dump(
@@ -179,6 +250,19 @@ class RetroReco(object):
             n_points = llhp.size
             print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
                   .format(dt, n_points, dt / n_points * 1e3))
+
+            if USE_PRIOR_UNWEIGHTING:
+                estimate = estimate_from_llhp(llhp, opt_meta)
+            else:
+                estimate = estimate_from_llhp(llhp)
+            estimate_outf = self.out_prefix + 'estimate.pkl'
+            print('Saving estimate to "{}"'.format(estimate_outf))
+            pickle.dump(
+                estimate,
+                open(estimate_outf, 'wb'),
+                protocol=pickle.HIGHEST_PROTOCOL
+            )
+
 
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
@@ -247,7 +331,6 @@ class RetroReco(object):
         """
         # -- Variables to be captured by `loglike` closure -- #
 
-        report_after = 100
 
         all_param_names = self.hypo_handler.all_param_names
         n_opt_params = self.n_opt_params
@@ -402,7 +485,10 @@ class RetroReco(object):
                 print('')
                 msg = 'truth:                '
                 for key, val in zip(all_param_names, result):
-                    msg += ' %s=%.1f'%(key, truth_info[key])
+                    try:
+                        msg += ' %s=%.1f'%(key, truth_info[key])
+                    except KeyError:
+                        pass
                 print(msg)
                 t_now = time.time()
                 best_idx = np.argmax(log_likelihoods)
@@ -424,6 +510,507 @@ class RetroReco(object):
             return llh
 
         return loglike
+
+    def run_test(self, prior, loglike):
+        '''
+        Random sampling instead of an actual minimizer
+        '''
+        rand = np.random.RandomState()
+        for i in range(100):
+            param_vals = rand.uniform(0,1,self.n_opt_params)
+            prior(param_vals)
+            llh = loglike(param_vals)
+        return OrderedDict()
+
+    def run_with_truth(self, prior, loglike, truth):
+        true_params = np.zeros(self.n_opt_params)
+
+        for i,name in enumerate(self.hypo_handler.opt_param_names):
+            if name in ['x', 'y', 'z', 'time']:
+                true_params[i] = truth[name]
+            elif name == 'track_zenith':
+                true_params[i] = np.arccos(truth['coszen'])
+            elif name == 'track_azimuth':
+                true_params[i] = truth['azimuth']
+            else:
+                raise NotImplementedError()
+        # now random values for these dimension
+        rand_dims = []
+        #rand_dims = [4,5]
+        rand = np.random.RandomState()
+        if len(rand_dims) > 1:
+            for i in range(10000):
+                rand_params = rand.uniform(0,1,self.n_opt_params)
+                prior(rand_params)
+                param_vals = np.zeros(self.n_opt_params)
+                param_vals[:] = true_params[:]
+                param_vals[rand_dims] = rand_params[rand_dims]
+                llh = loglike(param_vals)
+        else:
+            llh = loglike(true_params)
+
+
+        return OrderedDict()
+
+    def run_mymini(self, prior, loglike):
+        '''
+        Implementation of the CRS2 algoriyhm with local mutation as described in
+        JOURNAL OF OPTIMIZATION THEORY AND APPLICATIONS: Vol. 130, No. 2, pp. 253–264,
+        August 2006 (C 2006) DOI: 10.1007/s10957-006-9101-0
+
+        Adapted to work with spherical corrdinates (correct centroid calculation, reflection and mutation)
+
+        At the moment the number of cartesian (standard) parameters `n_cart` and spherical parameters `n_spher` is hard coded
+        Furthermore, all cartesian coordinates must come first followed by `azimuth_1, zenith_1, azimuth_2, zenith_2, ...`
+
+        '''
+        rand = np.random.RandomState()
+
+        # if true: use priors (for cartesian coordinates only) during minimization
+        # if false: use priors only to generate initial population, then perform minimization on actual parameter values
+
+        from sobol import i4_sobol
+
+
+        # number of live points
+        n_live = 160
+        # maximumm iterations
+        max_iter = 20000
+        # maximum iterations with no improvemet of best point
+        max_noimprovement = 2000
+        # break if stddev of function values accross all livepoints drops below
+        fn_std = 0.1
+        # use priors during minimization
+        use_priors = False
+        # use sobol sequence
+        sobol = True
+
+        def fun(x): 
+            '''
+            callable for minimizer
+            '''
+            if use_priors:
+                param_vals = np.zeros_like(x)
+                param_vals[:n_cart] = x[:n_cart]
+                prior(param_vals)
+                param_vals[n_cart:] = x[n_cart:]
+            else:
+                param_vals = x
+            llh = loglike(param_vals)
+            return -llh
+
+        n = self.n_opt_params
+        names = self.hypo_handler.opt_param_names
+        assert set(names[:4]) == set(['time','x', 'y', 'z'])
+        n_cart = 4
+        if n > 4:
+            n_spher = int((n-4)/2)
+        for spher in range(n_spher):
+            assert 'az' in names[4+spher*2]
+            assert 'zen' in names[4+spher*2+1]
+
+        # type to store spherical coordinates and handy quantities
+        spher_cord = np.dtype([('zen',np.float32),
+                               ('az', np.float32),
+                               ('x', np.float32),
+                               ('y', np.float32),
+                               ('z', np.float32),
+                               ('sinzen', np.float32),
+                               ('coszen', np.float32),
+                               ('sinaz', np.float32),
+                               ('cosaz', np.float32),
+                               ])
+
+        def create_x(x_cart, x_spher):
+            '''
+            patch back together the cartesian and spherical coordinates into one array
+            '''
+            # ToDO: make proper
+            x = np.empty(n)
+            x[:n_cart] = x_cart
+            x[n_cart+1::2] = x_spher['zen']
+            x[n_cart::2] = x_spher['az']
+            return x
+
+        def fill_from_spher(s):
+            '''
+            fill in the remaining values giving the two angles `zen` and `az`
+            '''
+            s['sinzen'] = np.sin(s['zen'])
+            s['coszen'] = np.cos(s['zen'])
+            s['sinaz'] = np.sin(s['az'])
+            s['cosaz'] = np.cos(s['az'])
+            s['x'] = s['sinzen'] * s['cosaz']
+            s['y'] = s['sinzen'] * s['sinaz']
+            s['z'] = s['coszen']
+
+        def fill_from_cart(s_vector):
+            '''
+            fill in the remaining values giving the cart, coords. `x`, `y` and `z`
+            '''
+
+            for s in s_vector:
+                radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
+                if not radius == 0:
+                    # make sure they're length 1
+                    s['x'] /= radius
+                    s['y'] /= radius
+                    s['z'] /= radius
+                    s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
+                    s['coszen'] = s['z']
+                    s['zen'] = np.arccos(s['coszen'])
+                    s['sinzen'] = np.sin(s['zen'])
+                    s['sinaz'] = np.sin(s['az'])
+                    s['cosaz'] = np.cos(s['az'])
+                else:
+                    s['z'] = 1
+                    s['az'] = 0
+                    s['zen'] = 0
+                    s['coszen'] = 1
+                    s['sinzen'] = 0
+                    s['cosaz'] = 1
+                    s['sinaz'] = 0
+
+
+        def reflect(old, centroid, new):
+            '''
+            reflect the old point around the centroid into the new point on the sphere
+            '''
+
+            x = old['x']
+            y = old['y']
+            z = old['z']
+
+            ca = centroid['cosaz']
+            sa = centroid['sinaz']
+            cz = centroid['coszen']
+            sz = centroid['sinzen']
+            
+            new['x'] = 2*ca*cz*sz*z + x*(ca*(-ca*cz**2 + ca*sz**2) - sa**2) + y*(ca*sa + sa*(-ca*cz**2 + ca*sz**2))
+            new['y'] = 2*cz*sa*sz*z + x*(ca*sa + ca*(-cz**2*sa + sa*sz**2)) + y*(-ca**2 + sa*(-cz**2*sa + sa*sz**2))
+            new['z'] = 2*ca*cz*sz*x + 2*cz*sa*sz*y + z*(cz**2 - sz**2)
+
+            fill_from_cart(new)
+
+        #N = 10 * (n + 1)
+        N = n_live
+        assert N > n + 1
+
+        # that many more initial individuals (didn;t seem to help realy)
+        initial_factor = 1
+
+        S_cart = np.zeros(shape=(N*initial_factor,n_cart))
+        S_spher = np.zeros(shape=(N*initial_factor,n_spher), dtype=spher_cord)
+        fx = np.zeros(shape=(N*initial_factor,))
+
+
+        # initial population
+        for i in range(N*initial_factor):
+            # sobol seems to do slightly better
+            if sobol:
+                x, _ = i4_sobol(n, i+1)
+            else:
+                x = rand.uniform(0,1,n)
+            param_vals = np.copy(x)
+            prior(param_vals)
+            # always transform angles!
+            x[n_cart:] = param_vals[n_cart:]
+            if not use_priors:
+                x[:n_cart] = param_vals[:n_cart]
+
+            # break up into cartesiand and spherical coordinates
+            # ToDO: make proper
+            S_cart[i] = x[:n_cart]
+            S_spher[i]['zen'] = x[n_cart+1::2]
+            S_spher[i]['az'] = x[n_cart::2]
+            fill_from_spher(S_spher[i])
+            fx[i] = fun(x)
+
+
+        if initial_factor > 1:
+            # cut down to best N
+            mask = fx <= np.percentile(fx, 100./initial_factor)
+            S_cart = S_cart[mask]
+            S_spher = S_spher[mask]
+            fx = fx[mask]
+
+
+        best_llh = np.min(fx)
+        no_improvement_counter = -1
+
+        simplex_success = 0
+        mutation_success = 0
+        whateverido = 0
+        failure = 0
+        stopping_flag = 0
+        for k in range(max_iter):
+
+            if k % report_after == 0:
+                print('simplex: %i, mutation: %i, mine: %i, failed: %i'%(simplex_success, mutation_success, whateverido, failure))
+
+            # minimizer loop
+
+            # break condition
+            if np.std(fx) < fn_std:
+                print('std below threshold, stopping.')
+                stopping_flag = 1
+                break
+
+            if no_improvement_counter > max_noimprovement:
+                print('no improvement found, stopping.')
+                stopping_flag = 2
+                break
+
+            new_best_llh = np.min(fx)
+            if new_best_llh < best_llh:
+                best_llh = new_best_llh
+                no_improvement_counter = 0
+            else:
+                no_improvement_counter += 1
+
+            worst_idx = np.argmax(fx)
+            best_idx = np.argmin(fx)
+
+            # choose n random points but not best
+            choice = rand.choice(N-1, n, replace=False)
+            choice[choice >= best_idx] +=1
+
+            # cardtesian centroid
+            centroid_cart = (np.sum(S_cart[choice[:-1]], axis=0) + S_cart[best_idx]) / n
+            # reflect point
+            new_x_cart = 2*centroid_cart - S_cart[choice[-1]]
+
+            # spherical centroid
+            centroid_spher = np.zeros(n_spher, dtype=spher_cord)
+            centroid_spher['x'] = (np.sum(S_spher['x'][choice[:-1]], axis=0) + S_spher['x'][best_idx]) / n
+            centroid_spher['y'] = (np.sum(S_spher['y'][choice[:-1]], axis=0) + S_spher['y'][best_idx]) / n
+            centroid_spher['z'] = (np.sum(S_spher['z'][choice[:-1]], axis=0) + S_spher['z'][best_idx]) / n
+            fill_from_cart(centroid_spher)
+            # reflect point
+            new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+            reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
+
+            if use_priors:
+                outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
+            else:
+                outside = False
+
+            if not outside:
+                new_fx = fun(create_x(new_x_cart, new_x_spher))
+
+                if new_fx < fx[worst_idx]:
+                    # found better point
+                    S_cart[worst_idx] = new_x_cart
+                    S_spher[worst_idx] = new_x_spher
+                    fx[worst_idx] = new_fx
+                    simplex_success += 1
+                    continue
+
+            # mutation
+            w = rand.uniform(0, 1, n_cart)
+            #w = rand.uniform(-0.5, 1.5, n_cart)
+            new_x_cart2 = (1 + w) * S_cart[best_idx] - w * new_x_cart
+
+            # first reflect at best point
+            reflected_new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+            reflect(new_x_spher, S_spher[best_idx], reflected_new_x_spher)
+
+            new_x_spher2 = np.zeros_like(new_x_spher)
+
+            # now do a combination of best and reflected point with weight w
+            for dim in ['x', 'y', 'z']:
+                #w = rand.uniform(-0.5, 1.5, n_spher)
+                w = rand.uniform(0, 1, n_spher)
+                new_x_spher2[dim] = (1 - w) * S_spher[best_idx][dim] + w * reflected_new_x_spher[dim]
+            fill_from_cart(new_x_spher2)
+
+            if use_priors:
+                outside = np.any(new_x_cart2 < 0) or np.any(new_x_cart2 > 1)
+            else:
+                outside = False
+
+            if not outside:
+                new_fx = fun(create_x(new_x_cart2, new_x_spher2))
+
+                if new_fx < fx[worst_idx]:
+                    #print('-> MUT accepted')
+                    # found better point
+                    S_cart[worst_idx] = new_x_cart2
+                    S_spher[worst_idx] = new_x_spher2
+                    fx[worst_idx] = new_fx
+                    mutation_success += 1
+                    continue
+
+            '''
+            # random sampling of new point
+
+            # sample new cartesian coordinates from distribution given the livepoints
+            mean_cart = np.average(S_cart, axis=0)
+            cov_cart = np.cov(S_cart.T)
+            new_x_cart = rand.multivariate_normal(mean_cart, cov_cart, 1)[0]
+            # random new angle
+            new_x_spher['az'] = rand.uniform(0,2*np.pi,n_spher)
+            new_x_spher['zen'] = np.arccos(rand.uniform(-1,1,n_spher))
+            fill_from_spher(new_x_spher)
+
+            new_fx = fun(create_x(new_x_cart, new_x_spher))
+
+            if new_fx < fx[worst_idx]:
+                # found better point
+                S_cart[worst_idx] = new_x_cart
+                S_spher[worst_idx] = new_x_spher
+                fx[worst_idx] = new_fx
+                whateverido += 1
+                continue
+            '''
+            
+            # if we get here no method was successful in replacing worst point -> start over
+            failure += 1
+
+
+        res = OrderedDict()
+        res['method'] = 'CRS2spherical+lm+sampling'
+        res['n_live'] = n_live
+        res['max_iter'] = max_iter
+        res['max_noimprovement'] = max_noimprovement
+        res['fn_std'] = fn_std
+        res['use_priors'] = use_priors
+        res['sobol'] = sobol
+        res['stopping_flag'] = stopping_flag
+        res['num_simplex'] = simplex_success
+        res['num_mutation'] = mutation_success
+        res['num_sampling'] = whateverido
+        res['num_failure'] = failure
+        res['num+tot'] = k
+        return res
+
+        # now let's do some sampling
+        #import emcee
+
+        #az_dim = 4
+        #zen_dim = 5
+
+        #def lnprob(new_x):
+        #    '''
+        #    function for sampler
+        #    '''
+        #    while new_x[zen_dim] < 0 or new_x[zen_dim] > np.pi:
+        #        new_x[az_dim] += np.pi
+        #        if new_x[zen_dim] < 0:
+        #            new_x[zen_dim] = -new_x[zen_dim]
+        #        else:
+        #            new_x[zen_dim] = np.pi - new_x[zen_dim]
+
+        #    new_x[az_dim] = new_x[az_dim] % (2 * np.pi)
+        #    new_llh = fun(new_x)
+        #    return -new_llh
+
+        #
+
+        ## first create array without dtype (otherwise covariance doesn't work)
+
+        ### bigger arrays to also contain sampled points 
+        #S = np.zeros(shape=(N,n))
+        ###f = np.full(2*N, np.inf)
+
+        ### set the first half
+        #for i in range(N):
+        #    S[i] = create_x(S_cart[i], S_spher[i])
+
+        #sampler = emcee.EnsembleSampler(N, n, lnprob)
+        #sampler.run_mcmc(S, 42)
+
+
+
+        ##f[:N] = fx
+        #
+
+        #N_sampling = 10000
+        #counter = 0
+
+        #while counter < N_sampling:
+        #    #print('Sampling round %i'%k)
+
+        #    
+        #    az_values = S[:,az_dim]
+
+        #    # move the azimuths
+        #    circmean = stats.circmean(az_values)
+        #    if circmean > np.pi:
+        #        az_values[az_values < circmean - np.pi] += (2 * np.pi)
+        #    else:
+        #        az_values[az_values > circmean + np.pi] -= (2 * np.pi)
+        #    
+        #    worst_idx = np.argmax(fx)
+        #    worst_llh = fx[worst_idx]
+
+        #    best_idx = np.argmin(fx)
+
+        #    weights = np.exp(fx - np.max(fx))
+
+        #    # calculate mean and covariance
+        #    #mean = np.average(S, axis=0, weights=weights)
+        #    #print(mean)
+        #    mean = S[best_idx]
+        #    cov = np.cov(S.T[:az_dim])
+
+        #    az_values = az_values % (2 * np.pi)
+
+        #    for j in range(100):
+        #        new_x = np.zeros(n)
+        #        for i in range(n):
+        #            new_x[i] = rand.randn(1) * np.std(S[:,i]) + mean[i]
+
+        #        #new_x[:az_dim] = rand.multivariate_normal(mean[:az_dim], cov, 1)[0]
+        #        #new_x[az_dim] = rand.randn(1) * np.std(az_values) + mean[az_dim]
+        #        #new_x[zen_dim] = rand.randn(1) * np.std(S[:,zen_dim]) + mean[zen_dim]
+
+        #        while new_x[zen_dim] < 0 or new_x[zen_dim] > np.pi:
+        #            new_x[az_dim] += np.pi
+        #            if new_x[zen_dim] < 0:
+        #                new_x[zen_dim] = -new_x[zen_dim]
+        #            else:
+        #                new_x[zen_dim] = np.pi - new_x[zen_dim]
+
+        #        new_x[az_dim] = new_x[az_dim] % (2 * np.pi)
+        #        new_llh = fun(new_x)
+        #        counter += 1
+        #        if new_llh < worst_llh:
+        #            S[worst_idx] = new_x
+        #            fx[worst_idx] = new_llh
+        #            #print('found better point after %i trials'%j)
+        #            break
+        #        else:
+        #            if j == 99:
+        #                print('failed to find better point in 100 trials')
+
+        #        
+        #    # fold in zeniths and flip azimuths
+        #    #zen_values = S[:,zen_dim]
+        #    #az_values = S[:,az_dim]
+        #    #while np.any(zen_values < 0) or np.any(zen_values > np.pi):
+        #    #    az_values[zen_values < 0] += np.pi
+        #    #    az_values[zen_values > np.pi] += np.pi
+        #    #    zen_values[zen_values < 0] = -zen_values[zen_values < 0]
+        #    #    zen_values[zen_values > np.pi] = np.pi - zen_values[zen_values > np.pi]
+
+        #    ## make sure boundaries are ok?
+        #    #az_values = az_values % (2 * np.pi)
+        #    
+
+        #    # evaluate LLH
+        #    #for i in range(N,2*N):
+        #    #    f[i] = fun(S[i])
+        #    #
+        #    ## find best half
+        #    #mask = f <= np.median(f)
+
+        #    ## reset first half
+        #    #S[:N] = S[mask]
+        #    #f[:N] = f[mask]
+
+
+        #return OrderedDict()
 
     def run_scipy(self, prior, loglike, method, eps):
         from scipy import optimize
@@ -491,8 +1078,9 @@ class RetroReco(object):
         # bounds
         lower_bounds = np.zeros(shape=self.n_opt_params)
         upper_bounds = np.ones(shape=self.n_opt_params)
+
         # for angles make bigger
-        for i, name in enumerate(self.hypo_handler.generic_param_names):
+        for i, name in enumerate(self.hypo_handler.opt_param_names):
             if 'azimuth' in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
@@ -506,34 +1094,59 @@ class RetroReco(object):
         # stepsize
         dx = np.zeros(shape=self.n_opt_params)
         for i in range(self.n_opt_params):
-            if 'azimuth' in self.hypo_handler.generic_param_names[i]:
+            if 'azimuth' in self.hypo_handler.opt_param_names[i]:
                 dx[i] = 0.001
-            elif 'zenith' in self.hypo_handler.generic_param_names[i]:
+            elif 'zenith' in self.hypo_handler.opt_param_names[i]:
                 dx[i] = 0.001
-            elif self.hypo_handler.generic_param_names[i] in ('x', 'y'):
+            elif self.hypo_handler.opt_param_names[i] in ('x', 'y'):
                 dx[i] = 0.005
-            elif self.hypo_handler.generic_param_names[i] == 'z':
+            elif self.hypo_handler.opt_param_names[i] == 'z':
                 dx[i] = 0.002
-            elif self.hypo_handler.generic_param_names[i] == 'time':
+            elif self.hypo_handler.opt_param_names[i] == 'time':
                 dx[i] = 0.01
 
-        # does not converge :/
-        local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        local_opt.set_lower_bounds([0.]*self.n_opt_params)
-        local_opt.set_upper_bounds([1.]*self.n_opt_params)
-        local_opt.set_min_objective(fun)
-        #local_opt.set_ftol_abs(0.5)
-        #local_opt.set_ftol_abs(100)
-        #local_opt.set_xtol_rel(10)
-        local_opt.set_ftol_abs(1)
-        opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
+        # seed from several angles
+        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
+        #opt = nlopt.opt(nlopt.LN_PRAXIS, self.n_opt_params)
         opt.set_lower_bounds([0.]*self.n_opt_params)
         opt.set_upper_bounds([1.]*self.n_opt_params)
         opt.set_min_objective(fun)
-        opt.set_local_optimizer(local_opt)
-        opt.set_ftol_abs(10)
-        opt.set_xtol_rel(1)
-        opt.set_maxeval(1111)
+        opt.set_ftol_abs(0.1)
+        
+        # initial guess
+
+        angles = np.linspace(0,1,3)
+        angles = 0.5 * (angles[1:] + angles[:-1])
+
+        for zen in angles:
+            for az in angles:
+                x0 = 0.5 * np.ones(shape=self.n_opt_params)
+                
+                for i in range(self.n_opt_params):
+                    if 'azimuth' in self.hypo_handler.opt_param_names[i]:
+                        x0[i] = az
+                    elif 'zenith' in self.hypo_handler.opt_param_names[i]:
+                        x0[i] = zen
+                x = opt.optimize(x0) # pylint: disable=unused-variable
+
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        #local_opt.set_lower_bounds([0.]*self.n_opt_params)
+        #local_opt.set_upper_bounds([1.]*self.n_opt_params)
+        #local_opt.set_min_objective(fun)
+        ##local_opt.set_ftol_abs(0.5)
+        ##local_opt.set_ftol_abs(100)
+        ##local_opt.set_xtol_rel(10)
+        #local_opt.set_ftol_abs(1)
+        # global
+        #opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
+        #opt.set_lower_bounds([0.]*self.n_opt_params)
+        #opt.set_upper_bounds([1.]*self.n_opt_params)
+        #opt.set_min_objective(fun)
+        #opt.set_local_optimizer(local_opt)
+        #opt.set_ftol_abs(10)
+        #opt.set_xtol_rel(1)
+        #opt.set_maxeval(1111)
 
         #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
         #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
@@ -550,7 +1163,7 @@ class RetroReco(object):
 
         #local_opt.set_maxeval(10)
 
-        x = opt.optimize(x0) # pylint: disable=unused-variable
+        #x = opt.optimize(x0) # pylint: disable=unused-variable
 
         # polish it up
         #print('***************** polishing ******************')
@@ -691,7 +1304,7 @@ def parse_args(description=__doc__):
 
     group.add_argument(
         '--spatial-prior',
-        choices='dc dc_subdust ic SPEFit2'.split(),
+        choices='dc dc_subdust ic SPEFit2 SPEFit2tight'.split(),
         required=True,
         help='''Choose a prior for choosing spatial samples. "dc", "dc_subdust"
         and "ic" are uniform priors with hard cut-offs at the extents of the
@@ -700,7 +1313,7 @@ def parse_args(description=__doc__):
     )
     group.add_argument(
         '--temporal-prior',
-        choices='uniform SPEFit2'.split(),
+        choices='uniform SPEFit2 SPEFit2tight'.split(),
         required=True,
         help='''Choose a prior for choosing temporal samples. "uniform" chooses
         uniformly from 4000 ns prior to the first hit up to the last hit, while
@@ -821,3 +1434,7 @@ def parse_args(description=__doc__):
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     my_reco.run(method='multinest')
+    #my_reco.run(method='test')
+    #my_reco.run(method='mymini')
+    #my_reco.run(method='truth')
+    #my_reco.run(method='nlopt')

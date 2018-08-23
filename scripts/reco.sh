@@ -40,8 +40,14 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
+
+    # -- Lea tables: 140 clusters, template compressed -- #
+
+    proto="/home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
+    tmpl_lib="--template-library /home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/ckv_dir_templates.npy"
     tblkind="ckv_templ_compr"
 
     # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
@@ -71,10 +77,15 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 else
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    tblkind="ckv_templ_compr"
+    #proto="/gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib="--template-library /gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
 
+    # -- Lea tables: 140 clusters, template compressed -- #
+
+    proto="/gpfs/group/dfc13/default/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
+    tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
     # -- Mie tables: separate, template compressed -- #
 
     #proto="/gpfs/scratch/pde3/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
@@ -92,11 +103,12 @@ importance_sampling="--importance-sampling"
 consteff=""
 
 
-#kernprof -l -v ~/retro/retro/reco.py \
+#python -m cProfile  \
+#kernprof -l -v \
 ~/retro/retro/reco.py \
     --outdir "$outdir" \
-    --spatial-prior SPEFit2 \
-    --temporal-prior SPEFit2 \
+    --spatial-prior SPEFit2tight \
+    --temporal-prior SPEFit2tight \
     \
     $importance_sampling \
     --max-modes 1 \
@@ -119,7 +131,7 @@ consteff=""
     --cascade-kernel "scaling_aligned_one_dim" \
     --cascade-angle-prior "log_normal" \
     --track-kernel "pegleg" \
-    --track-time-step 1.0 \
+    --track-time-step 1 \
     \
     --events-base "$events_base" \
     --start-idx "$start_idx" \
@@ -132,3 +144,7 @@ consteff=""
     --truth
 
 wait
+#    --cascade-kernel "scaling_aligned_one_dim" \
+#    --cascade-kernel "scaling_one_dim_delta" \
+#    --spatial-prior dc_subdust \
+#    --temporal-prior uniform \
