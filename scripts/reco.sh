@@ -128,10 +128,10 @@ consteff=""
     --step-length 1.0 \
     $no_noise \
     \
-    --cascade-kernel "scaling_one_dim" \
+    --cascade-kernel "scaling_aligned_one_dim" \
     --cascade-angle-prior "log_normal" \
     --track-kernel "pegleg" \
-    --track-time-step 3 \
+    --track-time-step 1 \
     \
     --events-base "$events_base" \
     --start-idx "$start_idx" \

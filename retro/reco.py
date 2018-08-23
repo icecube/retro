@@ -57,7 +57,8 @@ from retro.hypo.discrete_muon_kernels import pegleg_eval
 
 report_after = 100
 SAVE_FULL_INFO = False
-USE_PRIOR_UNWEIGHTING = False
+#USE_PRIOR_UNWEIGHTING = False
+USE_PRIOR_UNWEIGHTING = True
 
 class RetroReco(object):
 
@@ -1432,8 +1433,8 @@ def parse_args(description=__doc__):
 
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
-    #my_reco.run(method='multinest')
+    my_reco.run(method='multinest')
     #my_reco.run(method='test')
-    my_reco.run(method='mymini')
+    #my_reco.run(method='mymini')
     #my_reco.run(method='truth')
     #my_reco.run(method='nlopt')
