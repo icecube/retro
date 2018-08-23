@@ -56,6 +56,8 @@ from retro.priors import (
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 
 report_after = 100
+SAVE_FULL_INFO = False
+USE_PRIOR_UNWEIGHTING = False
 
 class RetroReco(object):
 
@@ -195,18 +197,18 @@ class RetroReco(object):
 
             if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
                 # create cascade angles from delta angles
-                rotate_point(llhp['cascade_d_zenith'], llhp['cascade_d_azimuth'],
-                             llhp['track_zenith'], llhp['track_azimuth'],
-                             llhp['cascade_zenith'], llhp['cascade_azimuth'])
+                rotate_point(p_theta = llhp['cascade_d_zenith'], p_phi = llhp['cascade_d_azimuth'],
+                             rot_theta = llhp['track_zenith'], rot_phi = llhp['track_azimuth'],
+                             q_theta = llhp['cascade_zenith'], q_phi = llhp['cascade_azimuth'])
 
             if 'track_zenith' in all_dim_names and 'track_azimuth' in all_dim_names:
                 if 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
                     # this resulting radius we won't need, but need to supply an array to the function
                     r_out = np.empty(shape=llhp.shape, dtype=np.float32)
                     # combine angles:
-                    add_vectors(llhp['track_energy'], llhp['track_zenith'], llhp['track_azimuth'],
-                                llhp['cascade_energy'], llhp['cascade_zenith'], llhp['cascade_azimuth'],
-                                r_out, llhp['zenith'], llhp['azimuth'])
+                    add_vectors(r1 = llhp['track_energy'], theta1 = llhp['track_zenith'], phi1 = llhp['track_azimuth'],
+                                r2 = llhp['cascade_energy'], theta2 = llhp['cascade_zenith'], phi2 = llhp['cascade_azimuth'],
+                                r3 = r_out, theta3 = llhp['zenith'], phi3 = llhp['azimuth'])
 
                 else:
                     # in this case there is no cascade angles
@@ -219,7 +221,7 @@ class RetroReco(object):
                 llhp['azimuth'] = llhp['cascade_azimuth']
 
 
-            if False:
+            if SAVE_FULL_INFO:
                 # save full info
                 llhp_outf = self.out_prefix + 'llhp.npy'
                 print('Saving llhp to "{}"...'.format(llhp_outf))
@@ -243,14 +245,15 @@ class RetroReco(object):
                 protocol=pickle.HIGHEST_PROTOCOL
             )
 
-            if False:
-                dt = time.time() - t1
-                n_points = llhp.size
-                print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
-                      .format(dt, n_points, dt / n_points * 1e3))
+            dt = time.time() - t1
+            n_points = llhp.size
+            print('  ---> {:.3f} s, {:d} points ({:.3f} ms per LLH)'
+                  .format(dt, n_points, dt / n_points * 1e3))
 
-            #estimate = estimate_from_llhp(llhp, opt_meta)
-            estimate = estimate_from_llhp(llhp)
+            if USE_PRIOR_UNWEIGHTING:
+                estimate = estimate_from_llhp(llhp, opt_meta)
+            else:
+                estimate = estimate_from_llhp(llhp)
             estimate_outf = self.out_prefix + 'estimate.pkl'
             print('Saving estimate to "{}"'.format(estimate_outf))
             pickle.dump(
@@ -573,9 +576,9 @@ class RetroReco(object):
         # maximumm iterations
         max_iter = 20000
         # maximum iterations with no improvemet of best point
-        max_noimprovement = 1000
+        max_noimprovement = 2000
         # break if stddev of function values accross all livepoints drops below
-        fn_std = 0.3
+        fn_std = 0.1
         # use priors during minimization
         use_priors = False
         # use sobol sequence
@@ -881,40 +884,40 @@ class RetroReco(object):
         return res
 
         # now let's do some sampling
-        import emcee
+        #import emcee
 
-        az_dim = 4
-        zen_dim = 5
+        #az_dim = 4
+        #zen_dim = 5
 
-        def lnprob(new_x):
-            '''
-            function for sampler
-            '''
-            while new_x[zen_dim] < 0 or new_x[zen_dim] > np.pi:
-                new_x[az_dim] += np.pi
-                if new_x[zen_dim] < 0:
-                    new_x[zen_dim] = -new_x[zen_dim]
-                else:
-                    new_x[zen_dim] = np.pi - new_x[zen_dim]
+        #def lnprob(new_x):
+        #    '''
+        #    function for sampler
+        #    '''
+        #    while new_x[zen_dim] < 0 or new_x[zen_dim] > np.pi:
+        #        new_x[az_dim] += np.pi
+        #        if new_x[zen_dim] < 0:
+        #            new_x[zen_dim] = -new_x[zen_dim]
+        #        else:
+        #            new_x[zen_dim] = np.pi - new_x[zen_dim]
 
-            new_x[az_dim] = new_x[az_dim] % (2 * np.pi)
-            new_llh = fun(new_x)
-            return -new_llh
+        #    new_x[az_dim] = new_x[az_dim] % (2 * np.pi)
+        #    new_llh = fun(new_x)
+        #    return -new_llh
 
-        
+        #
 
-        # first create array without dtype (otherwise covariance doesn't work)
+        ## first create array without dtype (otherwise covariance doesn't work)
 
-        ## bigger arrays to also contain sampled points 
-        S = np.zeros(shape=(N,n))
-        ##f = np.full(2*N, np.inf)
+        ### bigger arrays to also contain sampled points 
+        #S = np.zeros(shape=(N,n))
+        ###f = np.full(2*N, np.inf)
 
-        ## set the first half
-        for i in range(N):
-            S[i] = create_x(S_cart[i], S_spher[i])
+        ### set the first half
+        #for i in range(N):
+        #    S[i] = create_x(S_cart[i], S_spher[i])
 
-        sampler = emcee.EnsembleSampler(N, n, lnprob)
-        sampler.run_mcmc(S, 42)
+        #sampler = emcee.EnsembleSampler(N, n, lnprob)
+        #sampler.run_mcmc(S, 42)
 
 
 
@@ -1006,7 +1009,7 @@ class RetroReco(object):
         #    #f[:N] = f[mask]
 
 
-        return OrderedDict()
+        #return OrderedDict()
 
     def run_scipy(self, prior, loglike, method, eps):
         from scipy import optimize
@@ -1300,7 +1303,7 @@ def parse_args(description=__doc__):
 
     group.add_argument(
         '--spatial-prior',
-        choices='dc dc_subdust ic SPEFit2'.split(),
+        choices='dc dc_subdust ic SPEFit2 SPEFit2tight'.split(),
         required=True,
         help='''Choose a prior for choosing spatial samples. "dc", "dc_subdust"
         and "ic" are uniform priors with hard cut-offs at the extents of the
@@ -1309,7 +1312,7 @@ def parse_args(description=__doc__):
     )
     group.add_argument(
         '--temporal-prior',
-        choices='uniform SPEFit2'.split(),
+        choices='uniform SPEFit2 SPEFit2tight'.split(),
         required=True,
         help='''Choose a prior for choosing temporal samples. "uniform" chooses
         uniformly from 4000 ns prior to the first hit up to the last hit, while
