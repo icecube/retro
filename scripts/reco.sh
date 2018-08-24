@@ -93,45 +93,18 @@ else
     #tblkind="ckv_templ_compr"
 fi
 
-#no_noise="--no-noise"
-no_noise=""
-
-importance_sampling="--importance-sampling"
-#importance_sampling=""
-
-#consteff="--const-eff"
-consteff=""
-
 
 #python -m cProfile  \
 #kernprof -l -v \
 ~/retro/retro/reco.py \
     --outdir "$outdir" \
-    --spatial-prior SPEFit2tight \
-    --temporal-prior SPEFit2tight \
-    \
-    $importance_sampling \
-    --max-modes 1 \
-    $consteff \
-    --n-live 160 \
-    --evidence-tol 0.5 \
-    --sampling-eff 0.3 \
-    --max-iter 10000 \
-    --seed 0 \
-    \
     --dom-tables-kind "$tblkind" \
     --dom-tables-fname-proto "$proto" \
-    --use-doms "all" \
     --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
     --norm-version "binvol2.5" \
     $tmpl_lib \
     --step-length 1.0 \
-    $no_noise \
-    \
-    --cascade-kernel "scaling_one_dim" \
-    --cascade-angle-prior "log_normal" \
-    --track-kernel "pegleg" \
-    --track-time-step 3 \
+    --use-doms "all" \
     \
     --events-base "$events_base" \
     --start-idx "$start_idx" \
