@@ -119,20 +119,19 @@ class RetroReco(object):
 
 
         for event in self.events_iterator:
-            t_start = []
-            t0 = time.time()
-
-            # setup hypo
-            self.setup_hypo(
-                            #cascade_kernel='scaling_aligned_one_dim',
-                            track_kernel='pegleg',
-                            track_time_step=1.,
-                            )
-
-            self.hypo_handler.fixed_params = OrderedDict()
-            #self.hypo_handler.fixed_params['time'] = 10000
 
             if method in ['multinest', 'test', 'truth', 'crs', 'scipy', 'nlopt', 'skopt']:
+                t0 = time.time()
+                # setup hypo
+                self.setup_hypo(
+                                cascade_kernel='scaling_aligned_one_dim',
+                                track_kernel='pegleg',
+                                track_time_step=1.,
+                                )
+
+                self.hypo_handler.fixed_params = OrderedDict()
+
+                t_start = []
                 return_param_values = []
                 return_log_likelihoods = []
 
@@ -190,6 +189,106 @@ class RetroReco(object):
                 llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='opt_meta')
                 estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
+
+
+            elif method == 'mytrackfit':
+                t0 = time.time()
+                t_start = []
+
+                # ------- track only pre-fit ----------
+                print('--- track prefit ---')
+
+                # setup hypo
+                self.setup_hypo(
+                                track_kernel='pegleg',
+                                track_time_step=1.,
+                                )
+
+                self.hypo_handler.fixed_params = OrderedDict()
+                #self.hypo_handler.fixed_params['time'] = 10000
+
+                return_param_values = []
+                return_log_likelihoods = []
+
+                # Setup prior
+                prior_defs = OrderedDict()
+                prior_defs['x'] = {'kind':'SPEFit2'}
+                prior_defs['y'] = {'kind':'SPEFit2'}
+                prior_defs['z'] = {'kind':'SPEFit2'}
+                prior_defs['time'] = {'kind':'SPEFit2', 'low':-2000, 'high':2000, 'extent':'SPEFit2'}
+                self.generate_prior(prior_defs)
+
+                # Setup llh function
+                self.generate_loglike(
+                    return_param_values=return_param_values,
+                    return_log_likelihoods=return_log_likelihoods,
+                    t_start=t_start,
+                )
+
+                settings = self.run_crs(
+                    n_live=160,
+                    max_iter=20000,
+                    max_noimprovement=2000,
+                    fn_std=0.1,
+                    use_priors=False,
+                    sobol=True
+                )
+
+                t1 = time.time()
+
+                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='prefit_opt_meta')
+                estimate = self.make_estimate(llhp, opt_meta, fname='prefit_estimate')
+
+                # -------- adding cascade ---------
+                print('--- hybrid fit ---')
+
+                # setup hypo
+                self.setup_hypo(
+                                cascade_kernel='scaling_aligned_one_dim',
+                                #track_kernel='pegleg',
+                                track_kernel='table_e_loss',
+                                track_time_step=1.,
+                                )
+
+                self.hypo_handler.fixed_params = OrderedDict()
+                self.hypo_handler.fixed_params['track_energy'] = estimate['weighted_median']['track_energy']
+
+                return_param_values = []
+                return_log_likelihoods = []
+
+                # Setup prior
+                prior_defs = OrderedDict()
+                prior_defs['x'] = {'kind':'cauchy', 'loc':estimate['weighted_median']['x'], 'scale':12}
+                prior_defs['y'] = {'kind':'cauchy', 'loc':estimate['weighted_median']['y'], 'scale':13}
+                prior_defs['z'] = {'kind':'cauchy', 'loc':estimate['weighted_median']['z'], 'scale':7.5}
+                prior_defs['time'] = {'kind':'cauchy', 'loc':estimate['weighted_median']['time'], 'scale':40, 'low':estimate['weighted_median']['time']-2000, 'high':estimate['weighted_median']['time']+2000}
+                self.generate_prior(prior_defs)
+
+
+                # Setup llh function
+                self.generate_loglike(
+                    return_param_values=return_param_values,
+                    return_log_likelihoods=return_log_likelihoods,
+                    t_start=t_start,
+                )
+
+
+                settings = self.run_crs(
+                    n_live=160,
+                    max_iter=20000,
+                    max_noimprovement=2000,
+                    fn_std=0.1,
+                    use_priors=False,
+                    sobol=True
+                )
+
+                t2 = time.time()
+
+                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t2-t1, fname='opt_meta')
+                estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
+
 
             else:
                 raise ValueError('Unknown `Method` {}'.format(method))
@@ -391,8 +490,8 @@ class RetroReco(object):
                 table_norms=table_norms,
                 t_indep_tables=t_indep_tables,
                 t_indep_table_norms=t_indep_table_norms,
-                pegleg_stepsize=1,
             )
+
             assert np.isfinite(llh), 'LLH not finite'
             assert llh < 0, 'LLH positive'
 
@@ -517,7 +616,7 @@ class RetroReco(object):
             ('priors_used', self.priors_used),
             ('settings', sort_dict(settings)),
         ])
-        opt_meta['num_llhp'] = llhp.shape
+        opt_meta['num_llhp'] = len(llhp)
         opt_meta['run_time'] = time
 
         if fname is not None:
@@ -1355,5 +1454,5 @@ def parse_args(description=__doc__):
 
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
-    my_reco.run('crs')
+    my_reco.run('mytrackfit')
     #my_reco.run('test')

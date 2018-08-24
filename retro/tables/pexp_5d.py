@@ -494,6 +494,38 @@ def generate_pexp_5d_function(
         raise NotImplementedError()
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def simple_llh(
+        event_dom_info,
+        event_hit_info,
+        nonscaling_hit_exp,
+        nonscaling_t_indep_exp,
+    ):
+        """get llh if no scaling sources are present
+
+        Parameters:
+        -----------
+        event_dom_info : array of dtype EVT_DOM_INFO_T
+            containing all relevant event per DOM info
+        event_hit_info : array of dtype EVT_HIT_INFO_T
+
+        Returns
+        -------
+        llh
+
+        """
+        # Time- and DOM-independent part of LLH
+        llh = - nonscaling_t_indep_exp
+
+        # Time-dependent part of LLH (i.e., at hit times)
+        for hit_idx, hit_info in enumerate(event_hit_info):
+            llh += hit_info['charge'] * math.log(
+                event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                + nonscaling_hit_exp[hit_idx]
+            )
+
+        return llh
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_optimal_scalefactor(
         event_dom_info,
         event_hit_info,
@@ -617,7 +649,6 @@ def generate_pexp_5d_function(
         table_norms,
         t_indep_tables,
         t_indep_table_norms,
-        pegleg_stepsize,
     ):
         """Compute log likelihood for hypothesis sources given an event.
 
@@ -672,24 +703,6 @@ def generate_pexp_5d_function(
 
         num_pegleg_sources = len(pegleg_sources)
 
-        # take log steps
-        logstep = np.log(num_pegleg_sources) / 300
-        logspace = np.zeros(shape=301, dtype=np.int32)
-        x = -1e-8
-        for i in range(len(logspace)):
-            logspace[i] = np.int32(np.exp(x))
-            x+= logstep
-        pegleg_steps = np.unique(logspace)
-        assert pegleg_steps[0] == 0
-        n_pegleg_steps = len(pegleg_steps)
-
-        # take linear steps
-        #pegleg_steps = np.arange(num_pegleg_sources)
-        #n_pegleg_steps = len(pegleg_steps)
-
-
-        num_llhs = n_pegleg_steps + 1
-
 
         #pegleg_stepsize = 1
 
@@ -698,23 +711,22 @@ def generate_pexp_5d_function(
         num_operational_doms = len(event_dom_info)
         num_hits = len(event_hit_info)
 
-        # -- Expectations due to nominal (`scalefactor = 1`) scaling sources -- #
-
-        nominal_scaling_t_indep_exp = 0.
-        nominal_scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
-
-        nominal_scaling_t_indep_exp += pexp_5d(
-            sources=scaling_sources,
-            sources_start=0,
-            sources_stop=len(scaling_sources),
-            event_dom_info=event_dom_info,
-            event_hit_info=event_hit_info,
-            tables=tables,
-            table_norms=table_norms,
-            t_indep_tables=t_indep_tables,
-            t_indep_table_norms=t_indep_table_norms,
-            hit_exp=nominal_scaling_hit_exp,
-        )
+        if len(scaling_sources) > 0:
+            # -- Expectations due to nominal (`scalefactor = 1`) scaling sources -- #
+            nominal_scaling_t_indep_exp = 0.
+            nominal_scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
+            nominal_scaling_t_indep_exp += pexp_5d(
+                sources=scaling_sources,
+                sources_start=0,
+                sources_stop=len(scaling_sources),
+                event_dom_info=event_dom_info,
+                event_hit_info=event_hit_info,
+                tables=tables,
+                table_norms=table_norms,
+                t_indep_tables=t_indep_tables,
+                t_indep_table_norms=t_indep_table_norms,
+                hit_exp=nominal_scaling_hit_exp,
+            )
 
         # -- Storage for exp due to generic + pegleg (non-scaling) sources -- #
 
@@ -735,17 +747,48 @@ def generate_pexp_5d_function(
             hit_exp=nonscaling_hit_exp,
         )
 
-        # Compute initial scalefactor & LLH for generic-only (no pegleg) sources
-        scalefactor, llh = get_optimal_scalefactor(
-            event_dom_info=event_dom_info,
-            event_hit_info=event_hit_info,
-            nonscaling_hit_exp=nonscaling_hit_exp,
-            nonscaling_t_indep_exp=nonscaling_t_indep_exp,
-            nominal_scaling_hit_exp=nominal_scaling_hit_exp,
-            nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
-            initial_scalefactor=10.,
-        )
+        if len(scaling_sources) > 0:
+            # Compute initial scalefactor & LLH for generic-only (no pegleg) sources
+            scalefactor, llh = get_optimal_scalefactor(
+                event_dom_info=event_dom_info,
+                event_hit_info=event_hit_info,
+                nonscaling_hit_exp=nonscaling_hit_exp,
+                nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+                nominal_scaling_hit_exp=nominal_scaling_hit_exp,
+                nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
+                initial_scalefactor=10.,
+            )
+        else:
+            llh = simple_llh(
+                event_dom_info=event_dom_info,
+                event_hit_info=event_hit_info,
+                nonscaling_hit_exp=nonscaling_hit_exp,
+                nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+            )
+            scalefactor = 0
 
+        if num_pegleg_sources == 0:
+            # in this case we're done
+            return llh, 0, scalefactor
+
+        # -- Pegleg loop -- #
+
+        # take log steps
+        logstep = np.log(num_pegleg_sources) / 300
+        x = -1e-8
+        logspace = np.zeros(shape=301, dtype=np.int32)
+        for i in range(len(logspace)):
+            logspace[i] = np.int32(np.exp(x))
+            x+= logstep
+        pegleg_steps = np.unique(logspace)
+        assert pegleg_steps[0] == 0
+        n_pegleg_steps = len(pegleg_steps)
+
+        # take linear steps
+        #pegleg_steps = np.arange(num_pegleg_sources)
+        #n_pegleg_steps = len(pegleg_steps)
+
+        num_llhs = n_pegleg_steps + 1
         llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
         llhs[0] = llh
 
@@ -757,7 +800,6 @@ def generate_pexp_5d_function(
         best_llh_idx = 0
         getting_worse_counter = 0
 
-        # -- Pegleg loop -- #
 
         for pegleg_idx in range(1, n_pegleg_steps):
             # Update pegleg sources with additional segment of sources
@@ -774,16 +816,25 @@ def generate_pexp_5d_function(
                 hit_exp=nonscaling_hit_exp,
             )
 
-            # Find optimal scalefactor at this pegleg step
-            scalefactor, llh = get_optimal_scalefactor(
-                event_dom_info=event_dom_info,
-                event_hit_info=event_hit_info,
-                nonscaling_hit_exp=nonscaling_hit_exp,
-                nonscaling_t_indep_exp=nonscaling_t_indep_exp,
-                nominal_scaling_hit_exp=nominal_scaling_hit_exp,
-                nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
-                initial_scalefactor=scalefactor,
-            )
+            if len(scaling_sources) > 0:
+                # Find optimal scalefactor at this pegleg step
+                scalefactor, llh = get_optimal_scalefactor(
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    nonscaling_hit_exp=nonscaling_hit_exp,
+                    nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+                    nominal_scaling_hit_exp=nominal_scaling_hit_exp,
+                    nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
+                    initial_scalefactor=scalefactor,
+                )
+            else:
+                llh = simple_llh(
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    nonscaling_hit_exp=nonscaling_hit_exp,
+                    nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+                )
+                scalefactor = 0
 
             # Store this pegleg step's llh and best scalefactor
             llhs[pegleg_idx] = llh

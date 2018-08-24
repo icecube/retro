@@ -216,7 +216,7 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         kind = kind.lower()
         low = kwargs.get('low', -4e3)
         high = kwargs.get('high', 0)
-        extent = kwargs.get('extent', 'hits_window')
+        extent = kwargs.get('extent', 'none')
         if extent.lower() == 'hits_window':
             low += hits_summary['earliest_hit_time']
             high += hits_summary['latest_hit_time']
