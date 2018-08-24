@@ -57,7 +57,8 @@ from retro.hypo.discrete_muon_kernels import pegleg_eval
 
 report_after = 100
 SAVE_FULL_INFO = False
-USE_PRIOR_UNWEIGHTING = False
+#USE_PRIOR_UNWEIGHTING = False
+USE_PRIOR_UNWEIGHTING = True
 
 class RetroReco(object):
 

@@ -802,7 +802,7 @@ def generate_pexp_5d_function(
 
             # break condition
             #if getting_worse_counter > 10:
-            if getting_worse_counter > 3:
+            if getting_worse_counter > 30:
                 #for idx in range(pegleg_idx+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100
