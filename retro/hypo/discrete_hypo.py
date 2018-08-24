@@ -24,7 +24,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from collections import Mapping
+from collections import Mapping, OrderedDict
 from copy import deepcopy
 import inspect
 from operator import add
@@ -150,28 +150,45 @@ class DiscreteHypo(object):
             if name not in all_param_names:
                 all_param_names.append(name)
 
-        opt_param_names = deepcopy(all_param_names)
+        self._opt_param_names = deepcopy(all_param_names)
 
-        self.n_pegleg_params = 0
+        self.fixed_params = OrderedDict()
+
+    @property
+    def opt_param_names(self):
+        # remove fixed params
+        names = list(self._opt_param_names)
+
+        for n in self.fixed_params.keys():
+            names.remove(n)
+        return names
+
+    @property
+    def hypo_param_names(self):
+        return self._opt_param_names
+
+    @property
+    def all_param_names(self):
+        names = self.opt_param_names + self.fixed_params.keys()
         if self.pegleg_kernel:
-            for name in PEGLEG_PARAM_NAMES:
-                all_param_names.append(name)
-                if name in opt_param_names:
-                    opt_param_names.remove(name)
-                self.n_pegleg_params += 1
-
-        self.n_scaling_params = 0
+            names += PEGLEG_PARAM_NAMES
         if self.scaling_kernel:
-            for name in SCALING_PARAM_NAMES:
-                all_param_names.append(name)
-                if name in opt_param_names:
-                    opt_param_names.remove(name)
-                self.n_scaling_params += 1
+            names += SCALING_PARAM_NAMES
+        return names
 
-        self.all_param_names = tuple(all_param_names)
-        self.opt_param_names = tuple(opt_param_names)
-        self.n_params = len(self.all_param_names)
-        self.n_opt_params = self.n_params - self.n_pegleg_params - self.n_scaling_params
+    
+    @property
+    def n_params(self):
+        return len(self.all_param_names)
+
+    @property
+    def n_hypo_params(self):
+        return len(self.hypo_param_names)
+
+    @property
+    def n_opt_params(self):
+        return len(self.opt_param_names)
+
 
     def get_generic_sources(self, hypo):
         """Evaluate the discrete hypothesis (all hypo kernels) given particular
@@ -186,6 +203,7 @@ class DiscreteHypo(object):
         sources : shape (n_generic_sources,) array of dtype SRC_T
 
         """
+        hypo.update(self.fixed_params)
         sources = []
         for kernel, param_names, kwargs in zip(self.generic_kernels,
                                                self.generic_param_names,
@@ -215,6 +233,7 @@ class DiscreteHypo(object):
         sources : shape (n_pegleg_sources,) array of dtype SRC_T
 
         """
+        hypo.update(self.fixed_params)
         if self.pegleg_kernel is None:
             return EMPTY_SOURCES
         total_kwargs = {a:hypo[a] for a in self.pegleg_param_names}
@@ -237,6 +256,7 @@ class DiscreteHypo(object):
         sources : shape (n_scaling_sources,) array of dtype SRC_T
 
         """
+        hypo.update(self.fixed_params)
         if self.scaling_kernel is None:
             return EMPTY_SOURCES
         total_kwargs = {a:hypo[a] for a in self.scaling_param_names}
