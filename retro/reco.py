@@ -123,16 +123,17 @@ class RetroReco(object):
             t0 = time.time()
 
             # setup hypo
-            self.setup_hypo(cascade_kernel='scaling_aligned_one_dim',
+            self.setup_hypo(
+                            #cascade_kernel='scaling_aligned_one_dim',
                             track_kernel='pegleg',
                             track_time_step=1.,
                             )
 
             self.hypo_handler.fixed_params = OrderedDict()
-            self.hypo_handler.fixed_params['time'] = 10000
+            #self.hypo_handler.fixed_params['time'] = 10000
 
             if method in ['multinest', 'test', 'truth', 'crs', 'scipy', 'nlopt', 'skopt']:
-                retrun_param_values = []
+                return_param_values = []
                 return_log_likelihoods = []
 
                 # Setup prior
@@ -145,7 +146,7 @@ class RetroReco(object):
 
                 # Setup llh function
                 self.generate_loglike(
-                    retrun_param_values=retrun_param_values,
+                    return_param_values=return_param_values,
                     return_log_likelihoods=return_log_likelihoods,
                     t_start=t_start,
                 )
@@ -186,7 +187,7 @@ class RetroReco(object):
 
                 t1 = time.time()
 
-                llhp = self.make_llhp(return_log_likelihoods, retrun_param_values, fname=None)
+                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='opt_meta')
                 estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
 
@@ -239,12 +240,12 @@ class RetroReco(object):
 
         self.prior = prior
 
-    def generate_loglike(self, retrun_param_values, return_log_likelihoods, t_start):
+    def generate_loglike(self, return_param_values, return_log_likelihoods, t_start):
         """Generate the LLH callback function for a given event
 
         Parameters
         ----------
-        retrun_param_values : list
+        return_param_values : list
         return_log_likelihoods : list
         t_start : list
 
@@ -395,13 +396,20 @@ class RetroReco(object):
             assert np.isfinite(llh), 'LLH not finite'
             assert llh < 0, 'LLH positive'
 
-            pegleg_result = pegleg_eval(
-                pegleg_idx=pegleg_idx,
-                dt=pegleg_muon_dt,
-                const_e_loss=pegleg_muon_const_e_loss,
-            )
-            result = tuple(cube[:n_opt_params]) + tuple(fixed_params.values()) + (pegleg_result, scalefactor)
-            retrun_param_values.append(result)
+            additional_results = []
+
+            if self.hypo_handler.pegleg_kernel:
+                pegleg_result = pegleg_eval(
+                    pegleg_idx=pegleg_idx,
+                    dt=pegleg_muon_dt,
+                    const_e_loss=pegleg_muon_const_e_loss,
+                )
+                additional_results.append(pegleg_result)
+            if self.hypo_handler.scaling_kernel:
+                additional_results.append(scalefactor)
+
+            result = tuple(cube[:n_opt_params]) + tuple(fixed_params.values()) + tuple(additional_results)
+            return_param_values.append(result)
 
             return_log_likelihoods.append(llh)
             n_calls = len(return_log_likelihoods)
@@ -420,7 +428,7 @@ class RetroReco(object):
                 t_now = time.time()
                 best_idx = np.argmax(return_log_likelihoods)
                 best_llh = return_log_likelihoods[best_idx]
-                best_p = retrun_param_values[best_idx]
+                best_p = return_param_values[best_idx]
                 msg = 'best llh = {:.3f} @ '.format(best_llh)
                 for key, val in zip(all_param_names, best_p):
                     msg += ' %s=%.1f'%(key, val)
@@ -438,7 +446,7 @@ class RetroReco(object):
 
         self.loglike = loglike
 
-    def make_llhp(self, return_log_likelihoods, retrun_param_values, fname=None):
+    def make_llhp(self, return_log_likelihoods, return_param_values, fname=None):
         '''
         create a structured numpy array containing the reco infromation
         Also add derived dimensions
@@ -456,9 +464,9 @@ class RetroReco(object):
         llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + all_dim_names])
 
         # dump
-        llhp = np.zeros(shape=len(retrun_param_values), dtype=llhp_t)
+        llhp = np.zeros(shape=len(return_param_values), dtype=llhp_t)
         llhp['llh'] = return_log_likelihoods
-        llhp[dim_names] = retrun_param_values
+        llhp[dim_names] = return_param_values
 
         
         # create derived dimensions
