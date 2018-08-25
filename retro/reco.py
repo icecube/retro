@@ -237,7 +237,7 @@ class RetroReco(object):
 
                 llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='prefit_opt_meta')
-                estimate = self.make_estimate(llhp, opt_meta, fname='prefit_estimate')
+                estimate = self.make_estimate(llhp, fname='prefit_estimate')
 
                 # -------- adding cascade ---------
                 print('--- MN fit ---')
@@ -335,7 +335,7 @@ class RetroReco(object):
 
                 llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='prefit_opt_meta')
-                estimate = self.make_estimate(llhp, opt_meta, fname='prefit_estimate')
+                estimate = self.make_estimate(llhp, fname='prefit_estimate')
 
                 # -------- adding cascade ---------
                 print('--- hybrid fit ---')
@@ -384,7 +384,7 @@ class RetroReco(object):
 
                 llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t2-t1, fname='opt_meta')
-                estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
+                estimate = self.make_estimate(llhp, fname='estimate')
 
 
             else:
