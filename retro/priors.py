@@ -140,6 +140,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         elif extent.lower() in ['dc', 'dc_subdust']:
             low = kwargs.get('low', -150)
             high = kwargs.get('high', 270)
+        elif extent.lower() == 'tight':
+            low = -200
+            high = 200
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
@@ -148,6 +151,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             loc = -0.19687812829978152
             loc += spe_fit_val
             scale = 14.282171566308806
+            if extent.lower() == 'tight':
+                low += loc
+                high += loc
             prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         elif kind == PRI_CAUCHY:
             loc = kwargs.get('loc')
@@ -167,6 +173,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         elif extent.lower() in ['dc', 'dc_subdust']:
             low = kwargs.get('low', -210)
             high = kwargs.get('high', 150)
+        elif extent.lower() == 'tight':
+            low = -200
+            high = 200
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
@@ -174,6 +183,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             loc = -0.2393645701205161
             loc += event['recos']['SPEFit2'][dim_name]
             scale = 15.049528023495354
+            if extent.lower() == 'tight':
+                low += loc
+                high += loc
             prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         elif kind == PRI_CAUCHY:
             loc = kwargs.get('loc')
@@ -196,6 +208,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         elif extent.lower() == 'dc_subdust':
             low = kwargs.get('low', -610)
             high = kwargs.get('high', 60)
+        elif extent.lower() == 'tight':
+            low = -100
+            high = 100
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
@@ -203,6 +218,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             loc = -5.9170661027492546
             loc += event['recos']['SPEFit2'][dim_name]
             scale = 12.089399308036718
+            if extent.lower() == 'tight':
+                low += loc
+                high += loc
             prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         elif kind == PRI_CAUCHY:
             loc = kwargs.get('loc')
@@ -220,9 +238,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         if extent.lower() == 'hits_window':
             low += hits_summary['earliest_hit_time']
             high += hits_summary['latest_hit_time']
-        elif extent.lower() == PRI_SPEFIT2:
-            low += event['recos']['SPEFit2'][dim_name]
-            high += event['recos']['SPEFit2'][dim_name]
+        elif extent.lower() == 'tight':
+            low = -1000
+            high = 1000
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
@@ -230,6 +248,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             loc = -82.631395081663754
             loc += event['recos']['SPEFit2'][dim_name]
             scale = 75.619895703067343
+            if extent.lower() == 'tight':
+                low += loc
+                high += loc
             prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         elif kind == PRI_CAUCHY:
             loc = kwargs.get('loc')
