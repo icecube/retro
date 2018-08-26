@@ -337,59 +337,60 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
             estimate['weighted_median'][col] = weighted_median
 
 
-    if 'track_zenith' in columns and 'track_azimuth' in columns:
-        # currently double work, but for testing purposes
-        # idea, calculated the medians on the sphere for az and zen combined
-        if per_dim:
-            # no can do in this case
-            return estimate
+    for angle in ['', 'track_', 'cascade_']:
+        if angle+'zenith' in columns and angle+'azimuth' in columns:
+            # currently double work, but for testing purposes
+            # idea, calculated the medians on the sphere for az and zen combined
+            if per_dim:
+                # no can do in this case
+                return estimate
 
-        if prob_weights is None and prior_weights is None:
-            weights = None
-        else:
-            if prob_weights is None:
-                weights = np.ones(len(llhp))
+            if prob_weights is None and prior_weights is None:
+                weights = None
             else:
-                weights = np.copy(prob_weights)
-        if prior_weights is not None:
-            weights *= prior_weights
+                if prob_weights is None:
+                    weights = np.ones(len(llhp))
+                else:
+                    weights = np.copy(prob_weights)
+            if prior_weights is not None:
+                weights *= prior_weights
 
-        az = llhp['track_azimuth']
-        zen = llhp['track_zenith']
-        llh_cut = llhp['llh'] > np.max(llhp['llh']) - 15.5
-        az = az[llh_cut]
-        zen = zen[llh_cut]
-        weights = weights[llh_cut]
+            az = llhp[angle+'azimuth']
+            zen = llhp[angle+'zenith']
+            llh_cut = llhp['llh'] > np.max(llhp['llh']) - 15.5
+            az = az[llh_cut]
+            zen = zen[llh_cut]
+            weights = weights[llh_cut]
 
-        # calculate the average and weighted average on sphere:
-        # first need to create (x,y,z) array
-        cart = np.zeros(shape=(3, len(weights)))
+            # calculate the average and weighted average on sphere:
+            # first need to create (x,y,z) array
+            cart = np.zeros(shape=(3, len(weights)))
 
-        cart[0] = np.cos(az) * np.sin(zen)
-        cart[1] = np.sin(az) * np.sin(zen)
-        cart[2] = np.cos(zen)
+            cart[0] = np.cos(az) * np.sin(zen)
+            cart[1] = np.sin(az) * np.sin(zen)
+            cart[2] = np.cos(zen)
 
-        cart_mean = np.average(cart, axis=1)
-        cart_weighted_mean = np.average(cart, axis=1, weights=weights)
+            cart_mean = np.average(cart, axis=1)
+            cart_weighted_mean = np.average(cart, axis=1, weights=weights)
 
-        # normalize
-        r = np.sqrt(np.sum(np.square(cart_mean)))
-        r_weighted = np.sqrt(np.sum(np.square(cart_weighted_mean)))
+            # normalize
+            r = np.sqrt(np.sum(np.square(cart_mean)))
+            r_weighted = np.sqrt(np.sum(np.square(cart_weighted_mean)))
 
-        if r == 0:
-            estimate['mean']['track_zenith'] = 0
-            estimate['mean']['track_azimuth'] = 0
-        else:
-            estimate['mean']['track_zenith'] = np.arccos(cart_mean[2] / r)
-            estimate['mean']['track_azimuth'] = np.arctan2(cart_mean[1], cart_mean[0]) % (2 * np.pi)
+            if r == 0:
+                estimate['mean'][angle+'zenith'] = 0
+                estimate['mean'][angle+'azimuth'] = 0
+            else:
+                estimate['mean'][angle+'zenith'] = np.arccos(cart_mean[2] / r)
+                estimate['mean'][angle+'azimuth'] = np.arctan2(cart_mean[1], cart_mean[0]) % (2 * np.pi)
 
 
-        if r_weighted == 0:
-            estimate['weighted_mean']['track_zenith'] = 0
-            estimate['weighted_mean']['track_azimuth'] = 0
-        else:
-            estimate['weighted_mean']['track_zenith'] = np.arccos(cart_weighted_mean[2] / r_weighted)
-            estimate['weighted_mean']['track_azimuth'] = np.arctan2(cart_weighted_mean[1], cart_weighted_mean[0]) % (2 * np.pi)
+            if r_weighted == 0:
+                estimate['weighted_mean'][angle+'zenith'] = 0
+                estimate['weighted_mean'][angle+'azimuth'] = 0
+            else:
+                estimate['weighted_mean'][angle+'zenith'] = np.arccos(cart_weighted_mean[2] / r_weighted)
+                estimate['weighted_mean'][angle+'azimuth'] = np.arctan2(cart_weighted_mean[1], cart_weighted_mean[0]) % (2 * np.pi)
 
 
     return estimate
