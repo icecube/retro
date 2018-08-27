@@ -30,6 +30,7 @@ __all__ = [
     'cart2pol',
     'cart2sph',
     'rotsph2cart',
+    'rotate_point',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -60,7 +61,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DFLT_NUMBA_JIT_KWARGS, load_pickle, numba_jit
+from retro import DEBUG, DFLT_NUMBA_JIT_KWARGS, load_pickle, numba_jit
 from retro.const import SPEED_OF_LIGHT_M_PER_NS
 from retro.retro_types import TimeSphCoord
 from retro.utils.misc import hash_obj
@@ -383,7 +384,8 @@ def generate_digitizer(bin_edges, clip=True):
         log_bin_edges = np.log(bin_edges)
         logwidth = np.diff(log_bin_edges)
         if np.allclose(logwidth, logwidth[0]):
-            print('log')
+            if DEBUG:
+                print('log')
             is_log = True
             logwidth = (log_bin_edges[-1] - log_bin_edges[0]) / num_bins
             recip_logwidth = 1 / logwidth
@@ -485,7 +487,8 @@ def generate_digitizer(bin_edges, clip=True):
     )
     digitize = numba_jit(fastmath=True, nogil=True, cache=True)(digitize)
 
-    print(bindescr)
+    if DEBUG:
+        print(bindescr)
 
     return digitize
 
@@ -894,6 +897,53 @@ def rotsph2cart(p_sintheta, p_costheta, p_phi, rot_sintheta, rot_costheta,
     q_z = -pcphi_pstheta * rot_sintheta + p_costheta * rot_costheta
 
     return q_x, q_y, q_z
+
+
+@numba_jit
+def rotate_point(p_theta, p_phi, rot_theta, rot_phi):
+    """
+    Parameters
+    ----------
+    p_theta :  float
+        theta coordinate.
+
+    p_phi : float
+        Azimuth  on the circle
+
+    rot_theta :  float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    rot_phi :  float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    Returns
+    -------
+    q_theta : float
+        theta coordinate of rotated point
+
+    q_phi : float
+        phi coordinate of rotated point
+
+    """
+    sin_rot_theta = math.sin(rot_theta)
+    cos_rot_theta = math.cos(rot_theta)
+
+    sin_rot_phi = math.sin(rot_phi)
+    cos_rot_phi = math.cos(rot_phi)
+
+    sin_p_theta = math.sin(p_theta)
+    cos_p_theta = math.cos(p_theta)
+
+    sin_p_phi = math.sin(p_phi)
+    cos_p_phi = math.cos(p_phi)
+
+    q_theta = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
+    q_phi = math.atan2(
+        (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
+        (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+    )
+
+    return q_theta, q_phi
 
 
 if __name__ == '__main__':

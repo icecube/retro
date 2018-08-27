@@ -10,10 +10,15 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'point_cascade',
-    'point_ckv_cascade'
+    'point_ckv_cascade',
     'aligned_point_ckv_cascade',
+    'scaling_aligned_point_ckv_cascade',
     'one_dim_cascade',
     'aligned_one_dim_cascade',
+    'scaling_aligned_one_dim_cascade',
+    'scaling_one_dim_delta_cascade',
+    'one_dim_delta_cascade',
+    'scaling_one_dim_delta_cascade',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -48,7 +53,7 @@ from retro.const import (
     SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 )
 from retro.retro_types import SRC_T
-
+from retro.utils.geom import rotate_point
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def point_cascade(time, x, y, z, cascade_energy):
@@ -59,7 +64,7 @@ def point_cascade(time, x, y, z, cascade_energy):
     Parameters
     ----------
     time, x, y, z, cascade_energy
-    
+
     Returns
     -------
     sources
@@ -77,7 +82,6 @@ def point_cascade(time, x, y, z, cascade_energy):
     sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * cascade_energy
 
     return sources
-
 
 def point_ckv_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith):
     """Single-point Cherenkov-emitting cascade with axis collinear with the
@@ -117,6 +121,7 @@ def point_ckv_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_ze
     sources[0]['dir_costheta'] = dir_costheta
     sources[0]['dir_sintheta'] = dir_sintheta
 
+    sources[0]['dir_phi'] = opposite_azimuth
     sources[0]['dir_cosphi'] = dir_cosphi
     sources[0]['dir_sinphi'] = dir_sinphi
 
@@ -127,46 +132,51 @@ def point_ckv_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_ze
     return sources
 
 def aligned_point_ckv_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith):
-    '''
-    same as point_ckv_cascade, but using track directionality
-    '''
+    """Same as point_ckv_cascade, but using track directionality"""
     return point_ckv_cascade(
-            time=time,
-            x=x, y=y, z=z, 
-            cascade_energy=cascade_energy,
-            cascade_azimuth=track_azimuth,
-            cascade_zenith=track_zenith)
-
-
+        time=time,
+        x=x,
+        y=y,
+        z=z,
+        cascade_energy=cascade_energy,
+        cascade_azimuth=track_azimuth,
+        cascade_zenith=track_zenith
+    )
 
 def scaling_aligned_point_ckv_cascade(time, x, y, z, track_azimuth, track_zenith):
-    '''
-    fixed 1 GeV cascade kernel
-    '''
-    return aligned_point_ckv_cascade(time=time,
-                                     x=x,
-                                     y=y,
-                                     z=z,
-                                     track_azimuth=track_azimuth,
-                                     track_zenith=track_zenith,
-                                     cascade_energy=1.,
-                                     )
+    """Fixed 1 GeV cascade kernel"""
+    return aligned_point_ckv_cascade(
+        time=time,
+        x=x,
+        y=y,
+        z=z,
+        track_azimuth=track_azimuth,
+        track_zenith=track_zenith,
+        cascade_energy=1.,
+    )
 
 
 # TODO: use quasi-random (low discrepancy) numbers instead of pseudo-random
 #       (e.g., Sobol sequence)
 
 # Create angular zenith distribution
-np.random.seed(0)
 
 MAX_NUM_SAMPLES = int(1e5)
 
 # Parameterizations from arXiv:1210.5140v2
 ZEN_DIST = pareto(b=1.91833423, loc=-22.82924369, scale=22.82924369)
-ZEN_SAMPLES = np.deg2rad(np.clip(ZEN_DIST.rvs(size=MAX_NUM_SAMPLES), a_min=0, a_max=180))
+random_state = np.random.RandomState(0)
+ZEN_SAMPLES = np.deg2rad(
+    np.clip(
+        ZEN_DIST.rvs(size=MAX_NUM_SAMPLES, random_state=random_state),
+        a_min=0,
+        a_max=180,
+    )
+)
 
 # Create angular azimuth distribution
-AZI_SAMPLES = np.random.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
+random_state = np.random.RandomState(2)
+AZI_SAMPLES = random_state.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
 
 PARAM_ALPHA = 2.01849
 PARAM_BETA = 1.45469
@@ -177,10 +187,18 @@ RAD_LEN = 0.3975
 PARAM_B = 0.63207
 RAD_LEN_OVER_B = RAD_LEN / PARAM_B
 
-
-def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zenith, num_samples=-1):
-    """Cascade with both longitudinal and angular distributions. All emitters
-    are located on the shower axis.
+def one_dim_cascade(
+    time,
+    x,
+    y,
+    z,
+    cascade_energy,
+    cascade_azimuth,
+    cascade_zenith,
+    num_samples=-1,
+):
+    """Cascade with both longitudinal and angular distributions (but no
+    distribution off-axis). All emitters are located on the shower axis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
 
@@ -216,11 +234,14 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
 
     if num_samples == 1:
         return point_ckv_cascade(
-                time=time,
-                x=x, y=y, z=z, 
-                cascade_energy=cascade_energy,
-                cascade_azimuth=cascade_azimuth,
-                cascade_zenith=cascade_zenith)
+            time=time,
+            x=x,
+            y=y,
+            z=z,
+            cascade_energy=cascade_energy,
+            cascade_azimuth=cascade_azimuth,
+            cascade_zenith=cascade_zenith,
+        )
 
     zenith = PI - cascade_zenith
     azimuth = PI + cascade_azimuth
@@ -246,9 +267,8 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
         + PARAM_BETA * math.log10(max(MIN_CASCADE_ENERGY, cascade_energy))
     )
 
-    np.random.seed(1)
     long_dist = gamma(param_a, scale=RAD_LEN_OVER_B)
-    long_samples = long_dist.rvs(size=num_samples)
+    long_samples = long_dist.rvs(size=num_samples, random_state=1)
 
     # Grab samples from angular zenith distribution
     zen_samples = ZEN_SAMPLES[:num_samples]
@@ -290,6 +310,7 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
     sources['dir_costheta'] = final_ang_dist[2]
     sources['dir_sintheta'] = np.sin(final_theta_dist)
 
+    sources['dir_phi'] = final_phi_dist
     sources['dir_cosphi'] = np.cos(final_phi_dist)
     sources['dir_sinphi'] = np.sin(final_phi_dist)
 
@@ -299,119 +320,123 @@ def one_dim_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_zeni
 
     return sources
 
-def aligned_one_dim_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith, **kwargs):
-    '''
-    same as one_dim_cascade, but using track directionality
-    '''
+def aligned_one_dim_cascade(
+    time,
+    x,
+    y,
+    z,
+    cascade_energy,
+    track_azimuth,
+    track_zenith,
+    **kwargs
+):
+    """same as one_dim_cascade, but using track directionality"""
     return one_dim_cascade(
-            time=time,
-            x=x, y=y, z=z, 
-            cascade_energy=cascade_energy,
-            cascade_azimuth=track_azimuth,
-            cascade_zenith=track_zenith,
-            **kwargs)
-
-def scaling_aligned_one_dim_cascade(time, x, y, z, track_azimuth, track_zenith, **kwargs):
-    '''
-    fixed 1 GeV cascade kernel
-    '''
-    return aligned_one_dim_cascade(time=time,
-                                     x=x,
-                                     y=y,
-                                     z=z,
-                                     track_azimuth=track_azimuth,
-                                     track_zenith=track_zenith,
-                                     cascade_energy=1.,
-                                     num_samples=100,
-                                     **kwargs)
-
-def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith, **kwargs):
-    '''
-    fixed 1 GeV cascade kernel
-    '''
-    return one_dim_cascade(time=time,
-                                     x=x,
-                                     y=y,
-                                     z=z,
-                                     cascade_azimuth=cascade_azimuth,
-                                     cascade_zenith=cascade_zenith,
-                                     cascade_energy=1.,
-                                     num_samples=100,
-                                     **kwargs)
-
-def one_dim_delta_cascade(time, x, y, z, cascade_energy, track_azimuth, track_zenith, cascade_d_azimuth, cascade_d_zenith, **kwargs):
-    '''
-    cascade defined as rotation off of track angle
-
-    '''
-
-    cascade_zenith, cascade_azimuth = rotate_point(cascade_d_zenith, cascade_d_azimuth, track_zenith, track_azimuth)
-    return one_dim_cascade(time=time,
-                           x=x,
-                           y=y,
-                           z=z,
-                           cascade_azimuth=cascade_azimuth,
-                           cascade_zenith=cascade_zenith,
-                           cascade_energy=cascade_energy,
-                           **kwargs)
-
-def scaling_one_dim_delta_cascade(time, x, y, z, track_azimuth, track_zenith, cascade_d_azimuth, cascade_d_zenith, **kwargs):
-    return one_dim_delta_cascade(time=time,
-                                 x=x,
-                                 y=y,
-                                 z=z,
-                                 track_zenith=track_zenith,
-                                 track_azimuth=track_azimuth,
-                                 cascade_d_azimuth=cascade_d_azimuth,
-                                 cascade_d_zenith=cascade_d_zenith,
-                                 cascade_energy=1.,
-                                 num_samples=100,
-                                 **kwargs)
-    
-
-@numba_jit
-def rotate_point(p_theta, p_phi, rot_theta, rot_phi):
-    """
-    Parameters
-    ----------
-    p_theta :  float
-        theta coordinate.
-        
-    p_phi : float
-        Azimuth  on the circle
-        
-    rot_theta :  float
-        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
-        
-    rot_phi :  float
-        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
-
-    Returns
-    -------
-    q_theta : float
-        theta coordinate of rotated point
-        
-    q_phi : float
-        phi coordinate of rotated point
-
-    """
-    sin_rot_theta = math.sin(rot_theta)
-    cos_rot_theta = math.cos(rot_theta)
-    
-    sin_rot_phi = math.sin(rot_phi)
-    cos_rot_phi = math.cos(rot_phi)
-
-    sin_p_theta = math.sin(p_theta)
-    cos_p_theta = math.cos(p_theta)
-
-    sin_p_phi = math.sin(p_phi)
-    cos_p_phi = math.cos(p_phi)
-    
-    q_theta = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
-    q_phi = math.atan2(
-        (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
-        (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+        time=time,
+        x=x,
+        y=y,
+        z=z,
+        cascade_energy=cascade_energy,
+        cascade_azimuth=track_azimuth,
+        cascade_zenith=track_zenith,
+        **kwargs
     )
 
-    return q_theta, q_phi
+def scaling_aligned_one_dim_cascade(
+    time,
+    x,
+    y,
+    z,
+    track_azimuth,
+    track_zenith,
+    **kwargs
+):
+    """Fixed 1 GeV cascade kernel"""
+    return aligned_one_dim_cascade(
+        time=time,
+        x=x,
+        y=y,
+        z=z,
+        track_azimuth=track_azimuth,
+        track_zenith=track_zenith,
+        cascade_energy=1.,
+        num_samples=100,
+        **kwargs
+    )
 
+def scaling_one_dim_cascade(
+    time,
+    x,
+    y,
+    z,
+    cascade_azimuth,
+    cascade_zenith,
+    **kwargs
+):
+    """Fixed 1 GeV cascade kernel"""
+    return one_dim_cascade(
+        time=time,
+        x=x,
+        y=y,
+        z=z,
+        cascade_azimuth=cascade_azimuth,
+        cascade_zenith=cascade_zenith,
+        cascade_energy=1.,
+        num_samples=100,
+        **kwargs
+    )
+
+def one_dim_delta_cascade(
+    time,
+    x,
+    y,
+    z,
+    cascade_energy,
+    track_azimuth,
+    track_zenith,
+    cascade_d_azimuth,
+    cascade_d_zenith,
+    **kwargs
+):
+    """Cascade defined as rotation off of track angle"""
+    cascade_zenith, cascade_azimuth = rotate_point(
+        p_theta=cascade_d_zenith,
+        p_phi=cascade_d_azimuth,
+        rot_theta=track_zenith,
+        rot_phi=track_azimuth
+    )
+    return one_dim_cascade(
+        time=time,
+        x=x,
+        y=y,
+        z=z,
+        cascade_azimuth=cascade_azimuth,
+        cascade_zenith=cascade_zenith,
+        cascade_energy=cascade_energy,
+        **kwargs
+    )
+
+def scaling_one_dim_delta_cascade(
+    time,
+    x,
+    y,
+    z,
+    track_azimuth,
+    track_zenith,
+    cascade_d_azimuth,
+    cascade_d_zenith,
+    **kwargs
+):
+    return one_dim_delta_cascade(
+        time=time,
+        x=x,
+        y=y,
+        z=z,
+        track_zenith=track_zenith,
+        track_azimuth=track_azimuth,
+        cascade_d_azimuth=cascade_d_azimuth,
+        cascade_d_zenith=cascade_d_zenith,
+        cascade_energy=1.,
+        num_samples=100,
+        **kwargs
+    )

@@ -232,9 +232,7 @@ def setup_dom_tables(
     return dom_tables
 
 
-def setup_discrete_hypo(
-        cascade_kernel=None, track_kernel=None, track_time_step=None
-    ):
+def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=None):
     """Convenience function for instantiating a discrete hypothesis with
     specified kernel(s).
 

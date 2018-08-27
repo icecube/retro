@@ -13,8 +13,10 @@ __all__ = [
     'MULEN_INTERP',
     'TABLE_LOWER_BOUND',
     'TABLE_UPPER_BOUND',
+    'pegleg_muon',
     'const_energy_loss_muon',
-    'table_energy_loss_muon'
+    'table_energy_loss_muon',
+    'pegleg_eval',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi, K. Crust'
@@ -53,7 +55,17 @@ from retro.retro_types import SRC_T
 
 ALL_REALS = (-np.inf, np.inf)
 
-def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000):
+
+def pegleg_muon(
+    time,
+    x,
+    y,
+    z,
+    track_azimuth,
+    track_zenith,
+    dt,
+    n_segments=3000,
+):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -107,6 +119,7 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000)
     sources['dir_costheta'] = dir_costheta
     sources['dir_sintheta'] = dir_sintheta
 
+    sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
 
@@ -117,7 +130,16 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000)
     return sources
 
 
-def const_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zenith, dt):
+def const_energy_loss_muon(
+    time,
+    x,
+    y,
+    z,
+    track_energy,
+    track_azimuth,
+    track_zenith,
+    dt,
+):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
@@ -176,6 +198,7 @@ def const_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zen
     sources['dir_costheta'] = dir_costheta
     sources['dir_sintheta'] = dir_sintheta
 
+    sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
 
@@ -215,7 +238,14 @@ MUEN_INTERP = interpolate.UnivariateSpline(y=esamps[1:], x=lengths[1:], k=1, s=0
 
 
 def table_energy_loss_muon(
-        time, x, y, z, track_energy, track_azimuth, track_zenith, dt
+    time,
+    x,
+    y,
+    z,
+    track_energy,
+    track_azimuth,
+    track_zenith,
+    dt,
 ):
     """Discrete-time track hypothesis that calculates dE/dx as the muon travels
     using splined tabulated data.
@@ -284,6 +314,7 @@ def table_energy_loss_muon(
     sources['dir_costheta'] = dir_costheta
     sources['dir_sintheta'] = dir_sintheta
 
+    sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
 
@@ -308,7 +339,7 @@ def pegleg_eval(pegleg_idx, dt, const_e_loss):
     muon_energy : float
 
     """
-    length = pegleg_idx / dt * SPEED_OF_LIGHT_M_PER_NS
+    length = pegleg_idx * dt * SPEED_OF_LIGHT_M_PER_NS
     if const_e_loss:
         return length * TRACK_M_PER_GEV
     return MUEN_INTERP(length)

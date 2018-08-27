@@ -48,7 +48,7 @@ from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import SPEED_OF_LIGHT_M_PER_NS
 
 
-FLOAT_T = np.float32
+FLOAT_T = np.float64
 PI = FLOAT_T(np.pi)
 TWO_PI = FLOAT_T(2*np.pi)
 
@@ -242,6 +242,113 @@ def get_cone_map(
     deltaphi_indices = np.array([i[1] for i in bin_indices], dtype=np.uint32)
 
     return costheta_indices, deltaphi_indices, weights
+
+
+@numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
+def convolve_dirmap(
+    dirmap,
+    out,
+    cos_ckv,
+    sin_ckv,
+    costhetadir_bin_edges,
+    phidir_bin_edges,
+    num_cone_samples,
+    oversample,
+):
+    """Convolve an array of values in a grid of (costhetadir, phidir)
+    coordinates (a so-called directional map, or dirmap) with a Cherenkov cone.
+
+    Parameters
+    ----------
+    dirmap : (n_costhetadir, n_phidir) array
+        Directionality map to be convolved with a Cherenkov cone
+
+    out : (n_costhetadir, n_phidir) array
+        The result of the convolution is populated to this array
+
+    cos_ckv, sin_ckv : float
+        Cosine and sine of Cherenkov angle
+
+    costhetadir_bin_edges : shape (n_costhetadir + 1,) array
+        Cosine-of-direction-theta (zenith angle) bin edges.
+
+    phidir_bin_edges : shape (n_phidir + 1,) array
+        Direction-phi (azimuth angle) bin edges, in units of radians.
+
+    num_cone_samples : int > 0
+        Number of samples around cone (akin to antialiasing; more samples give
+        more accurate results)
+
+    oversample : int > 0
+        Sample this many times in each dimension in each (costhetadir, phidir)
+        bin
+
+    """
+    n_costhetadir = len(costhetadir_bin_edges) - 1
+    n_phidir = len(phidir_bin_edges) - 1
+
+    costhetadir_min = costhetadir_bin_edges[0]
+    costhetadir_max = costhetadir_bin_edges[-1]
+
+    phidir_min = phidir_bin_edges[0]
+    phidir_max = phidir_bin_edges[-1]
+
+    costhetadir_bw = (costhetadir_max - costhetadir_min) / n_costhetadir
+    phidir_bw = (phidir_max - phidir_min) / n_phidir
+
+    costhetadir_samp_step = costhetadir_bw / oversample
+    phidir_samp_step = phidir_bw / oversample
+
+    costhetadir_min_samp = costhetadir_min + 0.5 * costhetadir_samp_step
+    phidir_min_samp = phidir_min + 0.5 * phidir_samp_step
+
+    # Cosine and sine of thetadir
+    costhetadir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
+    sinthetadir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
+
+    # Cosine and sine of deltaphidir
+    cosphidir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
+    sinphidir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
+
+    for costhetadir_idx in range(n_costhetadir):
+        costhetadir0 = costhetadir_min_samp + costhetadir_idx*costhetadir_bw
+
+        for phidir_idx in range(n_phidir):
+            phidir0 = phidir_min_samp + phidir_idx*phidir_bw
+
+            for costhetadir_subidx in range(oversample):
+                costhetadir_samp = costhetadir0 + costhetadir_subidx * costhetadir_samp_step
+                sinthetadir_samp = math.sqrt(1 - costhetadir_samp*costhetadir_samp)
+
+                for phidir_subidx in range(oversample):
+                    phidir_samp = phidir0 + phidir_subidx * phidir_samp_step
+                    cosphidir_samp = math.cos(phidir_samp)
+                    sinphidir_samp = math.sqrt(1 - cosphidir_samp*cosphidir_samp)
+
+                    costhetadir_samples[costhetadir_subidx, phidir_subidx] = costhetadir_samp
+                    sinthetadir_samples[costhetadir_subidx, phidir_subidx] = sinthetadir_samp
+                    cosphidir_samples[costhetadir_subidx, phidir_subidx] = cosphidir_samp
+                    sinphidir_samples[costhetadir_subidx, phidir_subidx] = sinphidir_samp
+
+            costhetadir_idxs, phidir_idxs, weights = get_cone_map(
+                costheta=cos_ckv,
+                sintheta=sin_ckv,
+                num_phi=num_cone_samples,
+                axis_costheta=costhetadir_samples,
+                axis_sintheta=sinthetadir_samples,
+                axis_cosphi=cosphidir_samples,
+                axis_sinphi=sinphidir_samples,
+                num_costheta_bins=n_costhetadir,
+                num_deltaphi_bins=n_phidir,
+            )
+            num_idxs = len(costhetadir_idxs)
+            assert len(phidir_idxs) == len(weights) == num_idxs
+
+            total = 0.0
+            for i_idx in range(num_idxs):
+                total += weights[i_idx] * dirmap[costhetadir_idxs[i_idx], phidir_idxs[i_idx]]
+
+            out[costhetadir_idx, phidir_idx] = total
 
 
 @numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
