@@ -2,8 +2,8 @@
 #for file in {26..50}
 #for file in {16..17}
 #for file in {18..19}
-for file in {20..25}
-#for file in {22..50}
+#for file in {20..25}
+for file in {26..30}
 #for file in {20..25}
 do
 for dir in {0..59}

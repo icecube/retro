@@ -262,10 +262,10 @@ class RetroReco(object):
                 est_z = estimate['weighted_mean']['z']
                 est_time = estimate['weighted_mean']['time']
 
-                prior_defs['x'] = {'kind':'cauchy', 'loc':est_x, 'scale':10, 'low':est_x-100, 'high':est_x+100}
-                prior_defs['y'] = {'kind':'cauchy', 'loc':est_y, 'scale':10, 'low':est_y-100, 'high':est_y+100}
-                prior_defs['z'] = {'kind':'cauchy', 'loc':est_z, 'scale':6, 'low':est_z-60, 'high':est_z+60}
-                prior_defs['time'] = {'kind':'cauchy', 'loc':est_time, 'scale':32, 'low':est_time-320, 'high':est_time+320}
+                prior_defs['x'] = {'kind':'cauchy', 'loc':est_x, 'scale':15, 'low':est_x-300, 'high':est_x+300}
+                prior_defs['y'] = {'kind':'cauchy', 'loc':est_y, 'scale':15, 'low':est_y-300, 'high':est_y+300}
+                prior_defs['z'] = {'kind':'cauchy', 'loc':est_z, 'scale':10, 'low':est_z-200, 'high':est_z+200}
+                prior_defs['time'] = {'kind':'cauchy', 'loc':est_time, 'scale':40, 'low':est_time-800, 'high':est_time+800}
                 self.generate_prior(prior_defs)
 
 
@@ -280,8 +280,8 @@ class RetroReco(object):
                     importance_sampling=True,
                     max_modes=1,
                     const_eff=True,
-                    n_live=160,
-                    evidence_tol=0.5,
+                    n_live=250,
+                    evidence_tol=0.1,
                     sampling_eff=0.3,
                     max_iter=10000,
                     seed=0,
@@ -294,53 +294,53 @@ class RetroReco(object):
                 estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
 
                 # -------- 10D ---------
-                print('--- MN 10d fit ---')
+                #print('--- MN 10d fit ---')
 
-                # setup hypo
-                self.setup_hypo(
-                                cascade_kernel='scaling_one_dim',
-                                track_kernel='pegleg',
-                                track_time_step=1.,
-                                )
-
-
-                self.hypo_handler.fixed_params = OrderedDict()
-                self.hypo_handler.fixed_params['x'] = estimate['weighted_mean']['x']
-                self.hypo_handler.fixed_params['y'] = estimate['weighted_mean']['y']
-                self.hypo_handler.fixed_params['z'] = estimate['weighted_mean']['z']
-                self.hypo_handler.fixed_params['time'] = estimate['weighted_mean']['time']
-
-                return_param_values = []
-                return_log_likelihoods = []
-
-                # Setup prior (none)
-                prior_defs = OrderedDict()
-                self.generate_prior(prior_defs)
+                ## setup hypo
+                #self.setup_hypo(
+                #                cascade_kernel='scaling_one_dim',
+                #                track_kernel='pegleg',
+                #                track_time_step=1.,
+                #                )
 
 
-                # Setup llh function
-                self.generate_loglike(
-                    return_param_values=return_param_values,
-                    return_log_likelihoods=return_log_likelihoods,
-                    t_start=t_start,
-                )
+                #self.hypo_handler.fixed_params = OrderedDict()
+                #self.hypo_handler.fixed_params['x'] = estimate['weighted_mean']['x']
+                #self.hypo_handler.fixed_params['y'] = estimate['weighted_mean']['y']
+                #self.hypo_handler.fixed_params['z'] = estimate['weighted_mean']['z']
+                #self.hypo_handler.fixed_params['time'] = estimate['weighted_mean']['time']
 
-                settings = self.run_multinest(
-                    importance_sampling=True,
-                    max_modes=1,
-                    const_eff=True,
-                    n_live=160,
-                    evidence_tol=0.5,
-                    sampling_eff=0.3,
-                    max_iter=10000,
-                    seed=0,
-                )
+                #return_param_values = []
+                #return_log_likelihoods = []
 
-                t3 = time.time()
+                ## Setup prior (none)
+                #prior_defs = OrderedDict()
+                #self.generate_prior(prior_defs)
 
-                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
-                opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t3-t2, fname='10d_opt_meta')
-                estimate = self.make_estimate(llhp, opt_meta, fname='10d_estimate')
+
+                ## Setup llh function
+                #self.generate_loglike(
+                #    return_param_values=return_param_values,
+                #    return_log_likelihoods=return_log_likelihoods,
+                #    t_start=t_start,
+                #)
+
+                #settings = self.run_multinest(
+                #    importance_sampling=True,
+                #    max_modes=1,
+                #    const_eff=True,
+                #    n_live=160,
+                #    evidence_tol=0.5,
+                #    sampling_eff=0.3,
+                #    max_iter=10000,
+                #    seed=0,
+                #)
+
+                #t3 = time.time()
+
+                #llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                #opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t3-t2, fname='10d_opt_meta')
+                #estimate = self.make_estimate(llhp, opt_meta, fname='10d_estimate')
 
             elif method == 'mytrackfit':
                 t0 = time.time()
