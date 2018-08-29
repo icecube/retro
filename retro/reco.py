@@ -42,8 +42,8 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import init_obj
 from retro.const import PEGLEG_PARAM_NAMES, SCALING_PARAM_NAMES
-from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T
-from retro.utils.geom import rotate_point, add_vectors
+from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T
+from retro.utils.geom import rotate_point, add_vectors, fill_from_spher, fill_from_cart, reflect
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
 from retro.priors import (
@@ -854,7 +854,7 @@ class RetroReco(object):
 
         Adapted to work with spherical corrdinates (correct centroid calculation, reflection and mutation)
 
-        At the moment the number of cartesian (standard) parameters `n_cart` and spherical parameters `n_spher` is hard coded
+        At the moment the number of cartesian (standard) parameters `n_cart` and spherical parameters `n_spher` are assumed to have particular names
         Furthermore, all cartesian coordinates must come first followed by `azimuth_1, zenith_1, azimuth_2, zenith_2, ...`
 
         Parameters
@@ -869,17 +869,15 @@ class RetroReco(object):
         fn_std : float
             break if stddev of function values accross all livepoints drops below
         use_priors : bool
-            use priors during minimization
+            use priors during minimization, if `false` priors are only used for sampling the initial distributions
         sobol : bool
             use sobol sequence
 
         '''
         rand = np.random.RandomState()
 
-        # if true: use priors (for cartesian coordinates only) during minimization
-        # if false: use priors only to generate initial population, then perform minimization on actual parameter values
-
-        from sobol import i4_sobol
+        if sobol:
+            from sobol import i4_sobol
 
         def fun(x): 
             '''
@@ -895,32 +893,28 @@ class RetroReco(object):
             llh = self.loglike(param_vals)
             return -llh
 
+        N = n_live
         n = self.n_opt_params
-        names = self.hypo_handler.opt_param_names
+        # absolute minimum number of points necessary
+        assert N > n + 1
 
-        # figure out which are cartesian and which spherical
+        # figure out which variables are cartesian and which spherical
+        names = self.hypo_handler.opt_param_names
         cart = set(names) & set(['time','x', 'y', 'z'])
         n_cart = len(cart)
         assert set(names[:n_cart]) == cart
-
         if n > n_cart:
             n_spher = int((n-n_cart)/2)
         for spher in range(n_spher):
             assert 'az' in names[n_cart+spher*2]
             assert 'zen' in names[n_cart+spher*2+1]
 
-        # type to store spherical coordinates and handy quantities
-        spher_cord = np.dtype([('zen',np.float32),
-                               ('az', np.float32),
-                               ('x', np.float32),
-                               ('y', np.float32),
-                               ('z', np.float32),
-                               ('sinzen', np.float32),
-                               ('coszen', np.float32),
-                               ('sinaz', np.float32),
-                               ('cosaz', np.float32),
-                               ])
+        # setup arrays to store points in
+        S_cart = np.zeros(shape=(N,n_cart))
+        S_spher = np.zeros(shape=(N,n_spher), dtype=SPHER_T)
+        fx = np.zeros(shape=(N,))
 
+        # convenience methods
         def create_x(x_cart, x_spher):
             '''
             patch back together the cartesian and spherical coordinates into one array
@@ -932,82 +926,10 @@ class RetroReco(object):
             x[n_cart::2] = x_spher['az']
             return x
 
-        def fill_from_spher(s):
-            '''
-            fill in the remaining values giving the two angles `zen` and `az`
-            '''
-            s['sinzen'] = np.sin(s['zen'])
-            s['coszen'] = np.cos(s['zen'])
-            s['sinaz'] = np.sin(s['az'])
-            s['cosaz'] = np.cos(s['az'])
-            s['x'] = s['sinzen'] * s['cosaz']
-            s['y'] = s['sinzen'] * s['sinaz']
-            s['z'] = s['coszen']
-
-        def fill_from_cart(s_vector):
-            '''
-            fill in the remaining values giving the cart, coords. `x`, `y` and `z`
-            '''
-
-            for s in s_vector:
-                radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
-                if not radius == 0:
-                    # make sure they're length 1
-                    s['x'] /= radius
-                    s['y'] /= radius
-                    s['z'] /= radius
-                    s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
-                    s['coszen'] = s['z']
-                    s['zen'] = np.arccos(s['coszen'])
-                    s['sinzen'] = np.sin(s['zen'])
-                    s['sinaz'] = np.sin(s['az'])
-                    s['cosaz'] = np.cos(s['az'])
-                else:
-                    s['z'] = 1
-                    s['az'] = 0
-                    s['zen'] = 0
-                    s['coszen'] = 1
-                    s['sinzen'] = 0
-                    s['cosaz'] = 1
-                    s['sinaz'] = 0
-
-
-        def reflect(old, centroid, new):
-            '''
-            reflect the old point around the centroid into the new point on the sphere
-            '''
-
-            x = old['x']
-            y = old['y']
-            z = old['z']
-
-            ca = centroid['cosaz']
-            sa = centroid['sinaz']
-            cz = centroid['coszen']
-            sz = centroid['sinzen']
-            
-            new['x'] = 2*ca*cz*sz*z + x*(ca*(-ca*cz**2 + ca*sz**2) - sa**2) + y*(ca*sa + sa*(-ca*cz**2 + ca*sz**2))
-            new['y'] = 2*cz*sa*sz*z + x*(ca*sa + ca*(-cz**2*sa + sa*sz**2)) + y*(-ca**2 + sa*(-cz**2*sa + sa*sz**2))
-            new['z'] = 2*ca*cz*sz*x + 2*cz*sa*sz*y + z*(cz**2 - sz**2)
-
-            fill_from_cart(new)
-
-        #N = 10 * (n + 1)
-        N = n_live
-        assert N > n + 1
-
-        # that many more initial individuals (didn;t seem to help realy)
-        initial_factor = 1
-
-        S_cart = np.zeros(shape=(N*initial_factor,n_cart))
-        S_spher = np.zeros(shape=(N*initial_factor,n_spher), dtype=spher_cord)
-        fx = np.zeros(shape=(N*initial_factor,))
-
-
-        # initial population
-        for i in range(N*initial_factor):
-            # sobol seems to do slightly better
+        # generate initial population
+        for i in range(N):
             if sobol:
+                # sobol seems to do slightly better
                 x, _ = i4_sobol(n, i+1)
             else:
                 x = rand.uniform(0,1,n)
@@ -1019,7 +941,6 @@ class RetroReco(object):
                 x[:n_cart] = param_vals[:n_cart]
 
             # break up into cartesiand and spherical coordinates
-            # ToDO: make proper
             S_cart[i] = x[:n_cart]
             S_spher[i]['zen'] = x[n_cart+1::2]
             S_spher[i]['az'] = x[n_cart::2]
@@ -1027,41 +948,35 @@ class RetroReco(object):
             fx[i] = fun(x)
 
 
-        if initial_factor > 1:
-            # cut down to best N
-            mask = fx <= np.percentile(fx, 100./initial_factor)
-            S_cart = S_cart[mask]
-            S_spher = S_spher[mask]
-            fx = fx[mask]
-
 
         best_llh = np.min(fx)
         no_improvement_counter = -1
 
+        # optional bookkeeping
         simplex_success = 0
         mutation_success = 0
-        whateverido = 0
         failure = 0
         stopping_flag = 0
+
+        # minimizer loop
         for k in range(max_iter):
-
             if k % report_after == 0:
-                print('simplex: %i, mutation: %i, mine: %i, failed: %i'%(simplex_success, mutation_success, whateverido, failure))
+                print('simplex: %i, mutation: %i, failed: %i'%(simplex_success, mutation_success, failure))
 
-            # minimizer loop
-
-            # break condition
+            # break condition 1
             if np.std(fx) < fn_std:
                 print('std below threshold, stopping.')
                 stopping_flag = 1
                 break
 
+            # break condition 2
             if no_improvement_counter > max_noimprovement:
                 print('no improvement found, stopping.')
                 stopping_flag = 2
                 break
 
             new_best_llh = np.min(fx)
+
             if new_best_llh < best_llh:
                 best_llh = new_best_llh
                 no_improvement_counter = 0
@@ -1081,13 +996,13 @@ class RetroReco(object):
             new_x_cart = 2*centroid_cart - S_cart[choice[-1]]
 
             # spherical centroid
-            centroid_spher = np.zeros(n_spher, dtype=spher_cord)
+            centroid_spher = np.zeros(n_spher, dtype=SPHER_T)
             centroid_spher['x'] = (np.sum(S_spher['x'][choice[:-1]], axis=0) + S_spher['x'][best_idx]) / n
             centroid_spher['y'] = (np.sum(S_spher['y'][choice[:-1]], axis=0) + S_spher['y'][best_idx]) / n
             centroid_spher['z'] = (np.sum(S_spher['z'][choice[:-1]], axis=0) + S_spher['z'][best_idx]) / n
             fill_from_cart(centroid_spher)
             # reflect point
-            new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+            new_x_spher = np.zeros(n_spher, dtype=SPHER_T)
             reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
 
             if use_priors:
@@ -1108,18 +1023,16 @@ class RetroReco(object):
 
             # mutation
             w = rand.uniform(0, 1, n_cart)
-            #w = rand.uniform(-0.5, 1.5, n_cart)
             new_x_cart2 = (1 + w) * S_cart[best_idx] - w * new_x_cart
 
             # first reflect at best point
-            reflected_new_x_spher = np.zeros(n_spher, dtype=spher_cord)
+            reflected_new_x_spher = np.zeros(n_spher, dtype=SPHER_T)
             reflect(new_x_spher, S_spher[best_idx], reflected_new_x_spher)
 
             new_x_spher2 = np.zeros_like(new_x_spher)
 
             # now do a combination of best and reflected point with weight w
             for dim in ['x', 'y', 'z']:
-                #w = rand.uniform(-0.5, 1.5, n_spher)
                 w = rand.uniform(0, 1, n_spher)
                 new_x_spher2[dim] = (1 - w) * S_spher[best_idx][dim] + w * reflected_new_x_spher[dim]
             fill_from_cart(new_x_spher2)
@@ -1133,7 +1046,6 @@ class RetroReco(object):
                 new_fx = fun(create_x(new_x_cart2, new_x_spher2))
 
                 if new_fx < fx[worst_idx]:
-                    #print('-> MUT accepted')
                     # found better point
                     S_cart[worst_idx] = new_x_cart2
                     S_spher[worst_idx] = new_x_spher2
@@ -1141,28 +1053,6 @@ class RetroReco(object):
                     mutation_success += 1
                     continue
 
-            '''
-            # random sampling of new point
-
-            # sample new cartesian coordinates from distribution given the livepoints
-            mean_cart = np.average(S_cart, axis=0)
-            cov_cart = np.cov(S_cart.T)
-            new_x_cart = rand.multivariate_normal(mean_cart, cov_cart, 1)[0]
-            # random new angle
-            new_x_spher['az'] = rand.uniform(0,2*np.pi,n_spher)
-            new_x_spher['zen'] = np.arccos(rand.uniform(-1,1,n_spher))
-            fill_from_spher(new_x_spher)
-
-            new_fx = fun(create_x(new_x_cart, new_x_spher))
-
-            if new_fx < fx[worst_idx]:
-                # found better point
-                S_cart[worst_idx] = new_x_cart
-                S_spher[worst_idx] = new_x_spher
-                fx[worst_idx] = new_fx
-                whateverido += 1
-                continue
-            '''
             
             # if we get here no method was successful in replacing worst point -> start over
             failure += 1
@@ -1179,138 +1069,10 @@ class RetroReco(object):
         res['stopping_flag'] = stopping_flag
         res['num_simplex'] = simplex_success
         res['num_mutation'] = mutation_success
-        res['num_sampling'] = whateverido
         res['num_failure'] = failure
         res['num+tot'] = k
         return res
 
-        # now let's do some sampling
-        #import emcee
-
-        #az_dim = 4
-        #zen_dim = 5
-
-        #def lnprob(new_x):
-        #    '''
-        #    function for sampler
-        #    '''
-        #    while new_x[zen_dim] < 0 or new_x[zen_dim] > np.pi:
-        #        new_x[az_dim] += np.pi
-        #        if new_x[zen_dim] < 0:
-        #            new_x[zen_dim] = -new_x[zen_dim]
-        #        else:
-        #            new_x[zen_dim] = np.pi - new_x[zen_dim]
-
-        #    new_x[az_dim] = new_x[az_dim] % (2 * np.pi)
-        #    new_llh = fun(new_x)
-        #    return -new_llh
-
-        #
-
-        ## first create array without dtype (otherwise covariance doesn't work)
-
-        ### bigger arrays to also contain sampled points 
-        #S = np.zeros(shape=(N,n))
-        ###f = np.full(2*N, np.inf)
-
-        ### set the first half
-        #for i in range(N):
-        #    S[i] = create_x(S_cart[i], S_spher[i])
-
-        #sampler = emcee.EnsembleSampler(N, n, lnprob)
-        #sampler.run_mcmc(S, 42)
-
-
-
-        ##f[:N] = fx
-        #
-
-        #N_sampling = 10000
-        #counter = 0
-
-        #while counter < N_sampling:
-        #    #print('Sampling round %i'%k)
-
-        #    
-        #    az_values = S[:,az_dim]
-
-        #    # move the azimuths
-        #    circmean = stats.circmean(az_values)
-        #    if circmean > np.pi:
-        #        az_values[az_values < circmean - np.pi] += (2 * np.pi)
-        #    else:
-        #        az_values[az_values > circmean + np.pi] -= (2 * np.pi)
-        #    
-        #    worst_idx = np.argmax(fx)
-        #    worst_llh = fx[worst_idx]
-
-        #    best_idx = np.argmin(fx)
-
-        #    weights = np.exp(fx - np.max(fx))
-
-        #    # calculate mean and covariance
-        #    #mean = np.average(S, axis=0, weights=weights)
-        #    #print(mean)
-        #    mean = S[best_idx]
-        #    cov = np.cov(S.T[:az_dim])
-
-        #    az_values = az_values % (2 * np.pi)
-
-        #    for j in range(100):
-        #        new_x = np.zeros(n)
-        #        for i in range(n):
-        #            new_x[i] = rand.randn(1) * np.std(S[:,i]) + mean[i]
-
-        #        #new_x[:az_dim] = rand.multivariate_normal(mean[:az_dim], cov, 1)[0]
-        #        #new_x[az_dim] = rand.randn(1) * np.std(az_values) + mean[az_dim]
-        #        #new_x[zen_dim] = rand.randn(1) * np.std(S[:,zen_dim]) + mean[zen_dim]
-
-        #        while new_x[zen_dim] < 0 or new_x[zen_dim] > np.pi:
-        #            new_x[az_dim] += np.pi
-        #            if new_x[zen_dim] < 0:
-        #                new_x[zen_dim] = -new_x[zen_dim]
-        #            else:
-        #                new_x[zen_dim] = np.pi - new_x[zen_dim]
-
-        #        new_x[az_dim] = new_x[az_dim] % (2 * np.pi)
-        #        new_llh = fun(new_x)
-        #        counter += 1
-        #        if new_llh < worst_llh:
-        #            S[worst_idx] = new_x
-        #            fx[worst_idx] = new_llh
-        #            #print('found better point after %i trials'%j)
-        #            break
-        #        else:
-        #            if j == 99:
-        #                print('failed to find better point in 100 trials')
-
-        #        
-        #    # fold in zeniths and flip azimuths
-        #    #zen_values = S[:,zen_dim]
-        #    #az_values = S[:,az_dim]
-        #    #while np.any(zen_values < 0) or np.any(zen_values > np.pi):
-        #    #    az_values[zen_values < 0] += np.pi
-        #    #    az_values[zen_values > np.pi] += np.pi
-        #    #    zen_values[zen_values < 0] = -zen_values[zen_values < 0]
-        #    #    zen_values[zen_values > np.pi] = np.pi - zen_values[zen_values > np.pi]
-
-        #    ## make sure boundaries are ok?
-        #    #az_values = az_values % (2 * np.pi)
-        #    
-
-        #    # evaluate LLH
-        #    #for i in range(N,2*N):
-        #    #    f[i] = fun(S[i])
-        #    #
-        #    ## find best half
-        #    #mask = f <= np.median(f)
-
-        #    ## reset first half
-        #    #S[:N] = S[mask]
-        #    #f[:N] = f[mask]
-
-
-        #return OrderedDict()
 
     def run_scipy(self, method, eps):
         from scipy import optimize
