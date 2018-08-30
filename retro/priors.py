@@ -17,7 +17,6 @@ __all__ = [
     'PRI_SPEFIT2',
     'PRI_SPEFIT2TIGHT',
     'PRI_CAUCHY',
-    'get_prior_def',
     'get_prior_fun',
 ]
 

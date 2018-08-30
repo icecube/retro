@@ -46,13 +46,7 @@ from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T
 from retro.utils.geom import rotate_point, add_vectors, fill_from_spher, fill_from_cart, reflect
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
-from retro.priors import (
-    get_prior_def,
-    get_prior_fun,
-    PRI_UNIFORM,
-    PRI_LOG_NORMAL,
-    PRI_LOG_UNIFORM,
-)
+from retro.priors import get_prior_fun
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 
 report_after = 100
