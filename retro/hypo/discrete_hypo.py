@@ -157,11 +157,7 @@ class DiscreteHypo(object):
     @property
     def opt_param_names(self):
         # remove fixed params
-        names = list(self._opt_param_names)
-
-        for n in self.fixed_params.keys():
-            names.remove(n)
-        return names
+        return [n for n in self._opt_param_names if n not in self.fixed_params]
 
     @property
     def hypo_param_names(self):
