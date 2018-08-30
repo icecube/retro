@@ -43,6 +43,8 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 import retro
 
+# what values of the llhp scpace to include w.r.t. the best point
+DELTA_LLH_CUTOFF = 15.5
 
 def poisson_llh(expected, observed):
     r"""Compute the log Poisson likelihood.
@@ -287,12 +289,12 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
             best_idx = np.argmax(post_llh)
             estimate['weighted_best'][col] = var[best_idx]
 
-        postllh_cut = post_llh > np.max(post_llh) - 15.5
+        postllh_cut = post_llh > np.max(post_llh) - DELTA_LLH_CUTOFF
         postllh_vals = var[postllh_cut]
         postllh_weights = weights[postllh_cut]
 
         # now that we calculated the postllh stuff we can cut tighter
-        llh_cut = llhp['llh'] > np.max(llhp['llh']) - 15.5
+        llh_cut = llhp['llh'] > np.max(llhp['llh']) - DELTA_LLH_CUTOFF
         var = var[llh_cut]
         weights = weights[llh_cut]
 
@@ -336,14 +338,14 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
             estimate['weighted_mean'][col] = weighted_mean
             estimate['weighted_median'][col] = weighted_median
 
+    if per_dim:
+        # currently spherical averages not supported in this case, exit
+        return estimate
 
     for angle in ['', 'track_', 'cascade_']:
         if angle+'zenith' in columns and angle+'azimuth' in columns:
             # currently double work, but for testing purposes
             # idea, calculated the medians on the sphere for az and zen combined
-            if per_dim:
-                # no can do in this case
-                return estimate
 
             if prob_weights is None and prior_weights is None:
                 weights = None
@@ -357,7 +359,7 @@ def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
 
             az = llhp[angle+'azimuth']
             zen = llhp[angle+'zenith']
-            llh_cut = llhp['llh'] > np.max(llhp['llh']) - 15.5
+            llh_cut = llhp['llh'] > np.max(llhp['llh']) - DELTA_LLH_CUTOFF
             az = az[llh_cut]
             zen = zen[llh_cut]
             weights = weights[llh_cut]

@@ -111,7 +111,7 @@ class RetroReco(object):
         Parameters
         ----------
         method : str
-            One of "multinest", "nlopt", "scipy", or "skopt".
+            One of "multinest", "nlopt", "scipy", "skopt", "crs", "test", "truth" or "crs_prefit_mn" or "experimental_trackfit"
 
         """
         print('Running reconstructions...')
@@ -132,8 +132,8 @@ class RetroReco(object):
                 self.hypo_handler.fixed_params = OrderedDict()
 
                 t_start = []
-                return_param_values = []
-                return_log_likelihoods = []
+                param_values = []
+                log_likelihoods = []
 
                 # Setup prior
                 prior_defs = OrderedDict()
@@ -145,8 +145,8 @@ class RetroReco(object):
 
                 # Setup llh function
                 self.generate_loglike(
-                    return_param_values=return_param_values,
-                    return_log_likelihoods=return_log_likelihoods,
+                    param_values=param_values,
+                    log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
@@ -186,11 +186,11 @@ class RetroReco(object):
 
                 t1 = time.time()
 
-                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='opt_meta')
                 estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
 
-            elif method == 'prefitMN':
+            elif method == 'crs_prefit_mn':
                 t0 = time.time()
                 t_start = []
 
@@ -206,8 +206,8 @@ class RetroReco(object):
 
                 self.hypo_handler.fixed_params = OrderedDict()
 
-                return_param_values = []
-                return_log_likelihoods = []
+                param_values = []
+                log_likelihoods = []
 
                 # Setup prior
                 prior_defs = OrderedDict()
@@ -219,8 +219,8 @@ class RetroReco(object):
 
                 # Setup llh function
                 self.generate_loglike(
-                    return_param_values=return_param_values,
-                    return_log_likelihoods=return_log_likelihoods,
+                    param_values=param_values,
+                    log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
@@ -235,7 +235,7 @@ class RetroReco(object):
 
                 t1 = time.time()
 
-                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='prefit_opt_meta')
                 estimate = self.make_estimate(llhp, fname='prefit_estimate')
 
@@ -251,8 +251,8 @@ class RetroReco(object):
 
                 self.hypo_handler.fixed_params = OrderedDict()
 
-                return_param_values = []
-                return_log_likelihoods = []
+                param_values = []
+                log_likelihoods = []
 
                 # Setup prior
                 prior_defs = OrderedDict()
@@ -271,8 +271,8 @@ class RetroReco(object):
 
                 # Setup llh function
                 self.generate_loglike(
-                    return_param_values=return_param_values,
-                    return_log_likelihoods=return_log_likelihoods,
+                    param_values=param_values,
+                    log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
@@ -289,7 +289,7 @@ class RetroReco(object):
 
                 t2 = time.time()
 
-                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t2-t1, fname='opt_meta')
                 estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
 
@@ -310,8 +310,8 @@ class RetroReco(object):
                 #self.hypo_handler.fixed_params['z'] = estimate['weighted_mean']['z']
                 #self.hypo_handler.fixed_params['time'] = estimate['weighted_mean']['time']
 
-                #return_param_values = []
-                #return_log_likelihoods = []
+                #param_values = []
+                #log_likelihoods = []
 
                 ## Setup prior (none)
                 #prior_defs = OrderedDict()
@@ -320,8 +320,8 @@ class RetroReco(object):
 
                 ## Setup llh function
                 #self.generate_loglike(
-                #    return_param_values=return_param_values,
-                #    return_log_likelihoods=return_log_likelihoods,
+                #    param_values=param_values,
+                #    log_likelihoods=log_likelihoods,
                 #    t_start=t_start,
                 #)
 
@@ -338,11 +338,11 @@ class RetroReco(object):
 
                 #t3 = time.time()
 
-                #llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                #llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 #opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t3-t2, fname='10d_opt_meta')
                 #estimate = self.make_estimate(llhp, opt_meta, fname='10d_estimate')
 
-            elif method == 'mytrackfit':
+            elif method == 'experimental_trackfit':
                 t0 = time.time()
                 t_start = []
 
@@ -358,8 +358,8 @@ class RetroReco(object):
                 self.hypo_handler.fixed_params = OrderedDict()
                 #self.hypo_handler.fixed_params['time'] = 10000
 
-                return_param_values = []
-                return_log_likelihoods = []
+                param_values = []
+                log_likelihoods = []
 
                 # Setup prior
                 prior_defs = OrderedDict()
@@ -371,8 +371,8 @@ class RetroReco(object):
 
                 # Setup llh function
                 self.generate_loglike(
-                    return_param_values=return_param_values,
-                    return_log_likelihoods=return_log_likelihoods,
+                    param_values=param_values,
+                    log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
@@ -387,7 +387,7 @@ class RetroReco(object):
 
                 t1 = time.time()
 
-                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='prefit_opt_meta')
                 estimate = self.make_estimate(llhp, fname='prefit_estimate')
 
@@ -405,8 +405,8 @@ class RetroReco(object):
                 self.hypo_handler.fixed_params = OrderedDict()
                 self.hypo_handler.fixed_params['track_energy'] = estimate['weighted_median']['track_energy']
 
-                return_param_values = []
-                return_log_likelihoods = []
+                param_values = []
+                log_likelihoods = []
 
                 # Setup prior
                 prior_defs = OrderedDict()
@@ -419,8 +419,8 @@ class RetroReco(object):
 
                 # Setup llh function
                 self.generate_loglike(
-                    return_param_values=return_param_values,
-                    return_log_likelihoods=return_log_likelihoods,
+                    param_values=param_values,
+                    log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
@@ -436,7 +436,7 @@ class RetroReco(object):
 
                 t2 = time.time()
 
-                llhp = self.make_llhp(return_log_likelihoods, return_param_values, fname=None)
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t2-t1, fname='opt_meta')
                 estimate = self.make_estimate(llhp, fname='estimate')
 
@@ -490,13 +490,13 @@ class RetroReco(object):
 
         self.prior = prior
 
-    def generate_loglike(self, return_param_values, return_log_likelihoods, t_start):
+    def generate_loglike(self, param_values, log_likelihoods, t_start):
         """Generate the LLH callback function for a given event
 
         Parameters
         ----------
-        return_param_values : list
-        return_log_likelihoods : list
+        param_values : list
+        log_likelihoods : list
         t_start : list
 
         """
@@ -659,10 +659,10 @@ class RetroReco(object):
                 additional_results.append(scalefactor)
 
             result = tuple(cube[:n_opt_params]) + tuple(fixed_params.values()) + tuple(additional_results)
-            return_param_values.append(result)
+            param_values.append(result)
 
-            return_log_likelihoods.append(llh)
-            n_calls = len(return_log_likelihoods)
+            log_likelihoods.append(llh)
+            n_calls = len(log_likelihoods)
             t1 = time.time()
 
             if n_calls % report_after == 0:
@@ -676,9 +676,9 @@ class RetroReco(object):
                         pass
                 print(msg)
                 t_now = time.time()
-                best_idx = np.argmax(return_log_likelihoods)
-                best_llh = return_log_likelihoods[best_idx]
-                best_p = return_param_values[best_idx]
+                best_idx = np.argmax(log_likelihoods)
+                best_llh = log_likelihoods[best_idx]
+                best_p = param_values[best_idx]
                 msg = 'best llh = {:.3f} @ '.format(best_llh)
                 for key, val in zip(all_param_names, best_p):
                     msg += ' %s=%.1f'%(key, val)
@@ -696,10 +696,19 @@ class RetroReco(object):
 
         self.loglike = loglike
 
-    def make_llhp(self, return_log_likelihoods, return_param_values, fname=None):
+    def make_llhp(self, log_likelihoods, param_values, fname=None):
         '''
         create a structured numpy array containing the reco infromation
         Also add derived dimensions
+
+        Parameters
+        ----------
+        log_likelihoods : array
+
+        param_values : array
+
+        fname : str or None
+            filename if result should be dumped into file
         '''
         # Setup LLHP dtype
         dim_names = list(self.hypo_handler.all_param_names)
@@ -714,9 +723,9 @@ class RetroReco(object):
         llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + all_dim_names])
 
         # dump
-        llhp = np.zeros(shape=len(return_param_values), dtype=llhp_t)
-        llhp['llh'] = return_log_likelihoods
-        llhp[dim_names] = return_param_values
+        llhp = np.zeros(shape=len(param_values), dtype=llhp_t)
+        llhp['llh'] = log_likelihoods
+        llhp[dim_names] = param_values
 
         
         # create derived dimensions
@@ -759,8 +768,18 @@ class RetroReco(object):
         return llhp
 
     def make_meta_dict(self, settings, llhp=None, time=-1, fname=None):
-        '''
-        create meta information dictionary
+        '''create meta information dictionary
+
+        Parameters
+        ----------
+        settings : dict
+
+        llhp : strucured array
+
+        time : float
+
+        fname : str or None
+            filename if result should be dumped into file
         '''
         opt_meta = OrderedDict([
             ('params', list(self.hypo_handler.all_param_names)),
@@ -811,7 +830,7 @@ class RetroReco(object):
 
     def run_with_truth(self, rand_dims=[], n_samples=10000):
         '''
-        Run with for all params set to truth except the dimensions defined, whcih will be randomized
+        Run with all params set to truth except for the dimensions defined, whcih will be randomized
 
         Parameters
         ----------
@@ -1367,6 +1386,6 @@ def parse_args(description=__doc__):
 
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
-    #my_reco.run('mytrackfit')
-    my_reco.run('prefitMN')
+    #my_reco.run('experimental_trackfit')
+    my_reco.run('crs_prefit_mn')
     #my_reco.run('test')

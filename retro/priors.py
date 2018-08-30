@@ -61,23 +61,6 @@ PRI_SPEFIT2TIGHT = 'spefit2tight'
 PRI_CAUCHY = 'cauchy'
 
 
-def get_prior_def(param, reco_kw):
-    """Generate prior definitions from keyword args passed to `reco`.
-
-    Parameters
-    ----------
-    params : str
-        name of parameter
-    reco_kw : dict
-        dict from arg parse containing the prior info
-
-    Returns
-    -------
-    kind : tuple
-    args : tuple
-
-    """
-
 
 def get_prior_fun(dim_num, dim_name, event, **kwargs):
     """Generate prior function given a prior definition and the actual event
