@@ -151,9 +151,9 @@ class RetroReco(object):
                 elif method == 'crs':
                     settings = self.run_crs(
                         n_live=160,
-                        max_iter=20000,
-                        max_noimprovement=2000,
-                        fn_std=0.1,
+                        max_iter=10000,
+                        max_noimprovement=1000,
+                        fn_std=0.5,
                         use_priors=False,
                         sobol=True
                     )
@@ -183,6 +183,52 @@ class RetroReco(object):
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='opt_meta')
                 estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
+
+            elif method == 'fast':
+                t0 = time.time()
+                t_start = []
+
+                # setup hypo
+                self.setup_hypo(
+                                cascade_kernel='scaling_aligned_point_ckv',
+                                track_kernel='pegleg',
+                                track_time_step=3.,
+                                )
+
+                self.hypo_handler.fixed_params = OrderedDict()
+
+                param_values = []
+                log_likelihoods = []
+
+                # Setup prior
+                prior_defs = OrderedDict()
+                prior_defs['x'] = {'kind':'SPEFit2','extent':'tight'}
+                prior_defs['y'] = {'kind':'SPEFit2','extent':'tight'}
+                prior_defs['z'] = {'kind':'SPEFit2','extent':'tight'}
+                prior_defs['time'] = {'kind':'SPEFit2', 'extent':'tight'}
+                self.generate_prior(prior_defs)
+
+                # Setup llh function
+                self.generate_loglike(
+                    param_values=param_values,
+                    log_likelihoods=log_likelihoods,
+                    t_start=t_start,
+                )
+
+                settings = self.run_crs(
+                    n_live=160,
+                    max_iter=10000,
+                    max_noimprovement=1000,
+                    fn_std=0.5,
+                    use_priors=False,
+                    sobol=True
+                )
+
+                t1 = time.time()
+
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
+                opt_meta = self.make_meta_dict(settings, llhp=llhp, time=t1-t0, fname='opt_meta')
+                estimate = self.make_estimate(llhp, fname='estimate')
 
             elif method == 'crs_prefit_mn':
                 t0 = time.time()
@@ -647,6 +693,7 @@ class RetroReco(object):
                     pegleg_idx=pegleg_idx,
                     dt=pegleg_muon_dt,
                     const_e_loss=pegleg_muon_const_e_loss,
+                    mmc=True,
                 )
                 additional_results.append(pegleg_result)
             if self.hypo_handler.scaling_kernel:
@@ -987,6 +1034,21 @@ class RetroReco(object):
                 print('no improvement found, stopping.')
                 stopping_flag = 2
                 break
+
+            # break condition 4
+            done = []
+            stds = []
+            for dim, cond in zip(['x', 'y', 'z', 'time'], [5, 5, 5, 15]):
+                if dim in names:
+                    std = np.std(S_cart[:,names.index(dim)])
+                    stds.append(std)
+                    done.append(std < cond)
+            #print(stds)
+            if all(done) and len(done) > 0:
+                print('vertex std below threshold, stopping.')
+                stopping_flag = 3
+                break
+
 
             new_best_llh = np.min(fx)
 
@@ -1381,5 +1443,6 @@ def parse_args(description=__doc__):
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run('experimental_trackfit')
-    my_reco.run('crs_prefit_mn')
+    #my_reco.run('crs_prefit_mn')
+    my_reco.run('fast')
     #my_reco.run('test')
