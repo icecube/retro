@@ -49,6 +49,7 @@ from retro.const import (
 )
 from retro.retro_types import SRC_T
 
+SCALING_CASCADE_ENERGY = 1.
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def point_cascade(time, x, y, z, cascade_energy):
@@ -141,7 +142,7 @@ def aligned_point_ckv_cascade(time, x, y, z, cascade_energy, track_azimuth, trac
 
 def scaling_aligned_point_ckv_cascade(time, x, y, z, track_azimuth, track_zenith):
     '''
-    fixed 1 GeV cascade kernel
+    fixed energy cascade kernel
     '''
     return aligned_point_ckv_cascade(time=time,
                                      x=x,
@@ -149,7 +150,7 @@ def scaling_aligned_point_ckv_cascade(time, x, y, z, track_azimuth, track_zenith
                                      z=z,
                                      track_azimuth=track_azimuth,
                                      track_zenith=track_zenith,
-                                     cascade_energy=1.,
+                                     cascade_energy=SCALING_CASCADE_ENERGY,
                                      )
 
 
@@ -321,7 +322,7 @@ def scaling_aligned_one_dim_cascade(time, x, y, z, track_azimuth, track_zenith, 
                                      z=z,
                                      track_azimuth=track_azimuth,
                                      track_zenith=track_zenith,
-                                     cascade_energy=1.,
+                                     cascade_energy=SCALING_CASCADE_ENERGY,
                                      num_samples=100,
                                      **kwargs)
 
@@ -335,7 +336,7 @@ def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith, **kw
                                      z=z,
                                      cascade_azimuth=cascade_azimuth,
                                      cascade_zenith=cascade_zenith,
-                                     cascade_energy=1.,
+                                     cascade_energy=SCALING_CASCADE_ENERGY,
                                      num_samples=100,
                                      **kwargs)
 
@@ -364,7 +365,7 @@ def scaling_one_dim_delta_cascade(time, x, y, z, track_azimuth, track_zenith, ca
                                  track_azimuth=track_azimuth,
                                  cascade_d_azimuth=cascade_d_azimuth,
                                  cascade_d_zenith=cascade_d_zenith,
-                                 cascade_energy=1.,
+                                 cascade_energy=SCALING_CASCADE_ENERGY,
                                  num_samples=100,
                                  **kwargs)
     

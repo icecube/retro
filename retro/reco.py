@@ -48,6 +48,7 @@ from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
 from retro.priors import get_prior_fun
 from retro.hypo.discrete_muon_kernels import pegleg_eval
+from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 
 report_after = 100
 SAVE_FULL_INFO = False
@@ -697,7 +698,7 @@ class RetroReco(object):
                 )
                 additional_results.append(pegleg_result)
             if self.hypo_handler.scaling_kernel:
-                additional_results.append(scalefactor)
+                additional_results.append(scalefactor*SCALING_CASCADE_ENERGY)
 
             result = tuple(cube[:n_opt_params]) + tuple(fixed_params.values()) + tuple(additional_results)
             param_values.append(result)
@@ -1443,6 +1444,6 @@ def parse_args(description=__doc__):
 if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run('experimental_trackfit')
-    #my_reco.run('crs_prefit_mn')
-    my_reco.run('fast')
+    my_reco.run('crs_prefit_mn')
+    #my_reco.run('fast')
     #my_reco.run('test')

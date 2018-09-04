@@ -584,6 +584,7 @@ def generate_pexp_5d_function(
             grad_neg_llh : float
 
             """
+
             # Time- and DOM-independent part of grad(-LLH)
             grad_neg_llh = nominal_scaling_t_indep_exp
 
@@ -604,24 +605,57 @@ def generate_pexp_5d_function(
 
         # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
 
+        #print('Initial scalefactor: ', initial_scalefactor)
         scalefactor = initial_scalefactor
-        gamma = 1. # step size multiplier
-        epsilon = 1e-2 # tolerance
+        #previous_scalefactor = initial_scalefactor
+        gamma = 0.5 # step size multiplier
+        epsilon = 1e-3 # tolerance
         iters = 0 # iteration counter
         while True:
             gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
-            step = -gamma * gradient
+
+            if scalefactor == 0:
+                if gradient > 0:
+                    #scalefactor = 0
+                    #print('exiting because pos grad below 0')
+                    break
+
+            #if scalefactor == 0 and previous_scalefactor > 0:
+            #    step = min(-gamma * gradient, previous_scalefactor / 2)
+
+            else:
+                step = -gamma * gradient 
+
+
+
+            #print('grad: ',gradient)
+            #print('step: ',step)
+            # don't allow steps too big
+            #step = max(step, -10)
+            #step = min(step, 10)
+            #print('clipped step: ',step)
+            #if scalefactor + step < 0:
+            #    # we would end up below zero, in that case just step 
+            #    # half way between old scalefactor and zero
+            #   step = - scalefactor / 2
+            #previous_scalefactor = scalefactor
             scalefactor += step
+            scalefactor = max(scalefactor, 0)
+            #print('scalef: ',scalefactor)
             iters += 1
             if (
                 abs(step) < epsilon
-                or scalefactor <= -100
-                or scalefactor >= 1000
-                or iters >= 100
+                #or scalefactor <= -1000
+                #or scalefactor >= 1000
+                or iters >= 500
             ):
                 break
 
+        #print('arrived at ',scalefactor)
+        #print('\n')
+
         scalefactor = max(0., min(1000., scalefactor))
+
 
         # -- Calculate llh at the optimal `scalefactor` found -- #
 
@@ -774,19 +808,19 @@ def generate_pexp_5d_function(
         # -- Pegleg loop -- #
 
         # take log steps
-        logstep = np.log(num_pegleg_sources) / 300
-        x = -1e-8
-        logspace = np.zeros(shape=301, dtype=np.int32)
-        for i in range(len(logspace)):
-            logspace[i] = np.int32(np.exp(x))
-            x+= logstep
-        pegleg_steps = np.unique(logspace)
-        assert pegleg_steps[0] == 0
-        n_pegleg_steps = len(pegleg_steps)
+        #logstep = np.log(num_pegleg_sources) / 300
+        #x = -1e-8
+        #logspace = np.zeros(shape=301, dtype=np.int32)
+        #for i in range(len(logspace)):
+        #    logspace[i] = np.int32(np.exp(x))
+        #    x+= logstep
+        #pegleg_steps = np.unique(logspace)
+        #assert pegleg_steps[0] == 0
+        #n_pegleg_steps = len(pegleg_steps)
 
         # take linear steps
-        #pegleg_steps = np.arange(num_pegleg_sources)
-        #n_pegleg_steps = len(pegleg_steps)
+        pegleg_steps = np.arange(num_pegleg_sources)
+        n_pegleg_steps = len(pegleg_steps)
 
         num_llhs = n_pegleg_steps + 1
         llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
@@ -853,7 +887,7 @@ def generate_pexp_5d_function(
 
             # break condition
             #if getting_worse_counter > 10:
-            if getting_worse_counter > 30:
+            if getting_worse_counter > 50:
                 #for idx in range(pegleg_idx+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100
