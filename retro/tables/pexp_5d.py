@@ -601,59 +601,108 @@ def generate_pexp_5d_function(
 
             return grad_neg_llh
 
+        def get_newton_step(scalefactor):
+            """Compute the step for the newton method for the `scalefactor`
+
+            the step is defined as -f'/f'' where f is the LLH(scalefactor)
+
+            Parameters
+            ----------
+            scalefactor : float
+
+            Returns
+            -------
+            step : float
+
+            """
+
+            # Time- and DOM-independent part of grad(-LLH)
+            numerator = nominal_scaling_t_indep_exp
+            denominator = 0
+
+            # Time-dependent part of grad(-LLH) (i.e., at hit times)
+            for hit_idx, hit_info in enumerate(event_hit_info):
+                s = (hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                    / (
+                        event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                        + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                        + nonscaling_hit_exp[hit_idx]
+                      )
+                )
+                numerator -= s
+                denominator += s**2
+
+            if denominator == 0:
+                return -1
+            return numerator/denominator
+
         # -- Perform gradient descent on -LLH -- #
 
         # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
 
-        #print('Initial scalefactor: ', initial_scalefactor)
+        ##print('Initial scalefactor: ', initial_scalefactor)
+        #scalefactor = initial_scalefactor
+        ##previous_scalefactor = initial_scalefactor
+        #gamma = 0.1 # step size multiplier
+        #epsilon = 1e-2 # tolerance
+        #iters = 0 # iteration counter
+        #max_iter = 500
+        #while True:
+        #    gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
+
+        #    if scalefactor < epsilon:
+        #        if gradient > 0:
+        #            #scalefactor = 0
+        #            #print('exiting because pos grad below 0')
+        #            break
+
+        #    else:
+        #        step = -gamma * gradient 
+
+        #    scalefactor += step
+        #    scalefactor = max(scalefactor, 0)
+        #    #print('scalef: ',scalefactor)
+        #    iters += 1
+        #    if (
+        #        abs(step) < epsilon
+        #        or iters >= max_iter
+        #    ):
+        #        break
+
+        ##print('arrived at ',scalefactor)
+        #if iters >= max_iter:
+        #    print('exceeded gradient descent iteration limit!')
+        #    print('arrived at ',scalefactor)
+        ##print('\n')
+
         scalefactor = initial_scalefactor
-        #previous_scalefactor = initial_scalefactor
-        gamma = 0.5 # step size multiplier
-        epsilon = 1e-3 # tolerance
         iters = 0 # iteration counter
+        epsilon = 1e-2
+        max_iter = 100
         while True:
-            gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
+            step = get_newton_step(scalefactor)
+            if step == -1:
+                scalefactor = 0
+                break
 
-            if scalefactor == 0:
-                if gradient > 0:
-                    #scalefactor = 0
-                    #print('exiting because pos grad below 0')
+            if scalefactor < epsilon:
+                if step > 0:
                     break
-
-            #if scalefactor == 0 and previous_scalefactor > 0:
-            #    step = min(-gamma * gradient, previous_scalefactor / 2)
-
-            else:
-                step = -gamma * gradient 
-
-
-
-            #print('grad: ',gradient)
-            #print('step: ',step)
-            # don't allow steps too big
-            #step = max(step, -10)
-            #step = min(step, 10)
-            #print('clipped step: ',step)
-            #if scalefactor + step < 0:
-            #    # we would end up below zero, in that case just step 
-            #    # half way between old scalefactor and zero
-            #   step = - scalefactor / 2
-            #previous_scalefactor = scalefactor
-            scalefactor += step
+            scalefactor -= step
+            #print(scalefactor)
             scalefactor = max(scalefactor, 0)
-            #print('scalef: ',scalefactor)
             iters += 1
             if (
                 abs(step) < epsilon
-                #or scalefactor <= -1000
-                #or scalefactor >= 1000
-                or iters >= 500
+                or iters >= max_iter
             ):
                 break
 
-        #print('arrived at ',scalefactor)
+        #print('arrived at ',scalefactor, 'in iters = ', iters)
+        #if iters >= max_iter:
+        #    print('exceeded gradient descent iteration limit!')
+        #    print('arrived at ',scalefactor)
         #print('\n')
-
         scalefactor = max(0., min(1000., scalefactor))
 
 

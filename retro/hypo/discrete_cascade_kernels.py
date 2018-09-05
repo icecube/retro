@@ -49,7 +49,7 @@ from retro.const import (
 )
 from retro.retro_types import SRC_T
 
-SCALING_CASCADE_ENERGY = 1.
+SCALING_CASCADE_ENERGY = 10.
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def point_cascade(time, x, y, z, cascade_energy):
