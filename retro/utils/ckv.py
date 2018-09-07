@@ -14,10 +14,9 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'get_cone_map',
-    'convolve_dirmap',
     'convolve_table',
     'survival_prob_from_smeared_cone',
-    'survival_prob_from_cone'
+    'survival_prob_from_cone',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -35,18 +34,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from os.path import abspath, dirname
-import sys
 import math
 
+from numba import jit, njit, prange
 import numpy as np
-
-if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(abspath(__file__)))
-    if RETRO_DIR not in sys.path:
-        sys.path.append(RETRO_DIR)
-from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
-from retro.const import SPEED_OF_LIGHT_M_PER_NS
 
 
 FLOAT_T = np.float64
@@ -58,7 +49,7 @@ TWO_PI = FLOAT_T(2*np.pi)
 # resulting table. Smearing can be done on resulting table if that makes more
 # sense.
 
-#@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+#@njit
 #def get_dithered_cone_map(
 #        ckv_costheta, ckv_sintheta, num_phi, axis_costheta, axis_sintheta, axis_cosphi,
 #        axis_sinphi, num_costheta_bins, num_phi_bins
@@ -149,7 +140,7 @@ TWO_PI = FLOAT_T(2*np.pi)
 #    return bin_indices, weights
 
 
-@numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
+@njit(parallel=False, nogil=True, cache=True)
 def get_cone_map(
     ckv_costheta,
     ckv_sintheta,
@@ -251,186 +242,72 @@ def get_cone_map(
                 counts.insert(0, 1)
 
     weights = np.array([np.float64(c) / np.float64(counts_total) for c in counts])
-    costheta_indices = np.array([i[0] for i in bin_indices], dtype=np.uint32)
-    phi_indices = np.array([i[1] for i in bin_indices], dtype=np.uint32)
+    costheta_indices = np.array([i[0] for i in bin_indices], dtype=np.int64)
+    phi_indices = np.array([i[1] for i in bin_indices], dtype=np.int64)
 
     return costheta_indices, phi_indices, weights
 
 
-@numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
-def convolve_dirmap(
-    dirmap,
-    out,
-    cos_ckv,
-    sin_ckv,
-    costhetadir_bin_edges,
-    phidir_bin_edges,
-    num_cone_samples,
-    oversample,
-):
-    """Convolve an array of values in a grid of (costhetadir, phidir)
-    coordinates (a so-called directional map, or dirmap) with a Cherenkov cone.
-
-    Parameters
-    ----------
-    dirmap : (n_costhetadir, n_phidir) array
-        Directionality map to be convolved with a Cherenkov cone
-
-    out : (n_costhetadir, n_phidir) array
-        The result of the convolution is populated to this array
-
-    cos_ckv, sin_ckv : float
-        Cosine and sine of Cherenkov angle
-
-    costhetadir_bin_edges : shape (n_costhetadir + 1,) array
-        Cosine-of-direction-theta (zenith angle) bin edges.
-
-    phidir_bin_edges : shape (n_phidir + 1,) array
-        Direction-phi (azimuth angle) bin edges, in units of radians.
-
-    num_cone_samples : int > 0
-        Number of samples around cone (akin to antialiasing; more samples give
-        more accurate results)
-
-    oversample : int > 0
-        Sample this many times in each dimension in each (costhetadir, phidir)
-        bin
-
-    """
-    n_costhetadir = len(costhetadir_bin_edges) - 1
-    n_phidir = len(phidir_bin_edges) - 1
-
-    costhetadir_min = costhetadir_bin_edges[0]
-    costhetadir_max = costhetadir_bin_edges[-1]
-
-    phidir_min = phidir_bin_edges[0]
-    phidir_max = phidir_bin_edges[-1]
-
-    costhetadir_bw = (costhetadir_max - costhetadir_min) / n_costhetadir
-    phidir_bw = (phidir_max - phidir_min) / n_phidir
-
-    costhetadir_samp_step = costhetadir_bw / oversample
-    phidir_samp_step = phidir_bw / oversample
-
-    costhetadir_min_samp = costhetadir_min + 0.5 * costhetadir_samp_step
-    phidir_min_samp = phidir_min + 0.5 * phidir_samp_step
-
-    # Cosine and sine of thetadir
-    costhetadir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
-    sinthetadir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
-
-    # Cosine and sine of phidir
-    cosphidir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
-    sinphidir_samples = np.empty(shape=(oversample, oversample), dtype=FLOAT_T)
-
-    for costhetadir_idx in range(n_costhetadir):
-        costhetadir0 = costhetadir_min_samp + costhetadir_idx*costhetadir_bw
-
-        for phidir_idx in range(n_phidir):
-            phidir0 = phidir_min_samp + phidir_idx*phidir_bw
-
-            for costhetadir_subidx in range(oversample):
-                costhetadir_samp = costhetadir0 + costhetadir_subidx * costhetadir_samp_step
-                sinthetadir_samp = math.sqrt(1 - costhetadir_samp**2)
-
-                for phidir_subidx in range(oversample):
-                    phidir_samp = phidir0 + phidir_subidx * phidir_samp_step
-                    cosphidir_samp = math.cos(phidir_samp)
-                    sinphidir_samp = math.sin(phidir_samp)
-
-                    costhetadir_samples[costhetadir_subidx, phidir_subidx] = costhetadir_samp
-                    sinthetadir_samples[costhetadir_subidx, phidir_subidx] = sinthetadir_samp
-                    cosphidir_samples[costhetadir_subidx, phidir_subidx] = cosphidir_samp
-                    sinphidir_samples[costhetadir_subidx, phidir_subidx] = sinphidir_samp
-
-            costhetadir_idxs, phidir_idxs, weights = get_cone_map(
-                ckv_costheta=cos_ckv,
-                ckv_sintheta=sin_ckv,
-                num_phi=num_cone_samples,
-                axis_costheta=costhetadir_samples,
-                axis_sintheta=sinthetadir_samples,
-                axis_cosphi=cosphidir_samples,
-                axis_sinphi=sinphidir_samples,
-                num_costheta_bins=n_costhetadir,
-                num_phi_bins=n_phidir,
-                phi_min=phidir_min,
-                phi_max=phidir_max,
-                costheta_min=costhetadir_min,
-                costheta_max=costhetadir_max,
-            )
-            num_idxs = len(costhetadir_idxs)
-            assert len(phidir_idxs) == len(weights) == num_idxs
-
-            total = 0.0
-            for i_idx in range(num_idxs):
-                total += weights[i_idx] * dirmap[costhetadir_idxs[i_idx], phidir_idxs[i_idx]]
-
-            out[costhetadir_idx, phidir_idx] = total
-
-
-@numba_jit(nopython=True, parallel=False, nogil=True, cache=True)
+@njit(parallel=True, nogil=True, cache=True)
 def convolve_table(
     src,
     dst,
     cos_ckv,
-    sin_ckv,
-    r_bin_edges,
-    costheta_bin_edges,
-    t_bin_edges,
-    t_is_residual_time,
-    costhetadir_bin_edges,
-    phidir_bin_edges,
     num_cone_samples,
     oversample,
-    n_group,
+    costhetadir_min,
+    costhetadir_max,
+    phidir_min,
+    phidir_max,
 ):
     """
     Parameters
     ----------
-    src : (n_r, n_costheta, n_t, n_costhetadir, n_phidir) array
+    src : shape (..., n_costhetadir, n_phidir) arrays
+        Source array; at least 2 dimensions, where second-to-last dimension
+        must be costhetadir and last dimension must be phidir
 
-    dst : (n_r, n_costheta, n_t, n_costhetadir, n_phidir) array
+    dst : same shape as `src`
 
-    cos_ckv, sin_ckv : float
-
-    r_bin_edges
-        Radial bin edges, in units of meters.
-
-    costheta_bin_edges
-        Cosine of theta (zenith angle) bin edges.
-
-    t_bin_edges
-        Time bin edges, units of nanoseconds.
-
-    t_is_residual_time : bool
-        Whether time bins represent time residuals (True) or absolute time
-        (False).
-
-    costhetadir_bin_edges : array
-        Cosine-of-direction-theta (zenith angle) bin edges.
-
-    phidir_bin_edges : array
-        Azimuth angle bin edges, in units of radians.
+    cos_ckv : float
+        Cosine of Cherenkov angle
 
     num_cone_samples : int > 0
+        Number of samples to take from Cherenkov cone (the more, the more
+        accurate the result will be)
 
     oversample : int > 0
+        Sample within each (costhetadir, phidir) bin this many times; the final
+        result for a bin is the average over all subsamples (akin to
+        anti-aliasing)
 
-    n_group : float > 0
-        Group refractive index in the medium (use lowest value used for all ice
-        simulated).
+    costhetadir_min, costhetadir_max : floats in [-1, 1]
+        Lower and upper edges of costhetadir binning
+
+    phidir_min, phidir_max : floats in [-pi, pi]
+        Lower and upper edges of phidir binning
 
     """
-    n_t = len(t_bin_edges) - 1
-    n_costheta = len(costheta_bin_edges) - 1
-    n_costhetadir = len(costhetadir_bin_edges) - 1
-    n_phidir = len(phidir_bin_edges) - 1
+    assert src.ndim >= 2
+    assert dst.shape == src.shape
+    assert num_cone_samples > 0
+    assert oversample > 0
+    assert costhetadir_max > costhetadir_min
+    assert phidir_max > phidir_min
+    assert -1 <= costhetadir_max <= 1
+    assert -1 <= costhetadir_min <= 1
+    assert -np.pi <= phidir_min <= np.pi
+    assert -np.pi <= phidir_max <= np.pi
 
-    costhetadir_min = costhetadir_bin_edges[0]
-    costhetadir_max = costhetadir_bin_edges[-1]
+    sin_ckv = math.sin(math.acos(cos_ckv))
 
-    phidir_min = phidir_bin_edges[0]
-    phidir_max = phidir_bin_edges[-1]
+    n_costhetadir = src.shape[-2]
+    n_phidir = src.shape[-1]
+
+    src_flat = src.reshape(-1, n_costhetadir, n_phidir)
+    dst_flat = dst.reshape(-1, n_costhetadir, n_phidir)
+
+    n_nondir_bins = src_flat.shape[0]
 
     costhetadir_bw = (costhetadir_max - costhetadir_min) / n_costhetadir
     phidir_bw = (phidir_max - phidir_min) / n_phidir
@@ -445,20 +322,11 @@ def convolve_table(
 
     # Cosine and sine of thetadir
     costhetadir_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
-    std_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
+    sinthetadir_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
 
     # Cosine and sine of phidir
     cosphidir_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
     sinphidir_samples = np.empty(shape=samples_shape, dtype=FLOAT_T)
-
-    # Max distance from the DOM light could be for each time bin
-    if t_is_residual_time:
-        causal = True
-    else:
-        tbin_max_dist = np.array(
-            [t*SPEED_OF_LIGHT_M_PER_NS/n_group for t in np.nditer(t_bin_edges[1:])],
-            dtype=FLOAT_T
-        )
 
     for costhetadir_idx in range(n_costhetadir):
         costhetadir0 = costhetadir_min_samp + costhetadir_idx*costhetadir_bw
@@ -466,9 +334,9 @@ def convolve_table(
         for phidir_idx in range(n_phidir):
             phidir0 = phidir_min_samp + phidir_idx*phidir_bw
 
-            for costhetadir_subidx in range(oversample):
+            for costhetadir_subidx in prange(oversample): # pylint: disable=not-an-iterable
                 costhetadir_samp = costhetadir0 + costhetadir_subidx * costhetadir_samp_step
-                std_samp = math.sqrt(1 - costhetadir_samp**2)
+                sinthetadir_samp = math.sin(math.acos(costhetadir_samp))
 
                 for phidir_subidx in range(oversample):
                     phidir_samp = phidir0 + phidir_subidx * phidir_samp_step
@@ -476,53 +344,41 @@ def convolve_table(
                     sinphidir_samp = math.sin(phidir_samp)
 
                     costhetadir_samples[costhetadir_subidx, phidir_subidx] = costhetadir_samp
-                    std_samples[costhetadir_subidx, phidir_subidx] = std_samp
+                    sinthetadir_samples[costhetadir_subidx, phidir_subidx] = sinthetadir_samp
                     cosphidir_samples[costhetadir_subidx, phidir_subidx] = cosphidir_samp
                     sinphidir_samples[costhetadir_subidx, phidir_subidx] = sinphidir_samp
 
-            costhetadir_idxs, phidir_idxs, weights = get_cone_map(
+            ctdir_idxs, phidir_idxs, weights = get_cone_map(
                 ckv_costheta=cos_ckv,
                 ckv_sintheta=sin_ckv,
                 num_phi=num_cone_samples,
                 axis_costheta=costhetadir_samples,
-                axis_sintheta=std_samples,
+                axis_sintheta=sinthetadir_samples,
                 axis_cosphi=cosphidir_samples,
                 axis_sinphi=sinphidir_samples,
                 num_costheta_bins=n_costhetadir,
                 num_phi_bins=n_phidir,
-                phi_min=phidir_min,
-                phi_max=phidir_max,
                 costheta_min=costhetadir_min,
                 costheta_max=costhetadir_max,
+                phi_min=phidir_min,
+                phi_max=phidir_max,
             )
-            num_idxs = len(costhetadir_idxs)
-            assert len(phidir_idxs) == len(weights) == num_idxs
 
-            for r_idx, r_lower in enumerate(np.nditer(r_bin_edges[:-1])):
-                for t_idx in range(n_t):
-                    if not t_is_residual_time:
-                        max_dist = tbin_max_dist[t_idx]
-                        causal = r_lower <= max_dist
-                    for costheta_idx in range(n_costheta):
-                        total = 0.0
-                        if causal:
-                            # Apply the weights to the corresponding entries
-                            # (note that weights account for normalization)
-                            for i_idx in range(num_idxs):
-                                costhetadir_idx = costhetadir_idxs[i_idx]
-                                phidir_idx = phidir_idxs[i_idx]
-                                weight = weights[i_idx]
-                                total += weight * src[r_idx, costheta_idx, t_idx,
-                                                      costhetadir_idx, phidir_idx]
-                            #total = np.sum(
-                            #    weights *
-                            #    src[r_idx, costheta_idx, t_idx, costhetadir_idxs, phidir_idxs]
-                            #)
+            n_map = len(weights)
 
-                        dst[r_idx, costheta_idx, t_idx, costhetadir_idx, phidir_idx] = total
+            for nondir_idx in prange(n_nondir_bins): # pylint: disable=not-an-iterable
+                # Apply the weights to the corresponding entries
+                # (note that weights account for normalization)
+                total = 0.0
+                for i in range(n_map):
+                    total += weights[i] * src_flat[nondir_idx, ctdir_idxs[i], phidir_idxs[i]]
+
+                dst_flat[nondir_idx, costhetadir_idx, phidir_idx] = total
+
+            #wstderr('({}, {}) '.format(costhetadir_idx, phidir_idx))
 
 
-@numba_jit(parallel=False, nogil=False, cache=True) #**DFLT_NUMBA_JIT_KWARGS)
+@jit(parallel=False, nogil=False, cache=True)
 def survival_prob_from_smeared_cone(
     theta,
     num_phi,
@@ -635,7 +491,7 @@ def survival_prob_from_smeared_cone(
     return survival_prob, bin_indices, counts
 
 
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+@njit(nogil=True)
 def survival_prob_from_cone(
     ckv_costheta,
     ckv_sintheta,
