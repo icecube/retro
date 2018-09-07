@@ -48,13 +48,17 @@ from retro.utils.misc import force_little_endian, wstdout
 TDI_TILE_ROOTDIR = '/gpfs/scratch/jll1062'
 TILESET_HASH = '873a6a13'
 TILT = True
-ANISOTROPY = True
+ANISOTROPY = False
 SIMDIR = '/gpfs/group/dfc13/default/sim/retro'
 SIM = SIMULATIONS['lea_horizontal_muon']
 GCD_FILE = 'GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl'
 BETA = 1.0
+CHECK_DOMS = 'str86'
 
-print('sim: {}, tilt: {}, anisotropy: {}'.format(SIM, TILT, ANISOTROPY))
+print(
+    'doms: {}, sim: {}, tilt: {}, anisotropy: {}'
+    .format(CHECK_DOMS, SIM, TILT, ANISOTROPY)
+)
 
 
 # -- Derived constants -- #
@@ -153,11 +157,16 @@ avg_angsens = None
 results = OrderedDict()
 for tilenum, spec in enumerate(specs):
     omkey = string, dom = spec['omkey']
-    #if string < 79:
-    if string != 86:
-        continue
-    #if dom < 34 or dom > 38:
-    #    continue
+
+    if CHECK_DOMS == 'str86':
+        if string != 86:
+            continue
+    elif CHECK_DOMS == 'dcsubset':
+        if string < 79 or dom < 34 or dom > 38:
+            continue
+    else:
+        raise ValueError('CHECK_DOMS value "{}" unhandled'.format(CHECK_DOMS))
+
     wstdout('tile {:4d} om ({:2d}, {:2d}):'.format(spec['tile'], string, dom))
     if not fwdsim_histos['results'].has_key(omkey):
         wstdout(' no results.\n')
@@ -275,7 +284,7 @@ for tilenum, spec in enumerate(specs):
         else:
             wstdout('\b-')
 
-        dir_costheta = source['dir_costheta']
+        dir_costheta = -source['dir_costheta']
         dir_phi = source['dir_phi'] + np.pi
         if dir_phi > np.pi:
             dir_phi -= 2*np.pi

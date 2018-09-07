@@ -47,9 +47,15 @@ from retro.i3info.extract_gcd import extract_gcd
 
 
 def generate_histos(
-        photons, hole_ice_model, t_max, num_bins, gcd=None, include_rde=True,
-        include_noise=True, outfile=None
-    ):
+    photons,
+    hole_ice_model,
+    t_max,
+    num_bins,
+    gcd=None,
+    include_rde=True,
+    include_noise=True,
+    outfile=None,
+):
     """Generate time histograms from photons extracted from CLSim (repated)
     forward event simulations.
 
