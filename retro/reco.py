@@ -51,21 +51,27 @@ from retro.priors import (
     PRI_LOG_UNIFORM,
 )
 from retro.hypo.discrete_muon_kernels import pegleg_eval
+from retro.tables.pexp_5d import generate_pexp_function
 
 
 class RetroReco(object):
 
-    def __init__(self, dom_tables_kw, hypo_kw, events_kw, reco_kw):
+    def __init__(
+        self,
+        dom_tables_kw,
+        tdi_tables_kw,
+        hypo_kw,
+        events_kw,
+        reco_kw,
+    ):
         self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+        self.tdi_tables, self.tdi_metas = init_obj.setup_tdi_tables(**tdi_tables_kw)
 
-        # check tables are finite:
-        for tbl in self.dom_tables.tables:
-            assert np.sum(~np.isfinite(tbl['weight'])) == 0, 'table not finite!'
-            assert np.sum(tbl['weight'] < 0) == 0, 'table is negative!'
-            assert np.min(tbl['index']) >= 0, 'table has negative index'
-            assert np.max(tbl['index']) < self.dom_tables.template_library.shape[0], 'table too large index'
-        assert np.sum(~np.isfinite(self.dom_tables.template_library)) == 0, 'templates not finite!'
-        assert np.sum(self.dom_tables.template_library < 0) == 0, 'templates not finite!'
+        _, self.get_llh, _ = generate_pexp_function(
+            dom_tables=self.dom_tables,
+            tdi_tables=self.tdi_tables,
+            tdi_metas=self.tdi_metas,
+        )
 
         self.hypo_handler = init_obj.setup_discrete_hypo(**hypo_kw)
         self.events_iterator = init_obj.get_events(**events_kw)
@@ -172,7 +178,7 @@ class RetroReco(object):
             pickle.dump(
                 opt_meta,
                 open(opt_meta_outf, 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL
+                protocol=pickle.HIGHEST_PROTOCOL,
             )
 
             dt = time.time() - t1
@@ -258,12 +264,12 @@ class RetroReco(object):
         pegleg_muon_dt = hypo_handler.pegleg_kernel_kwargs.get('dt')
         pegleg_muon_const_e_loss = False
 
-        get_llh = self.dom_tables._get_llh # pylint: disable=protected-access
+        #get_llh = self.dom_tables._get_llh # pylint: disable=protected-access
         dom_info = self.dom_tables.dom_info
-        tables = self.dom_tables.tables
-        table_norms = self.dom_tables.table_norms
-        t_indep_tables = self.dom_tables.t_indep_tables
-        t_indep_table_norms = self.dom_tables.t_indep_table_norms
+        #tables = self.dom_tables.tables
+        #table_norms = self.dom_tables.table_norms
+        #t_indep_tables = self.dom_tables.t_indep_tables
+        #t_indep_table_norms = self.dom_tables.t_indep_table_norms
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
 
         truth_info = OrderedDict()
@@ -371,16 +377,12 @@ class RetroReco(object):
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
             scaling_sources = hypo_handler.get_scaling_sources(hypo)
 
-            llh, pegleg_idx, scalefactor = get_llh(
+            llh, pegleg_idx, scalefactor = self.get_llh(
                 generic_sources=generic_sources,
                 pegleg_sources=pegleg_sources,
                 scaling_sources=scaling_sources,
                 event_hit_info=event_hit_info,
                 event_dom_info=event_dom_info,
-                tables=tables,
-                table_norms=table_norms,
-                t_indep_tables=t_indep_tables,
-                t_indep_table_norms=t_indep_table_norms,
                 pegleg_stepsize=1,
             )
             assert np.isfinite(llh), 'LLH not finite'
@@ -786,7 +788,7 @@ def parse_args(description=__doc__):
     )
 
     split_kwargs = init_obj.parse_args(
-        dom_tables=True, hypo=True, events=True, parser=parser
+        dom_tables=True, tdi_tables=True, hypo=True, events=True, parser=parser
     )
 
     split_kwargs['reco_kw'] = reco_kw = split_kwargs.pop('other_kw')

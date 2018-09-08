@@ -49,7 +49,7 @@ from retro.const import (
 )
 from retro.i3info.angsens_model import load_angsens_model
 from retro.retro_types import DOM_INFO_T
-from retro.tables.pexp_5d import generate_pexp_function
+#from retro.tables.pexp_5d import generate_pexp_function
 from retro.utils.geom import spherical_volume
 from retro.utils.misc import expand
 
@@ -289,19 +289,19 @@ class Retro5DTables(object):
             dtype=np.int32
         )
 
-        self._pexp = None
-        self._get_llh = None
-        self.pexp_meta = None
+        #self._pexp = None
+        #self._get_llh = None
+        #self.pexp_meta = None
         self.is_stacked = None
         self.t_is_residual_time = None
 
-    def get_llh(self, *args, **kwargs):
-        return self._get_llh(*args, **kwargs)
+    #def get_llh(self, *args, **kwargs):
+    #    return self._get_llh(*args, **kwargs)
 
-    def pexp(self, *args, **kwargs):
-        if self._pexp is None:
-            raise ValueError('No pexp function initialized. (Are tables loaded?)')
-        return self._pexp(*args, **kwargs)
+    #def pexp(self, *args, **kwargs):
+    #    if self._pexp is None:
+    #        raise ValueError('No pexp function initialized. (Are tables loaded?)')
+    #    return self._pexp(*args, **kwargs)
 
     def load_stacked_tables(
             self,
@@ -335,21 +335,21 @@ class Retro5DTables(object):
         self.t_indep_tables.setflags(write=False, align=True, uic=False)
         assert self.t_indep_tables.shape[0] == num_tables
 
-        if self._pexp is None:
-            pexp, get_llh, pexp_meta = generate_pexp_function(
-                table=self.table_meta,
-                table_kind=self.table_kind,
-                t_is_residual_time=self.t_is_residual_time,
-                compute_t_indep_exp=self.compute_t_indep_exp,
-                compute_unhit_doms=True, # TODO: modify when TDI table works
-                use_directionality=self.use_directionality,
-                num_phi_samples=self.num_phi_samples,
-                ckv_sigma_deg=self.ckv_sigma_deg,
-                template_library=self.template_library
-            )
-            self._pexp = pexp
-            self._get_llh = get_llh
-            self.pexp_meta = pexp_meta
+        #if self._pexp is None:
+        #    pexp, get_llh, pexp_meta = generate_pexp_function(
+        #        table=self.table_meta,
+        #        table_kind=self.table_kind,
+        #        t_is_residual_time=self.t_is_residual_time,
+        #        compute_t_indep_exp=self.compute_t_indep_exp,
+        #        compute_unhit_doms=True, # TODO: modify when TDI table works
+        #        use_directionality=self.use_directionality,
+        #        num_phi_samples=self.num_phi_samples,
+        #        ckv_sigma_deg=self.ckv_sigma_deg,
+        #        template_library=self.template_library
+        #    )
+        #    self._pexp = pexp
+        #    self._get_llh = get_llh
+        #    self.pexp_meta = pexp_meta
 
         self.sd_idx_table_indexer = deepcopy(self.table_meta['sd_idx_table_indexer'])
         self.sd_idx_table_indexer.setflags(write=False, align=True, uic=False)
@@ -434,6 +434,8 @@ class Retro5DTables(object):
             table_meta[k] = table[k]
         table_meta['binning'] = binning
 
+        self.table_meta = table_meta
+
         if self.t_is_residual_time is None:
             self.t_is_residual_time = bool(table['t_is_residual_time'])
         else:
@@ -446,21 +448,21 @@ class Retro5DTables(object):
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
 
-        if self._pexp is None:
-            pexp, get_llh, pexp_meta = generate_pexp_function(
-                table=table,
-                table_kind=self.table_kind,
-                t_is_residual_time=self.t_is_residual_time,
-                compute_t_indep_exp=self.compute_t_indep_exp,
-                use_directionality=self.use_directionality,
-                compute_unhit_doms=True, # TODO: modify when TDI works
-                num_phi_samples=self.num_phi_samples,
-                ckv_sigma_deg=self.ckv_sigma_deg,
-                template_library=self.template_library
-            )
-            self._pexp = pexp
-            self._get_llh = get_llh
-            self.pexp_meta = pexp_meta
+        #if self._pexp is None:
+        #    pexp, get_llh, pexp_meta = generate_pexp_function(
+        #        table=table,
+        #        table_kind=self.table_kind,
+        #        t_is_residual_time=self.t_is_residual_time,
+        #        compute_t_indep_exp=self.compute_t_indep_exp,
+        #        use_directionality=self.use_directionality,
+        #        compute_unhit_doms=True, # TODO: modify when TDI works
+        #        num_phi_samples=self.num_phi_samples,
+        #        ckv_sigma_deg=self.ckv_sigma_deg,
+        #        template_library=self.template_library
+        #    )
+        #    self._pexp = pexp
+        #    self._get_llh = get_llh
+        #    self.pexp_meta = pexp_meta
 
         self.tables.append(table[self.table_name])
         self.table_norms.append(table_norm)
@@ -564,7 +566,7 @@ def get_table_norm(
 
     constant_part = (
         # Number of photons, divided equally among the costheta bins
-        0.45 * n_dir_bins / (n_photons ) #/ n_costheta_bins)
+        0.45 * n_dir_bins / n_photons
 
         # Correction for quantum efficiency of the DOM
         * quantum_efficiency
@@ -584,7 +586,7 @@ def get_table_norm(
 
     # t bin edges are in ns and speed_of_light_in_medum is m/ns
     t_bin_widths_in_m = t_bin_widths * speed_of_light_in_medum
-    t_bin_range_in_m = t_bin_range * speed_of_light_in_medum
+    #t_bin_range_in_m = t_bin_range * speed_of_light_in_medum
 
     # TODO: Note that the actual counts will be rounded down (or are one fewer
     # than indicated by this ratio if the ratio comres out to an integer). We

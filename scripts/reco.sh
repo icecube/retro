@@ -20,6 +20,8 @@ mkdir -p "$outdir"
 # -- Tables -- #
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
+    tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
+
     # -- Mie tables: stacked, template compressed -- #
 
     #proto="/home/icecube/retro/tables/large_5d_notilt_combined/stacked"
@@ -40,9 +42,9 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
 
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    tblkind="ckv_templ_compr"
+    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
 
     # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
 
@@ -68,18 +70,34 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
     #tmpl_lib=""
     #tblkind="ckv_uncompr"
 
+    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; template compressed (high stats) -- #
+
+    proto="/home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
+    tmpl_lib="--template-library /home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
+
 else
+    tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_off"
+    #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_on"
+
     # -- Lea tables: 80 clusters, template compressed -- #
 
-    proto="/gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    tmpl_lib="--template-library /gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    tblkind="ckv_templ_compr"
+    #proto="/gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
+    #tmpl_lib="--template-library /gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
+    #tblkind="ckv_templ_compr"
 
     # -- Mie tables: separate, template compressed -- #
 
     #proto="/gpfs/scratch/pde3/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
     #tmpl_lib="--template-library /gpfs/scratch/pde3/large_5d_notilt_combined/ckv_dir_templates.npy"
     #tblkind="ckv_templ_compr"
+
+    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; template compressed (high stats) -- #
+
+    proto="/gpfs/group/dfc13/default/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
+    tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
+
 fi
 
 #no_noise="--no-noise"
@@ -115,6 +133,7 @@ consteff=""
     $tmpl_lib \
     --step-length 1.0 \
     $no_noise \
+    $tdi0 \
     \
     --cascade-kernel "scaling_aligned_one_dim" \
     --cascade-angle-prior "log_normal" \

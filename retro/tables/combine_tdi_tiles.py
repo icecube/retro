@@ -46,7 +46,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
-from retro.utils.misc import expand, mkdir, wstderr, wstdout
+from retro.utils.misc import expand, load_pickle, mkdir, wstderr, wstdout
 
 
 def extract_meta_from_keys(keys, prefix):
@@ -96,7 +96,7 @@ def combine_tdi_tiles(
 
     gcd = extract_gcd(gcd)
 
-    bin_edges = pickle.load(file(bin_edges_file, 'rb'))
+    bin_edges = load_pickle(bin_edges_file)
     x_edges = bin_edges['x']
     y_edges = bin_edges['y']
     z_edges = bin_edges['z']

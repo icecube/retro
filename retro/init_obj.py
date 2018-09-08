@@ -13,7 +13,7 @@ __all__ = [
     'setup_dom_tables',
     'setup_discrete_hypo',
     'get_hits',
-    'parse_args'
+    'parse_args',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -75,21 +75,21 @@ I3_FNAME_INFO_RE = re.compile(
 
 
 def setup_dom_tables(
-        dom_tables_kind,
-        dom_tables_fname_proto,
-        gcd,
-        angsens_model,
-        norm_version,
-        use_sd_indices=const.ALL_STRS_DOMS,
-        step_length=1.0,
-        num_phi_samples=None,
-        ckv_sigma_deg=None,
-        template_library=None,
-        compute_t_indep_exp=True,
-        use_directionality=True,
-        no_noise=False,
-        force_no_mmap=False,
-    ):
+    dom_tables_kind,
+    dom_tables_fname_proto,
+    gcd,
+    angsens_model,
+    norm_version,
+    use_sd_indices=const.ALL_STRS_DOMS,
+    step_length=1.0,
+    num_phi_samples=None,
+    ckv_sigma_deg=None,
+    template_library=None,
+    compute_t_indep_exp=True,
+    use_directionality=True,
+    no_noise=False,
+    force_no_mmap=False,
+):
     """Instantiate and load single-DOM tables.
 
     Parameters
@@ -108,6 +108,10 @@ def setup_dom_tables(
     use_directionality : bool, optional
     no_noise : bool, optional
     force_no_mmap : bool, optional
+
+    Returns
+    -------
+    dom_tables : Retro5DTables
 
     """
     print('Instantiating and loading DOM tables')
@@ -144,7 +148,7 @@ def setup_dom_tables(
         num_phi_samples=num_phi_samples,
         ckv_sigma_deg=ckv_sigma_deg,
         template_library=template_library,
-        use_sd_indices=use_sd_indices
+        use_sd_indices=use_sd_indices,
     )
 
     if '{subdet' in dom_tables_fname_proto:
@@ -227,9 +231,63 @@ def setup_dom_tables(
             mmap_t_indep=mmap,
         )
 
+    for table in dom_tables.tables:
+        assert np.all(np.isfinite(table['weight'])), 'table not finite!'
+        assert np.all(table['weight'] >= 0), 'table is negative!'
+        assert np.min(table['index']) >= 0, 'table has negative index'
+        if dom_tables.template_library is not None:
+            assert np.max(table['index']) < dom_tables.template_library.shape[0], 'table too large index'
+    if dom_tables.template_library is not None:
+        assert np.all(np.isfinite(dom_tables.template_library)), 'templates not finite!'
+        assert np.all(dom_tables.template_library >= 0), 'templates have negative values!'
+
     print('  -> {:.3f} s\n'.format(time.time() - t0))
 
     return dom_tables
+
+
+def setup_tdi_tables(tdi=None, mmap=False):
+    """Load and instantiate (Cherenkov) TDI tables.
+
+    Parameters
+    ----------
+    tdi : sequence of strings, optional
+        Path to TDI tables' `ckv_tdi_table.npy` files, or paths to
+        directories containing those files; one entry per TDI table
+
+    mmap : bool
+
+    Returns
+    -------
+    tdi_tables : tuple of 0 or more numpy arrays
+    tdi_metas : tuple of 0 or more OrderedDicts
+
+    """
+    if tdi is None:
+        return (), ()
+
+    mmap_mode = 'r' if mmap else None
+
+    tdi_tables = []
+    tdi_metas = []
+    for tdi_ in tdi:
+        if tdi_ is None:
+            continue
+        tdi_ = expand(tdi_)
+        if isdir(tdi_):
+            tdi_ = join(tdi_, 'ckv_tdi_table.npy')
+
+        print('Loading and instantiating TDI table at "{}"'.format(tdi_))
+
+        be = load_pickle(join(dirname(tdi_), 'tdi_bin_edges.pkl'))
+        meta = load_pickle(join(dirname(tdi_), 'tdi_metadata.pkl'))
+        meta['bin_edges'] = be
+        tdi_table = np.load(tdi_, mmap_mode=mmap_mode)
+
+        tdi_metas.append(meta)
+        tdi_tables.append(tdi_table)
+
+    return tuple(tdi_tables), tuple(tdi_metas)
 
 
 def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=None):
@@ -316,18 +374,18 @@ def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=
 
 
 def get_events(
-        events_base,
-        start=0,
-        stop=None,
-        step=None,
-        truth=True,
-        photons=None,
-        pulses=None,
-        recos=None,
-        triggers=None,
-        angsens_model=None,
-        hits=None
-    ):
+    events_base,
+    start=0,
+    stop=None,
+    step=None,
+    truth=True,
+    photons=None,
+    pulses=None,
+    recos=None,
+    triggers=None,
+    angsens_model=None,
+    hits=None,
+):
     """Iterate through a Retro events directory, getting events in a
     the form of a nested OrderedDict, with leaf nodes numpy structured arrays.
 
@@ -708,7 +766,7 @@ def get_hits(event, path, angsens_model=None):
             total_num_hits,
             total_num_doms_hit,
             time_window_start,
-            time_window_stop
+            time_window_stop,
         ),
         dtype=HITS_SUMMARY_T
     )
@@ -740,8 +798,14 @@ def extract_next_event(file_iterator_tree, event=None):
     return event
 
 
-def parse_args(dom_tables=False, hypo=False, events=False, description=None,
-               parser=None):
+def parse_args(
+    dom_tables=False,
+    tdi_tables=False,
+    hypo=False,
+    events=False,
+    description=None,
+    parser=None,
+):
     """Parse command line arguments.
 
     If `parser` is supplied, args are added to that; otherwise, a new parser is
@@ -752,6 +816,10 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
     dom_tables : bool, optional
         Whether to include args for instantiating and loading single-DOM
         tables. Default is False.
+
+    tdi_tables : bool, optional
+        Whether to include args for instantiating and loading TDI tables.
+        Default is False.
 
     hypo : bool
         Whether to include args for instantiating a DiscreteHypo and its hypo
@@ -856,6 +924,19 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
             sensible default is chosen for the type of tables being used.'''
         )
 
+    if tdi_tables:
+        group = parser.add_argument_group(
+            title='TDI tables arguments',
+        )
+        group.add_argument(
+            '--tdi',
+            action='append',
+            help='''Path to TDI table's `ckv_tdi_table.npy` file or path
+            to directory containing that file; repeat --tdi to specify multiple
+            TDI tables (making sure more finely-binned tables are specified
+            BEFORE more coarsely-binned tables)'''
+        )
+
     if hypo:
         group = parser.add_argument_group(
             title='Hypothesis handler and kernel parameters',
@@ -939,12 +1020,16 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
             kwargs['stop'] = kwargs['start'] + kwargs.pop('num_events')
 
     dom_tables_kw = {}
+    tdi_tables_kw = {}
     hypo_kw = {}
     events_kw = {}
     other_kw = {}
     if dom_tables:
         code = setup_dom_tables.__code__
         dom_tables_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
+    if tdi_tables:
+        code = setup_tdi_tables.__code__
+        tdi_tables_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
     if hypo:
         code = setup_discrete_hypo.__code__
         hypo_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
@@ -969,7 +1054,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
 
     for key, val in kwargs.items():
         taken = False
-        for kw in [dom_tables_kw, hypo_kw, events_kw]:
+        for kw in [dom_tables_kw, tdi_tables_kw, hypo_kw, events_kw]:
             if key not in kw:
                 continue
             kw[key] = val
@@ -980,6 +1065,8 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
     split_kwargs = OrderedDict()
     if dom_tables:
         split_kwargs['dom_tables_kw'] = dom_tables_kw
+    if tdi_tables:
+        split_kwargs['tdi_tables_kw'] = tdi_tables_kw
     if hypo:
         split_kwargs['hypo_kw'] = hypo_kw
     if events:
