@@ -569,7 +569,7 @@ def generate_pexp_function(
         for source_idx in range(sources_start, sources_stop):
             src = sources[source_idx]
             src_opposite_dir_costheta = -src['dir_costheta']
-            src_opposite_dir_phi = (src['dir_phi'] + 2*np.pi) % (2*np.pi) - np.pi
+            src_opposite_dir_phi = ((src['dir_phi'] + 2*np.pi) % (2*np.pi)) - np.pi
 
             if (
                 tdi0_xmin <= src['x'] <= tdi0_xmax

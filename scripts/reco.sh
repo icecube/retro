@@ -21,6 +21,7 @@ mkdir -p "$outdir"
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
     tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
+    tdi1=""
 
     # -- Mie tables: stacked, template compressed -- #
 
@@ -80,6 +81,8 @@ else
     tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_on"
 
+    tdi1=""
+
     # -- Lea tables: 80 clusters, template compressed -- #
 
     #proto="/gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
@@ -111,7 +114,7 @@ consteff=""
 
 
 #kernprof -l -v ~/retro/retro/reco.py \
-~/retro/retro/reco.py \
+~/src/retro/retro/reco.py \
     --outdir "$outdir" \
     --spatial-prior SPEFit2 \
     --temporal-prior SPEFit2 \
@@ -134,6 +137,7 @@ consteff=""
     --step-length 1.0 \
     $no_noise \
     $tdi0 \
+    $tdi1 \
     \
     --cascade-kernel "scaling_aligned_one_dim" \
     --cascade-angle-prior "log_normal" \
