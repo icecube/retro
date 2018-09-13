@@ -140,8 +140,18 @@ def extract_reco(frame, reco):
 
     # MultiNest8D fits a cascade & track, with casscade in the track direction
     elif reco.endswith('MultiNest8D'):
-        neutrino = frame[reco + '_Neutrino']
-        casc = frame[reco + '_Cascade']
+        if reco + '_Neutrino' in frame:
+            neutrino = frame[reco + '_Neutrino']
+        elif reco + '_NumuCC' in frame:
+            neutrino = frame[reco + '_NumuCC']
+
+        if reco + '_Cascade' in frame:
+            casc = frame[reco + '_Cascade']
+        elif reco + '_HDCasc' in frame:
+            casc = frame[reco + '_HDCasc']
+        else:
+            raise ValueError('Cannot find cascade in frame')
+
         track = frame[reco + '_Track']
 
         reco_dict['x'] = neutrino.pos.x
@@ -156,7 +166,7 @@ def extract_reco(frame, reco):
         reco_dict['track_azimuth'] = track.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
 
-    # MultiNest8D fits a cascade & track with their directions independnent
+    # MultiNest10D fits a cascade & track with their directions independnent
     elif reco.endswith('MultiNest10D'):
         neutrino = frame[reco + '_Neutrino']
         casc = frame[reco + '_Cascade']
@@ -187,6 +197,16 @@ def extract_reco(frame, reco):
         reco_dict['energy'] = i3particle.energy
         reco_dict['zenith'] = i3particle.dir.zenith
         reco_dict['azimuth'] = i3particle.dir.azimuth
+
+    # -- (subset of) PID and cut vars -- #
+
+    if reco.startswith('IC86_Dunkman_L6') and 'IC86_Dunkman_L6' in frame:
+        cutvars = frame['IC86_Dunkman_L6']
+        for var in ['delta_LLH', 'mn_start_contained', 'mn_stop_contained']:
+            try:
+                reco_dict[var] = getattr(cutvars, var)
+            except AttributeError:
+                pass
 
     reco = np.array(
         tuple(reco_dict.values()),
@@ -242,8 +262,15 @@ def extract_pulses(frame, pulse_series_name):
     """
     from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
     pulse_series = frame[pulse_series_name]
-    time_range_name = pulse_series_name + 'TimeRange'
-    if time_range_name in frame:
+
+    time_range_name = None
+    if pulse_series_name + 'TimeRange' in frame:
+        time_range_name = pulse_series_name + 'TimeRange'
+    elif 'UncleanedInIcePulsesTimeRange' in frame:
+        # TODO: use WaveformRange instead?
+        time_range_name = 'UncleanedInIcePulsesTimeRange'
+
+    if time_range_name is not None:
         i3_time_range = frame[time_range_name]
         time_range = i3_time_range.start, i3_time_range.stop
     else:
@@ -433,19 +460,27 @@ def extract_truth(frame, run_id, event_id):
         et.update(longest_info)
 
     # Extract info from {MC,true}Cascade
-    has_mc_true_cascade = True
+    has_mc_true_cascade = False
     if 'trueCascade' in frame:
-        true_cascade = frame['trueCascade']
+        has_mc_true_cascade = True
+        true_cascade_name = 'trueCascade'
     elif 'MCCascade' in frame:
-        true_cascade = frame['MCCascade']
-    else:
-        has_mc_true_cascade = False
+        has_mc_true_cascade = True
+        true_cascade_name = 'MCCascade'
 
     if has_mc_true_cascade:
-        et['cascade_pdg'] = true_cascade.pdg_encoding
-        et['cascade_energy'] = true_cascade.energy
-        et['cascade_coszen'] = np.cos(true_cascade.dir.zenith)
-        et['cascade_azimuth'] = true_cascade.dir.azimuth
+        try:
+            true_cascade = frame[true_cascade_name]
+        except KeyError:
+            et['cascade_pdg'] = 0
+            et['cascade_energy'] = np.nan
+            et['cascade_coszen'] = np.nan
+            et['cascade_azimuth'] = np.nan
+        else:
+            et['cascade_pdg'] = true_cascade.pdg_encoding
+            et['cascade_energy'] = true_cascade.energy
+            et['cascade_coszen'] = np.cos(true_cascade.dir.zenith)
+            et['cascade_azimuth'] = true_cascade.dir.azimuth
 
     # Extract per-event info from I3MCWeightDict
     mcwd_copy_keys = '''
@@ -588,12 +623,18 @@ def extract_events(
 
     frame_buffer = []
     finished = False
+    frame_number = 0
     while not finished:
         if i3file.more():
+            frame_number += 1
             try:
                 next_frame = i3file.pop_frame()
             except:
-                print('Failed to pop frame, source file "{}"'.format(fpath))
+                print(
+                    'Failed to pop frame {}, source file "{}"'.format(
+                        frame_number, fpath
+                    )
+                )
                 raise
         else:
             finished = True
@@ -630,8 +671,10 @@ def extract_events(
                     frame, run_id=run_id, event_id=event_id
                 )
             except:
-                print('Failed to get truth form "{}" event_id {}'
-                      .format(fpath, event_id))
+                print(
+                    'Failed to get truth from "{}" event_id {} (frame {})'
+                    .format(fpath, event_id, frame_number)
+                )
                 raise
             truths.append(event_truth)
             event['unique_id'] = unique_id = truths[-1]['unique_id']
