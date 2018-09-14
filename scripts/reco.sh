@@ -1,9 +1,10 @@
 #!/bin/bash
+export PATH=/storage/home/pde3/anaconda2/bin:$PATH
 
 timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 events_base="$1"
-start_idx="$2"
+modulo="$2"
 outdir="$3"
 
 mkdir -p "$outdir"
@@ -107,16 +108,17 @@ fi
     --use-doms "all" \
     \
     --events-base "$events_base" \
-    --start-idx "$start_idx" \
-    --num-events 100 \
-    --pulses "OfflinePulses" \
+    --modulo "$modulo" \
+    --num-events 10000 \
+    --pulses "InIcePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
-    --hits "pulses/OfflinePulses" \
+    --hits "pulses/InIcePulses" \
     --angsens-model "h2-50cm" \
     --truth
 
 wait
+#    --hits "pulses/OfflinePulses" \
 #    --cascade-kernel "scaling_aligned_one_dim" \
 #    --cascade-kernel "scaling_one_dim_delta" \
 #    --spatial-prior dc_subdust \

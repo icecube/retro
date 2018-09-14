@@ -2,11 +2,12 @@
 #for file in {26..50}
 #for file in {16..17}
 #for file in {18..19}
-for file in {20..29}
+#for file in {20..29}
+for file in {0..19}
 #for file in {26..30}
 #for file in {20..25}
 do
-for dir in {0..59}
+for dir in {0..99}
 do
 #    echo "/storage/home/pde3/retro/scripts/reco_file.sh $dir $file" | qsub -A cyberlamp \
 #-l qos=cl_open \

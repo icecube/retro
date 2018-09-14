@@ -42,12 +42,21 @@ if __name__ == '__main__' and __package__ is None:
 from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI
 from retro.utils.geom import generate_digitizer
+from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 
 
 MACHINE_EPS = 1e-10
 
 #maximum radius to consider
 MAX_RAD_SQ = 500**2
+
+
+# choices are 0:'gradient', 1:'newton' and 2:'binary'
+CASCADE_MINIMIZER = 2
+
+# choices are 0:'linear', 1:'log'
+PEGLEG_LOOP = 0
+
 
 def generate_pexp_5d_function(
     table,
@@ -636,76 +645,115 @@ def generate_pexp_5d_function(
                 return -1
             return numerator/denominator
 
-        # -- Perform gradient descent on -LLH -- #
+        if CASCADE_MINIMIZER == 0:
+            # -- Perform gradient descent on -LLH -- #
 
-        # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
+            # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
 
-        ##print('Initial scalefactor: ', initial_scalefactor)
-        #scalefactor = initial_scalefactor
-        ##previous_scalefactor = initial_scalefactor
-        #gamma = 0.1 # step size multiplier
-        #epsilon = 1e-2 # tolerance
-        #iters = 0 # iteration counter
-        #max_iter = 500
-        #while True:
-        #    gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
+            #print('Initial scalefactor: ', initial_scalefactor)
+            scalefactor = initial_scalefactor
+            #previous_scalefactor = initial_scalefactor
+            gamma = 0.1 # step size multiplier
+            epsilon = 1e-2 # tolerance
+            iters = 0 # iteration counter
+            max_iter = 500
+            while True:
+                gradient = get_grad_neg_llh_wrt_scalefactor(scalefactor)
 
-        #    if scalefactor < epsilon:
-        #        if gradient > 0:
-        #            #scalefactor = 0
-        #            #print('exiting because pos grad below 0')
-        #            break
+                if scalefactor < epsilon:
+                    if gradient > 0:
+                        #scalefactor = 0
+                        #print('exiting because pos grad below 0')
+                        break
 
-        #    else:
-        #        step = -gamma * gradient 
+                else:
+                    step = -gamma * gradient 
 
-        #    scalefactor += step
-        #    scalefactor = max(scalefactor, 0)
-        #    #print('scalef: ',scalefactor)
-        #    iters += 1
-        #    if (
-        #        abs(step) < epsilon
-        #        or iters >= max_iter
-        #    ):
-        #        break
-
-        ##print('arrived at ',scalefactor)
-        #if iters >= max_iter:
-        #    print('exceeded gradient descent iteration limit!')
-        #    print('arrived at ',scalefactor)
-        ##print('\n')
-
-        scalefactor = initial_scalefactor
-        iters = 0 # iteration counter
-        epsilon = 1e-2
-        max_iter = 100
-        while True:
-            step = get_newton_step(scalefactor)
-            if step == -1:
-                scalefactor = 0
-                break
-
-            if scalefactor < epsilon:
-                if step > 0:
+                scalefactor += step
+                scalefactor = max(scalefactor, 0)
+                #print('scalef: ',scalefactor)
+                iters += 1
+                if (
+                    abs(step) < epsilon
+                    or iters >= max_iter
+                ):
                     break
-            scalefactor -= step
-            #print(scalefactor)
-            scalefactor = max(scalefactor, 0)
-            iters += 1
-            if (
-                abs(step) < epsilon
-                or iters >= max_iter
-            ):
-                break
 
-        #print('arrived at ',scalefactor, 'in iters = ', iters)
-        #if iters >= max_iter:
-        #    print('exceeded gradient descent iteration limit!')
-        #    print('arrived at ',scalefactor)
-        #print('\n')
-        scalefactor = max(0., min(1000., scalefactor))
+            #print('arrived at ',scalefactor)
+            if iters >= max_iter:
+                print('exceeded gradient descent iteration limit!')
+                print('arrived at ',scalefactor)
+            #print('\n')
+            scalefactor = max(0., min(1000./SCALING_CASCADE_ENERGY, scalefactor))
 
 
+        elif CASCADE_MINIMIZER == 1:
+            # Newton method
+
+            scalefactor = initial_scalefactor
+            iters = 0 # iteration counter
+            epsilon = 1e-2
+            max_iter = 100
+            while True:
+                step = get_newton_step(scalefactor)
+                if step == -1:
+                    scalefactor = 0
+                    break
+
+                if scalefactor < epsilon:
+                    if step > 0:
+                        break
+                scalefactor -= step
+                #print(scalefactor)
+                scalefactor = max(scalefactor, 0)
+                iters += 1
+                if (
+                    abs(step) < epsilon
+                    or iters >= max_iter
+                ):
+                    break
+
+            #print('arrived at ',scalefactor, 'in iters = ', iters)
+            #if iters >= max_iter:
+            #    print('exceeded gradient descent iteration limit!')
+            #    print('arrived at ',scalefactor)
+            #print('\n')
+            scalefactor = max(0., min(1000./SCALING_CASCADE_ENERGY, scalefactor))
+
+        elif CASCADE_MINIMIZER == 2:
+            # do binary search
+            epsilon = 1e-2
+            done = False
+            first = 0.
+            first_grad = get_grad_neg_llh_wrt_scalefactor(first)
+            if first_grad > 0 or abs(first_grad) < epsilon:
+                scalefactor = first
+                done = True
+                #print('trivial 0')
+            if not done:
+                last = 1000./SCALING_CASCADE_ENERGY
+                last_grad =  get_grad_neg_llh_wrt_scalefactor(last)
+                if last_grad < 0 or abs(last_grad) < epsilon:
+                    scalefactor = last
+                    done = True
+                    #print('trivial 1000')
+            if not done:
+                iters = 0
+                while iters < 20:
+                    iters += 1
+                    test = (first + last)/2.
+                    scalefactor = test
+                    test_grad = get_grad_neg_llh_wrt_scalefactor(test)
+                    #print('test :',test)
+                    #print('test_grad :',test_grad)
+                    if abs(test_grad) < epsilon:
+                        break
+                    elif test_grad < 0:
+                        first = test
+                    else:
+                        last = test
+            #print('found :',scalefactor)
+            #print('\n')
         # -- Calculate llh at the optimal `scalefactor` found -- #
 
         # Time- and DOM-independent part of LLH
@@ -856,20 +904,24 @@ def generate_pexp_5d_function(
 
         # -- Pegleg loop -- #
 
-        # take log steps
-        #logstep = np.log(num_pegleg_sources) / 300
-        #x = -1e-8
-        #logspace = np.zeros(shape=301, dtype=np.int32)
-        #for i in range(len(logspace)):
-        #    logspace[i] = np.int32(np.exp(x))
-        #    x+= logstep
-        #pegleg_steps = np.unique(logspace)
-        #assert pegleg_steps[0] == 0
-        #n_pegleg_steps = len(pegleg_steps)
 
-        # take linear steps
-        pegleg_steps = np.arange(num_pegleg_sources)
-        n_pegleg_steps = len(pegleg_steps)
+        if PEGLEG_LOOP == 0:
+            # take linear steps
+            pegleg_steps = np.arange(num_pegleg_sources)
+            n_pegleg_steps = len(pegleg_steps)
+
+        else:
+            pass
+            # take log steps
+            #logstep = np.log(num_pegleg_sources) / 300
+            #x = -1e-8
+            #logspace = np.zeros(shape=301, dtype=np.int32)
+            #for i in range(len(logspace)):
+            #    logspace[i] = np.int32(np.exp(x))
+            #    x+= logstep
+            #pegleg_steps = np.unique(logspace)
+            #assert pegleg_steps[0] == 0
+            #n_pegleg_steps = len(pegleg_steps)
 
         num_llhs = n_pegleg_steps + 1
         llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
@@ -932,37 +984,60 @@ def generate_pexp_5d_function(
             elif llh < previous_llh:
                 getting_worse_counter += 1
 
+            else:
+                getting_worse_counter -= 1
+
             previous_llh = llh
 
             # break condition
             #if getting_worse_counter > 10:
-            if getting_worse_counter > 50:
+            if getting_worse_counter > 100:
                 #for idx in range(pegleg_idx+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100
                 #print('break at step ',pegleg_idx)
                 break
 
-        # find the best pegleg idx:
-        #best_llh = np.max(llhs)
-        #n_good_indices = np.sum(llhs > best_llh - 0.1)
-        #median_good_idx = max(1,np.int(n_good_indices/2))
-        
-        # search for that median pegleg index
-        #counter = 0
-        #for best_idx in range(n_pegleg_steps):
-        #    if llhs[best_idx] > best_llh - 0.1:
-        #        counter +=1
-        #    if counter == median_good_idx:
-        #        break
-        
-        #good_indices = np.argwhere(llhs > best_llh - 0.1)
-        #best_idx = np.median(good_indices)
+        if PEGLEG_LOOP == 0:
 
-        #print(llhs[:10])
-        #print(scalefactors[:10])
-        #print(pegleg_steps[:10])
+            # find the best pegleg idx:
+            # try averagong....not sure if good idea
+            best_llh = np.max(llhs)
+            final_llh = 0.
+            final_idx = 0.
+            final_scalefactor = 0.
+            counter = 0.
+            for pegleg_idx in range(len(llhs)):
+                if llhs[pegleg_idx] > best_llh - 0.1:
+                    counter += 1.
+                    final_llh += llhs[pegleg_idx]
+                    final_idx += pegleg_idx
+                    final_scalefactor += scalefactors[pegleg_idx]
 
-        return llhs[best_llh_idx], pegleg_steps[best_llh_idx], scalefactors[best_llh_idx]
+            return final_llh/counter, final_idx/counter, final_scalefactor/counter 
+
+
+            # find the best pegleg idx:
+            #best_llh = np.max(llhs)
+            #n_good_indices = np.sum(llhs > best_llh - 0.1)
+            #median_good_idx = max(1,np.int(n_good_indices/2))
+            
+            # search for that median pegleg index
+            #counter = 0
+            #for best_idx in range(n_pegleg_steps):
+            #    if llhs[best_idx] > best_llh - 0.1:
+            #        counter +=1
+            #    if counter == median_good_idx:
+            #        break
+            
+            #good_indices = np.argwhere(llhs > best_llh - 0.1)
+            #best_idx = np.median(good_indices)
+
+            #print(llhs[:10])
+            #print(scalefactors[:10])
+            #print(pegleg_steps[:10])
+
+        else:
+            return llhs[best_llh_idx], pegleg_steps[best_llh_idx], scalefactors[best_llh_idx]
 
     return pexp_5d, get_llh, meta

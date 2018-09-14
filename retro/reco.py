@@ -30,7 +30,7 @@ from collections import OrderedDict
 
 from os.path import abspath, dirname, join
 import pickle
-import sys
+import sys, os
 import time
 
 import numpy as np
@@ -52,6 +52,7 @@ from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 
 report_after = 100
 SAVE_FULL_INFO = False
+APPEND_FILE = True
 #USE_PRIOR_UNWEIGHTING = False
 USE_PRIOR_UNWEIGHTING = True
 
@@ -60,11 +61,14 @@ class RetroReco(object):
     def __init__(self, events_kw, dom_tables_kw, other_kw):
         self.get_events = init_obj.get_events(**events_kw)
         self.outdir = other_kw.get('outdir')
+        self.modulo = other_kw.get('modulo')
         self.outdir = expand(self.outdir)
         mkdir(self.outdir)
         self.setup_tables(dom_tables_kw)
         self.out_prefix = None
         self.current_event = None
+        self.current_event_idx = -1
+        self.event_counter = -1
         self.hypo_handler = None
         self.priors = None
         self.loglike = None
@@ -73,9 +77,16 @@ class RetroReco(object):
     @property
     def events_iterator(self):
         for event_idx, event in self.get_events:
+            if self.modulo >= 0 and not event_idx % 10 == self.modulo:
+                print('skipping event %i'%event_idx)
+                # skip event
+                continue
+
             self.out_prefix = join(self.outdir, 'evt{}-'.format(event_idx))
             print('Output files prefix: "{}"\n'.format(self.out_prefix))
             self.current_event = event
+            self.current_event_idx = event_idx
+            self.event_counter += 1
             yield event
 
     @property
@@ -151,10 +162,11 @@ class RetroReco(object):
                     settings = self.run_with_truth()
                 elif method == 'crs':
                     settings = self.run_crs(
-                        n_live=160,
-                        max_iter=10000,
-                        max_noimprovement=1000,
-                        fn_std=0.5,
+                        n_live=250,
+                        max_iter=20000,
+                        max_noimprovement=5000,
+                        fn_std=0.1,
+                        min_vertex=[1,1,1,3],
                         use_priors=False,
                         sobol=True
                     )
@@ -322,8 +334,8 @@ class RetroReco(object):
                     max_modes=1,
                     const_eff=True,
                     n_live=250,
-                    evidence_tol=0.1,
-                    sampling_eff=0.3,
+                    evidence_tol=0.02,
+                    sampling_eff=0.5,
                     max_iter=10000,
                     seed=0,
                 )
@@ -830,15 +842,43 @@ class RetroReco(object):
         ])
         opt_meta['num_llhp'] = len(llhp)
         opt_meta['run_time'] = time
+        opt_meta['event_idx'] = self.current_event_idx
 
         if fname is not None:
-            opt_meta_outf = self.out_prefix + fname + '.pkl'
-            print('Saving metadata to "{}"'.format(opt_meta_outf))
-            pickle.dump(
-                opt_meta,
-                open(opt_meta_outf, 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL
-            )
+            if APPEND_FILE:
+                if self.modulo >= 0:
+                    fname += '_mod%i'%self.modulo
+                opt_meta_outf = os.path.join(self.outdir, fname + '.pkl')
+                file_exists = os.path.isfile(opt_meta_outf)
+                if self.event_counter == 0:
+                    assert not file_exists, 'File already exists but want to save event #1'
+                    # create new dict
+                    out_dict = OrderedDict()
+                    for key in opt_meta:
+                        out_dict[key] = []
+                else:
+                    assert file_exists, 'File does not exists but want to save event > #1'
+                    out_dict = pickle.load(open(opt_meta_outf, 'rb'))
+                    for key, val in out_dict.items():
+                        assert len(val) == self.event_counter, 'Index mismatch in outfile'
+            
+                for key in opt_meta:
+                    out_dict[key].append(opt_meta[key])
+
+                pickle.dump(
+                    out_dict,
+                    open(opt_meta_outf, 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL
+                )
+
+            else:
+                opt_meta_outf = self.out_prefix + fname + '.pkl'
+                print('Saving metadata to "{}"'.format(opt_meta_outf))
+                pickle.dump(
+                    opt_meta,
+                    open(opt_meta_outf, 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL
+                )
 
         return opt_meta
 
@@ -847,14 +887,42 @@ class RetroReco(object):
         create estimate from llhp
         '''
         estimate = estimate_from_llhp(llhp=llhp, meta=opt_meta)
+        estimate['event_idx'] = self.current_event_idx
         if fname is not None:
-            estimate_outf = self.out_prefix + fname + '.pkl'
-            print('Saving estimate to "{}"'.format(estimate_outf))
-            pickle.dump(
-                estimate,
-                open(estimate_outf, 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL
-            )
+            if APPEND_FILE:
+                if self.modulo >= 0:
+                    fname += '_mod%i'%self.modulo
+                estimate_outf = os.path.join(self.outdir, fname + '.pkl')
+                file_exists = os.path.isfile(estimate_outf)
+                if self.event_counter == 0:
+                    assert not file_exists, 'File already exists but want to save event #1'
+                    # create new dict
+                    out_dict = OrderedDict()
+                    for key in estimate:
+                        out_dict[key] = []
+                else:
+                    assert file_exists, 'File does not exists but want to save event > #1'
+                    out_dict = pickle.load(open(estimate_outf, 'rb'))
+                    for key, val in out_dict.items():
+                        assert len(val) == self.event_counter, 'Index mismatch in outfile'
+            
+                for key in estimate:
+                    out_dict[key].append(estimate[key])
+
+                pickle.dump(
+                    out_dict,
+                    open(estimate_outf, 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL
+                )
+
+            else:
+                estimate_outf = self.out_prefix + fname + '.pkl'
+                print('Saving estimate to "{}"'.format(estimate_outf))
+                pickle.dump(
+                    estimate,
+                    open(estimate_outf, 'wb'),
+                    protocol=pickle.HIGHEST_PROTOCOL
+                )
 
         return estimate
 
@@ -907,7 +975,7 @@ class RetroReco(object):
 
         return OrderedDict()
 
-    def run_crs(self, n_live=160, max_iter=20000, max_noimprovement=2000, fn_std=0.1, use_priors=False, sobol=True):
+    def run_crs(self, n_live=160, max_iter=20000, max_noimprovement=2000, fn_std=0.1, min_vertex = [5, 5, 5, 15], use_priors=False, sobol=True):
         '''
         Implementation of the CRS2 algoriyhm with local mutation as described in
         JOURNAL OF OPTIMIZATION THEORY AND APPLICATIONS: Vol. 130, No. 2, pp. 253–264,
@@ -929,6 +997,8 @@ class RetroReco(object):
             maximum iterations with no improvemet of best point
         fn_std : float
             break if stddev of function values accross all livepoints drops below
+        min_vertex : list
+            break condition on std of vertex
         use_priors : bool
             use priors during minimization, if `false` priors are only used for sampling the initial distributions
         sobol : bool
@@ -1039,7 +1109,7 @@ class RetroReco(object):
             # break condition 4
             done = []
             stds = []
-            for dim, cond in zip(['x', 'y', 'z', 'time'], [5, 5, 5, 15]):
+            for dim, cond in zip(['x', 'y', 'z', 'time'], min_vertex):
                 if dim in names:
                     std = np.std(S_cart[:,names.index(dim)])
                     stds.append(std)
@@ -1433,6 +1503,10 @@ def parse_args(description=__doc__):
     parser.add_argument(
         '--outdir', required=True
     )
+    parser.add_argument(
+        '--modulo', default=-1, type=int,
+        help='only process events with number of `%10 == modulo`, if <0 no effect'
+    )
 
     split_kwargs = init_obj.parse_args(
         dom_tables=True, events=True, parser=parser
@@ -1445,5 +1519,6 @@ if __name__ == '__main__':
     my_reco = RetroReco(**parse_args()) # pylint: disable=invalid-name
     #my_reco.run('experimental_trackfit')
     my_reco.run('crs_prefit_mn')
+    #my_reco.run('crs')
     #my_reco.run('fast')
     #my_reco.run('test')
