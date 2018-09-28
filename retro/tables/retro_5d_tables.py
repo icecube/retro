@@ -49,7 +49,7 @@ from retro.const import (
 )
 from retro.i3info.angsens_model import load_angsens_model
 from retro.retro_types import DOM_INFO_T
-#from retro.tables.pexp_5d import generate_pexp_function
+#from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.utils.geom import spherical_volume
 from retro.utils.misc import expand
 
@@ -336,7 +336,7 @@ class Retro5DTables(object):
         assert self.t_indep_tables.shape[0] == num_tables
 
         #if self._pexp is None:
-        #    pexp, get_llh, pexp_meta = generate_pexp_function(
+        #    pexp, get_llh, pexp_meta = generate_pexp_and_llh_functions(
         #        table=self.table_meta,
         #        table_kind=self.table_kind,
         #        t_is_residual_time=self.t_is_residual_time,
@@ -449,7 +449,7 @@ class Retro5DTables(object):
         )
 
         #if self._pexp is None:
-        #    pexp, get_llh, pexp_meta = generate_pexp_function(
+        #    pexp, get_llh, pexp_meta = generate_pexp_and_llh_functions(
         #        table=table,
         #        table_kind=self.table_kind,
         #        t_is_residual_time=self.t_is_residual_time,

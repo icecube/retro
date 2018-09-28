@@ -56,23 +56,21 @@ from retro.retro_types import SRC_T
 ALL_REALS = (-np.inf, np.inf)
 
 
-def pegleg_muon(
-    time,
-    x,
-    y,
-    z,
-    track_azimuth,
-    track_zenith,
-    dt,
-    n_segments=3000,
-):
+def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
 
     Parameters
     ----------
-    time, x, y, z, track_azimuth, track_zenith
+    time : float
+        Particle vertex (start) time in nanoseconds from trigger time
+
+    x, y, z : float
+        Particle vertex location in meters (in IceCube coordinate system)
+
+    track_azimuth, track_zenith : float
+        Angle from which particle arrived in radians
 
     dt : float
         Time step in nanoseconds
@@ -146,14 +144,21 @@ def const_energy_loss_muon(
 
     Parameters
     ----------
-    time, x, y, z, track_energy, track_azimuth, track_zenith
+    time : float
+        Particle vertex (start) time in nanoseconds from trigger time
+
+    x, y, z : float
+        Particle vertex location in meters (in IceCube coordinate system)
+
+    track_azimuth, track_zenith : float
+        Angle from which particle arrived in radians
 
     dt : float
         Time step in nanoseconds
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_T
+    sources : shape (n_sources,) numpy.ndarray, dtype SRC_T
 
     """
     if track_energy == 0:
@@ -254,14 +259,21 @@ def table_energy_loss_muon(
 
     Parameters
     ----------
-    time, x, y, z, track_energy, track_azimuth, track_zenith
+    time : float
+        Particle vertex (start) time in nanoseconds from trigger time
+
+    x, y, z : float
+        Particle vertex location in meters (in IceCube coordinate system)
+
+    track_azimuth, track_zenith : float
+        Angle from which particle arrived in radians
 
     dt : float
         Time step in nanoseconds
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_T
+    sources : shape (n_sources,) numpy.ndarray, dtype SRC_T
 
     """
     # Check for no-track condition

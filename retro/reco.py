@@ -51,7 +51,7 @@ from retro.priors import (
     PRI_LOG_UNIFORM,
 )
 from retro.hypo.discrete_muon_kernels import pegleg_eval
-from retro.tables.pexp_5d import generate_pexp_function
+from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 
 
 class RetroReco(object):
@@ -67,7 +67,7 @@ class RetroReco(object):
         self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
         self.tdi_tables, self.tdi_metas = init_obj.setup_tdi_tables(**tdi_tables_kw)
 
-        _, self.get_llh, _ = generate_pexp_function(
+        _, self.get_llh, _ = generate_pexp_and_llh_functions(
             dom_tables=self.dom_tables,
             tdi_tables=self.tdi_tables,
             tdi_metas=self.tdi_metas,
@@ -237,7 +237,7 @@ class RetroReco(object):
         return prior, priors_used
 
     def generate_loglike(self, event, param_values, log_likelihoods, t_start):
-        """Generate the LLH callback function for a given event
+        """Generate the LLH callback function for a given event.
 
         Parameters
         ----------
@@ -589,17 +589,17 @@ class RetroReco(object):
         return settings
 
     def run_multinest(
-            self,
-            prior,
-            loglike,
-            importance_sampling,
-            max_modes,
-            const_eff,
-            n_live,
-            evidence_tol,
-            sampling_eff,
-            max_iter,
-            seed,
+        self,
+        prior,
+        loglike,
+        importance_sampling,
+        max_modes,
+        const_eff,
+        n_live,
+        evidence_tol,
+        sampling_eff,
+        max_iter,
+        seed,
     ):
         """Setup and run MultiNest on an event.
 

@@ -236,7 +236,8 @@ def setup_dom_tables(
         assert np.all(table['weight'] >= 0), 'table is negative!'
         assert np.min(table['index']) >= 0, 'table has negative index'
         if dom_tables.template_library is not None:
-            assert np.max(table['index']) < dom_tables.template_library.shape[0], 'table too large index'
+            assert np.max(table['index']) < dom_tables.template_library.shape[0], \
+                    'table too large index'
     if dom_tables.template_library is not None:
         assert np.all(np.isfinite(dom_tables.template_library)), 'templates not finite!'
         assert np.all(dom_tables.template_library >= 0), 'templates have negative values!'

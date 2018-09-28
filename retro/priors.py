@@ -117,8 +117,8 @@ def get_prior_def(param, reco_kw):
                     # scipy.stats.cauchy loc, scale parameters
                     -0.19687812829978152, 14.282171566308806,
                     # Hard limits
-                    #-600, 750, # original limits
-                    -590, 600, # TDI table limits
+                    -600, 750, # original limits
+                    #-590, 600, # TDI table limits
                 )
             )
         else:
@@ -141,8 +141,8 @@ def get_prior_def(param, reco_kw):
                     # scipy.stats.cauchy loc, scale parameters
                     -0.2393645701205161, 15.049528023495354,
                     # Hard limits
-                    #-750, 650, # original limits
-                    -540, 530, # TDI table limits
+                    -750, 650, # original limits
+                    #-540, 530, # TDI table limits
                 )
             )
         else:
@@ -165,8 +165,8 @@ def get_prior_def(param, reco_kw):
                     # scipy.stats.cauchy loc, scale parameters
                     -5.9170661027492546, 12.089399308036718,
                     # Hard limits
-                    #-1200, 200, # original limits
-                    -530, 540, # TDI table limits
+                    -1200, 200, # original limits
+                    #-530, 540, # TDI table limits
                 )
             )
         else:
