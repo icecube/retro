@@ -1,9 +1,10 @@
 #!/bin/bash
+export PATH=~/anaconda2/bin:$PATH
 
 timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 events_base="$1"
-start_idx="$2"
+modulo="$2"
 outdir="$3"
 
 mkdir -p "$outdir"
@@ -20,7 +21,8 @@ mkdir -p "$outdir"
 # -- Tables -- #
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
-    tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
+    tdi0=""
+    #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
     tdi1=""
 
     # -- Mie tables: stacked, template compressed -- #
@@ -78,7 +80,8 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
     tblkind="ckv_templ_compr"
 
 else
-    tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_off"
+    tdi0=""
+    #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_on"
 
     tdi1=""
@@ -103,54 +106,31 @@ else
 
 fi
 
-#no_noise="--no-noise"
-no_noise=""
 
-importance_sampling="--importance-sampling"
-#importance_sampling=""
-
-#consteff="--const-eff"
-consteff=""
-
-
-#kernprof -l -v ~/retro/retro/reco.py \
-~/src/retro/retro/reco.py \
+#python -m cProfile  \
+#kernprof -l -v \
+~/retro/retro/reco.py \
     --outdir "$outdir" \
-    --spatial-prior SPEFit2 \
-    --temporal-prior SPEFit2 \
-    \
-    $importance_sampling \
-    --max-modes 1 \
-    $consteff \
-    --n-live 160 \
-    --evidence-tol 0.5 \
-    --sampling-eff 0.3 \
-    --max-iter 10000 \
-    --seed 0 \
+    --method "crs_prefit_mn" \
     \
     --dom-tables-kind "$tblkind" \
     --dom-tables-fname-proto "$proto" \
-    --use-doms "all" \
     --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
     --norm-version "binvol2.5" \
-    $tmpl_lib \
-    --step-length 1.0 \
-    $no_noise \
     $tdi0 \
     $tdi1 \
-    \
-    --cascade-kernel "scaling_aligned_one_dim" \
-    --cascade-angle-prior "log_normal" \
-    --track-kernel "pegleg" \
-    --track-time-step 1.0 \
+    $tmpl_lib \
+    --step-length 1.0 \
+    --use-doms "all" \
     \
     --events-base "$events_base" \
-    --start-idx "$start_idx" \
-    --num-events 100 \
-    --pulses "OfflinePulses" \
+    --start "$modulo" \
+    --step 10 \
+    --num-events 10000 \
+    --pulses "InIcePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
-    --hits "pulses/OfflinePulses" \
+    --hits "pulses/InIcePulses" \
     --angsens-model "h2-50cm" \
     --truth
 

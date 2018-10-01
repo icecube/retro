@@ -9,6 +9,7 @@ hypo_kernels in discrete_hypo/DiscreteHypo class.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    'SCALING_CASCADE_ENERGY',
     'point_cascade',
     'point_ckv_cascade',
     'aligned_point_ckv_cascade',
@@ -16,7 +17,7 @@ __all__ = [
     'one_dim_cascade',
     'aligned_one_dim_cascade',
     'scaling_aligned_one_dim_cascade',
-    'scaling_one_dim_delta_cascade',
+    'scaling_one_dim_cascade',
     'one_dim_delta_cascade',
     'scaling_one_dim_delta_cascade',
 ]
@@ -54,6 +55,8 @@ from retro.const import (
 )
 from retro.retro_types import SRC_T
 from retro.utils.geom import rotate_point
+
+SCALING_CASCADE_ENERGY = 10.
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def point_cascade(time, x, y, z, cascade_energy):
@@ -165,18 +168,18 @@ MAX_NUM_SAMPLES = int(1e5)
 
 # Parameterizations from arXiv:1210.5140v2
 ZEN_DIST = pareto(b=1.91833423, loc=-22.82924369, scale=22.82924369)
-random_state = np.random.RandomState(0)
+RANDOM_STATE = np.random.RandomState(0)
 ZEN_SAMPLES = np.deg2rad(
     np.clip(
-        ZEN_DIST.rvs(size=MAX_NUM_SAMPLES, random_state=random_state),
+        ZEN_DIST.rvs(size=MAX_NUM_SAMPLES, random_state=RANDOM_STATE),
         a_min=0,
         a_max=180,
     )
 )
 
 # Create angular azimuth distribution
-random_state = np.random.RandomState(2)
-AZI_SAMPLES = random_state.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
+RANDOM_STATE = np.random.RandomState(2)
+AZI_SAMPLES = RANDOM_STATE.uniform(low=0, high=2*np.pi, size=MAX_NUM_SAMPLES)
 
 PARAM_ALPHA = 2.01849
 PARAM_BETA = 1.45469
@@ -364,15 +367,7 @@ def scaling_aligned_one_dim_cascade(
         **kwargs
     )
 
-def scaling_one_dim_cascade(
-    time,
-    x,
-    y,
-    z,
-    cascade_azimuth,
-    cascade_zenith,
-    **kwargs
-):
+def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith, **kwargs):
     """Fixed 1 GeV cascade kernel"""
     return one_dim_cascade(
         time=time,
@@ -381,7 +376,7 @@ def scaling_one_dim_cascade(
         z=z,
         cascade_azimuth=cascade_azimuth,
         cascade_zenith=cascade_zenith,
-        cascade_energy=1.,
+        cascade_energy=SCALING_CASCADE_ENERGY,
         num_samples=100,
         **kwargs
     )
@@ -427,6 +422,7 @@ def scaling_one_dim_delta_cascade(
     cascade_d_zenith,
     **kwargs
 ):
+    """Scaling cascade 1 GeV prototype defined as rotation off of track angle"""
     return one_dim_delta_cascade(
         time=time,
         x=x,

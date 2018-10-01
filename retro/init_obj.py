@@ -975,10 +975,18 @@ def parse_args(
             files'''
         )
         group.add_argument(
-            '--start-idx', type=int, default=0
+            '--start', type=int, default=0,
+            help='''Process events defined by slice [start:stop:step]. Default is 0.'''
         )
         group.add_argument(
-            '--num-events', type=int, default=None
+            '--stop', type=int, default=None,
+            help='''Process events defined by slice [start:stop:step]. Default is None,
+            i.e., take events until they run out.'''
+        )
+        group.add_argument(
+            '--step', type=int, default=None,
+            help='''Process events defined by slice [start:stop:step]. Default is
+            None, i.e., take every event from `start` through `stop - 1`.'''
         )
         group.add_argument(
             '--photons', action='append',

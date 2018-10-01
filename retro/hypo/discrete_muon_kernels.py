@@ -337,7 +337,7 @@ def table_energy_loss_muon(
     return sources
 
 
-def pegleg_eval(pegleg_idx, dt, const_e_loss):
+def pegleg_eval(pegleg_idx, dt, const_e_loss, mmc=False):
     """Convert a pegleg index into track energy in GeV.
 
     Parameters
@@ -345,6 +345,8 @@ def pegleg_eval(pegleg_idx, dt, const_e_loss):
     pegleg_idx : int
     dt : float
     const_e_loss : bool
+    mmc : bool
+        do calculation accordint to MMC paper
 
     Returns
     -------
@@ -354,4 +356,9 @@ def pegleg_eval(pegleg_idx, dt, const_e_loss):
     length = pegleg_idx * dt * SPEED_OF_LIGHT_M_PER_NS
     if const_e_loss:
         return length * TRACK_M_PER_GEV
+    elif mmc:
+        # values from MMC paper Table 4
+        a = 0.268
+        b = 0.00047
+        return (np.exp(length*b) - 1)*a/b
     return MUEN_INTERP(length)

@@ -16,11 +16,12 @@ __all__ = [
     'powerbin',
     'test_powerbin',
     'powerspace',
-    'generate_digitizer',
     'inv_power_2nd_diff',
     'infer_power',
     'test_infer_power',
     'sample_powerlaw_binning',
+    'generate_digitizer',
+    'test_generate_digitizer',
     'bin_edges_to_binspec',
     'linear_bin_centers',
     'spacetime_separation',
@@ -31,6 +32,11 @@ __all__ = [
     'cart2sph',
     'rotsph2cart',
     'rotate_point',
+    'rotate_points',
+    'add_vectors',
+    'fill_from_spher',
+    'fill_from_cart',
+    'reflect',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -321,6 +327,124 @@ def test_powerbin():
     print('<< PASS : test_powerbin >>')
 
 
+# TODO: add `endpoint`, `retstep`, and `dtype` kwargs
+def powerspace(start, stop, num, power):
+    """Create bin edges evenly spaced w.r.t. ``x**power``.
+
+    Reverse engineered from Jakob van Santen's power axis, with arguments
+    defined with analogy to :function:`numpy.linspace` (adding `power` but
+    removing the `endpoint`, `retstep`, and `dtype` arguments).
+
+    Parameters
+    ----------
+    start : float
+        Lower-most bin edge
+
+    stop : float
+        Upper-most bin edge
+
+    num : int
+        Number of edges (this defines ``num - 1`` bins)
+
+    power : float
+        Power-law to use for even spacing
+
+    Returns
+    -------
+    edges : numpy.ndarray of shape (1, num)
+        Edges
+
+    """
+    inv_power = 1 / power
+    liner_edges = np.linspace(start=np.power(start, inv_power),
+                              stop=np.power(stop, inv_power),
+                              num=num)
+    bin_edges = np.power(liner_edges, power)
+    return bin_edges
+
+
+def inv_power_2nd_diff(power, edges):
+    """Second finite difference of edges**(1/power)"""
+    return np.diff(edges**(1/power), n=2)
+
+
+def infer_power(edges, dtype=np.float64):
+    """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
+    first_three_edges = edges[:3]
+    atol = 1e-15
+    rtol = 4*np.finfo(dtype).eps
+    power = None
+    try:
+        power = brentq(
+            f=inv_power_2nd_diff,
+            a=1, b=100,
+            maxiter=1000, xtol=atol, rtol=rtol,
+            args=(first_three_edges,)
+        )
+    except RuntimeError:
+        raise ValueError('Edges do not appear to be power-spaced'
+                         ' (optimizer did not converge)')
+    diff = inv_power_2nd_diff(power, edges)
+    if not np.allclose(diff, diff[0], atol=1000*atol, rtol=10*rtol):
+        raise ValueError('Edges do not appear to be power-spaced'
+                         ' (power found does not hold for all edges)\n%s'
+                         % str(diff))
+    return power
+
+
+def test_infer_power():
+    """Unit test for function `infer_power`"""
+    ref_powers = np.arange(1, 10, 0.001)
+    total_time = 0.0
+    for ref_power in ref_powers:
+        edges = powerspace(start=0, stop=400, num=201, power=ref_power)
+        try:
+            t0 = time()
+            inferred_power = infer_power(edges)
+            t1 = time()
+        except ValueError:
+            print(ref_power, edges)
+            raise
+        assert np.isclose(inferred_power, ref_power,
+                          atol=1e-14, rtol=4*np.finfo(np.float).eps), ref_power
+        total_time += t1 - t0
+    print('Average time to infer power: {} s'
+          .format(total_time/len(ref_powers)))
+    print('<< PASS : test_infer_power >>')
+
+
+def sample_powerlaw_binning(edges, samples_per_bin):
+    """Draw samples evenly distributed in bins which are spaced evenly with
+    respect to the (inverse) power of the dimension.
+
+    Parameters
+    ----------
+    edges : array
+        Edges of bins to sample within.
+
+    samples_per_bin : int > 0
+        Number of samples per bin.
+
+    Returns
+    -------
+    samples : array
+
+    """
+    num_bins = len(edges) - 1
+    pwr = infer_power(edges)
+    edges_to_inv_pwr = edges**(1/pwr)
+    delta_eip = (edges_to_inv_pwr[-1] - edges_to_inv_pwr[0]) / num_bins
+    half_delta_eip_s = delta_eip / samples_per_bin / 2
+
+    samples = np.linspace(
+        start=edges_to_inv_pwr[0] + half_delta_eip_s,
+        stop=edges_to_inv_pwr[-1] - half_delta_eip_s,
+        num=samples_per_bin * num_bins
+    ) ** pwr
+
+    return samples
+
+
 def generate_digitizer(bin_edges, clip=True):
     """Factory to generate a specialized Numba function for "digitizing" data
     (i.e., returning which bin a value fall within).
@@ -521,124 +645,6 @@ def test_generate_digitizer():
         assert digitize_overflow(edges[-1] + 1e-8) == num_bins, dim
 
     print('<< PASS : test_generate_digitizer >>')
-
-
-# TODO: add `endpoint`, `retstep`, and `dtype` kwargs
-def powerspace(start, stop, num, power):
-    """Create bin edges evenly spaced w.r.t. ``x**power``.
-
-    Reverse engineered from Jakob van Santen's power axis, with arguments
-    defined with analogy to :function:`numpy.linspace` (adding `power` but
-    removing the `endpoint`, `retstep`, and `dtype` arguments).
-
-    Parameters
-    ----------
-    start : float
-        Lower-most bin edge
-
-    stop : float
-        Upper-most bin edge
-
-    num : int
-        Number of edges (this defines ``num - 1`` bins)
-
-    power : float
-        Power-law to use for even spacing
-
-    Returns
-    -------
-    edges : numpy.ndarray of shape (1, num)
-        Edges
-
-    """
-    inv_power = 1 / power
-    liner_edges = np.linspace(start=np.power(start, inv_power),
-                              stop=np.power(stop, inv_power),
-                              num=num)
-    bin_edges = np.power(liner_edges, power)
-    return bin_edges
-
-
-def inv_power_2nd_diff(power, edges):
-    """Second finite difference of edges**(1/power)"""
-    return np.diff(edges**(1/power), n=2)
-
-
-def infer_power(edges, dtype=np.float64):
-    """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
-    first_three_edges = edges[:3]
-    atol = 1e-15
-    rtol = 4*np.finfo(dtype).eps
-    power = None
-    try:
-        power = brentq(
-            f=inv_power_2nd_diff,
-            a=1, b=100,
-            maxiter=1000, xtol=atol, rtol=rtol,
-            args=(first_three_edges,)
-        )
-    except RuntimeError:
-        raise ValueError('Edges do not appear to be power-spaced'
-                         ' (optimizer did not converge)')
-    diff = inv_power_2nd_diff(power, edges)
-    if not np.allclose(diff, diff[0], atol=1000*atol, rtol=10*rtol):
-        raise ValueError('Edges do not appear to be power-spaced'
-                         ' (power found does not hold for all edges)\n%s'
-                         % str(diff))
-    return power
-
-
-def test_infer_power():
-    """Unit test for function `infer_power`"""
-    ref_powers = np.arange(1, 10, 0.001)
-    total_time = 0.0
-    for ref_power in ref_powers:
-        edges = powerspace(start=0, stop=400, num=201, power=ref_power)
-        try:
-            t0 = time()
-            inferred_power = infer_power(edges)
-            t1 = time()
-        except ValueError:
-            print(ref_power, edges)
-            raise
-        assert np.isclose(inferred_power, ref_power,
-                          atol=1e-14, rtol=4*np.finfo(np.float).eps), ref_power
-        total_time += t1 - t0
-    print('Average time to infer power: {} s'
-          .format(total_time/len(ref_powers)))
-    print('<< PASS : test_infer_power >>')
-
-
-def sample_powerlaw_binning(edges, samples_per_bin):
-    """Draw samples evenly distributed in bins which are spaced evenly with
-    respect to the (inverse) power of the dimension.
-
-    Parameters
-    ----------
-    edges : array
-        Edges of bins to sample within.
-
-    samples_per_bin : int > 0
-        Number of samples per bin.
-
-    Returns
-    -------
-    samples : array
-
-    """
-    num_bins = len(edges) - 1
-    pwr = infer_power(edges)
-    edges_to_inv_pwr = edges**(1/pwr)
-    delta_eip = (edges_to_inv_pwr[-1] - edges_to_inv_pwr[0]) / num_bins
-    half_delta_eip_s = delta_eip / samples_per_bin / 2
-
-    samples = np.linspace(
-        start=edges_to_inv_pwr[0] + half_delta_eip_s,
-        stop=edges_to_inv_pwr[-1] - half_delta_eip_s,
-        num=samples_per_bin * num_bins
-    ) ** pwr
-
-    return samples
 
 
 def bin_edges_to_binspec(edges):
@@ -901,19 +907,20 @@ def rotsph2cart(p_sintheta, p_costheta, p_phi, rot_sintheta, rot_costheta,
 
 @numba_jit
 def rotate_point(p_theta, p_phi, rot_theta, rot_phi):
-    """
+    """Rotate a point `p` by `rot` resulting in a new point `q`.
+
     Parameters
     ----------
     p_theta :  float
-        theta coordinate.
+        Zenith
 
     p_phi : float
-        Azimuth  on the circle
+        Azimuth
 
-    rot_theta :  float
+    rot_theta : float
         Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
 
-    rot_phi :  float
+    rot_phi : float
         Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
 
     Returns
@@ -944,6 +951,146 @@ def rotate_point(p_theta, p_phi, rot_theta, rot_phi):
     )
 
     return q_theta, q_phi
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def rotate_points(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
+    """Rotate points `p` by `rot` resulting in new points `q`.
+
+    Parameters
+    ----------
+    p_theta :  array of float
+        theta coordinate.
+
+    p_phi : array of float
+        Azimuth on the circle
+
+    rot_theta :  array of float
+        Rotate the points to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    rot_phi :  array of float
+        Rotate the points to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    q_theta : array of float
+        theta coordinate of rotated points
+
+    q_phi : array of float
+        phi coordinate of rotated points
+
+    """
+    for i in range(len(p_theta)):
+        sin_rot_theta = math.sin(rot_theta[i])
+        cos_rot_theta = math.cos(rot_theta[i])
+
+        sin_rot_phi = math.sin(rot_phi[i])
+        cos_rot_phi = math.cos(rot_phi[i])
+
+        sin_p_theta = math.sin(p_theta[i])
+        cos_p_theta = math.cos(p_theta[i])
+
+        sin_p_phi = math.sin(p_phi[i])
+        cos_p_phi = math.cos(p_phi[i])
+
+        q_theta[i] = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
+        q_phi[i] = math.atan2(
+            (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
+            (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+        )
+
+        q_phi[i] = q_phi[i] % (2 * math.pi)
+
+
+def fill_from_spher(s):
+    """Fill in the remaining values in SPHER_T type giving the two angles `zen` and
+    `az`.
+
+    Parameters
+    ----------
+    s : SPHER_T
+
+    """
+    s['sinzen'] = np.sin(s['zen'])
+    s['coszen'] = np.cos(s['zen'])
+    s['sinaz'] = np.sin(s['az'])
+    s['cosaz'] = np.cos(s['az'])
+    s['x'] = s['sinzen'] * s['cosaz']
+    s['y'] = s['sinzen'] * s['sinaz']
+    s['z'] = s['coszen']
+
+def fill_from_cart(s_vector):
+    """Fill in the remaining values in SPHER_T type giving the cart, coords. `x`, `y`
+    and `z`.
+
+    Parameters
+    ----------
+    s_vector : SPHER_T
+
+    """
+    for s in s_vector:
+        radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
+        if not radius == 0:
+            # make sure they're length 1
+            s['x'] /= radius
+            s['y'] /= radius
+            s['z'] /= radius
+            s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
+            s['coszen'] = s['z']
+            s['zen'] = np.arccos(s['coszen'])
+            s['sinzen'] = np.sin(s['zen'])
+            s['sinaz'] = np.sin(s['az'])
+            s['cosaz'] = np.cos(s['az'])
+        else:
+            s['z'] = 1
+            s['az'] = 0
+            s['zen'] = 0
+            s['coszen'] = 1
+            s['sinzen'] = 0
+            s['cosaz'] = 1
+            s['sinaz'] = 0
+
+
+def reflect(old, centroid, new):
+    """Reflect the old point around the centroid into the new point on the sphere.
+
+    Parameters
+    ----------
+    old : SPHER_T
+    centroid : SPHER_T
+    new : SPHER_T
+
+    """
+    x = old['x']
+    y = old['y']
+    z = old['z']
+
+    ca = centroid['cosaz']
+    sa = centroid['sinaz']
+    cz = centroid['coszen']
+    sz = centroid['sinzen']
+
+    new['x'] = 2*ca*cz*sz*z + x*(ca*(-ca*cz**2 + ca*sz**2) - sa**2) + y*(ca*sa + sa*(-ca*cz**2 + ca*sz**2))
+    new['y'] = 2*cz*sa*sz*z + x*(ca*sa + ca*(-cz**2*sa + sa*sz**2)) + y*(-ca**2 + sa*(-cz**2*sa + sa*sz**2))
+    new['z'] = 2*ca*cz*sz*x + 2*cz*sa*sz*y + z*(cz**2 - sz**2)
+
+    fill_from_cart(new)
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def add_vectors(r1, theta1, phi1, r2, theta2, phi2, r3, theta3, phi3):
+    """Add two vectors v1 + v2 = v3 in spherical coordinates."""
+    for i in range(len(r1)):
+        x1 = r1[i] * math.sin(theta1[i]) * math.cos(phi1[i])
+        y1 = r1[i] * math.sin(theta1[i]) * math.sin(phi1[i])
+        z1 = r1[i] * math.cos(theta1[i])
+        x2 = r2[i] * math.sin(theta2[i]) * math.cos(phi2[i])
+        y2 = r2[i] * math.sin(theta2[i]) * math.sin(phi2[i])
+        z2 = r2[i] * math.cos(theta2[i])
+        x3 = x1 + x2
+        y3 = y1 + y2
+        z3 = z1 + z2
+        r3[i] = math.sqrt(x3**2 + y3**2 + z3**2)
+        theta3[i] = math.acos(z3/r3[i])
+        phi3[i] = math.atan2(y3, x3) % (2 * math.pi)
 
 
 if __name__ == '__main__':

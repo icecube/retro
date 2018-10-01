@@ -1,3 +1,4 @@
+from __future__ import print_function, division
 '''
 Script to apply k-means to tables, saveing raw templates
 '''
@@ -11,26 +12,31 @@ import cPickle as pickle
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 parser = ArgumentParser()
-parser.add_argument('--overwrite', action='store_true',
-                    help='overwrite existing file')
+parser.add_argument('-d', '--dir', type=str,
+                    metavar='directory', default=None,
+                    help='parent directory of the tables')
 args = parser.parse_args()
 
 
 first = True
-for cluster_idx in range(60):
-    if os.path.isfile('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/templates.npy'%(cluster_idx)):
-        template = np.load('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/cl%s/templates.npy'%(cluster_idx))
+for item in os.listdir(args.dir):
+    path = os.path.join(args.dir, item)
+    if os.path.isdir(path):
+        tf = os.path.join(path, 'templates.npy')
+        if os.path.isfile(tf):
+            template = np.load(tf)
+            print('adding templates from %s'%path)
 
-        if first:
-            templates = np.zeros(template.shape)
-            first = False
+            if first:
+                templates = np.zeros(template.shape)
+                first = False
 
-        # add
-        templates = templates + template
-    else:
-        print 'templates missing for table cluster %s'%(cluster_idx)
+            # add
+            templates = templates + template
+        else:
+            print('templates missing for %s'%path)
 
-print 'all templates summed'
+print('all templates summed')
 
 # now followed by some numpy acrobatics
 
@@ -42,7 +48,7 @@ for i in range(templates.shape[0]):
     if n_templates[i] > 0:
         templates[i] /= n_templates[i]
     else:
-        print 'template %i is zero - substituting with flat template'%i
+        print('template %i is zero - substituting with flat template'%i)
         templates[i] = np.ones_like(templates[i])
         templates[i] /= np.sum(templates[i])
 
@@ -51,4 +57,4 @@ sorted_indices = np.argsort(n_templates)
 templates = templates[sorted_indices[::-1]]
 
 #save
-np.save('/data/icecube/retro_tables/tilt_on_anisotropy_on_noazimuth_80/final_templates.npy', templates)
+np.save(os.path.join(args.dir, 'ckv_dir_templates.npy'), templates)
