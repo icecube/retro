@@ -44,7 +44,8 @@ setup(
         'scipy>=0.17',
         'matplotlib>=2.0',
         'pyfits',
-        'numba>=0.37'
+        'numba>=0.37',
+        'sobol',
     ],
     packages=find_packages(),
     include_dirs=[np.get_include()],

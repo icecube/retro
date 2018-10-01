@@ -1021,13 +1021,6 @@ def parse_args(
     args = parser.parse_args()
     kwargs = vars(args)
 
-    if events:
-        kwargs['start'] = kwargs.pop('start_idx')
-        if kwargs['num_events'] is None:
-            kwargs['stop'] = kwargs.pop('num_events')
-        else:
-            kwargs['stop'] = kwargs['start'] + kwargs.pop('num_events')
-
     dom_tables_kw = {}
     tdi_tables_kw = {}
     hypo_kw = {}

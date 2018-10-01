@@ -287,7 +287,7 @@ def generate_pexp_and_llh_functions(
     t_indep_dom_table_norms.flags.writeable = False
 
     if USE_JITTER:
-        if tdi_tables is not None:
+        if num_tdi_tables > 0:
             raise NotImplementedError('Jitter not yet implemented for TDI tables')
         # Time offsets to sample for DOM jitter
         jitter_dt = np.arange(-10, 11, 2)
@@ -497,7 +497,7 @@ def generate_pexp_and_llh_functions(
             t_indep_dom_tables,
             t_indep_dom_table_norms,
             tdi_tables, # pylint: disable=unused-argument
-        ): # pylint: disable=missing-docstring
+        ): # pylint: disable=missing-docstring, too-many-arguments
             num_operational_doms = len(event_dom_info)
             t_indep_exp = 0.
             for source_idx in range(sources_start, sources_stop):
@@ -598,7 +598,7 @@ def generate_pexp_and_llh_functions(
 
             return t_indep_exp
 
-        pexp.__doc__ = pexp_docstr.format(
+        pexp_.__doc__ = pexp_docstr.format(
             type='int',
             text="""Dummy argument for this version of `pexp` since it doesn't use TDI
             tables (but this argument needs to be present to maintain same
@@ -620,7 +620,7 @@ def generate_pexp_and_llh_functions(
             t_indep_dom_tables, # pylint: disable=unused-argument
             t_indep_dom_table_norms, # pylint: disable=unused-argument
             tdi_tables,
-        ): # pylint: disable=missing-docstring
+        ): # pylint: disable=missing-docstring, too-many-arguments
             t_indep_exp = 0.
             for source_idx in range(sources_start, sources_stop):
                 src = sources[source_idx]
@@ -729,7 +729,7 @@ def generate_pexp_and_llh_functions(
 
             return t_indep_exp
 
-        pexp.__doc__ = pexp_docstr.format(
+        pexp_.__doc__ = pexp_docstr.format(
             type='tuple of 1 or 2 arrays',
             text="""TDI tables"""
         )
@@ -1004,7 +1004,7 @@ def generate_pexp_and_llh_functions(
         t_indep_dom_tables,
         t_indep_dom_table_norms,
         tdi_tables,
-    ):
+    ): # pylint: disable=too-many-arguments
         """Compute log likelihood for hypothesis sources given an event.
 
         Parameters

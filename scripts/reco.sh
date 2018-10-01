@@ -126,12 +126,13 @@ fi
     --events-base "$events_base" \
     --start "$modulo" \
     --step 10 \
-    --num-events 10000 \
-    --pulses "InIcePulses" \
+    --pulses "OfflinePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
-    --hits "pulses/InIcePulses" \
+    --hits "pulses/OfflinePulses" \
     --angsens-model "h2-50cm" \
     --truth
 
+#    --pulses "InIcePulses" \
+#    --hits "pulses/InIcePulses" \
 wait
