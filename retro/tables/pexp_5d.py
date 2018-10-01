@@ -482,7 +482,7 @@ def generate_pexp_and_llh_functions(
         """
     )
 
-    if num_tdi_tables == 0: # not using TDI tables
+    if num_tdi_tables == 0:
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def pexp_(
@@ -575,7 +575,7 @@ def generate_pexp_and_llh_functions(
                                 surv_prob_at_hit_t = table_lookup_mean(
                                     tables=dom_tables,
                                     table_idx=dom_tbl_idx,
-                                    r_bin_dix=r_bin_idx,
+                                    r_bin_idx=r_bin_idx,
                                     costheta_bin_idx=costheta_bin_idx,
                                     t_bin_idx=t_bin_idx,
                                 )
@@ -1132,7 +1132,7 @@ def generate_pexp_and_llh_functions(
             #assert pegleg_steps[0] == 0
             #n_pegleg_steps = len(pegleg_steps)
         else:
-            raise ValueError('Unknown `PEGLEG_SPACING` {}'.format(PEGLEG_SPACING))
+            raise ValueError('Unknown `PEGLEG_SPACING`')
 
         # -- Loop initialization -- #
 
@@ -1258,10 +1258,11 @@ def generate_pexp_and_llh_functions(
             #print(pegleg_steps[:10])
 
         else:
-            raise ValueError('Unknown `PEGLEG_LLH_CHOICE` {}'.format(PEGLEG_LLH_CHOICE))
+            raise ValueError('Unknown `PEGLEG_LLH_CHOICE`')
 
     # -- Define pexp and get_llh closures, baking-in the tables -- #
 
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def pexp(
         sources,
         sources_start,
@@ -1284,6 +1285,7 @@ def generate_pexp_and_llh_functions(
             tdi_tables=tdi_tables,
         )
 
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh(
         generic_sources,
         pegleg_sources,

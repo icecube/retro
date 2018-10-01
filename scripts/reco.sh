@@ -4,7 +4,7 @@ export PATH=~/anaconda2/bin:$PATH
 timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 events_base="$1"
-modulo="$2"
+start_idx="$2"
 outdir="$3"
 
 mkdir -p "$outdir"
@@ -107,6 +107,15 @@ else
 fi
 
 
+# NOTE: Use
+#   --pulses "InIcePulses" \
+#   --hits "pulses/InIcePulses" \
+# for DRAGON MC and use
+#   --pulses "OfflinePulses" \
+#   --hits "pulses/OfflinePulses" \
+# for GRECO MC.
+
+
 #python -m cProfile  \
 #kernprof -l -v \
 ~/retro/retro/reco.py \
@@ -124,8 +133,9 @@ fi
     --use-doms "all" \
     \
     --events-base "$events_base" \
-    --start "$modulo" \
+    --start "$start_idx" \
     --step 10 \
+    \
     --pulses "OfflinePulses" \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
@@ -133,6 +143,4 @@ fi
     --angsens-model "h2-50cm" \
     --truth
 
-#    --pulses "InIcePulses" \
-#    --hits "pulses/InIcePulses" \
 wait

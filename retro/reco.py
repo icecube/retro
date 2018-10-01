@@ -210,6 +210,7 @@ class RetroReco(object):
                         min_vertex=(1, 1, 1, 3),
                         use_priors=False,
                         sobol=True,
+                        seed=0,
                     )
                 elif method == 'multinest':
                     settings = self.run_multinest(
@@ -282,6 +283,7 @@ class RetroReco(object):
                     min_vertex=(5, 5, 5, 15),
                     use_priors=False,
                     sobol=True,
+                    seed=0,
                 )
 
                 t1 = time.time()
@@ -337,6 +339,7 @@ class RetroReco(object):
                     min_vertex=(5, 5, 5, 15),
                     use_priors=False,
                     sobol=True,
+                    seed=0,
                 )
 
                 t1 = time.time()
@@ -494,6 +497,7 @@ class RetroReco(object):
                     min_vertex=(5, 5, 5, 15),
                     use_priors=False,
                     sobol=True,
+                    seed=0,
                 )
 
                 t1 = time.time()
@@ -556,6 +560,7 @@ class RetroReco(object):
                     min_vertex=(5, 5, 5, 15),
                     use_priors=False,
                     sobol=True,
+                    seed=0,
                 )
 
                 t2 = time.time()
@@ -939,13 +944,21 @@ class RetroReco(object):
                 opt_meta_outf = os.path.join(self.outdir, fname + '.pkl')
                 file_exists = os.path.isfile(opt_meta_outf)
                 if self.event_counter == 0:
-                    assert not file_exists, 'File already exists but want to save event #1'
+                    if file_exists:
+                        raise ValueError(
+                            'File already exists but want to save event #1: "{}"'
+                            .format(opt_meta_outf)
+                        )
                     # create new dict
                     out_dict = OrderedDict()
                     for key in opt_meta:
                         out_dict[key] = []
                 else:
-                    assert file_exists, 'File does not exists but want to save event > #1'
+                    if not file_exists:
+                        raise ValueError(
+                            'File does not exist but want to save event > #1: "{}"'
+                            .format(opt_meta_outf)
+                        )
                     out_dict = pickle.load(open(opt_meta_outf, 'rb'))
                     for key, val in out_dict.items():
                         if len(val) != self.event_counter:
@@ -1122,7 +1135,7 @@ class RetroReco(object):
             the initial distributions
         sobol : bool
             use Sobol sequence
-        seed : int, required if not using `sobol`
+        seed : int
 
         Returns
         -------
@@ -1131,10 +1144,8 @@ class RetroReco(object):
         """
         if sobol:
             from sobol import i4_sobol
-            assert seed is None
-        else:
-            assert seed is not None
-            rand = np.random.RandomState(seed=seed)
+
+        rand = np.random.RandomState(seed=seed)
 
         def fun(x):
             """Callable for minimizer"""
