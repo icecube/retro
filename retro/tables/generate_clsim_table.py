@@ -4,7 +4,7 @@
 # pylint: disable=import-error
 
 """
-Create a Retro table: Prpagate light outwards from a DOM and tabulate the
+Create a Retro table: Propagate light outwards from a DOM and tabulate the
 photons. Uses CLSim (tabulator) to do the work of photon propagation.
 """
 

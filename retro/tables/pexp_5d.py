@@ -17,7 +17,7 @@ __all__ = [
     'SCALE_FACTOR_MINIMIZER',
     'PEGLEG_SPACING',
     'PEGLEG_LLH_CHOICE',
-    'PEGLEG_BEST_LLH_THRESHOLD',
+    'PEGLEG_BEST_DELTA_LLH_THRESHOLD',
     'USE_JITTER',
     'generate_pexp_and_llh_functions',
 ]
@@ -91,11 +91,11 @@ or logarithmically (more segments are added the longer the track"""
 PEGLEG_LLH_CHOICE = LLHChoice.MEAN
 """How to choose best LLH from all Pegleg steps"""
 
-PEGLEG_BEST_LLH_THRESHOLD = 0.1
+PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
 """For Pegleg `LLHChoice` that require a range of LLH and average (mean, median, etc.),
 take all LLH that are within this threshold of the maximum LLH"""
 
-USE_JITTER = True
+USE_JITTER = False
 """Whether to use a crude jitter implementation"""
 
 
@@ -741,7 +741,7 @@ def generate_pexp_and_llh_functions(
         nonscaling_hit_exp,
         nonscaling_t_indep_exp,
     ):
-        """get llh if no scaling sources are present
+        """Get llh if no scaling sources are present.
 
         Parameters:
         -----------
@@ -1038,9 +1038,12 @@ def generate_pexp_and_llh_functions(
         -------
         llh : float
             Log-likelihood value at best pegleg hypo
-        pegleg_stop_idx : int
-            Stop index for `pegleg_sources` to obtain optimal LLH .. ::
+        pegleg_stop_idx : int or float
+            Pegleg stop index for `pegleg_sources` to obtain `llh`. If integer, .. ::
                 pegleg_sources[:pegleg_stop_idx]
+            but float can also be returned if `PEGLEG_LLH_CHOICE` is not LLHChoice.MAX.
+            `pegleg_stop_idx` is designed to be fed to
+            :func:`retro.hypo.discrete_muon_kernels.pegleg_eval`
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
 
@@ -1075,19 +1078,20 @@ def generate_pexp_and_llh_functions(
         nonscaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
         # Expectations for generic-only sources (i.e. pegleg=0 at this point)
-        nonscaling_t_indep_exp += pexp_(
-            sources=generic_sources,
-            sources_start=0,
-            sources_stop=len(generic_sources),
-            event_dom_info=event_dom_info,
-            event_hit_info=event_hit_info,
-            hit_exp=nonscaling_hit_exp,
-            dom_tables=dom_tables,
-            dom_table_norms=dom_table_norms,
-            t_indep_dom_tables=t_indep_dom_tables,
-            t_indep_dom_table_norms=t_indep_dom_table_norms,
-            tdi_tables=tdi_tables,
-        )
+        if len(generic_sources) > 0:
+            nonscaling_t_indep_exp += pexp_(
+                sources=generic_sources,
+                sources_start=0,
+                sources_stop=len(generic_sources),
+                event_dom_info=event_dom_info,
+                event_hit_info=event_hit_info,
+                hit_exp=nonscaling_hit_exp,
+                dom_tables=dom_tables,
+                dom_table_norms=dom_table_norms,
+                t_indep_dom_tables=t_indep_dom_tables,
+                t_indep_dom_table_norms=t_indep_dom_table_norms,
+                tdi_tables=tdi_tables,
+            )
 
         if num_scaling_sources > 0:
             # Compute initial scalefactor & LLH for generic-only (no pegleg) sources
@@ -1111,13 +1115,18 @@ def generate_pexp_and_llh_functions(
 
         if num_pegleg_sources == 0:
             # in this case we're done
-            return llh, 0, scalefactor
+            return (
+                llh,
+                0, # pegleg_stop_idx = 0: no pegleg sources
+                scalefactor,
+            )
 
         # -- Pegleg loop -- #
 
         if PEGLEG_SPACING is StepSpacing.LINEAR:
-            pegleg_steps = np.arange(num_pegleg_sources)
-            n_pegleg_steps = len(pegleg_steps)
+            pass
+            #pegleg_steps = np.arange(num_pegleg_sources)
+            #n_pegleg_steps = len(pegleg_steps)
         elif PEGLEG_SPACING is StepSpacing.LOG:
             raise NotImplementedError(
                 'Only ``PEGLEG_SPACING = StepSpacing.LINEAR`` is implemented'
@@ -1136,7 +1145,7 @@ def generate_pexp_and_llh_functions(
 
         # -- Loop initialization -- #
 
-        num_llhs = n_pegleg_steps + 1
+        num_llhs = num_pegleg_steps + 1
         llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
         llhs[0] = llh
 
@@ -1156,8 +1165,8 @@ def generate_pexp_and_llh_functions(
             # sources
             nonscaling_t_indep_exp += pexp_(
                 sources=pegleg_sources,
-                sources_start=pegleg_steps[pegleg_start_idx],
-                sources_stop=pegleg_steps[pegleg_stop_idx],
+                sources_start=pegleg_start_idx,
+                sources_stop=pegleg_stop_idx,
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
                 hit_exp=nonscaling_hit_exp,
@@ -1213,25 +1222,28 @@ def generate_pexp_and_llh_functions(
         if PEGLEG_LLH_CHOICE is LLHChoice.MAX:
             return (
                 llhs[pegleg_max_llh_step],
-                pegleg_steps[pegleg_max_llh_step],
+                pegleg_max_llh_step * pegleg_stepsize,
                 scalefactors[pegleg_max_llh_step],
             )
 
         elif PEGLEG_LLH_CHOICE is LLHChoice.MEAN:
-            # not sure if good idea...
-            best_llh = llhs[pegleg_max_llh_step]
-            final_llh = 0.
-            final_idx = 0.
-            final_scalefactor = 0.
-            counter = 0.
-            for pegleg_idx in range(num_llhs):
-                if llhs[pegleg_idx] > best_llh - PEGLEG_BEST_LLH_THRESHOLD:
-                    counter += 1.
-                    final_llh += llhs[pegleg_idx]
-                    final_idx += pegleg_idx
-                    final_scalefactor += scalefactors[pegleg_idx]
+            max_llh = llhs[pegleg_max_llh_step]
+            total_llh_above_thresh = 0.
+            total_idx_above_thresh = 0.
+            total_scalefactor_above_thresh = 0.
+            counter = 0
+            for pegleg_step in range(num_llhs):
+                if llhs[pegleg_step] > max_llh - PEGLEG_BEST_DELTA_LLH_THRESHOLD:
+                    counter += 1
+                    total_llh_above_thresh += llhs[pegleg_step]
+                    total_idx_above_thresh += pegleg_step * pegleg_stepsize
+                    total_scalefactor_above_thresh += scalefactors[pegleg_step]
 
-            return final_llh/counter, final_idx/counter, final_scalefactor/counter
+            return (
+                total_llh_above_thresh / counter,
+                total_idx_above_thresh / counter,
+                total_scalefactor_above_thresh / counter,
+            )
 
         elif PEGLEG_LLH_CHOICE is LLHChoice.MEDIAN:
             raise NotImplementedError(
@@ -1262,7 +1274,7 @@ def generate_pexp_and_llh_functions(
 
     # -- Define pexp and get_llh closures, baking-in the tables -- #
 
-    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    # Note: faster to _not_ jit-compile this function (why, though?)
     def pexp(
         sources,
         sources_start,
@@ -1285,7 +1297,7 @@ def generate_pexp_and_llh_functions(
             tdi_tables=tdi_tables,
         )
 
-    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    # Note: numba fails w/ TDI tables if this is set to be jit-compiled (why?)
     def get_llh(
         generic_sources,
         pegleg_sources,
