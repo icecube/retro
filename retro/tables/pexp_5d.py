@@ -95,7 +95,11 @@ PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
 """For Pegleg `LLHChoice` that require a range of LLH and average (mean, median, etc.),
 take all LLH that are within this threshold of the maximum LLH"""
 
-USE_JITTER = False
+# TODO: a "proper" jitter (and transit time spread) implementation should treat each DOM
+# independently and pick the time offset for each DOM that maximizes LLH (_not_ expected
+# photon detections)
+
+USE_JITTER = True
 """Whether to use a crude jitter implementation"""
 
 
@@ -287,12 +291,8 @@ def generate_pexp_and_llh_functions(
     t_indep_dom_table_norms.flags.writeable = False
 
     if USE_JITTER:
-        if num_tdi_tables > 0:
-            raise NotImplementedError('Jitter not yet implemented for TDI tables')
         # Time offsets to sample for DOM jitter
         jitter_dt = np.arange(-10, 11, 2)
-        #jitter_dt =  np.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
-        #jitter_dt =  np.array([0])
 
         # Weight at each time offset
         jitter_weights = stats.norm.pdf(jitter_dt, 0, 5)
@@ -562,11 +562,10 @@ def generate_pexp_and_llh_functions(
 
                         for jitter_idx in range(num_jitter_time_offsets):
                             dt = nominal_dt + jitter_dt[jitter_idx]
-                            jitter_weight = jitter_weights[jitter_idx]
 
                             # Note the comparison is written such that it will evaluate
-                            # to True if `nominal_dt` is NaN or less than zero.
-                            if (not nominal_dt >= 0) or nominal_dt > t_max:
+                            # to True if `dt` is NaN or less than zero.
+                            if (not dt >= 0) or dt > t_max:
                                 continue
 
                             t_bin_idx = digitize_t(dt)
@@ -592,7 +591,7 @@ def generate_pexp_and_llh_functions(
                                 )
 
                             r_t_bin_norm = dom_table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
-                            hit_exp[hit_idx] += jitter_weight * (
+                            hit_exp[hit_idx] += jitter_weights[jitter_idx] * (
                                 src['photons'] * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
                             )
 
@@ -621,6 +620,8 @@ def generate_pexp_and_llh_functions(
             t_indep_dom_table_norms, # pylint: disable=unused-argument
             tdi_tables,
         ): # pylint: disable=missing-docstring, too-many-arguments
+            # -- Time- and DOM-independent photon-detection expectation -- #
+
             t_indep_exp = 0.
             for source_idx in range(sources_start, sources_stop):
                 src = sources[source_idx]
@@ -653,6 +654,8 @@ def generate_pexp_and_llh_functions(
                     ]
                 else:
                     continue
+
+            # -- Time-dependent photon-det expectation for each hit DOM -- #
 
             for hit_idx, hit_info in enumerate(event_hit_info):
                 dom_info = event_dom_info[hit_info['event_dom_idx']]
@@ -695,37 +698,45 @@ def generate_pexp_and_llh_functions(
                     else:
                         nominal_dt = hit_info['time'] - src['time']
 
-                    # Note the comparison is written such that it will evaluate
-                    # to True if `nominal_dt` is NaN.
-                    if (not nominal_dt >= 0) or nominal_dt > t_max:
-                        continue
+                    # Note: caching last `t_bin_idx`, `r_t_bin_norm`, and
+                    # `surv_prob_at_hit_t` and checking for identical `t_bin_idx` seems
+                    # to take about the same time as not caching these values, so
+                    # choosing the simpler way
 
-                    t_bin_idx = digitize_t(nominal_dt)
+                    for jitter_idx in range(num_jitter_time_offsets):
+                        dt = nominal_dt + jitter_dt[jitter_idx]
 
-                    if src['kind'] == SRC_OMNI:
-                        surv_prob_at_hit_t = table_lookup_mean(
-                            tables=dom_tables,
-                            table_idx=dom_tbl_idx,
-                            r_bin_idx=r_bin_idx,
-                            costheta_bin_idx=costheta_bin_idx,
-                            t_bin_idx=t_bin_idx,
+                        # Note the comparison is written such that it will evaluate to
+                        # True if `dt` is NaN or less than zero.
+                        if (not dt >= 0) or dt > t_max:
+                            continue
+
+                        t_bin_idx = digitize_t(dt)
+
+                        if src['kind'] == SRC_OMNI:
+                            surv_prob_at_hit_t = table_lookup_mean(
+                                tables=dom_tables,
+                                table_idx=dom_tbl_idx,
+                                r_bin_idx=r_bin_idx,
+                                costheta_bin_idx=costheta_bin_idx,
+                                t_bin_idx=t_bin_idx,
+                            )
+
+                        else: # SRC_CKV_BETA1
+                            surv_prob_at_hit_t = table_lookup(
+                                tables=dom_tables,
+                                table_idx=dom_tbl_idx,
+                                r_bin_idx=r_bin_idx,
+                                costheta_bin_idx=costheta_bin_idx,
+                                t_bin_idx=t_bin_idx,
+                                costhetadir_bin_idx=costhetadir_bin_idx,
+                                deltaphidir_bin_idx=deltaphidir_bin_idx,
+                            )
+
+                        r_t_bin_norm = dom_table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
+                        hit_exp[hit_idx] += jitter_weights[jitter_idx] * (
+                            src['photons'] * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
                         )
-
-                    else: # SRC_CKV_BETA1
-                        surv_prob_at_hit_t = table_lookup(
-                            tables=dom_tables,
-                            table_idx=dom_tbl_idx,
-                            r_bin_idx=r_bin_idx,
-                            costheta_bin_idx=costheta_bin_idx,
-                            t_bin_idx=t_bin_idx,
-                            costhetadir_bin_idx=costhetadir_bin_idx,
-                            deltaphidir_bin_idx=deltaphidir_bin_idx,
-                        )
-
-                    r_t_bin_norm = dom_table_norms[dom_tbl_idx][r_bin_idx, t_bin_idx]
-                    hit_exp[hit_idx] += (
-                        src['photons'] * r_t_bin_norm * surv_prob_at_hit_t * dom_qe
-                    )
 
             return t_indep_exp
 
