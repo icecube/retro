@@ -9,20 +9,12 @@ outdir="$3"
 
 mkdir -p "$outdir"
 
-#proto="/fastio2/icecube/retro/tables/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
-#tmpl_lib=""
-
-#proto="/gpfs/scratch/jll1062/retro_tables/stacked"
-#tmpl_lib="--template-library /gpfs/scratch/jll1062/retro_tables/ckv_dir_templates.npy"
-
-#proto="/data/icecube/retro_tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
-#tmpl_lib="--template-library /data/icecube/retro_tables/large_5d_notilt_combined/ckv_dir_templates.npy"
-
 # -- Tables -- #
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
     tdi0=""
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
+    #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_on"
     tdi1=""
 
     # -- Mie tables: stacked, template compressed -- #
@@ -83,7 +75,6 @@ else
     tdi0=""
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_on"
-
     tdi1=""
 
     # -- Lea tables: 80 clusters, template compressed -- #
@@ -106,15 +97,22 @@ else
 
 fi
 
+#    --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
 
-# NOTE: Use
+# NOTE:
+#
+# for DRAGON MC, use
 #   --pulses "InIcePulses" \
 #   --hits "pulses/InIcePulses" \
-# for DRAGON MC and use
+# and for GRECO MC, use
 #   --pulses "OfflinePulses" \
 #   --hits "pulses/OfflinePulses" \
-# for GRECO MC.
-
+#
+# If pulses provided are photons, then specify e.g.
+#   --angsens-model 9
+# or
+#   --angsens-model h2-50cm
+# etc. (note that tables for now are hard-coded to be generated using "9")
 
 #python -m cProfile  \
 #kernprof -l -v \
@@ -124,7 +122,7 @@ fi
     \
     --dom-tables-kind "$tblkind" \
     --dom-tables-fname-proto "$proto" \
-    --gcd "GeoCalibDetectorStatus_IC86.2017.Run129700_V0.pkl" \
+    --gcd "GeoCalibDetectorStatus_2013.56429_V1_Modified" \
     --norm-version "binvol2.5" \
     $tdi0 \
     $tdi1 \
@@ -140,7 +138,7 @@ fi
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/OfflinePulses" \
-    --angsens-model "h2-50cm" \
+    --angsens-model 9 \
     --truth
 
 wait

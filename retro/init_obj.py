@@ -78,7 +78,6 @@ def setup_dom_tables(
     dom_tables_kind,
     dom_tables_fname_proto,
     gcd,
-    angsens_model,
     norm_version,
     use_sd_indices=const.ALL_STRS_DOMS,
     step_length=1.0,
@@ -86,7 +85,6 @@ def setup_dom_tables(
     ckv_sigma_deg=None,
     template_library=None,
     compute_t_indep_exp=True,
-    use_directionality=True,
     no_noise=False,
     force_no_mmap=False,
 ):
@@ -97,7 +95,6 @@ def setup_dom_tables(
     dom_tables_kind : str
     dom_tables_fname_proto : str
     gcd : str
-    angsens_model : str
     norm_version : str
     use_sd_indices : sequence
     step_length : float
@@ -105,7 +102,6 @@ def setup_dom_tables(
     ckv_sigma_deg : float, optional
     template_library : str, optional
     compute_t_indep_exp : bool, optional
-    use_directionality : bool, optional
     no_noise : bool, optional
     force_no_mmap : bool, optional
 
@@ -141,9 +137,7 @@ def setup_dom_tables(
         geom=gcd['geo'],
         rde=gcd['rde'],
         noise_rate_hz=gcd['noise'],
-        angsens_model=angsens_model,
         compute_t_indep_exp=compute_t_indep_exp,
-        use_directionality=use_directionality,
         norm_version=norm_version,
         num_phi_samples=num_phi_samples,
         ckv_sigma_deg=ckv_sigma_deg,
@@ -426,7 +420,10 @@ def get_events(
         to not extract any trigger hierarchies.
 
     angsens_model : string
-        Required if `photons` specifies any photon series to extract.
+        Required if `photons` specifies any photon series to extract, as this angular
+        sensitivity model is applied to the photons to arrive at expectation for
+        detected photons (though without taking into account any further details of the
+        DOM's ability to detect photons)
 
     hits : string or sequence thereof, optional
         Path to photon or pulse series to extract as ``event["hits"]`` field.
@@ -1052,7 +1049,6 @@ def parse_args(
         print('nubmer of doms = {}'.format(len(use_sd_indices)))
         kwargs['use_sd_indices'] = use_sd_indices
         kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
-        kwargs['use_directionality'] = not kwargs.pop('no_dir')
 
     for key, val in kwargs.items():
         taken = False
