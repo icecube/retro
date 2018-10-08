@@ -242,7 +242,12 @@ class RetroReco(object):
                     run_time=t1 - t0,
                     fname='opt_meta',
                 )
-                estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
+                estimate = self.make_estimate(
+                    llhp=llhp,
+                    remove_priors=True,
+                    meta=opt_meta,
+                    fname='estimate',
+                )
 
             elif method == 'fast':
                 t0 = time.time()
@@ -295,7 +300,12 @@ class RetroReco(object):
                     run_time=t1 - t0,
                     fname='opt_meta',
                 )
-                estimate = self.make_estimate(llhp, fname='estimate')
+                estimate = self.make_estimate(
+                    llhp=llhp,
+                    remove_priors=False,
+                    meta=opt_meta,
+                    fname='estimate',
+                )
 
             elif method == 'crs_prefit_mn':
                 t0 = time.time()
@@ -986,21 +996,30 @@ class RetroReco(object):
 
         return opt_meta
 
-    def make_estimate(self, llhp, opt_meta=None, fname=None):
+    def make_estimate(self, llhp, opt_meta, remove_priors, fname=None):
         """Create estimate from llhp and optionally save to disk.
 
         Parameters
         ----------
-        llhp
-        opt_meta : , optional
+        llhp : length-num_llhp array of dtype llhp_t
+        remove_priors : bool
+            Remove effect of priors
+        opt_meta : mapping
         fname : string, optional
+            If provided, information will be saved to disk
 
         Returns
         -------
         estimate
 
         """
-        estimate = estimate_from_llhp(llhp=llhp, meta=opt_meta)
+        estimate = estimate_from_llhp(
+            llhp=llhp,
+            treat_dims_independently=False,
+            use_prob_weights=True
+            remove_priors=True,
+            meta=opt_meta,
+        )
         estimate['event_idx'] = self.current_event_idx
         if fname is None:
             return estimate
@@ -1619,10 +1638,10 @@ class RetroReco(object):
             LogLikelihood=self.loglike,
             Prior=self.prior,
             verbose=True,
-            outputfiles_basename=self.out_prefix,
+            outputfiles_basename='/tmp/jll1062/x', #self.out_prefix,
             resume=False,
-            write_output=False,
-            n_iter_before_update=5000,
+            write_output=True,
+            n_iter_before_update=REPORT_AFTER,
             **settings
         )
 

@@ -78,7 +78,7 @@ def setup_dom_tables(
     dom_tables_kind,
     dom_tables_fname_proto,
     gcd,
-    norm_version,
+    norm_version='binvol2.5',
     use_sd_indices=const.ALL_STRS_DOMS,
     step_length=1.0,
     num_phi_samples=None,
@@ -95,9 +95,9 @@ def setup_dom_tables(
     dom_tables_kind : str
     dom_tables_fname_proto : str
     gcd : str
-    norm_version : str
-    use_sd_indices : sequence
-    step_length : float
+    norm_version : str, optional
+    use_sd_indices : sequence, optional
+    step_length : float, optional
     num_phi_samples : int, optional
     ckv_sigma_deg : float, optional
     template_library : str, optional
@@ -885,7 +885,7 @@ def parse_args(
         )
         group.add_argument(
             '--norm-version',
-            required=True,
+            required=False, default='binvol2.5',
             choices=NORM_VERSIONS,
             help='''Norm version.'''
         )
@@ -911,10 +911,6 @@ def parse_args(
             '--no-t-indep', action='store_true',
             help='''Do NOT load t-indep tables (time-independent expectations
             would have to be handled by specifying a TDI table'''
-        )
-        group.add_argument(
-            '--no-dir', action='store_true',
-            help='''Do NOT use source photon directionality'''
         )
         group.add_argument(
             '--force-no-mmap', action='store_true',
