@@ -15,7 +15,7 @@ __all__ = [
     'SAVE_FULL_INFO',
     'APPEND_FILE',
     'USE_PRIOR_UNWEIGHTING',
-    'RetroReco',
+    'Reco',
     'parse_args',
 ]
 
@@ -90,7 +90,7 @@ APPEND_FILE = True
 USE_PRIOR_UNWEIGHTING = True
 
 
-class RetroReco(object):
+class Reco(object):
     """
     Setup tables, get events, run reconstructons on them, and store the results to disk.
 
@@ -176,9 +176,9 @@ class RetroReco(object):
         self.n_opt_params = self.hypo_handler.n_opt_params
 
     def run(self, method):
-        """Run reconstructions on `self.events`.
+        """Run reconstructions on events.
 
-        This collects many recipes (methods) for performing different kinds of
+        This method collects many recipes for performing different kinds of
         reconstructions.
 
         Parameters
@@ -265,11 +265,11 @@ class RetroReco(object):
                 run_info['run_time'] = t1 - t0
 
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                estimate = self.make_estimate(
+                self.make_estimate(
                     llhp=llhp,
                     remove_priors=True,
                     run_info=run_info,
-                    fname='estimate',
+                    fname='estimate_{}'.format(method),
                 )
 
             elif method == 'fast':
@@ -317,11 +317,11 @@ class RetroReco(object):
                 run_info['run_time'] = t1 - t0
 
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                run_info = self.make_estimate(
+                self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
                     run_info=run_info,
-                    fname='estimate',
+                    fname='estimate_{}'.format(method),
                 )
 
             elif method == 'crs_prefit_mn':
@@ -356,7 +356,7 @@ class RetroReco(object):
                     t_start=t_start,
                 )
 
-                run_info = self.run_crs(
+                prefit_run_info = self.run_crs(
                     n_live=160,
                     max_iter=10000,
                     max_noimprovement=1000,
@@ -368,14 +368,14 @@ class RetroReco(object):
                 )
 
                 t1 = time.time()
-                run_info['run_time'] = t1 - t0
+                prefit_run_info['run_time'] = t1 - t0
 
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                estimate = self.make_estimate(
+                prefit_estimate = self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
-                    run_info=run_info,
-                    fname='prefit_estimate',
+                    run_info=prefit_run_info,
+                    fname='prefit_estimate_{}'.format(method),
                 )
 
                 print('--- MultiNest fit including aligned 1D cascade ---')
@@ -393,10 +393,10 @@ class RetroReco(object):
 
                 # Setup prior
 
-                est_x = estimate['weighted_mean']['x']
-                est_y = estimate['weighted_mean']['y']
-                est_z = estimate['weighted_mean']['z']
-                est_time = estimate['weighted_mean']['time']
+                est_x = prefit_estimate.loc[dict(kind='mean', param='x')]
+                est_y = prefit_estimate.loc[dict(kind='mean', param='y')]
+                est_z = prefit_estimate.loc[dict(kind='mean', param='z')]
+                est_time = prefit_estimate.loc[dict(kind='mean', param='time')]
 
                 prior_defs = OrderedDict()
                 prior_defs['x'] = dict(
@@ -450,11 +450,11 @@ class RetroReco(object):
                 run_info['run_time'] = t2 - t1
 
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                estimate = self.make_estimate(
+                self.make_estimate(
                     run_info=run_info,
                     llhp=llhp,
                     remove_priors=False,
-                    fname='estimate',
+                    fname='estimate_{}'.format(method),
                 )
 
                 # -- 10D -- #
@@ -467,10 +467,10 @@ class RetroReco(object):
                 #)
 
                 #self.hypo_handler.fixed_params = OrderedDict()
-                #self.hypo_handler.fixed_params['x'] = estimate['weighted_mean']['x']
-                #self.hypo_handler.fixed_params['y'] = estimate['weighted_mean']['y']
-                #self.hypo_handler.fixed_params['z'] = estimate['weighted_mean']['z']
-                #self.hypo_handler.fixed_params['time'] = estimate['weighted_mean']['time']
+                #self.hypo_handler.fixed_params['x'] = estimate['mean']['x']
+                #self.hypo_handler.fixed_params['y'] = estimate['mean']['y']
+                #self.hypo_handler.fixed_params['z'] = estimate['mean']['z']
+                #self.hypo_handler.fixed_params['time'] = estimate['mean']['time']
 
                 #param_values = []
                 #log_likelihoods = []
@@ -500,7 +500,7 @@ class RetroReco(object):
                 #run_info['run_time'] = t3 - t2
 
                 #llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                #estimate = self.make_estimate(llhp, opt_meta, fname='10d_estimate')
+                #self.make_estimate(llhp, opt_meta, fname='10d_estimate')
 
             elif method == 'experimental_trackfit':
                 t0 = time.time()
@@ -531,7 +531,7 @@ class RetroReco(object):
                     t_start=t_start,
                 )
 
-                run_info = self.run_crs(
+                prefit_run_info = self.run_crs(
                     n_live=160,
                     max_iter=20000,
                     max_noimprovement=2000,
@@ -543,14 +543,14 @@ class RetroReco(object):
                 )
 
                 t1 = time.time()
-                run_info['run_time'] = t1 - t0
+                prefit_run_info['run_time'] = t1 - t0
 
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
                 prefit_estimate = self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
-                    run_info=run_info,
-                    fname='prefit_estimate',
+                    run_info=prefit_run_info,
+                    fname='prefit_estimate_{}'.format(method),
                 )
 
                 print('--- hybrid fit ---')
@@ -565,7 +565,7 @@ class RetroReco(object):
 
                 self.hypo_handler.fixed_params = OrderedDict()
                 self.hypo_handler.fixed_params['track_energy'] = (
-                    prefit_estimate['weighted_median']['track_energy']
+                    prefit_estimate.loc[dict(kind='median', param='track_energy')]
                 )
 
                 param_values = []
@@ -575,25 +575,25 @@ class RetroReco(object):
                     OrderedDict([
                         ('x', dict(
                             kind='cauchy',
-                            loc=prefit_estimate['weighted_median']['x'],
+                            loc=prefit_estimate.loc[dict(kind='median', param='x')],
                             scale=12,
                         )),
                         ('y', dict(
                             kind='cauchy',
-                            loc=prefit_estimate['weighted_median']['y'],
+                            loc=prefit_estimate.loc[dict(kind='median', param='y')],
                             scale=13,
                         )),
                         ('z', dict(
                             kind='cauchy',
-                            loc=prefit_estimate['weighted_median']['z'],
+                            loc=prefit_estimate.loc[dict(kind='median', param='z')],
                             scale=7.5,
                         )),
                         ('time', dict(
                             kind='cauchy',
-                            loc=prefit_estimate['weighted_median']['time'],
+                            loc=prefit_estimate.loc[dict(kind='median', param='time')],
                             scale=40,
-                            low=prefit_estimate['weighted_median']['time'] - 2000,
-                            high=prefit_estimate['weighted_median']['time'] + 2000,
+                            low=prefit_estimate.loc[dict(kind='median', param='time')] - 2000,
+                            high=prefit_estimate.loc[dict(kind='median', param='time')] + 2000,
                         )),
                     ])
                 )
@@ -619,11 +619,11 @@ class RetroReco(object):
                 run_info['run_time'] = t2 - t1
 
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                estimate = self.make_estimate(
+                self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
                     run_info=run_info,
-                    fname='estimate',
+                    fname='estimate_{}'.format(method),
                 )
             else:
                 raise ValueError('Unknown `Method` {}'.format(method))
@@ -683,6 +683,9 @@ class RetroReco(object):
         param_values : list
         log_likelihoods : list
         t_start : list
+            Needs to be a list for start time to be passed by reference and therefore
+            universally accessible within all methods that require knowing the start
+            time
 
         """
         # -- Variables to be captured by `loglike` closure -- #
@@ -690,20 +693,15 @@ class RetroReco(object):
         all_param_names = self.hypo_handler.all_param_names
         opt_param_names = self.hypo_handler.opt_param_names
         n_opt_params = self.hypo_handler.n_opt_params
-
         fixed_params = self.hypo_handler.fixed_params
-
         event = self.current_event
-
         hits = event['hits']
         hits_indexer = event['hits_indexer']
         hypo_handler = self.hypo_handler
         pegleg_muon_dt = hypo_handler.pegleg_kernel_kwargs.get('dt')
         pegleg_muon_const_e_loss = False
-
         dom_info = self.dom_tables.dom_info
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
-
         truth_info = OrderedDict([
             ('x', event['truth']['x']),
             ('y', event['truth']['y']),
@@ -719,7 +717,6 @@ class RetroReco(object):
             ('cascade_energy', event['truth']['cascade_energy']),
             ('neutrino_energy', event['truth']['energy']),
         ])
-
         num_operational_doms = np.sum(dom_info['operational'])
 
         # Array containing only DOMs operational during the event & info
@@ -735,8 +732,8 @@ class RetroReco(object):
 
         copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
 
-        print('all noise rate %.5f'%np.sum(dom_info['noise_rate_per_ns']))
-        print('DOMs with zero noise %i'%np.sum(dom_info['noise_rate_per_ns'] == 0))
+        print('all noise rate %.5f' % np.sum(dom_info['noise_rate_per_ns']))
+        print('DOMs with zero noise %i' % np.sum(dom_info['noise_rate_per_ns'] == 0))
 
         # Fill `event_{hit,dom}_info` arrays only for operational DOMs
         for dom_idx, this_dom_info in enumerate(dom_info[dom_info['operational']]):
@@ -800,7 +797,7 @@ class RetroReco(object):
 
             """
             t0 = time.time()
-            if not t_start:
+            if len(t_start) == 0:
                 t_start.append(time.time())
 
             hypo = OrderedDict(list(zip(opt_param_names, cube)))
@@ -988,7 +985,7 @@ class RetroReco(object):
             * If provided and APPEND_FILE is True, an `xarray.Dataset` where each
               contained `xarray.DataArray` is one event's reconstruction (plus run and
               estimate metadata); the name of each DataArray is the event index, and
-              RetroReco metadata is stored to `Dataset.attrs`; output file is
+              Reco metadata is stored to `Dataset.attrs`; output file is
                 {outdir}/{fname}_{start}:{stop}:{step}.pkl
             * If provided and APPEND_FILE is False, event and run_info metadata is
               written as an `xarray.DataArray` containing estimate and metadata to file
@@ -1000,9 +997,6 @@ class RetroReco(object):
         estimate : xarray.DataArray
 
         """
-        if run_info is None:
-            run_info = {}
-
         estimate = estimate_from_llhp(
             llhp=llhp,
             treat_dims_independently=False,
@@ -1015,9 +1009,12 @@ class RetroReco(object):
                 event_idx=self.current_event_idx,
                 params=list(self.hypo_handler.all_param_names),
                 priors_used=self.priors_used,
-                run_info=sort_dict(run_info),
             )
         )
+        if run_info is None:
+            attrs['run_info'] = OrderedDict()
+        else:
+            attrs['run_info'] = run_info
         estimate.attrs = sort_dict(attrs)
         estimate.name = self.current_event_idx
         if not fname:
@@ -1056,12 +1053,14 @@ class RetroReco(object):
     def run_test(self, seed):
         """Random sampling instead of an actual minimizer"""
         raise NotImplementedError('`run_test` not implemented') # TODO
+        kwargs = sort_dict(dict(seed=seed))
         rand = np.random.RandomState(seed=seed)
         for i in range(100):
             param_vals = rand.uniform(0, 1, self.n_opt_params)
             self.prior(param_vals)
             llh = self.loglike(param_vals)
-        run_info = dict()
+        run_info = sort_dict(dict(method='run_test', kwargs=kwargs))
+        return run_info
 
     def run_with_truth(self, rand_dims=None, n_samples=10000, seed=0):
         """Run with all params set to truth except for the dimensions defined, which
@@ -1105,7 +1104,8 @@ class RetroReco(object):
         else:
             llh = self.loglike(true_params)
 
-        return dict()
+        run_info = sort_dict(dict(method='run_with_truth', kwargs=kwargs))
+        return run_info
 
     def run_crs(
         self,
@@ -1378,11 +1378,11 @@ class RetroReco(object):
             # point -> start over
             num_failures += 1
 
-        print(CRS_FLAGS[stopping_flag])
+        print(CRS_STOP_FLAGS[stopping_flag])
 
         fit_meta = sort_dict(dict(
             stopping_flag=stopping_flag,
-            stopping_message=CRS_FLAGS[stopping_flag],
+            stopping_message=CRS_STOP_FLAGS[stopping_flag],
             num_simplex_successes=num_simplex_successes,
             num_mutation_successes=num_mutation_successes,
             num_failures=num_failures,
@@ -1395,11 +1395,15 @@ class RetroReco(object):
             kwargs=kwargs,
             fit_meta=fit_meta,
         ))
-
         return run_info
 
     def run_scipy(self, method, eps):
         from scipy import optimize
+
+        kwargs = sort_dict(dict(
+            method=method,
+            eps=eps,
+        ))
 
         # initial guess
         x0 = 0.5 * np.ones(shape=self.n_opt_params)
@@ -1420,7 +1424,7 @@ class RetroReco(object):
         else:
             optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
 
-        run_info = dict(settings=settings)
+        run_info = sort_dict(dict(method='run_scipy', kwargs=kwargs))
         return run_info
 
     def run_skopt(self):
@@ -1450,7 +1454,7 @@ class RetroReco(object):
             **settings
         )
 
-        run_info = dict(settings=settings)
+        run_info = sort_dict(dict(method='run_skopt', settings=settings))
         return run_info
 
     def run_nlopt(self):
@@ -1588,9 +1592,7 @@ class RetroReco(object):
             stopval=opt.get_stopval(),
         ))
 
-        run_info = sort_dict(dict(
-            settings=settings,
-        ))
+        run_info = sort_dict(dict(method='run_nlopt', settings=settings))
         return run_info
 
     def run_multinest(
@@ -1687,7 +1689,6 @@ class RetroReco(object):
             mn_kwargs=mn_kwargs,
             fit_meta=fit_meta,
         ))
-
         return run_info
 
 
@@ -1723,5 +1724,5 @@ if __name__ == '__main__':
     # pylint: disable=invalid-name
     kwargs = parse_args()
     method = kwargs['other_kw'].pop('method')
-    my_reco = RetroReco(**kwargs)
+    my_reco = Reco(**kwargs)
     my_reco.run(method=method)
