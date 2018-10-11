@@ -222,7 +222,7 @@ def estimate_from_llhp(
         weights = copy(prob_weights)
     else:
         prob_weights = None
-        weights = np.ones(shape=num_llh)
+        weights = np.ones(shape=len(llh))
 
     if treat_dims_independently:
         weights = {d: copy(weights) for d in priors_used.keys()}
@@ -285,7 +285,7 @@ def estimate_from_llhp(
         # will have a different max since each gets weighted independently
         max_postproc_llh = max_llh
     else:
-        postproc_llh = np.log(weights)
+        postproc_llh = max_llh + np.log(weights)
         max_idx = np.nanargmax(postproc_llh)
         max_postproc_llh = postproc_llh[max_idx]
         params_at_max_llh = llhp[max_idx]
@@ -391,7 +391,7 @@ def estimate_from_llhp(
 
         # calculate the average of Cartesian coords
         # first need to create (x,y,z) array
-        cart = np.empty(shape=(3, num_llh))
+        cart = np.empty(shape=(3, len(cut_llhp)))
         cart[0, :] = np.cos(az) * np.sin(zen)
         cart[1, :] = np.sin(az) * np.sin(zen)
         cart[2, :] = np.cos(zen)

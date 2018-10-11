@@ -16,6 +16,7 @@ __all__ = [
     'APPEND_FILE',
     'USE_PRIOR_UNWEIGHTING',
     'Reco',
+    'get_multinest_meta',
     'parse_args',
 ]
 
@@ -38,9 +39,11 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 import os
-from os.path import abspath, dirname, join
+from os.path import abspath, dirname, isdir, join
 import pickle
+from shutil import rmtree
 import sys
+from tempfile import mkdtemp
 import time
 
 import numpy as np
@@ -1026,12 +1029,17 @@ class Reco(object):
             )
             file_exists = os.path.isfile(estimate_outf)
             if self.event_counter == 0:
-                assert not file_exists, 'File already exists but want to save event #1'
+                if file_exists:
+                    raise IOError('File already exists at "{}"'.format(estimate_outf))
                 # create new Dataset
                 dataset = xr.Dataset()
                 dataset.attrs = self.attrs
             else:
-                assert file_exists, 'File does not exists but want to save event > #1'
+                if not file_exists:
+                    raise IOError(
+                        'Output file with previous events does not exist at "{}"'
+                        .format(estimate_outf)
+                    )
                 dataset = pickle.load(open(estimate_outf, 'rb'))
             dataset[estimate.name] = estimate
             pickle.dump(
@@ -1670,26 +1678,74 @@ class Reco(object):
         ))
 
         print('Runing MultiNest...')
-        pymultinest.run(
-            LogLikelihood=self.loglike,
-            Prior=self.prior,
-            verbose=True,
-            outputfiles_basename='/tmp/jll1062/x', #self.out_prefix,
-            resume=False,
-            write_output=True,
-            n_iter_before_update=REPORT_AFTER,
-            **mn_kwargs
-        )
 
-        fit_meta = sort_dict(dict())
+        fit_meta = {}
+        tmpdir = mkdtemp()
+        outputfiles_basename = join(tmpdir, '')
+        try:
+            pymultinest.run(
+                LogLikelihood=self.loglike,
+                Prior=self.prior,
+                verbose=True,
+                outputfiles_basename=outputfiles_basename,
+                resume=False,
+                write_output=True,
+                n_iter_before_update=REPORT_AFTER,
+                **mn_kwargs
+            )
+            fit_meta = get_multinest_meta(outputfiles_basename=outputfiles_basename)
+        finally:
+            rmtree(tmpdir)
 
         run_info = sort_dict(dict(
             method='run_multinest',
             kwargs=kwargs,
             mn_kwargs=mn_kwargs,
-            fit_meta=fit_meta,
+            fit_meta=sort_dict(fit_meta),
         ))
         return run_info
+
+
+def get_multinest_meta(outputfiles_basename):
+    """Get metadata from files that MultiNest writes to disk.
+
+    Parameters
+    ----------
+    outputfiles_basename : str
+
+    Returns
+    -------
+    fit_meta : OrderedDict
+        Contains "logZ", "logZ_err" and, if importance nested sampling was run,
+        "ins_logZ" and "ins_logZ_err"
+
+    """
+    fit_meta = OrderedDict()
+    if isdir(outputfiles_basename):
+        stats_fpath = join(outputfiles_basename, 'stats.dat')
+    else:
+        stats_fpath = outputfiles_basename + 'stats.dat'
+
+    with open(stats_fpath, 'r') as stats_f:
+        stats = stats_f.readlines()
+
+    logZ, logZ_err = None, None
+    ins_logZ, ins_logZ_err = None, None
+
+    for line in stats:
+        if logZ is None and line.startswith('Nested Sampling Global Log-Evidence'):
+            logZ, logZ_err = [float(x) for x in line.split(':')[1].split('+/-')]
+        elif ins_logZ is None and line.startswith('Nested Importance Sampling Global Log-Evidence'):
+            ins_logZ, ins_logZ_err = [float(x) for x in line.split(':')[1].split('+/-')]
+
+    if logZ is not None:
+        fit_meta['logZ'] = logZ
+        fit_meta['logZ_err'] = logZ_err
+    if ins_logZ is not None:
+        fit_meta['ins_logZ'] = ins_logZ
+        fit_meta['ins_logZ_err'] = ins_logZ_err
+
+    return fit_meta
 
 
 def parse_args(description=__doc__):
