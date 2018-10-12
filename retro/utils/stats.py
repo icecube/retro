@@ -146,13 +146,9 @@ def weighted_percentile(data, percentile, weights=None):
     sorted_data = data[ind]
     sorted_weights = weights[ind]
     # Samples from unnormed cdf via cumulative sum of sorted samples of pdf
-    cdf_samples = sorted_weights.cumsum()
-    tot = cdf_samples[-1]
-    return np.interp(
-        percentile/100 * tot,
-        cdf_samples,  # "x" coords come from unnormed CDF
-        sorted_data,  # "y" coords come from data values
-    )
+    probs = sorted_weights.cumsum()
+    tot = probs[-1]
+    return np.interp(percentile/100 * tot, probs, sorted_data)
 
 
 def estimate_from_llhp(
@@ -183,10 +179,11 @@ def estimate_from_llhp(
 
     Returns
     -------
-    estimate : xarray
+    estimate : xarray.DataArray
         Dims are "kind" (coords "max", "mean", "median", "lower_bound", and
-        "upper_bound") and "param" (one coord per parameter).
-        "lower_bound" and "upper_bound" come from the `percentile` bounds.
+        "upper_bound") and "param" (coords are parameter names, such as
+        "time", "x", "track_energy", etc.). "lower_bound" and "upper_bound"
+        come from the `percentile` bounds.
 
     """
     # currently spherical averages are not supported if dimensions are treated
@@ -292,6 +289,7 @@ def estimate_from_llhp(
         cut = postproc_llh > max_postproc_llh - DELTA_LLH_CUTOFF
         cut_llhp = llhp[cut]
         cut_postproc_llh = postproc_llh[cut]
+        cut_weights = weights[cut]
 
     # -- Construct xarray.DataArray for storing estimates & metadata -- #
 
@@ -326,16 +324,19 @@ def estimate_from_llhp(
     for param in params:
         if treat_dims_independently:
             this_postproc_llh = postproc_llh[param]
+            this_weights = weights[param]
             max_idx = np.nanargmax(this_postproc_llh)
             max_postproc_llh = this_postproc_llh[max_idx]
             param_vals = llhp[param]
             param_at_max_llh = param_vals[max_idx]
             cut = this_postproc_llh > max_postproc_llh - DELTA_LLH_CUTOFF
             this_postproc_llh = this_postproc_llh[cut]
+            this_weights = this_weights[cut]
             param_vals = param_vals[cut]
         else:
             param_at_max_llh = params_at_max_llh[param]
             this_postproc_llh = cut_postproc_llh
+            this_weights = cut_weights
             param_vals = cut_llhp[param]
 
         estimate.loc[dict(kind='max', param=param)] = param_at_max_llh
@@ -353,7 +354,7 @@ def estimate_from_llhp(
                 weighted_percentile(
                     data=shifted_vals,
                     percentile=percentiles,
-                    weights=this_postproc_llh,
+                    weights=this_weights,
                 )
                 + shift - np.pi
             ) % (2*np.pi)
@@ -363,7 +364,7 @@ def estimate_from_llhp(
             lower_bound, upper_bound = weighted_percentile(
                 data=param_vals,
                 percentile=percentiles,
-                weights=this_postproc_llh,
+                weights=weights,
             )
 
         estimate.loc[dict(kind='mean', param=param)] = mean
@@ -397,7 +398,7 @@ def estimate_from_llhp(
         cart[2, :] = np.cos(zen)
 
         if use_prob_weights or remove_priors:
-            cart_mean = np.average(cart, axis=1, weights=cut_postproc_llh)
+            cart_mean = np.average(cart, axis=1, weights=cut_weights)
         else:
             cart_mean = np.average(cart, axis=1)
 

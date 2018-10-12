@@ -3,7 +3,7 @@
 # pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals
 
 """
-Instantiate Retro tables and find the max over the log-likelihood space.
+Reco class for performing reconstructions
 """
 
 from __future__ import absolute_import, division, print_function
@@ -12,16 +12,14 @@ __all__ = [
     'METHODS',
     'CRS_STOP_FLAGS',
     'REPORT_AFTER',
-    'SAVE_FULL_INFO',
     'APPEND_FILE',
-    'USE_PRIOR_UNWEIGHTING',
     'Reco',
     'get_multinest_meta',
     'parse_args',
 ]
 
 __author__ = 'J.L. Lanfranchi, P. Eller'
-__license__ = '''Copyright 2017 Justin L. Lanfranchi
+__license__ = '''Copyright 2017-2018 Justin L. Lanfranchi and Philipp Eller
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -88,23 +86,39 @@ CRS_STOP_FLAGS = {
 
 # TODO: make following args to `__init__` or `run`
 REPORT_AFTER = 100
-SAVE_FULL_INFO = False
 APPEND_FILE = True
-USE_PRIOR_UNWEIGHTING = True
 
 
 class Reco(object):
     """
-    Setup tables, get events, run reconstructons on them, and store the results to disk.
+    Setup tables, get events, run reconstructons on them, and optionally store
+    results to disk.
+
+    Note that "recipes" for different reconstructions are defined in the
+    `Reco.run` method.
 
     Parameters
     ----------
-    events_kw, dom_tables_kw, tdi_tables_kw, other_kw : mappings
+    events_kw, dom_tables_kw, tdi_tables_kw : mappings
         As returned by `retro.init_obj.parse_args`; `other_kw` must contain
         key "outdir".
 
+    outdir : string
+        Directory in which to save any generated files
+
+    save_llhp : bool, optional
+        Whether to save llhp (within 30 LLH of max-LLH) to disk; default is
+        False
+
     """
-    def __init__(self, events_kw, dom_tables_kw, tdi_tables_kw, other_kw):
+    def __init__(
+        self,
+        events_kw,
+        dom_tables_kw,
+        tdi_tables_kw,
+        outdir,
+        save_llhp=False,
+    ):
         self.events_kw = events_kw
         self.dom_tables_kw = dom_tables_kw
         self.tdi_tables_kw = tdi_tables_kw
@@ -114,7 +128,8 @@ class Reco(object):
             tdi_tables_kw=sort_dict(self.tdi_tables_kw),
         ))
         self._get_events = init_obj.get_events(**events_kw)
-        self.outdir = other_kw.get('outdir')
+        self.outdir = outdir
+        self.save_llhp = save_llhp
 
         # Replace None values for `start` and `step` for fewer branches in
         # subsequent logic (i.e., these will always be integers)
@@ -124,12 +139,16 @@ class Reco(object):
         # events there are in total.
         self.events_stop = events_kw['stop']
 
-        self.slice_str = '{start}:{stop}:{step}'.format(
-            start=self.events_start,
-            stop='' if self.events_stop is None else self.events_stop,
-            step=self.events_step,
+        self.slice_prefix = join(
+            outdir,
+            'slc{start}:{stop}:{step}.'.format(
+                start=self.events_start,
+                stop='' if self.events_stop is None else self.events_stop,
+                step=self.events_step,
+            )
         )
-        """Slice-notation string to append to filenames if APPEND_FILE is True"""
+        """Slice-notation string to append to *estimate filenames if
+        APPEND_FILE is True"""
 
         self.outdir = expand(self.outdir)
         mkdir(self.outdir)
@@ -140,7 +159,7 @@ class Reco(object):
             tdi_tables=self.tdi_tables,
             tdi_metas=self.tdi_metas,
         )
-        self.out_prefix = None
+        self.event_prefix = None
         self.current_event = None
         self.current_event_idx = -1
         self.event_counter = -1
@@ -153,12 +172,12 @@ class Reco(object):
 
     @property
     def events(self):
-        """Iterator over events which sets class variables `out_prefix`,
-        `current_event`, `current_event_idx`, and `event_counter` for each event
-        retrieved."""
+        """Iterator over events which sets class variables `event_prefix`,
+        `current_event`, `current_event_idx`, and `event_counter` for each
+        event retrieved."""
         for event_idx, event in self._get_events:
-            self.out_prefix = join(self.outdir, 'evt{}-'.format(event_idx))
-            print('Output files prefix: "{}"\n'.format(self.out_prefix))
+            self.event_prefix = join(self.outdir, 'evt{}.'.format(event_idx))
+            print('Output files prefix: "{}"\n'.format(self.event_prefix))
             self.current_event = event
             self.current_event_idx = event_idx
             self.event_counter += 1
@@ -199,7 +218,15 @@ class Reco(object):
         t00 = time.time()
 
         for _ in self.events:
-            if method in ('multinest', 'test', 'truth', 'crs', 'scipy', 'nlopt', 'skopt'):
+            if method in (
+                'multinest',
+                'test',
+                'truth',
+                'crs',
+                'scipy',
+                'nlopt',
+                'skopt',
+            ):
                 t0 = time.time()
                 self.setup_hypo(
                     cascade_kernel='scaling_aligned_one_dim',
@@ -207,14 +234,8 @@ class Reco(object):
                     track_time_step=1.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
-
-                t_start = []
-                param_values = []
-                log_likelihoods = []
-
                 self.generate_prior_method(
-                    OrderedDict([
+                    prior_defs=OrderedDict([
                         ('x', dict(kind='SPEFit2', extent='tight')),
                         ('y', dict(kind='SPEFit2', extent='tight')),
                         ('z', dict(kind='SPEFit2', extent='tight')),
@@ -222,6 +243,9 @@ class Reco(object):
                     ])
                 )
 
+                param_values = []
+                log_likelihoods = []
+                t_start = []
                 self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
@@ -267,17 +291,20 @@ class Reco(object):
                 t1 = time.time()
                 run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 self.make_estimate(
                     llhp=llhp,
                     remove_priors=True,
                     run_info=run_info,
-                    fname='estimate_{}'.format(method),
+                    fname='{}.estimate'.format(method),
                 )
 
             elif method == 'fast':
                 t0 = time.time()
-                t_start = []
 
                 self.setup_hypo(
                      cascade_kernel='scaling_aligned_point_ckv',
@@ -285,13 +312,8 @@ class Reco(object):
                      track_time_step=3.,
                  )
 
-                self.hypo_handler.fixed_params = OrderedDict()
-
-                param_values = []
-                log_likelihoods = []
-
                 self.generate_prior_method(
-                    OrderedDict([
+                    prior_defs=OrderedDict([
                         ('x', dict(kind='SPEFit2', extent='tight')),
                         ('y', dict(kind='SPEFit2', extent='tight')),
                         ('z', dict(kind='SPEFit2', extent='tight')),
@@ -299,6 +321,9 @@ class Reco(object):
                     ])
                 )
 
+                param_values = []
+                log_likelihoods = []
+                t_start = []
                 self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
@@ -319,17 +344,20 @@ class Reco(object):
                 t1 = time.time()
                 run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
                     run_info=run_info,
-                    fname='estimate_{}'.format(method),
+                    fname='{}.estimate'.format(method),
                 )
 
             elif method == 'crs_prefit_mn':
                 t0 = time.time()
-                t_start = []
 
                 print('--- Track-only CRS prefit ---')
 
@@ -339,13 +367,8 @@ class Reco(object):
                     track_time_step=3.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
-
-                param_values = []
-                log_likelihoods = []
-
                 self.generate_prior_method(
-                    OrderedDict([
+                    prior_defs=OrderedDict([
                         ('x', dict(kind='SPEFit2', extent='tight')),
                         ('y', dict(kind='SPEFit2', extent='tight')),
                         ('z', dict(kind='SPEFit2', extent='tight')),
@@ -353,10 +376,13 @@ class Reco(object):
                     ])
                 )
 
+                param_values = []
+                log_likelihoods = []
+                prefit_t_start = []
                 self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
-                    t_start=t_start,
+                    t_start=prefit_t_start,
                 )
 
                 prefit_run_info = self.run_crs(
@@ -373,12 +399,16 @@ class Reco(object):
                 t1 = time.time()
                 prefit_run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp_prefit'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 prefit_estimate = self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
                     run_info=prefit_run_info,
-                    fname='prefit_estimate_{}'.format(method),
+                    fname='{}.estimate_prefit'.format(method),
                 )
 
                 print('--- MultiNest fit including aligned 1D cascade ---')
@@ -389,49 +419,50 @@ class Reco(object):
                     track_time_step=1.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
+                # Setup prior
+
+                pft_est = prefit_estimate.sel(kind='mean')
+                pft_x = float(pft_est.sel(param='x'))
+                pft_y = float(pft_est.sel(param='y'))
+                pft_z = float(pft_est.sel(param='z'))
+                pft_time = float(pft_est.sel(param='time'))
+
+                self.generate_prior_method(
+                    prior_defs=OrderedDict([
+                        ('x', dict(
+                            kind='cauchy',
+                            loc=pft_x,
+                            scale=15,
+                            low=pft_x - 300,
+                            high=pft_x + 300,
+                        )),
+                        ('y', dict(
+                            kind='cauchy',
+                            loc=pft_y,
+                            scale=15,
+                            low=pft_y - 300,
+                            high=pft_y + 300,
+                        )),
+                        ('z', dict(
+                            kind='cauchy',
+                            loc=pft_z,
+                            scale=10,
+                            low=pft_z - 200,
+                            high=pft_z + 200,
+                        )),
+                        ('time', dict(
+                            kind='cauchy',
+                            loc=pft_time,
+                            scale=40,
+                            low=pft_time - 800,
+                            high=pft_time + 800,
+                        )),
+                    ])
+                )
 
                 param_values = []
                 log_likelihoods = []
-
-                # Setup prior
-
-                est_x = prefit_estimate.loc[dict(kind='mean', param='x')]
-                est_y = prefit_estimate.loc[dict(kind='mean', param='y')]
-                est_z = prefit_estimate.loc[dict(kind='mean', param='z')]
-                est_time = prefit_estimate.loc[dict(kind='mean', param='time')]
-
-                prior_defs = OrderedDict()
-                prior_defs['x'] = dict(
-                    kind='cauchy',
-                    loc=est_x,
-                    scale=15,
-                    low=est_x - 300,
-                    high=est_x + 300,
-                )
-                prior_defs['y'] = dict(
-                    kind='cauchy',
-                    loc=est_y,
-                    scale=15,
-                    low=est_y - 300,
-                    high=est_y + 300,
-                )
-                prior_defs['z'] = dict(
-                    kind='cauchy',
-                    loc=est_z,
-                    scale=10,
-                    low=est_z - 200,
-                    high=est_z + 200,
-                )
-                prior_defs['time'] = dict(
-                    kind='cauchy',
-                    loc=est_time,
-                    scale=40,
-                    low=est_time - 800,
-                    high=est_time + 800,
-                )
-                self.generate_prior_method(prior_defs)
-
+                t_start = []
                 self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
@@ -452,12 +483,16 @@ class Reco(object):
                 t2 = time.time()
                 run_info['run_time'] = t2 - t1
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 self.make_estimate(
                     run_info=run_info,
                     llhp=llhp,
                     remove_priors=False,
-                    fname='estimate_{}'.format(method),
+                    fname='{}.estimate'.format(method),
                 )
 
                 # -- 10D -- #
@@ -502,25 +537,26 @@ class Reco(object):
                 #t3 = time.time()
                 #run_info['run_time'] = t3 - t2
 
-                #llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                #self.make_estimate(llhp, opt_meta, fname='10d_estimate')
+                #if self.save_llhp:
+                #    llhp_fname = '{}.llhp_10d'.format(method)
+                #else:
+                #    llhp_fname = None
+                #llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                #self.make_estimate(
+                #    llhp=llhp,
+                #    meta=opt_meta,
+                #    fname='{}.estimate_10d'.format(method),
+                #)
 
             elif method == 'experimental_trackfit':
                 t0 = time.time()
-                t_start = []
 
                 print('--- track-only prefit ---')
 
                 self.setup_hypo(track_kernel='pegleg', track_time_step=1.)
 
-                self.hypo_handler.fixed_params = OrderedDict()
-                #self.hypo_handler.fixed_params['time'] = 10000
-
-                param_values = []
-                log_likelihoods = []
-
                 self.generate_prior_method(
-                    OrderedDict([
+                    prior_defs=OrderedDict([
                         ('x', dict(kind='SPEFit2', extent='tight')),
                         ('y', dict(kind='SPEFit2', extent='tight')),
                         ('z', dict(kind='SPEFit2', extent='tight')),
@@ -528,6 +564,9 @@ class Reco(object):
                     ])
                 )
 
+                param_values = []
+                log_likelihoods = []
+                prefit_t_start = []
                 self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
@@ -548,12 +587,16 @@ class Reco(object):
                 t1 = time.time()
                 prefit_run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp_prefit'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 prefit_estimate = self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
                     run_info=prefit_run_info,
-                    fname='prefit_estimate_{}'.format(method),
+                    fname='{}.estimate_prefit'.format(method),
                 )
 
                 print('--- hybrid fit ---')
@@ -566,41 +609,35 @@ class Reco(object):
                     track_time_step=1.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
-                self.hypo_handler.fixed_params['track_energy'] = (
-                    prefit_estimate.loc[dict(kind='median', param='track_energy')]
-                )
+                pft_est = prefit_estimate.sel(kind='median')
+                pft_x = float(pft_est.sel(param='x'))
+                pft_y = float(pft_est.sel(param='y'))
+                pft_z = float(pft_est.sel(param='z'))
+                pft_time = float(pft_est.sel(param='time'))
+                pft_track_energy = float(pft_est.sel(param='track_energy'))
 
-                param_values = []
-                log_likelihoods = []
+                self.hypo_handler.fixed_params = OrderedDict([
+                    ('track_energy', pft_track_energy)
+                ])
 
                 self.generate_prior_method(
-                    OrderedDict([
-                        ('x', dict(
-                            kind='cauchy',
-                            loc=prefit_estimate.loc[dict(kind='median', param='x')],
-                            scale=12,
-                        )),
-                        ('y', dict(
-                            kind='cauchy',
-                            loc=prefit_estimate.loc[dict(kind='median', param='y')],
-                            scale=13,
-                        )),
-                        ('z', dict(
-                            kind='cauchy',
-                            loc=prefit_estimate.loc[dict(kind='median', param='z')],
-                            scale=7.5,
-                        )),
+                    prior_defs=OrderedDict([
+                        ('x', dict(kind='cauchy', loc=pft_x, scale=12)),
+                        ('y', dict(kind='cauchy', loc=pft_y, scale=13)),
+                        ('z', dict(kind='cauchy', loc=pft_z, scale=7.5)),
                         ('time', dict(
                             kind='cauchy',
-                            loc=prefit_estimate.loc[dict(kind='median', param='time')],
+                            loc=pft_time,
                             scale=40,
-                            low=prefit_estimate.loc[dict(kind='median', param='time')] - 2000,
-                            high=prefit_estimate.loc[dict(kind='median', param='time')] + 2000,
+                            low=pft_time - 2000,
+                            high=pft_time + 2000,
                         )),
                     ])
                 )
 
+                param_values = []
+                log_likelihoods = []
+                t_start = []
                 self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
@@ -621,12 +658,16 @@ class Reco(object):
                 t2 = time.time()
                 run_info['run_time'] = t2 - t1
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
                     run_info=run_info,
-                    fname='estimate_{}'.format(method),
+                    fname='{}.estimate'.format(method),
                 )
             else:
                 raise ValueError('Unknown `Method` {}'.format(method))
@@ -634,8 +675,8 @@ class Reco(object):
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
     def generate_prior_method(self, prior_defs):
-        """Generate the prior transform method `self.prior` and info `self.priors_used`
-        for a given event.
+        """Generate the prior transform method `self.prior` and info
+        `self.priors_used` for a given event.
 
         Parameters
         ----------
@@ -686,9 +727,9 @@ class Reco(object):
         param_values : list
         log_likelihoods : list
         t_start : list
-            Needs to be a list for start time to be passed by reference and therefore
-            universally accessible within all methods that require knowing the start
-            time
+            Needs to be a list for start time to be passed by reference and
+            therefore universally accessible within all methods that require
+            knowing the start time
 
         """
         # -- Variables to be captured by `loglike` closure -- #
@@ -781,12 +822,12 @@ class Reco(object):
         def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Get log likelihood values.
 
-            Defined as a closure to capture particulars of the event and priors without
-            having to pass these as parameters to the function.
+            Defined as a closure to capture particulars of the event and priors
+            without having to pass these as parameters to the function.
 
             Note that this is called _after_ `prior` has been called, so `cube`
-            already contains the parameter values scaled to be in their physical
-            ranges.
+            already contains the parameter values scaled to be in their
+            physical ranges.
 
             Parameters
             ----------
@@ -879,8 +920,8 @@ class Reco(object):
         self.loglike = loglike
 
     def make_llhp(self, log_likelihoods, param_values, fname=None):
-        """Create a structured numpy array containing the reco information; also add
-        derived dimensions, and optionally save to disk.
+        """Create a structured numpy array containing the reco information;
+        also add derived dimensions, and optionally save to disk.
 
         Parameters
         ----------
@@ -890,7 +931,7 @@ class Reco(object):
 
         fname : str, optional
             If provided, llhp for the event reco are saved to file at path
-              {self.outdir}/evt{event_idx}-{fname}.npy
+              {self.outdir}/evt{event_idx}.{fname}.npy
 
         Returns
         -------
@@ -960,11 +1001,18 @@ class Reco(object):
             llhp['zenith'] = llhp['cascade_zenith']
             llhp['azimuth'] = llhp['cascade_azimuth']
 
-        # save full info
         if fname:
-            llhp_outf = self.out_prefix + fname + '.npy'
-            print('Saving llhp to "{}"...'.format(llhp_outf))
-            np.save(llhp_outf, llhp)
+            # NOTE: since each array can have different length and numpy
+            # doesn't handle "ragged" arrays nicely, forcing each llhp to be
+            # saved to its own file even if APPEND_FILE is True.
+            llhp_outf = '{}{}.npy'.format(self.event_prefix, fname)
+            llh = llhp['llh']
+            cut_llhp = llhp[llh > np.max(llh) - 30]
+            print(
+                'Saving llhp within 30 LLH of max ({} llhp) to "{}"'
+                .format(len(cut_llhp), llhp_outf)
+            )
+            np.save(llhp_outf, cut_llhp)
 
         return llhp
 
@@ -985,15 +1033,16 @@ class Reco(object):
         run_info : mapping, optional
         fname : string, optional
             * If not provided, estimate is not written to disk.
-            * If provided and APPEND_FILE is True, an `xarray.Dataset` where each
-              contained `xarray.DataArray` is one event's reconstruction (plus run and
-              estimate metadata); the name of each DataArray is the event index, and
-              Reco metadata is stored to `Dataset.attrs`; output file is
-                {outdir}/{fname}_{start}:{stop}:{step}.pkl
-            * If provided and APPEND_FILE is False, event and run_info metadata is
-              written as an `xarray.DataArray` containing estimate and metadata to file
-              at
-                {outdir}/evt{event_idx}-{fname}.pkl
+            * If provided and APPEND_FILE is True, an `xarray.Dataset` where
+              each contained `xarray.DataArray` is one event's reconstruction
+              (plus run and estimate metadata); the name of each DataArray is
+              the event index, and Reco metadata is stored to `Dataset.attrs`;
+              output file is
+                {outdir}/slc{start}:{stop}:{step}.{fname}.pkl
+            * If provided and APPEND_FILE is False, event and run_info metadata
+              is written as an `xarray.DataArray` containing estimate and
+              metadata to file at
+                {outdir}/evt{event_idx}.{fname}.pkl
 
         Returns
         -------
@@ -1025,7 +1074,7 @@ class Reco(object):
 
         if APPEND_FILE:
             estimate_outf = os.path.join(
-                self.outdir, '{}_{}.pkl'.format(fname, self.slice_str)
+                self.outdir, '{}{}.pkl'.format(self.slice_prefix, fname)
             )
             file_exists = os.path.isfile(estimate_outf)
             if self.event_counter == 0:
@@ -1048,7 +1097,7 @@ class Reco(object):
                 protocol=pickle.HIGHEST_PROTOCOL,
             )
         else: # save each event reco estimate as its own pickle file
-            estimate_outf = self.out_prefix + fname + '.pkl'
+            estimate_outf = '{}{}.pkl'.format(self.event_prefix, fname)
             print('Saving estimate to "{}"'.format(estimate_outf))
             pickle.dump(
                 obj=estimate,
@@ -1071,13 +1120,13 @@ class Reco(object):
         return run_info
 
     def run_with_truth(self, rand_dims=None, n_samples=10000, seed=0):
-        """Run with all params set to truth except for the dimensions defined, which
-        will be randomized.
+        """Run with all params set to truth except for the dimensions defined,
+        which will be randomized.
 
         Parameters
         ----------
         rand_dims : list, optional
-            Dimensions to randomly sample; all not specified are set to truth.
+            Dimensions to randomly sample; all not specified are set to truth
 
         n_samples : int
             Number of samples to draw
@@ -1129,11 +1178,11 @@ class Reco(object):
         """Implementation of the CRS2 algorithm, adapted to work with spherical
         coordinates (correct centroid calculation, reflection, and mutation).
 
-        At the moment Cartesian (standard) parameters and spherical parameters are
-        assumed to have particular names (i.e., spherical coordinates start with "az"
-        and "zen"). Furthermore, all Cartesian coordinates must come first followed by
-        the pairs of (azimuth, zenith) spherical coordinates; e.g., "az_1", "zen_1",
-        "az_2", "zen_2", etc.
+        At the moment Cartesian (standard) parameters and spherical parameters
+        are assumed to have particular names (i.e., spherical coordinates start
+        with "az" and "zen"). Furthermore, all Cartesian coordinates must come
+        first followed by the pairs of (azimuth, zenith) spherical coordinates;
+        e.g., "az_1", "zen_1", "az_2", "zen_2", etc.
 
         Parameters
         ----------
@@ -1162,14 +1211,14 @@ class Reco(object):
 
         Notes
         -----
-        CRS2 [1] is a variant of controlled random search (CRS, a global optimizer) with
-        faster convergence than CRS.
+        CRS2 [1] is a variant of controlled random search (CRS, a global
+        optimizer) with faster convergence than CRS.
 
         Refrences
         ---------
-        .. [1] P. Kaelo, M.M. Ali, "Some variants of the controlled random search
-           algorithm for global optimization," J. Optim. Theory Appl., 130 (2) (2006),
-           pp. 253-264.
+        .. [1] P. Kaelo, M.M. Ali, "Some variants of the controlled random
+           search algorithm for global optimization," J. Optim. Theory Appl.,
+           130 (2) (2006), pp. 253-264.
 
         """
         if use_sobol:
@@ -1221,8 +1270,7 @@ class Reco(object):
             return -llh
 
         def create_x(x_cart, x_spher):
-            """Patch together the cartesian and spherical coordinates into one
-            array"""
+            """Patch Cartesian and spherical coordinates into one array"""
             # TODO: make proper
             x = np.empty(shape=n_opt_params)
             x[:n_cart] = x_cart
@@ -1768,6 +1816,10 @@ def parse_args(description=__doc__):
         '--method', required=True, choices=METHODS,
         help='Method to use for performing reconstructions'
     )
+    parser.add_argument(
+        '--save-llhp', action='store_true',
+        help='Whether to save LLHP within 30 LLH of max-LLH to disk'
+    )
 
     split_kwargs = init_obj.parse_args(
         dom_tables=True, tdi_tables=True, events=True, parser=parser
@@ -1779,6 +1831,8 @@ def parse_args(description=__doc__):
 if __name__ == '__main__':
     # pylint: disable=invalid-name
     kwargs = parse_args()
-    method = kwargs['other_kw'].pop('method')
+    other_kw = kwargs.pop('other_kw')
+    method = other_kw.pop('method')
+    kwargs.update(other_kw)
     my_reco = Reco(**kwargs)
     my_reco.run(method=method)
