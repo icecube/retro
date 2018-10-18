@@ -4,11 +4,16 @@
 """
 Discrete-time kernels for muons generating photons, to be used as hypo_kernels
 in discrete_hypo/DiscreteHypo class.
+
+Note that muon track kernels (and only track kernels) must be functions with
+names ending in "_muon". Pegleg muon kernels must have names beginning with
+"pegleg_".
 """
 
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    'MUON_KINDS',
     'ALL_REALS',
     'MULEN_INTERP',
     'TABLE_LOWER_BOUND',
@@ -53,6 +58,7 @@ from retro.const import (
 from retro.retro_types import SRC_T
 
 
+MUON_KINDS = sorted([k[:-len('_muon')] for k in __all__ if k.endswith('_muon')])
 ALL_REALS = (-np.inf, np.inf)
 
 

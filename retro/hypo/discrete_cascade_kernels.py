@@ -4,12 +4,17 @@
 """
 Discrete-time kernels for cascades generating photons, to be used as
 hypo_kernels in discrete_hypo/DiscreteHypo class.
+
+Note that cascade kernels (and only cascade kernels) must be functions with
+names ending in "_cascade". Scaling cascade kernels must have names beginning
+with "scaling_".
 """
 
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
     'SCALING_CASCADE_ENERGY',
+    'CASCADE_KINDS',
     'point_cascade',
     'point_ckv_cascade',
     'aligned_point_ckv_cascade',
@@ -56,7 +61,12 @@ from retro.const import (
 from retro.retro_types import SRC_T
 from retro.utils.geom import rotate_point
 
+
 SCALING_CASCADE_ENERGY = 10.
+CASCADE_KINDS = sorted(
+    [k[:-len('_cascade')] for k in __all__ if k.endswith('_cascade')]
+)
+
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def point_cascade(time, x, y, z, cascade_energy):
@@ -155,7 +165,7 @@ def scaling_aligned_point_ckv_cascade(time, x, y, z, track_azimuth, track_zenith
         z=z,
         track_azimuth=track_azimuth,
         track_zenith=track_zenith,
-        cascade_energy=1.,
+        cascade_energy=SCALING_CASCADE_ENERGY,
     )
 
 
@@ -232,7 +242,11 @@ def one_dim_cascade(
         else:
             # See `retro/notebooks/energy_dependent_cascade_num_samples.ipynb`
             num_samples = int(np.round(
-                np.clip(math.exp(0.77 * math.log(cascade_energy) + 2.3), a_min=1, a_max=None)
+                np.clip(
+                    math.exp(0.77 * math.log(cascade_energy) + 2.3),
+                    a_min=1,
+                    a_max=None,
+                )
             ))
 
     if num_samples == 1:
@@ -362,13 +376,13 @@ def scaling_aligned_one_dim_cascade(
         z=z,
         track_azimuth=track_azimuth,
         track_zenith=track_zenith,
-        cascade_energy=1.,
+        cascade_energy=SCALING_CASCADE_ENERGY,
         num_samples=100,
         **kwargs
     )
 
 def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith, **kwargs):
-    """Fixed 1 GeV cascade kernel"""
+    """Fixed cascade kernel at a single energy (`SCALING_CASCADE_ENERGY`)"""
     return one_dim_cascade(
         time=time,
         x=x,
@@ -432,7 +446,7 @@ def scaling_one_dim_delta_cascade(
         track_azimuth=track_azimuth,
         cascade_d_azimuth=cascade_d_azimuth,
         cascade_d_zenith=cascade_d_zenith,
-        cascade_energy=1.,
+        cascade_energy=SCALING_CASCADE_ENERGY,
         num_samples=100,
         **kwargs
     )
