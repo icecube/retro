@@ -78,7 +78,7 @@ def setup_dom_tables(
     dom_tables_kind,
     dom_tables_fname_proto,
     gcd,
-    norm_version,
+    norm_version='binvol2.5',
     use_sd_indices=const.ALL_STRS_DOMS,
     step_length=1.0,
     num_phi_samples=None,
@@ -95,9 +95,9 @@ def setup_dom_tables(
     dom_tables_kind : str
     dom_tables_fname_proto : str
     gcd : str
-    norm_version : str
-    use_sd_indices : sequence
-    step_length : float
+    norm_version : str, optional
+    use_sd_indices : sequence, optional
+    step_length : float, optional
     num_phi_samples : int, optional
     ckv_sigma_deg : float, optional
     template_library : str, optional
@@ -303,58 +303,39 @@ def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=
     """
     generic_kernels = []
     generic_kernels_kwargs = []
+
     pegleg_kernel = None
     pegleg_kernel_kwargs = None
+
     scaling_kernel = None
     scaling_kernel_kwargs = None
+
     if cascade_kernel is not None:
-        if cascade_kernel == 'point':
-            generic_kernels.append(dck.point_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'point_ckv':
-            generic_kernels.append(dck.point_ckv_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'aligned_point_ckv':
-            generic_kernels.append(dck.aligned_point_ckv_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'one_dim':
-            generic_kernels.append(dck.one_dim_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'aligned_one_dim':
-            generic_kernels.append(dck.aligned_one_dim_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'one_dim_delta':
-            generic_kernels.append(dck.one_dim_delta_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'scaling_aligned_one_dim':
-            scaling_kernel = dck.scaling_aligned_one_dim_cascade
-            scaling_kernel_kwargs = dict()
-        elif cascade_kernel == 'scaling_aligned_point_ckv':
-            scaling_kernel = dck.scaling_aligned_point_ckv_cascade
-            scaling_kernel_kwargs = dict()
-        elif cascade_kernel == 'scaling_one_dim':
-            scaling_kernel = dck.scaling_one_dim_cascade
-            scaling_kernel_kwargs = dict()
-        elif cascade_kernel == 'scaling_one_dim_delta':
-            scaling_kernel = dck.scaling_one_dim_delta_cascade
-            scaling_kernel_kwargs = dict()
+        assert cascade_kernel in dck.CASCADE_KINDS, str(cascade_kernel)
+        cascade_kernel_func = getattr(dck, cascade_kernel + '_cascade')
+        cascade_kernel_kwargs = dict()
+        if cascade_kernel.startswith('scaling'):
+            if scaling_kernel is not None:
+                raise ValueError('can only have one scaling kernel')
+            scaling_kernel = cascade_kernel_func
+            scaling_kernel_kwargs = cascade_kernel_kwargs
         else:
-            raise NotImplementedError('{} cascade not implemented yet.'
-                                      .format(cascade_kernel))
+            generic_kernels.append(cascade_kernel_func)
+            generic_kernels_kwargs.append(cascade_kernel_kwargs)
 
     if track_kernel is not None:
-        if track_kernel == 'const_e_loss':
-            generic_kernels.append(dmk.const_energy_loss_muon)
-            generic_kernels_kwargs.append(dict(dt=track_time_step))
-        elif track_kernel == 'pegleg':
-            pegleg_kernel = dmk.pegleg_muon
-            pegleg_kernel_kwargs = dict(dt=track_time_step)
-        elif track_kernel == 'table_e_loss':
-            generic_kernels.append(dmk.table_energy_loss_muon)
-            generic_kernels_kwargs.append(dict(dt=track_time_step))
+        assert track_kernel in dmk.MUON_KINDS, str(track_kernel)
+        print('track_kernel:', track_kernel)
+        track_kernel_func = getattr(dmk, track_kernel + '_muon')
+        track_kernel_kwargs = dict(dt=track_time_step)
+        if track_kernel.startswith('pegleg'):
+            if pegleg_kernel is not None:
+                raise ValueError('can only have one pegleg kernel')
+            pegleg_kernel = track_kernel_func
+            pegleg_kernel_kwargs = track_kernel_kwargs
         else:
-            raise NotImplementedError('{} track not implemented yet.'
-                                      .format(track_kernel))
+            generic_kernels.append(track_kernel_func)
+            generic_kernels_kwargs.append(dict(dt=track_time_step))
 
     hypo_handler = DiscreteHypo(
         generic_kernels=generic_kernels,
@@ -885,7 +866,7 @@ def parse_args(
         )
         group.add_argument(
             '--norm-version',
-            required=True,
+            required=False, default='binvol2.5',
             choices=NORM_VERSIONS,
             help='''Norm version.'''
         )
@@ -911,10 +892,6 @@ def parse_args(
             '--no-t-indep', action='store_true',
             help='''Do NOT load t-indep tables (time-independent expectations
             would have to be handled by specifying a TDI table'''
-        )
-        group.add_argument(
-            '--no-dir', action='store_true',
-            help='''Do NOT use source photon directionality'''
         )
         group.add_argument(
             '--force-no-mmap', action='store_true',
@@ -943,17 +920,12 @@ def parse_args(
         group.add_argument(
             '--cascade-kernel',
             required=True,
-            choices=sorted([
-                'point', 'point_ckv', 'one_dim', 'aligned_point_ckv',
-                'aligned_one_dim', 'scaling_aligned_one_dim',
-                'scaling_aligned_point_ckv', 'scaling_one_dim',
-                'one_dim_delta', 'scaling_one_dim_delta'
-            ]),
+            choices=dck.CASCADE_KINDS,
         )
         group.add_argument(
             '--track-kernel',
             required=True,
-            choices=['const_e_loss', 'table_e_loss', 'pegleg'],
+            choices=dmk.MUON_KINDS,
         )
         group.add_argument(
             '--track-time-step', type=float,

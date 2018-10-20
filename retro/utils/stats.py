@@ -11,6 +11,8 @@ __all__ = [
     'poisson_llh',
     'partial_poisson_llh',
     'weighted_average',
+    'weighted_percentile',
+    'test_weighted_percentile',
     'estimate_from_llhp',
 ]
 
@@ -29,28 +31,32 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from collections import OrderedDict
+from copy import copy, deepcopy
 from os.path import abspath, dirname
 import sys
 
 import numpy as np
 from scipy.special import gammaln
 from scipy import stats
+import xarray as xr
 
-RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
+    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 import retro
+from retro.utils.misc import sort_dict
 
-# what values of the llhp scpace to include w.r.t. the best point
+
 DELTA_LLH_CUTOFF = 15.5
+"""What values of the llhp space to include relative to the max-LLH point"""
+
 
 def poisson_llh(expected, observed):
-    r"""Compute the log Poisson likelihood.
+    u"""Compute the log Poisson likelihood.
 
     .. math::
-        observed \times \log expected - expected \log \Gamma(observed)
+        observed × log(expected) - expected - log Γ(observed + 1)
 
     Parameters
     ----------
@@ -66,17 +72,16 @@ def poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    llh = observed * np.log(expected) - expected - gammaln(observed + 1)
-    return llh
+    return observed * np.log(expected) - expected - gammaln(observed + 1)
 
 
 def partial_poisson_llh(expected, observed):
-    r"""Compute the log Poisson likelihood _excluding_ subtracting off
+    u"""Compute the log Poisson likelihood _excluding_ subtracting off
     expected. This part, which constitutes an expected-but-not-observed
     penalty, is intended to be taken care of outside this function.
 
     .. math::
-        {\rm observed} \cdot \log {\rm expected} - \log \Gamma({\rm observed})
+        observed × log(expected) - log Γ(observed + 1)
 
     Parameters
     ----------
@@ -92,8 +97,7 @@ def partial_poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    llh = observed * np.log(expected) - expected - gammaln(observed)
-    return llh
+    return observed * np.log(expected) - gammaln(observed + 1)
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
@@ -116,283 +120,329 @@ def weighted_average(x, w):
     """
     sum_xw = 0.0
     sum_w = 0.0
-    for x_i, w_i in zip(x, w):
-        sum_xw += x_i * w_i
-        sum_w += w_i
+    for i in range(x.size):
+        sum_xw += x[i] * w[i]
+        sum_w += w[i]
     return sum_xw / sum_w
 
 
-def weighted_percentile(data, percentile, weights=None):
-    """
+def weighted_percentile(a, q, weights=None):
+    """Compute percentile(s) of data, optionally using weights.
 
     Parameters
     ----------
-    percenttile : scalar in [0, 100]
-    weights
-        Frequency (count) of data
+    a : array
+        Data
+    q : scalar or array-like in [0, 100]
+        Percentile(s) to compute for data
+    weights : array, same shape as `data`
+        Frequencies (counts) of data
 
     Returns
     -------
-    wtd_pct : scalar
+    percentile : scalar or ndarray
 
     """
     if weights is None:
-        return np.percentile(data, percentile)
-    ind = np.argsort(data)
-    d = data[ind]
-    w = weights[ind]
-    p = w.cumsum() / w.sum() * 100
-    return np.interp(percentile, p, d)
+        return np.percentile(a=a, q=q)
+
+    sort_indices = np.argsort(a)
+    sorted_data = a[sort_indices]
+    sorted_weights = weights[sort_indices]
+
+    # Samples from unnormed cdf via cumulative sum of sorted samples of pdf
+    probs = sorted_weights.cumsum()
+
+    # Total (norm factor) can be read off as last value from cumsum
+    tot = probs[-1]
+
+    # Scale `percentile` to be a fraction of the unnormed total of `probs` to
+    # avoid re-scaling the entire `probs` array
+    return np.interp(np.asarray(q) * (tot / 100), probs, sorted_data)
 
 
-def estimate_from_llhp(llhp, meta=None, per_dim=False, prob_weights=True):
+def test_weighted_percentile():
+    """Unit test for `weighted_percentile` function."""
+    rand = np.random.RandomState(0)
+    data = rand.normal(size=1000)
+    weights = rand.uniform(size=1000)
+    pctiles = [0, 10, 25, 50, 75, 90, 100]
+    vals = weighted_percentile(a=data, q=pctiles, weights=weights)
+    ref_vals = np.array([
+        -3.046143054799927,
+        -1.231954827314273,
+        -0.659949597686861,
+        -0.041388356155877,
+        0.645261111851618,
+        1.322480276194482,
+        2.759355114021582,
+    ])
+    assert np.allclose(vals, ref_vals, atol=0, rtol=1e-12)
+
+
+def estimate_from_llhp(
+    llhp,
+    treat_dims_independently,
+    use_prob_weights,
+    priors_used=None,
+):
     """Evaluate estimate for reconstruction quantities given the MultiNest
-    points of LLH space exploration.
+    points of LLH space exploration. .
 
     Paranters
     ---------
-    llhp : shape (num_llh,) array of dtype retro_types.LLHP8D_T, LLHP10_T, etc.
+    llhp : shape (num_llh,) array of custom dtype llhp_t
         Fields of the structured array must contain 'llh' and any reconstructed
-        quantities
+        quantities (aka parameters or dimensions)
 
-    meta : dict or None
-        meta information from the minimization, including priors
-        If specified, "no_prior_*" estimates will also be returned.
+    treat_dims_independently : boolean
+        treat each dimension individually (not yet sure how much sense that
+        makes)
 
-    per_dim : boolean
-        treat each dimension individually (not yet sure how much sense that makes)
+    use_prob_weights : boolean
+        use LLH weights in computing estimates
 
-    prob_weights : boolean
-        use LLH weights
+    priors_used : dict, optional
+        Specify the priors used to remove their effects on the posterior LLH
+        distributions; if not specified, effects of priors will not be removed
 
     Returns
     -------
-    estimate : OrderedDict
-        Keys are dimension names and values are "mean", "median", "low", and
-        "high", where the latter two come are the `percentile` bounds. If
-        `meta` is specified, then values are estimated by _removing_ the
-        effect of the prior from the llh values.
+    estimate : xarray.DataArray
+        Dims are "kind" (coords "max", "mean", "median", "lower_bound", and
+        "upper_bound") and "param" (coords are parameter names, such as
+        "time", "x", "track_energy", etc.). "lower_bound" and "upper_bound"
+        come from the `percentile` bounds.
 
     """
-    columns = list(llhp.dtype.names)
-    assert 'llh' in columns, 'llh not in %s'%columns
-    columns.remove('llh')
+    # currently spherical averages are not supported if dimensions are treated
+    # independently (how would this even work?)
+    averages_spherically_aware = not treat_dims_independently
+    remove_priors = bool(priors_used)
 
-    # cut away extremely low llh (30 or more below best point)
-    cut = llhp['llh'] >= np.nanmax(llhp['llh']) - 30
-    if np.sum(cut) == 0:
-        raise IndexError('no points')
+    names = list(llhp.dtype.names)
+    for name in ('llh', 'track_energy', 'cascade_energy'):
+        if name not in names:
+            raise ValueError(
+                '"{}" not a field in `llhp.dtype.names` = {}'
+                .format(name, names)
+            )
 
-    # can throw rest of points away
-    llhp = llhp[cut]
+    params = copy(names)
+    params.remove('llh')
 
-    # calculate weights from probabilities
-    if prob_weights:
-        prob_weights = np.exp(llhp['llh'] - np.max(llhp['llh']))
-        #prob_weights = 1./np.square((1. + np.max(llhp['llh']) - llhp['llh']))
+    num_params = len(params)
+    num_llh = len(llhp)
+
+    # cut away extremely low llh
+    max_llh = np.nanmax(llhp['llh'])
+    llhp = llhp[llhp['llh'] >= (max_llh - 30)]
+    if len(llhp) == 0:
+        raise ValueError('no points')
+    llh = llhp['llh']
+
+    if use_prob_weights:
+        # weight points by their likelihood (_not_ log likelihood) relative to
+        # max; keep prob_weights around for later use
+        prob_weights = np.exp(llh - max_llh)
+        weights = deepcopy(prob_weights)
     else:
         prob_weights = None
+        weights = np.ones(shape=len(llh))
 
-    # calculate the prior weights from the used priors
-    if meta is None:
-        prior_weights = None
+    if treat_dims_independently:
+        weights = {d: deepcopy(weights) for d in priors_used.keys()}
+
+    if remove_priors:
+        # calculate the prior weights from the priors used
+        for dim, (prior_kind, prior_params) in priors_used.items():
+            if prior_kind == 'uniform':
+                w = None
+            elif prior_kind in ('cauchy', 'spefit2'):
+                w = 1 / stats.cauchy.pdf(llhp[dim], *prior_params[:2])
+            elif prior_kind == 'log_normal' and dim == 'energy':
+                w = 1 / stats.lognorm.pdf(
+                    llhp['track_energy'] + llhp['cascade_energy'],
+                    *prior_params[:3]
+                )
+            elif prior_kind == 'log_uniform' and dim == 'energy':
+                w = llhp['track_energy'] + llhp['cascade_energy']
+            elif prior_kind == 'log_uniform' and dim == 'cascade_energy':
+                w = llhp['cascade_energy']
+            elif prior_kind == 'log_uniform' and dim == 'track_energy':
+                w = llhp['track_energy']
+            elif prior_kind == 'cosine':
+                w = None
+            elif prior_kind == 'log_normal' and dim == 'cascade_d_zenith':
+                w = None
+            else:
+                raise NotImplementedError(
+                    'Prior "{}" for dimension/param "{}" is unhandled'
+                    .format(prior_kind, dim)
+                )
+
+            if w is not None:
+                if treat_dims_independently:
+                    weights[dim] *= w
+                else:
+                    weights *= w
+
+        if treat_dims_independently:
+            if 'energy' in weights:
+                w = prob_weights if use_prob_weights else 1
+                weights['track_energy'] = w * (
+                    llhp['track_energy']
+                    / (llhp['track_energy'] + llhp['cascade_energy'])
+                    * weights['energy']
+                )
+                weights['cascade_energy'] = w * (
+                    llhp['cascade_energy']
+                    / (llhp['track_energy'] + llhp['cascade_energy'])
+                    * weights['energy']
+                )
+
+    if treat_dims_independently:
+        postproc_llh = {}
+        for dim, weights in weights.items():
+            if use_prob_weights or remove_priors:
+                postproc_llh[dim] = np.log(weights)
+            else:
+                postproc_llh[dim] = llh
+        # simply report `max_llh` for `max_postproc_llh` since each dimension
+        # will have a different max since each gets weighted independently
+        max_postproc_llh = max_llh
     else:
-        if per_dim:
-            prior_weights = {}
+        postproc_llh = max_llh + np.log(weights)
+        max_idx = np.nanargmax(postproc_llh)
+        max_postproc_llh = postproc_llh[max_idx]
+        params_at_max_llh = llhp[max_idx]
+        cut = postproc_llh > max_postproc_llh - DELTA_LLH_CUTOFF
+        cut_llhp = llhp[cut]
+        cut_postproc_llh = postproc_llh[cut]
+        cut_weights = weights[cut]
+
+    # -- Construct xarray.DataArray for storing estimates & metadata -- #
+
+    # Note that xarray requires list for `coords` (e.g. tuple fails)
+    est_kinds = ['max', 'mean', 'median', 'lower_bound', 'upper_bound']
+
+    estimate = xr.DataArray(
+        data=np.full(
+            fill_value=np.nan,
+            shape=(len(est_kinds), num_params),
+            dtype=np.float32,
+        ),
+        dims=('kind', 'param'),
+        coords=dict(kind=est_kinds, param=params),
+        attrs=sort_dict(dict(
+            estimation_settings=sort_dict(dict(
+                treat_dims_independently=treat_dims_independently,
+                use_prob_weights=use_prob_weights,
+                remove_priors=remove_priors,
+                averages_spherically_aware=averages_spherically_aware,
+            )),
+            num_llh=num_llh,
+            max_llh=max_llh,
+            max_postproc_llh=max_postproc_llh,
+        ))
+    )
+
+    # -- Calculate each kind of estimate for each param -- #
+
+    # TODO: document origin of constants used: why 13.35, 86.65?
+    qth_percentiles = np.array([13.35, 50.0, 86.65])
+
+    for param in params:
+        if treat_dims_independently:
+            this_postproc_llh = postproc_llh[param]
+            max_idx = np.nanargmax(this_postproc_llh)
+            max_postproc_llh = this_postproc_llh[max_idx]
+            param_vals = llhp[param]
+            param_at_max_llh = param_vals[max_idx]
+            cut = this_postproc_llh > max_postproc_llh - DELTA_LLH_CUTOFF
+            this_postproc_llh = this_postproc_llh[cut]
+            this_weights = weights[param][cut]
+            param_vals = param_vals[cut]
         else:
-            prior_weights = np.ones(len(llhp))
-        if not meta is None:
-            priors = meta['priors_used']
-            for dim in priors.keys():
-                prior = priors[dim]
-                if prior[0] == 'uniform':
-                    # for testing
-                    #if 'zenith' in dim:
-                    #    w = np.clip(np.abs(np.sin(llhp[dim])), 0.01, None)
-                    #else:
-                    w = np.ones(len(llhp))
-                elif prior[0] in ['cauchy', 'spefit2']:
-                    w = 1./stats.cauchy.pdf(llhp[dim], *prior[1][:2])
-                    #w = np.ones(len(llhp))
-                elif prior[0] == 'log_normal' and dim == 'energy':
-                    w = (
-                        1 / stats.lognorm.pdf(
-                            llhp['track_energy'] + llhp['cascade_energy'], *prior[1][:3]
-                        )
-                    )
-                    #w = np.ones(len(llhp))
-                elif prior[0] == 'log_uniform' and dim == 'energy':
-                    w = llhp['track_energy'] + llhp['cascade_energy']
-                    #w = np.ones(len(llhp))
-                elif prior[0] == 'log_uniform' and dim == 'cascade_energy':
-                    w = llhp['cascade_energy']
-                elif prior[0] == 'log_uniform' and dim == 'track_energy':
-                    w = llhp['track_energy']
-                elif prior[0] == 'cosine':
-                    # we don;t want to unweight that!
-                    #w = 1./np.clip(np.sin(llhp[dim]), 0.01, None)
-                    w = np.ones(len(llhp))
-                elif prior[0] == 'log_normal' and dim == 'cascade_d_zenith':
-                    w = 1.
-                else:
-                    raise NotImplementedError('Prior %s for dimension %s unknown'
-                                              % (prior[0], dim))
+            param_at_max_llh = params_at_max_llh[param]
+            this_postproc_llh = cut_postproc_llh
+            this_weights = cut_weights
+            param_vals = cut_llhp[param]
 
-                if per_dim:
-                    prior_weights[dim] = w
-                else:
-                    prior_weights *= w
+        estimate.loc[dict(kind='max', param=param)] = param_at_max_llh
 
-    if per_dim:
-        prior_weights['track_energy'] = (
-            llhp['track_energy']
-            / (llhp['track_energy'] + llhp['cascade_energy']) * prior_weights['energy']
-        )
-        prior_weights['cascade_energy'] = (
-            llhp['cascade_energy']
-            / (llhp['track_energy'] + llhp['cascade_energy']) * prior_weights['energy']
-        )
-
-    estimate = OrderedDict()
-
-    estimate['mean'] = OrderedDict()
-    estimate['best'] = OrderedDict()
-    estimate['median'] = OrderedDict()
-    estimate['low'] = OrderedDict()
-    estimate['high'] = OrderedDict()
-    if prior_weights is not None or prob_weights is not None:
-        estimate['weighted_mean'] = OrderedDict()
-        estimate['weighted_median'] = OrderedDict()
-        estimate['weighted_best'] = OrderedDict()
-
-    for col in columns:
-
-        if prob_weights is None and prior_weights is None:
-            weights = None
-        else:
-            if prob_weights is None:
-                weights = np.ones(len(llhp))
-            else:
-                weights = np.copy(prob_weights)
-        if prior_weights is not None:
-            if per_dim:
-                weights *= prior_weights[col]
-            else:
-                weights *= prior_weights
-
-        var = llhp[col]
-        # post llh here means including the correction from prior weights in the llh
-        best_idx = np.argmax(llhp['llh'])
-        estimate['best'][col] = var[best_idx]
-        post_llh = np.log(weights)
-        if weights is not None:
-            best_idx = np.argmax(post_llh)
-            estimate['weighted_best'][col] = var[best_idx]
-
-        postllh_cut = post_llh > np.max(post_llh) - DELTA_LLH_CUTOFF
-        postllh_vals = var[postllh_cut]
-        postllh_weights = weights[postllh_cut]
-
-        # now that we calculated the postllh stuff we can cut tighter
-        llh_cut = llhp['llh'] > np.max(llhp['llh']) - DELTA_LLH_CUTOFF
-        var = var[llh_cut]
-        weights = weights[llh_cut]
-
-        if 'azimuth' in col:
-            # azimuth is a cyclic function, so need some special treatement to
-            # get correct mean shift everything such that the bestfit point is
+        if 'azimuth' in param:
+            # azimuth is a cyclic function, so need some special treatment to
+            # get correct mean: shift everything such that the best-fit point is
             # in the middle (pi)
-            shift = estimate['best'][col]
-            var_shifted = (var - shift + np.pi)%(2*np.pi)
-            postllh_shifted = (postllh_vals - shift + np.pi)%(2*np.pi)
+            shift = param_at_max_llh
+            shifted_vals = (param_vals - shift + np.pi) % (2*np.pi)
 
-            median = (np.median(var_shifted) + shift - np.pi)%(2*np.pi)
-            mean = (stats.circmean(var_shifted) + shift - np.pi)%(2*np.pi)
-            low = (weighted_percentile(postllh_shifted, 13.35, postllh_weights)
-                   + shift - np.pi)%(2*np.pi)
-            high = (weighted_percentile(postllh_shifted, 86.65, postllh_weights)
-                    + shift - np.pi)%(2*np.pi)
-            if weights is not None:
-                weighted_mean = (np.average(var_shifted, weights=weights)
-                                 + shift - np.pi)%(2*np.pi)
-                weighted_median = (weighted_percentile(var_shifted, 50, weights)
-                                   + shift - np.pi)%(2*np.pi)
+            mean = (stats.circmean(shifted_vals) + shift - np.pi) % (2*np.pi)
+            vals_at_q = weighted_percentile(
+                a=shifted_vals,
+                q=qth_percentiles,
+                weights=this_weights,
+            )
+            lower, median, upper = (vals_at_q + shift - np.pi) % (2*np.pi)
         else:
-            mean = np.mean(var)
-            median = np.median(var)
-            low = weighted_percentile(postllh_vals, 13.35, postllh_weights)
-            high = weighted_percentile(postllh_vals, 86.65, postllh_weights)
-            #low = weighted_percentile(var, percentile, weights)
-            #high = weighted_percentile(var, 100-percentile, weights)
-            if weights is not None:
-                weighted_mean = np.average(var, weights=weights)
-                weighted_median = weighted_percentile(var, 50, weights)
+            mean = np.average(param_vals, weights=this_weights)
+            lower, median, upper = weighted_percentile(
+                a=param_vals,
+                q=qth_percentiles,
+                weights=this_weights,
+            )
 
+        estimate.loc[dict(kind='mean', param=param)] = mean
+        estimate.loc[dict(kind='median', param=param)] = median
+        estimate.loc[dict(kind='lower_bound', param=param)] = lower
+        estimate.loc[dict(kind='upper_bound', param=param)] = upper
 
-        estimate['mean'][col] = mean
-        estimate['median'][col] = median
-        estimate['low'][col] = low
-        estimate['high'][col] = high
-
-        if weights is not None:
-            estimate['weighted_mean'][col] = weighted_mean
-            estimate['weighted_median'][col] = weighted_median
-
-    if per_dim:
-        # currently spherical averages not supported in this case, exit
+    if not averages_spherically_aware:
         return estimate
 
+    # Idea: calculate the meanns on the sphere for az and zen combined
+    #
+    # currently the below duplicates work done above but aware of spherical
+    # coords, but just allowing this inefficiency for now since we're still
+    # testing what's best
     for angle in ['', 'track_', 'cascade_']:
-        if angle+'zenith' in columns and angle+'azimuth' in columns:
-            # currently double work, but for testing purposes
-            # idea, calculated the medians on the sphere for az and zen combined
+        zen_name = angle + 'zenith'
+        az_name = angle + 'azimuth'
 
-            if prob_weights is None and prior_weights is None:
-                weights = None
-            else:
-                if prob_weights is None:
-                    weights = np.ones(len(llhp))
-                else:
-                    weights = np.copy(prob_weights)
-            if prior_weights is not None:
-                weights *= prior_weights
+        if not (zen_name in params and az_name in params):
+            continue
 
-            az = llhp[angle+'azimuth']
-            zen = llhp[angle+'zenith']
-            llh_cut = llhp['llh'] > np.max(llhp['llh']) - DELTA_LLH_CUTOFF
-            az = az[llh_cut]
-            zen = zen[llh_cut]
-            weights = weights[llh_cut]
+        az = cut_llhp[az_name]
+        zen = cut_llhp[zen_name]
 
-            # calculate the average and weighted average on sphere:
-            # first need to create (x,y,z) array
-            cart = np.zeros(shape=(3, len(weights)))
+        # calculate the average of Cartesian coords
+        # first need to create (x,y,z) array
+        cart = np.empty(shape=(3, len(cut_llhp)))
+        cart[0, :] = np.cos(az) * np.sin(zen)
+        cart[1, :] = np.sin(az) * np.sin(zen)
+        cart[2, :] = np.cos(zen)
 
-            cart[0] = np.cos(az) * np.sin(zen)
-            cart[1] = np.sin(az) * np.sin(zen)
-            cart[2] = np.cos(zen)
-
+        if use_prob_weights or remove_priors:
+            cart_mean = np.average(cart, axis=1, weights=cut_weights)
+        else:
             cart_mean = np.average(cart, axis=1)
-            cart_weighted_mean = np.average(cart, axis=1, weights=weights)
 
-            # normalize
-            r = np.sqrt(np.sum(np.square(cart_mean)))
-            r_weighted = np.sqrt(np.sum(np.square(cart_weighted_mean)))
-
-            if r == 0:
-                estimate['mean'][angle+'zenith'] = 0
-                estimate['mean'][angle+'azimuth'] = 0
-            else:
-                estimate['mean'][angle+'zenith'] = np.arccos(cart_mean[2] / r)
-                estimate['mean'][angle+'azimuth'] = np.arctan2(cart_mean[1], cart_mean[0]) % (2 * np.pi)
-
-
-            if r_weighted == 0:
-                estimate['weighted_mean'][angle+'zenith'] = 0
-                estimate['weighted_mean'][angle+'azimuth'] = 0
-            else:
-                estimate['weighted_mean'][angle+'zenith'] = np.arccos(cart_weighted_mean[2] / r_weighted)
-                estimate['weighted_mean'][angle+'azimuth'] = np.arctan2(cart_weighted_mean[1], cart_weighted_mean[0]) % (2 * np.pi)
-
+        # normalize if r > 0
+        r = np.sqrt(np.sum(np.square(cart_mean)))
+        if r == 0:
+            estimate.loc[dict(kind='mean', param=zen_name)] = 0
+            estimate.loc[dict(kind='mean', param=az_name)] = 0
+        else:
+            estimate.loc[dict(kind='mean', param=zen_name)] = (
+                np.arccos(cart_mean[2] / r)
+            )
+            estimate.loc[dict(kind='mean', param=az_name)] = np.arctan2(
+                cart_mean[1], cart_mean[0]
+            ) % (2 * np.pi)
 
     return estimate
+
+
+if __name__ == '__main__':
+    test_weighted_percentile()

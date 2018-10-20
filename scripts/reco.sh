@@ -3,6 +3,8 @@ export PATH=~/anaconda2/bin:$PATH
 
 timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
+scripts_dir="$( dirname $0 )"
+retro_dir="$( dirname $scripts_dir )"
 events_base="$1"
 start_idx="$2"
 outdir="$3"
@@ -116,19 +118,17 @@ fi
 
 #python -m cProfile  \
 #kernprof -l -v \
-~/retro/retro/reco.py \
+$retro_dir/retro/reco.py \
     --outdir "$outdir" \
     --method "crs_prefit_mn" \
     \
+    --gcd "GeoCalibDetectorStatus_2013.56429_V1_Modified" \
     --dom-tables-kind "$tblkind" \
     --dom-tables-fname-proto "$proto" \
-    --gcd "GeoCalibDetectorStatus_2013.56429_V1_Modified" \
-    --norm-version "binvol2.5" \
+    --use-doms "all" \
+    $tmpl_lib \
     $tdi0 \
     $tdi1 \
-    $tmpl_lib \
-    --step-length 1.0 \
-    --use-doms "all" \
     \
     --events-base "$events_base" \
     --start "$start_idx" \
@@ -138,7 +138,7 @@ fi
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/OfflinePulses" \
-    --angsens-model 9 \
+    --angsens-model "9" \
     --truth
 
 wait

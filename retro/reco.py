@@ -3,23 +3,23 @@
 # pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals
 
 """
-Instantiate Retro tables and find the max over the log-likelihood space.
+Reco class for performing reconstructions
 """
 
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'REPORT_AFTER',
-    'SAVE_FULL_INFO',
-    'APPEND_FILE',
-    'USE_PRIOR_UNWEIGHTING',
     'METHODS',
-    'RetroReco',
+    'CRS_STOP_FLAGS',
+    'REPORT_AFTER',
+    'APPEND_FILE',
+    'Reco',
+    'get_multinest_meta',
     'parse_args',
 ]
 
 __author__ = 'J.L. Lanfranchi, P. Eller'
-__license__ = '''Copyright 2017 Justin L. Lanfranchi
+__license__ = '''Copyright 2017-2018 Justin L. Lanfranchi and Philipp Eller
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,12 +37,15 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 import os
-from os.path import abspath, dirname, join
+from os.path import abspath, dirname, isdir, join
 import pickle
+from shutil import rmtree
 import sys
+from tempfile import mkdtemp
 import time
 
 import numpy as np
+import xarray as xr
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -74,42 +77,78 @@ METHODS = set([
     "truth",
 ])
 
+CRS_STOP_FLAGS = {
+    0: 'max iterations reached',
+    1: 'stddev below threshold',
+    2: 'no improvement',
+    3: 'vertex stddev below threshold'
+}
+
 # TODO: make following args to `__init__` or `run`
 REPORT_AFTER = 100
-SAVE_FULL_INFO = False
 APPEND_FILE = True
-USE_PRIOR_UNWEIGHTING = True
 
 
-class RetroReco(object):
+class Reco(object):
     """
-    Setup tables, get events, run reconstructons on them, and store the results to disk.
+    Setup tables, get events, run reconstructons on them, and optionally store
+    results to disk.
+
+    Note that "recipes" for different reconstructions are defined in the
+    `Reco.run` method.
 
     Parameters
     ----------
-    events_kw, dom_tables_kw, tdi_tables_kw, other_kw : mappings
+    events_kw, dom_tables_kw, tdi_tables_kw : mappings
         As returned by `retro.init_obj.parse_args`; `other_kw` must contain
         key "outdir".
 
-    """
-    def __init__(self, events_kw, dom_tables_kw, tdi_tables_kw, other_kw):
-        self._get_events = init_obj.get_events(**events_kw)
-        self.outdir = other_kw.get('outdir')
+    outdir : string
+        Directory in which to save any generated files
 
-        # Replace None values for `start` and `step` for fewer branches in subsequent
-        # logic (i.e., these will always be integers)
+    save_llhp : bool, optional
+        Whether to save llhp (within 30 LLH of max-LLH) to disk; default is
+        False
+
+    """
+    def __init__(
+        self,
+        events_kw,
+        dom_tables_kw,
+        tdi_tables_kw,
+        outdir,
+        save_llhp=False,
+    ):
+        self.events_kw = events_kw
+        self.dom_tables_kw = dom_tables_kw
+        self.tdi_tables_kw = tdi_tables_kw
+        self.attrs = sort_dict(dict(
+            events_kw=sort_dict(self.events_kw),
+            dom_tables_kw=sort_dict(self.dom_tables_kw),
+            tdi_tables_kw=sort_dict(self.tdi_tables_kw),
+        ))
+        self._get_events = init_obj.get_events(**events_kw)
+        self.outdir = outdir
+        self.save_llhp = save_llhp
+
+        # Replace None values for `start` and `step` for fewer branches in
+        # subsequent logic (i.e., these will always be integers)
         self.events_start = 0 if events_kw['start'] is None else events_kw['start']
         self.events_step = 1 if events_kw['step'] is None else events_kw['step']
-        # Nothing we can do about None for `stop` since we don't know how many events
-        # there are in total.
+        # Nothing we can do about None for `stop` since we don't know how many
+        # events there are in total.
         self.events_stop = events_kw['stop']
 
-        self.fname_suffix = '{start}:{stop}:{step}'.format(
-            start=self.events_start,
-            stop='' if self.events_stop is None else self.events_stop,
-            step=self.events_step,
+        self.slice_prefix = join(
+            outdir,
+            'slc{start}:{stop}:{step}.'.format(
+                start=self.events_start,
+                stop='' if self.events_stop is None else self.events_stop,
+                step=self.events_step,
+            )
         )
-        """Slice-notation string to append to filenames if APPEND_FILE is True"""
+        """Slice-notation string to append to *estimate filenames if
+        APPEND_FILE is True"""
 
         self.outdir = expand(self.outdir)
         mkdir(self.outdir)
@@ -120,7 +159,7 @@ class RetroReco(object):
             tdi_tables=self.tdi_tables,
             tdi_metas=self.tdi_metas,
         )
-        self.out_prefix = None
+        self.event_prefix = None
         self.current_event = None
         self.current_event_idx = -1
         self.event_counter = -1
@@ -133,24 +172,36 @@ class RetroReco(object):
 
     @property
     def events(self):
-        """Iterator over events which sets class variables `out_prefix`,
-        `current_event`, `current_event_idx`, and `event_counter` for each event
-        retrieved."""
+        """Iterator over events which sets class variables `event_prefix`,
+        `current_event`, `current_event_idx`, and `event_counter` for each
+        event retrieved."""
         for event_idx, event in self._get_events:
-            self.out_prefix = join(self.outdir, 'evt{}-'.format(event_idx))
-            print('Output files prefix: "{}"\n'.format(self.out_prefix))
+            print('Operating on event: "{}"'.format(event_idx))
+            self.event_prefix = join(self.outdir, 'evt{}.'.format(event_idx))
             self.current_event = event
             self.current_event_idx = event_idx
             self.event_counter += 1
             yield self.current_event
 
     def setup_hypo(self, **kwargs):
+        """Setup hypothesis and record `n_params` and `n_opt_params`
+        corresponding to the hypothesis.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to `retro.init_obj.setup_discrete_hypo`
+
+        """
         self.hypo_handler = init_obj.setup_discrete_hypo(**kwargs)
         self.n_params = self.hypo_handler.n_params
         self.n_opt_params = self.hypo_handler.n_opt_params
 
     def run(self, method):
-        """Run reconstructions.
+        """Run reconstructions on events.
+
+        This method collects many recipes for performing different kinds of
+        reconstructions.
 
         Parameters
         ----------
@@ -163,57 +214,61 @@ class RetroReco(object):
                 'Unrecognized `method` "{}"; must be one of {}'.format(method, METHODS)
             )
 
-        print('Running reconstructions...')
+        print('Running "{}" reconstruction...'.format(method))
         t00 = time.time()
 
         for _ in self.events:
-            if method in ('multinest', 'test', 'truth', 'crs', 'scipy', 'nlopt', 'skopt'):
+            if method in (
+                'multinest',
+                'test',
+                'truth',
+                'crs',
+                'scipy',
+                'nlopt',
+                'skopt',
+            ):
                 t0 = time.time()
-                # setup hypo
                 self.setup_hypo(
                     cascade_kernel='scaling_aligned_one_dim',
                     track_kernel='pegleg',
                     track_time_step=1.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
+                self.generate_prior_method(
+                    prior_defs=OrderedDict([
+                        ('x', dict(kind='SPEFit2', extent='tight')),
+                        ('y', dict(kind='SPEFit2', extent='tight')),
+                        ('z', dict(kind='SPEFit2', extent='tight')),
+                        ('time', dict(kind='SPEFit2', extent='tight')),
+                    ])
+                )
 
-                t_start = []
                 param_values = []
                 log_likelihoods = []
-
-                # Setup prior
-                prior_defs = OrderedDict()
-                prior_defs['x'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['y'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['z'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['time'] = {'kind':'SPEFit2', 'extent':'tight'}
-                self.generate_prior(prior_defs)
-
-                # Setup llh function
-                self.generate_loglike(
+                t_start = []
+                self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
                 if method == 'test':
-                    settings = self.run_test(seed=0)
+                    run_info = self.run_test(seed=0)
                 if method == 'truth':
-                    settings = self.run_with_truth()
+                    run_info = self.run_with_truth()
                 elif method == 'crs':
-                    settings = self.run_crs(
+                    run_info = self.run_crs(
                         n_live=250,
                         max_iter=20000,
                         max_noimprovement=5000,
-                        fn_std=0.1,
-                        min_vertex=(1, 1, 1, 3),
+                        min_fn_std=0.1,
+                        min_vertex_std=(1, 1, 1, 3),
                         use_priors=False,
-                        sobol=True,
+                        use_sobol=True,
                         seed=0,
                     )
                 elif method == 'multinest':
-                    settings = self.run_multinest(
+                    run_info = self.run_multinest(
                         importance_sampling=True,
                         max_modes=1,
                         const_eff=True,
@@ -224,172 +279,196 @@ class RetroReco(object):
                         seed=0,
                     )
                 elif method == 'scipy':
-                    settings = self.run_scipy(
+                    run_info = self.run_scipy(
                         method='differential_evolution',
                         eps=0.02
                     )
                 elif method == 'nlopt':
-                    settings = self.run_nlopt()
+                    run_info = self.run_nlopt()
                 elif method == 'skopt':
-                    settings = self.run_skopt()
+                    run_info = self.run_skopt()
 
                 t1 = time.time()
+                run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                opt_meta = self.make_meta_dict(
-                    settings,
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                self.make_estimate(
                     llhp=llhp,
-                    run_time=t1 - t0,
-                    fname='opt_meta',
+                    remove_priors=True,
+                    run_info=run_info,
+                    fname='{}.estimate'.format(method),
                 )
-                estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
 
             elif method == 'fast':
                 t0 = time.time()
-                t_start = []
-
-                # setup hypo
                 self.setup_hypo(
                      cascade_kernel='scaling_aligned_point_ckv',
                      track_kernel='pegleg',
                      track_time_step=3.,
                  )
 
-                self.hypo_handler.fixed_params = OrderedDict()
+                self.generate_prior_method(
+                    prior_defs=OrderedDict([
+                        ('x', dict(kind='SPEFit2', extent='tight')),
+                        ('y', dict(kind='SPEFit2', extent='tight')),
+                        ('z', dict(kind='SPEFit2', extent='tight')),
+                        ('time', dict(kind='SPEFit2', extent='tight')),
+                    ])
+                )
 
                 param_values = []
                 log_likelihoods = []
-
-                # Setup prior
-                prior_defs = OrderedDict()
-                prior_defs['x'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['y'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['z'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['time'] = {'kind':'SPEFit2', 'extent':'tight'}
-                self.generate_prior(prior_defs)
-
-                # Setup llh function
-                self.generate_loglike(
+                t_start = []
+                self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
-                settings = self.run_crs(
+                run_info = self.run_crs(
                     n_live=160,
                     max_iter=10000,
                     max_noimprovement=1000,
-                    fn_std=0.5,
-                    min_vertex=(5, 5, 5, 15),
+                    min_fn_std=0.5,
+                    min_vertex_std=(5, 5, 5, 15),
                     use_priors=False,
-                    sobol=True,
+                    use_sobol=True,
                     seed=0,
                 )
 
                 t1 = time.time()
+                run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                opt_meta = self.make_meta_dict(
-                    settings,
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                self.make_estimate(
                     llhp=llhp,
-                    run_time=t1 - t0,
-                    fname='opt_meta',
+                    remove_priors=False,
+                    run_info=run_info,
+                    fname='{}.estimate'.format(method),
                 )
-                estimate = self.make_estimate(llhp, fname='estimate')
 
             elif method == 'crs_prefit_mn':
                 t0 = time.time()
-                t_start = []
 
-                # ------- track only pre-fit ----------
-                print('--- CRS prefit ---')
+                print('--- Track-only CRS prefit ---')
 
-                # setup hypo
                 self.setup_hypo(
                     cascade_kernel='scaling_aligned_point_ckv',
                     track_kernel='pegleg',
                     track_time_step=3.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
+                self.generate_prior_method(
+                    prior_defs=OrderedDict([
+                        ('x', dict(kind='SPEFit2', extent='tight')),
+                        ('y', dict(kind='SPEFit2', extent='tight')),
+                        ('z', dict(kind='SPEFit2', extent='tight')),
+                        ('time', dict(kind='SPEFit2', extent='tight')),
+                    ])
+                )
 
                 param_values = []
                 log_likelihoods = []
-
-                # Setup prior
-                prior_defs = OrderedDict()
-                prior_defs['x'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['y'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['z'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['time'] = {'kind':'SPEFit2', 'extent':'tight'}
-                self.generate_prior(prior_defs)
-
-                # Setup llh function
-                self.generate_loglike(
+                prefit_t_start = []
+                self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
-                    t_start=t_start,
+                    t_start=prefit_t_start,
                 )
 
-                settings = self.run_crs(
+                prefit_run_info = self.run_crs(
                     n_live=160,
                     max_iter=10000,
                     max_noimprovement=1000,
-                    fn_std=0.5,
-                    min_vertex=(5, 5, 5, 15),
+                    min_fn_std=0.5,
+                    min_vertex_std=(5, 5, 5, 15),
                     use_priors=False,
-                    sobol=True,
+                    use_sobol=True,
                     seed=0,
                 )
 
                 t1 = time.time()
+                prefit_run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                opt_meta = self.make_meta_dict(
-                    settings,
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp_prefit'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                prefit_estimate = self.make_estimate(
                     llhp=llhp,
-                    run_time=t1 - t0,
-                    fname='prefit_opt_meta',
+                    remove_priors=False,
+                    run_info=prefit_run_info,
+                    fname='{}.estimate_prefit'.format(method),
                 )
-                estimate = self.make_estimate(llhp, fname='prefit_estimate')
 
-                # -------- adding cascade ---------
-                print('--- MN fit ---')
+                print('--- MultiNest fit including aligned 1D cascade ---')
 
-                # setup hypo
                 self.setup_hypo(
                     cascade_kernel='scaling_aligned_one_dim',
                     track_kernel='pegleg',
                     track_time_step=1.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
+                # Setup prior
+
+                pft_est = prefit_estimate.sel(kind='mean')
+                pft_x = float(pft_est.sel(param='x'))
+                pft_y = float(pft_est.sel(param='y'))
+                pft_z = float(pft_est.sel(param='z'))
+                pft_time = float(pft_est.sel(param='time'))
+
+                self.generate_prior_method(
+                    prior_defs=OrderedDict([
+                        ('x', dict(
+                            kind='cauchy',
+                            loc=pft_x,
+                            scale=15,
+                            low=pft_x - 300,
+                            high=pft_x + 300,
+                        )),
+                        ('y', dict(
+                            kind='cauchy',
+                            loc=pft_y,
+                            scale=15,
+                            low=pft_y - 300,
+                            high=pft_y + 300,
+                        )),
+                        ('z', dict(
+                            kind='cauchy',
+                            loc=pft_z,
+                            scale=10,
+                            low=pft_z - 200,
+                            high=pft_z + 200,
+                        )),
+                        ('time', dict(
+                            kind='cauchy',
+                            loc=pft_time,
+                            scale=40,
+                            low=pft_time - 800,
+                            high=pft_time + 800,
+                        )),
+                    ])
+                )
 
                 param_values = []
                 log_likelihoods = []
-
-                # Setup prior
-                prior_defs = OrderedDict()
-
-                est_x = estimate['weighted_mean']['x']
-                est_y = estimate['weighted_mean']['y']
-                est_z = estimate['weighted_mean']['z']
-                est_time = estimate['weighted_mean']['time']
-
-                prior_defs['x'] = {'kind':'cauchy', 'loc':est_x, 'scale':15, 'low':est_x-300, 'high':est_x+300}
-                prior_defs['y'] = {'kind':'cauchy', 'loc':est_y, 'scale':15, 'low':est_y-300, 'high':est_y+300}
-                prior_defs['z'] = {'kind':'cauchy', 'loc':est_z, 'scale':10, 'low':est_z-200, 'high':est_z+200}
-                prior_defs['time'] = {'kind':'cauchy', 'loc':est_time, 'scale':40, 'low':est_time-800, 'high':est_time+800}
-                self.generate_prior(prior_defs)
-
-                # Setup llh function
-                self.generate_loglike(
+                t_start = []
+                self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
-                settings = self.run_multinest(
+                run_info = self.run_multinest(
                     importance_sampling=True,
                     max_modes=1,
                     const_eff=True,
@@ -401,20 +480,22 @@ class RetroReco(object):
                 )
 
                 t2 = time.time()
+                run_info['run_time'] = t2 - t1
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                opt_meta = self.make_meta_dict(
-                    settings,
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                self.make_estimate(
                     llhp=llhp,
-                    run_time=t2 - t1,
-                    fname='opt_meta',
+                    remove_priors=True,
+                    run_info=run_info,
+                    fname='{}.estimate'.format(method),
                 )
-                estimate = self.make_estimate(llhp, opt_meta, fname='estimate')
 
-                # -------- 10D ---------
                 #print('--- MN 10d fit ---')
 
-                ## setup hypo
                 #self.setup_hypo(
                 #    cascade_kernel='scaling_one_dim',
                 #    track_kernel='pegleg',
@@ -422,26 +503,25 @@ class RetroReco(object):
                 #)
 
                 #self.hypo_handler.fixed_params = OrderedDict()
-                #self.hypo_handler.fixed_params['x'] = estimate['weighted_mean']['x']
-                #self.hypo_handler.fixed_params['y'] = estimate['weighted_mean']['y']
-                #self.hypo_handler.fixed_params['z'] = estimate['weighted_mean']['z']
-                #self.hypo_handler.fixed_params['time'] = estimate['weighted_mean']['time']
+                #self.hypo_handler.fixed_params['x'] = estimate['mean']['x']
+                #self.hypo_handler.fixed_params['y'] = estimate['mean']['y']
+                #self.hypo_handler.fixed_params['z'] = estimate['mean']['z']
+                #self.hypo_handler.fixed_params['time'] = estimate['mean']['time']
 
                 #param_values = []
                 #log_likelihoods = []
 
                 ## Setup prior (none)
                 #prior_defs = OrderedDict()
-                #self.generate_prior(prior_defs)
+                #self.generate_prior_method(prior_defs)
 
-                ## Setup llh function
-                #self.generate_loglike(
+                #self.generate_loglike_method(
                 #    param_values=param_values,
                 #    log_likelihoods=log_likelihoods,
                 #    t_start=t_start,
                 #)
 
-                #settings = self.run_multinest(
+                #run_info_10d = self.run_multinest(
                 #    importance_sampling=True,
                 #    max_modes=1,
                 #    const_eff=True,
@@ -453,133 +533,149 @@ class RetroReco(object):
                 #)
 
                 #t3 = time.time()
+                #run_info_10d['run_time'] = t3 - t2
 
-                #llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                #opt_meta = self.make_meta_dict(settings, llhp=llhp, run_time=t3-t2, fname='10d_opt_meta')
-                #estimate = self.make_estimate(llhp, opt_meta, fname='10d_estimate')
+                #if self.save_llhp:
+                #    llhp_fname = '{}.llhp_10d'.format(method)
+                #else:
+                #    llhp_fname = None
+                #llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                #self.make_estimate(
+                #    llhp=llhp,
+                #    remove_priors=True,
+                #    run_info=run_info_10d,
+                #    fname='{}.estimate_10d'.format(method),
+                #)
 
             elif method == 'experimental_trackfit':
+                print('--- track-only prefit ---')
+
                 t0 = time.time()
-                t_start = []
-
-                # ------- track only pre-fit ----------
-                print('--- track prefit ---')
-
-                # setup hypo
                 self.setup_hypo(track_kernel='pegleg', track_time_step=1.)
 
-                self.hypo_handler.fixed_params = OrderedDict()
-                #self.hypo_handler.fixed_params['time'] = 10000
+                self.generate_prior_method(
+                    prior_defs=OrderedDict([
+                        ('x', dict(kind='SPEFit2', extent='tight')),
+                        ('y', dict(kind='SPEFit2', extent='tight')),
+                        ('z', dict(kind='SPEFit2', extent='tight')),
+                        ('time', dict(kind='SPEFit2', extent='tight')),
+                    ])
+                )
 
                 param_values = []
                 log_likelihoods = []
-
-                # Setup prior
-                prior_defs = OrderedDict()
-                prior_defs['x'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['y'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['z'] = {'kind':'SPEFit2', 'extent':'tight'}
-                prior_defs['time'] = {'kind':'SPEFit2', 'extent':'tight'}
-                self.generate_prior(prior_defs)
-
-                # Setup llh function
-                self.generate_loglike(
+                prefit_t_start = []
+                self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
-                settings = self.run_crs(
+                prefit_run_info = self.run_crs(
                     n_live=160,
                     max_iter=20000,
                     max_noimprovement=2000,
-                    fn_std=0.1,
-                    min_vertex=(5, 5, 5, 15),
+                    min_fn_std=0.1,
+                    min_vertex_std=(5, 5, 5, 15),
                     use_priors=False,
-                    sobol=True,
+                    use_sobol=True,
                     seed=0,
                 )
 
                 t1 = time.time()
+                prefit_run_info['run_time'] = t1 - t0
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                opt_meta = self.make_meta_dict(
-                    settings,
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp_prefit'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                prefit_estimate = self.make_estimate(
                     llhp=llhp,
-                    run_time=t1 - t0,
-                    fname='prefit_opt_meta',
+                    remove_priors=False,
+                    run_info=prefit_run_info,
+                    fname='{}.estimate_prefit'.format(method),
                 )
-                estimate = self.make_estimate(llhp, fname='prefit_estimate')
 
-                # -------- adding cascade ---------
                 print('--- hybrid fit ---')
 
-                # setup hypo
+                t2 = time.time()
+                # track AND cascade to hypo
                 self.setup_hypo(
                     cascade_kernel='scaling_aligned_one_dim',
                     #track_kernel='pegleg',
-                    track_kernel='table_e_loss',
+                    track_kernel='table_energy_loss',
                     track_time_step=1.,
                 )
 
-                self.hypo_handler.fixed_params = OrderedDict()
-                self.hypo_handler.fixed_params['track_energy'] = (
-                    estimate['weighted_median']['track_energy']
+                pft_est = prefit_estimate.sel(kind='median')
+                pft_x = float(pft_est.sel(param='x'))
+                pft_y = float(pft_est.sel(param='y'))
+                pft_z = float(pft_est.sel(param='z'))
+                pft_time = float(pft_est.sel(param='time'))
+                pft_track_energy = float(pft_est.sel(param='track_energy'))
+
+                self.hypo_handler.fixed_params = OrderedDict([
+                    ('track_energy', pft_track_energy)
+                ])
+
+                self.generate_prior_method(
+                    prior_defs=OrderedDict([
+                        ('x', dict(kind='cauchy', loc=pft_x, scale=12)),
+                        ('y', dict(kind='cauchy', loc=pft_y, scale=13)),
+                        ('z', dict(kind='cauchy', loc=pft_z, scale=7.5)),
+                        ('time', dict(
+                            kind='cauchy',
+                            loc=pft_time,
+                            scale=40,
+                            low=pft_time - 2000,
+                            high=pft_time + 2000,
+                        )),
+                    ])
                 )
 
                 param_values = []
                 log_likelihoods = []
-
-                # Setup prior
-                prior_defs = OrderedDict()
-                prior_defs['x'] = {'kind':'cauchy', 'loc':estimate['weighted_median']['x'], 'scale':12}
-                prior_defs['y'] = {'kind':'cauchy', 'loc':estimate['weighted_median']['y'], 'scale':13}
-                prior_defs['z'] = {'kind':'cauchy', 'loc':estimate['weighted_median']['z'], 'scale':7.5}
-                prior_defs['time'] = {
-                    'kind': 'cauchy',
-                    'loc': estimate['weighted_median']['time'],
-                    'scale': 40,
-                    'low': estimate['weighted_median']['time'] - 2000,
-                    'high': estimate['weighted_median']['time'] + 2000
-                }
-                self.generate_prior(prior_defs)
-
-
-                # Setup llh function
-                self.generate_loglike(
+                t_start = []
+                self.generate_loglike_method(
                     param_values=param_values,
                     log_likelihoods=log_likelihoods,
                     t_start=t_start,
                 )
 
-                settings = self.run_crs(
+                run_info = self.run_crs(
                     n_live=160,
                     max_iter=20000,
                     max_noimprovement=2000,
-                    fn_std=0.1,
-                    min_vertex=(5, 5, 5, 15),
+                    min_fn_std=0.1,
+                    min_vertex_std=(5, 5, 5, 15),
                     use_priors=False,
-                    sobol=True,
+                    use_sobol=True,
                     seed=0,
                 )
 
-                t2 = time.time()
+                t3 = time.time()
+                run_info['run_time'] = t3 - t2
 
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=None)
-                opt_meta = self.make_meta_dict(
-                    settings,
+                if self.save_llhp:
+                    llhp_fname = '{}.llhp'.format(method)
+                else:
+                    llhp_fname = None
+                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                self.make_estimate(
                     llhp=llhp,
-                    run_time=t2 - t1,
-                    fname='opt_meta',
+                    remove_priors=False,
+                    run_info=run_info,
+                    fname='{}.estimate'.format(method),
                 )
-                estimate = self.make_estimate(llhp, fname='estimate')
             else:
                 raise ValueError('Unknown `Method` {}'.format(method))
 
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
-    def generate_prior(self, prior_defs):
-        """Generate the prior transform functions + info for a given event.
+    def generate_prior_method(self, prior_defs):
+        """Generate the prior transform method `self.prior` and info
+        `self.priors_used` for a given event.
 
         Parameters
         ----------
@@ -622,14 +718,17 @@ class RetroReco(object):
 
         self.prior = prior
 
-    def generate_loglike(self, param_values, log_likelihoods, t_start):
-        """Generate the LLH callback function for a given event.
+    def generate_loglike_method(self, param_values, log_likelihoods, t_start):
+        """Generate the LLH callback method `self.loglike` for a given event.
 
         Parameters
         ----------
         param_values : list
         log_likelihoods : list
         t_start : list
+            Needs to be a list for start time to be passed by reference and
+            therefore universally accessible within all methods that require
+            knowing the start time
 
         """
         # -- Variables to be captured by `loglike` closure -- #
@@ -637,35 +736,30 @@ class RetroReco(object):
         all_param_names = self.hypo_handler.all_param_names
         opt_param_names = self.hypo_handler.opt_param_names
         n_opt_params = self.hypo_handler.n_opt_params
-
         fixed_params = self.hypo_handler.fixed_params
-
         event = self.current_event
-
         hits = event['hits']
         hits_indexer = event['hits_indexer']
         hypo_handler = self.hypo_handler
         pegleg_muon_dt = hypo_handler.pegleg_kernel_kwargs.get('dt')
         pegleg_muon_const_e_loss = False
-
         dom_info = self.dom_tables.dom_info
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
-
-        truth_info = OrderedDict()
-        truth_info['x'] = event['truth']['x']
-        truth_info['y'] = event['truth']['y']
-        truth_info['z'] = event['truth']['z']
-        truth_info['time'] = event['truth']['time']
-        truth_info['zenith'] = np.arccos(event['truth']['coszen'])
-        truth_info['azimuth'] = event['truth']['azimuth']
-        truth_info['track_azimuth'] = event['truth']['longest_daughter_azimuth']
-        truth_info['track_zenith'] = np.arccos(event['truth']['longest_daughter_coszen'])
-        truth_info['track_energy'] = event['truth']['longest_daughter_energy']
-        truth_info['cascade_azimuth'] = event['truth']['cascade_azimuth']
-        truth_info['cascade_zenith'] = np.arccos(event['truth']['cascade_coszen'])
-        truth_info['cascade_energy'] = event['truth']['cascade_energy']
-        truth_info['neutrino_energy'] = event['truth']['energy']
-
+        truth_info = OrderedDict([
+            ('x', event['truth']['x']),
+            ('y', event['truth']['y']),
+            ('z', event['truth']['z']),
+            ('time', event['truth']['time']),
+            ('zenith', np.arccos(event['truth']['coszen'])),
+            ('azimuth', event['truth']['azimuth']),
+            ('track_azimuth', event['truth']['longest_daughter_azimuth']),
+            ('track_zenith', np.arccos(event['truth']['longest_daughter_coszen'])),
+            ('track_energy', event['truth']['longest_daughter_energy']),
+            ('cascade_azimuth', event['truth']['cascade_azimuth']),
+            ('cascade_zenith', np.arccos(event['truth']['cascade_coszen'])),
+            ('cascade_energy', event['truth']['cascade_energy']),
+            ('neutrino_energy', event['truth']['energy']),
+        ])
         num_operational_doms = np.sum(dom_info['operational'])
 
         # Array containing only DOMs operational during the event & info
@@ -681,8 +775,8 @@ class RetroReco(object):
 
         copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
 
-        print('all noise rate %.5f'%np.sum(dom_info['noise_rate_per_ns']))
-        print('DOMs with zero noise %i'%np.sum(dom_info['noise_rate_per_ns'] == 0))
+        print('all noise rate %.5f' % np.sum(dom_info['noise_rate_per_ns']))
+        print('DOMs with zero noise %i' % np.sum(dom_info['noise_rate_per_ns'] == 0))
 
         # Fill `event_{hit,dom}_info` arrays only for operational DOMs
         for dom_idx, this_dom_info in enumerate(dom_info[dom_info['operational']]):
@@ -727,12 +821,12 @@ class RetroReco(object):
         def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Get log likelihood values.
 
-            Defined as a closure to capture particulars of the event and priors without
-            having to pass these as parameters to the function.
+            Defined as a closure to capture particulars of the event and priors
+            without having to pass these as parameters to the function.
 
             Note that this is called _after_ `prior` has been called, so `cube`
-            already contains the parameter values scaled to be in their physical
-            ranges.
+            already contains the parameter values scaled to be in their
+            physical ranges.
 
             Parameters
             ----------
@@ -746,7 +840,7 @@ class RetroReco(object):
 
             """
             t0 = time.time()
-            if not t_start:
+            if len(t_start) == 0:
                 t_start.append(time.time())
 
             hypo = OrderedDict(list(zip(opt_param_names, cube)))
@@ -814,7 +908,9 @@ class RetroReco(object):
                     msg += ' %s=%.1f'%(key, val)
                 print(msg)
                 print('{} LLH computed'.format(n_calls))
-                print('avg time per llh: {:.3f} ms'.format((t_now - t_start[0])/n_calls*1000))
+                print('avg time per llh: {:.3f} ms'.format(
+                    (t_now - t_start[0])/n_calls*1000)
+                )
                 print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
                 print('')
 
@@ -823,8 +919,8 @@ class RetroReco(object):
         self.loglike = loglike
 
     def make_llhp(self, log_likelihoods, param_values, fname=None):
-        """Create a structured numpy array containing the reco information; also add
-        derived dimensions.
+        """Create a structured numpy array containing the reco information;
+        also add derived dimensions, and optionally save to disk.
 
         Parameters
         ----------
@@ -832,12 +928,13 @@ class RetroReco(object):
 
         param_values : array
 
-        fname : str or None
-            filename if result should be dumped into file
+        fname : str, optional
+            If provided, llhp for the event reco are saved to file at path
+              {self.outdir}/evt{event_idx}.{fname}.npy
 
         Returns
         -------
-        llhp : length-n_llp array of dtype llhp_t
+        llhp : length-n_llhp array of dtype llhp_t
             Note that llhp_t is derived from the defined parameter names.
 
         """
@@ -878,7 +975,8 @@ class RetroReco(object):
 
         if 'track_zenith' in all_dim_names and 'track_azimuth' in all_dim_names:
             if 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
-                # this resulting radius we won't need, but need to supply an array to the function
+                # this resulting radius we won't need, but need to supply an array to
+                # the function
                 r_out = np.empty(shape=llhp.shape, dtype=np.float32)
                 # combine angles:
                 add_vectors(
@@ -902,169 +1000,134 @@ class RetroReco(object):
             llhp['zenith'] = llhp['cascade_zenith']
             llhp['azimuth'] = llhp['cascade_azimuth']
 
-        # save full info
-        if fname is not None:
-            llhp_outf = self.out_prefix + fname + '.npy'
-            print('Saving llhp to "{}"...'.format(llhp_outf))
-            np.save(llhp_outf, llhp)
+        if fname:
+            # NOTE: since each array can have different length and numpy
+            # doesn't handle "ragged" arrays nicely, forcing each llhp to be
+            # saved to its own file even if APPEND_FILE is True.
+            llhp_outf = '{}{}.npy'.format(self.event_prefix, fname)
+            llh = llhp['llh']
+            cut_llhp = llhp[llh > np.max(llh) - 30]
+            print(
+                'Saving llhp within 30 LLH of max ({} llhp) to "{}"'
+                .format(len(cut_llhp), llhp_outf)
+            )
+            np.save(llhp_outf, cut_llhp)
 
         return llhp
 
-    def make_meta_dict(self, settings, llhp, run_time=-1, fname=None):
-        """Create meta-information dictionary and optionally dump to disk.
-
-        Parameters
-        ----------
-        settings : dict
-
-        llhp : length n_llhp array of dtype llhp_t
-
-        run_time : float, optional
-
-        fname : str, optional
-            If specified, dump result to this file
-
-        Returns
-        -------
-        opt_meta : OrderedDict
-
-        """
-        opt_meta = OrderedDict([
-            ('params', list(self.hypo_handler.all_param_names)),
-            ('priors_used', self.priors_used),
-            ('settings', sort_dict(settings)),
-        ])
-        opt_meta['num_llhp'] = len(llhp)
-        opt_meta['run_time'] = run_time
-        opt_meta['event_idx'] = self.current_event_idx
-
-        if fname is not None:
-            if APPEND_FILE:
-                fname += '_' + self.fname_suffix
-                opt_meta_outf = os.path.join(self.outdir, fname + '.pkl')
-                file_exists = os.path.isfile(opt_meta_outf)
-                if self.event_counter == 0:
-                    if file_exists:
-                        raise ValueError(
-                            'File already exists but want to save event #1: "{}"'
-                            .format(opt_meta_outf)
-                        )
-                    # create new dict
-                    out_dict = OrderedDict()
-                    for key in opt_meta:
-                        out_dict[key] = []
-                else:
-                    if not file_exists:
-                        raise ValueError(
-                            'File does not exist but want to save event > #1: "{}"'
-                            .format(opt_meta_outf)
-                        )
-                    out_dict = pickle.load(open(opt_meta_outf, 'rb'))
-                    for key, val in out_dict.items():
-                        if len(val) != self.event_counter:
-                            raise ValueError(
-                                'Index mismatch in outfile "{}"'.format(opt_meta_outf)
-                            )
-
-                for key in opt_meta:
-                    out_dict[key].append(opt_meta[key])
-
-                pickle.dump(
-                    out_dict,
-                    open(opt_meta_outf, 'wb'),
-                    protocol=pickle.HIGHEST_PROTOCOL,
-                )
-
-            else:
-                opt_meta_outf = self.out_prefix + fname + '.pkl'
-                print('Saving metadata to "{}"'.format(opt_meta_outf))
-                pickle.dump(
-                    opt_meta,
-                    open(opt_meta_outf, 'wb'),
-                    protocol=pickle.HIGHEST_PROTOCOL
-                )
-
-        return opt_meta
-
-    def make_estimate(self, llhp, opt_meta=None, fname=None):
+    def make_estimate(
+        self,
+        llhp,
+        remove_priors,
+        run_info=None,
+        fname=None,
+    ):
         """Create estimate from llhp and optionally save to disk.
 
         Parameters
         ----------
-        llhp
-        opt_meta : , optional
+        llhp : length-n_llhp array of dtype llhp_t
+        remove_priors : bool
+            Remove effect of priors
+        run_info : mapping, optional
         fname : string, optional
+            * If not provided, estimate is not written to disk.
+            * If provided and APPEND_FILE is True, an `xarray.Dataset` where
+              each contained `xarray.DataArray` is one event's reconstruction
+              (plus run and estimate metadata); the name of each DataArray is
+              the event index, and Reco metadata is stored to `Dataset.attrs`;
+              output file is
+                {outdir}/slc{start}:{stop}:{step}.{fname}.pkl
+            * If provided and APPEND_FILE is False, event and run_info metadata
+              is written as an `xarray.DataArray` containing estimate and
+              metadata to file at
+                {outdir}/evt{event_idx}.{fname}.pkl
 
         Returns
         -------
-        estimate
+        estimate : xarray.DataArray
 
         """
-        estimate = estimate_from_llhp(llhp=llhp, meta=opt_meta)
-        estimate['event_idx'] = self.current_event_idx
-        if fname is None:
+        estimate = estimate_from_llhp(
+            llhp=llhp,
+            treat_dims_independently=False,
+            use_prob_weights=True,
+            priors_used=self.priors_used if remove_priors else None,
+        )
+        attrs = estimate.attrs
+        attrs['event_idx'] = self.current_event_idx
+        attrs['params'] = list(self.hypo_handler.all_param_names)
+        attrs['priors_used'] = self.priors_used
+        if run_info is None:
+            attrs['run_info'] = OrderedDict()
+        else:
+            attrs['run_info'] = run_info
+        estimate.attrs = sort_dict(attrs)
+        estimate.name = self.current_event_idx
+        if not fname:
             return estimate
 
         if APPEND_FILE:
-            fname += '_' + self.fname_suffix
-            estimate_outf = os.path.join(self.outdir, fname + '.pkl')
+            estimate_outf = os.path.join(
+                self.outdir, '{}{}.pkl'.format(self.slice_prefix, fname)
+            )
             file_exists = os.path.isfile(estimate_outf)
             if self.event_counter == 0:
-                assert not file_exists, 'File already exists but want to save event #1'
-                # create new dict
-                out_dict = OrderedDict()
-                for key in estimate:
-                    out_dict[key] = []
+                if file_exists:
+                    raise IOError('File already exists at "{}"'.format(estimate_outf))
+                # create new Dataset
+                dataset = xr.Dataset()
+                dataset.attrs = self.attrs
             else:
-                assert file_exists, 'File does not exists but want to save event > #1'
-                out_dict = pickle.load(open(estimate_outf, 'rb'))
-                for key, val in out_dict.items():
-                    assert len(val) == self.event_counter, 'Index mismatch in outfile'
-
-            for key in estimate:
-                out_dict[key].append(estimate[key])
-
+                if not file_exists:
+                    raise IOError(
+                        'Output file with previous events does not exist at "{}"'
+                        .format(estimate_outf)
+                    )
+                dataset = pickle.load(open(estimate_outf, 'rb'))
+            dataset[estimate.name] = estimate
             pickle.dump(
-                out_dict,
-                open(estimate_outf, 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL
+                obj=dataset,
+                file=open(estimate_outf, 'wb'),
+                protocol=pickle.HIGHEST_PROTOCOL,
             )
-
         else: # save each event reco estimate as its own pickle file
-            estimate_outf = self.out_prefix + fname + '.pkl'
+            estimate_outf = '{}{}.pkl'.format(self.event_prefix, fname)
             print('Saving estimate to "{}"'.format(estimate_outf))
             pickle.dump(
-                estimate,
-                open(estimate_outf, 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL
+                obj=estimate,
+                file=open(estimate_outf, 'wb'),
+                protocol=pickle.HIGHEST_PROTOCOL,
             )
 
         return estimate
 
     def run_test(self, seed):
         """Random sampling instead of an actual minimizer"""
-        raise NotImplementedError() # TODO
+        raise NotImplementedError('`run_test` not implemented') # TODO
+        kwargs = sort_dict(dict(seed=seed))
         rand = np.random.RandomState(seed=seed)
         for i in range(100):
             param_vals = rand.uniform(0, 1, self.n_opt_params)
             self.prior(param_vals)
             llh = self.loglike(param_vals)
-        return OrderedDict()
+        run_info = sort_dict(dict(method='run_test', kwargs=kwargs))
+        return run_info
 
     def run_with_truth(self, rand_dims=None, n_samples=10000, seed=0):
-        """Run with all params set to truth except for the dimensions defined, which
-        will be randomized.
+        """Run with all params set to truth except for the dimensions defined,
+        which will be randomized.
 
         Parameters
         ----------
         rand_dims : list, optional
-            Dimensions to randomly sample; all not specified are set to truth.
+            Dimensions to randomly sample; all not specified are set to truth
 
         n_samples : int
             Number of samples to draw
 
         """
-        raise NotImplementedError() # TODO
+        raise NotImplementedError('`run_with_truth` not implemented') # TODO
         if rand_dims is None:
             rand_dims = []
 
@@ -1093,59 +1156,102 @@ class RetroReco(object):
         else:
             llh = self.loglike(true_params)
 
-        return OrderedDict()
+        run_info = sort_dict(dict(method='run_with_truth', kwargs=kwargs))
+        return run_info
 
     def run_crs(
         self,
         n_live,
         max_iter,
         max_noimprovement,
-        fn_std,
-        min_vertex,
+        min_fn_std,
+        min_vertex_std,
         use_priors,
-        sobol,
-        seed=None,
+        use_sobol,
+        seed,
     ):
-        """Implementation of the CRS2 algorithm with local mutation as described in
-        JOURNAL OF OPTIMIZATION THEORY AND APPLICATIONS: Vol. 130, No. 2, pp. 253–264,
-        August 2006 (C 2006) DOI: 10.1007/s10957-006-9101-0
+        """Implementation of the CRS2 algorithm, adapted to work with spherical
+        coordinates (correct centroid calculation, reflection, and mutation).
 
-        Adapted to work with spherical coordinates (correct centroid calculation,
-        reflection and mutation).
-
-        At the moment the number of Cartesian (standard) parameters `n_cart` and
-        spherical parameters `n_spher` are assumed to have particular names.
-        Furthermore, all Cartesian coordinates must come first followed by `azimuth_1,
-        zenith_1, azimuth_2, zenith_2, ...`
+        At the moment Cartesian (standard) parameters and spherical parameters
+        are assumed to have particular names (i.e., spherical coordinates start
+        with "az" and "zen"). Furthermore, all Cartesian coordinates must come
+        first followed by the pairs of (azimuth, zenith) spherical coordinates;
+        e.g., "az_1", "zen_1", "az_2", "zen_2", etc.
 
         Parameters
         ----------
         n_live : int
-            number of live points
+            Number of live points
         max_iter : int
-            maximum iterations
+            Maximum iterations
         max_noimprovement : int
-            maximum iterations with no improvement of best point
-        fn_std : float
-            break if stddev of function values across all livepoints drops below
-        min_vertex : sequence
-            break condition on stddev of vertex
+            Maximum iterations with no improvement of best point
+        min_fn_std : float
+            Break if stddev of function values across all livepoints drops
+            below this threshold
+        min_vertex_std : sequence
+            Break condition on stddev of vertex
         use_priors : bool
-            use priors during minimization, if `false` priors are only used for sampling
-            the initial distributions
-        sobol : bool
-            use Sobol sequence
+            Use priors during minimization; if `False`, priors are only used
+            for sampling the initial distributions
+        use_sobol : bool
+            Use a Sobol sequence instead of numpy pseudo-random numbers
         seed : int
+            Random seed
 
         Returns
         -------
-        res
+        run_info : OrderedDict
+
+        Notes
+        -----
+        CRS2 [1] is a variant of controlled random search (CRS, a global
+        optimizer) with faster convergence than CRS.
+
+        Refrences
+        ---------
+        .. [1] P. Kaelo, M.M. Ali, "Some variants of the controlled random
+           search algorithm for global optimization," J. Optim. Theory Appl.,
+           130 (2) (2006), pp. 253-264.
 
         """
-        if sobol:
+        if use_sobol:
             from sobol import i4_sobol
 
+        kwargs = sort_dict(dict(
+            n_live=n_live,
+            max_iter=max_iter,
+            max_noimprovement=max_noimprovement,
+            min_fn_std=min_fn_std,
+            min_vertex_std=min_vertex_std,
+            use_priors=use_priors,
+            use_sobol=use_sobol,
+            seed=seed,
+        ))
+
         rand = np.random.RandomState(seed=seed)
+
+        n_opt_params = self.n_opt_params
+        # absolute minimum number of points necessary
+        assert n_live > n_opt_params + 1
+
+        # figure out which variables are Cartesian and which spherical
+        opt_param_names = self.hypo_handler.opt_param_names
+        cart_param_names = set(opt_param_names) & set(['time', 'x', 'y', 'z'])
+        n_cart = len(cart_param_names)
+        assert set(opt_param_names[:n_cart]) == cart_param_names
+        n_spher_param_pairs = int((n_opt_params - n_cart)/2)
+        for sph_pair_idx in range(n_spher_param_pairs):
+            az_param = opt_param_names[n_cart + sph_pair_idx*2]
+            zen_param = opt_param_names[n_cart + sph_pair_idx*2 + 1]
+            assert 'az' in az_param, '"{}" not azimuth param'.format(az_param)
+            assert 'zen' in zen_param, '"{}" not zenith param'.format(zen_param)
+
+        # setup arrays to store points
+        s_cart = np.zeros(shape=(n_live, n_cart))
+        s_spher = np.zeros(shape=(n_live, n_spher_param_pairs), dtype=SPHER_T)
+        fx = np.zeros(shape=(n_live,))
 
         def fun(x):
             """Callable for minimizer"""
@@ -1159,29 +1265,8 @@ class RetroReco(object):
             llh = self.loglike(param_vals)
             return -llh
 
-        n_opt_params = self.n_opt_params
-        # absolute minimum number of points necessary
-        assert n_live > n_opt_params + 1
-
-        # figure out which variables are Cartesian and which spherical
-        names = self.hypo_handler.opt_param_names
-        cart = set(names) & set(['time', 'x', 'y', 'z'])
-        n_cart = len(cart)
-        assert set(names[:n_cart]) == cart
-        if n_opt_params > n_cart:
-            n_spher = int((n_opt_params - n_cart)/2)
-        for spher in range(n_spher):
-            assert 'az' in names[n_cart+spher*2]
-            assert 'zen' in names[n_cart+spher*2+1]
-
-        # setup arrays to store points
-        S_cart = np.zeros(shape=(n_live, n_cart))
-        S_spher = np.zeros(shape=(n_live, n_spher), dtype=SPHER_T)
-        fx = np.zeros(shape=(n_live,))
-
-        # convenience methods
         def create_x(x_cart, x_spher):
-            """Patch together the cartesian and spherical coordinates into one array"""
+            """Patch Cartesian and spherical coordinates into one array"""
             # TODO: make proper
             x = np.empty(shape=n_opt_params)
             x[:n_cart] = x_cart
@@ -1191,7 +1276,7 @@ class RetroReco(object):
 
         # generate initial population
         for i in range(n_live):
-            if sobol:
+            if use_sobol:
                 # sobol seems to do slightly better
                 x, _ = i4_sobol(n_opt_params, i+1)
             else:
@@ -1204,53 +1289,49 @@ class RetroReco(object):
                 x[:n_cart] = param_vals[:n_cart]
 
             # break up into cartesiand and spherical coordinates
-            S_cart[i] = x[:n_cart]
-            S_spher[i]['zen'] = x[n_cart+1::2]
-            S_spher[i]['az'] = x[n_cart::2]
-            fill_from_spher(S_spher[i])
+            s_cart[i] = x[:n_cart]
+            s_spher[i]['zen'] = x[n_cart+1::2]
+            s_spher[i]['az'] = x[n_cart::2]
+            fill_from_spher(s_spher[i])
             fx[i] = fun(x)
 
         best_llh = np.min(fx)
         no_improvement_counter = -1
 
         # optional bookkeeping
-        simplex_success = 0
-        mutation_success = 0
-        failure = 0
+        num_simplex_successes = 0
+        num_mutation_successes = 0
+        num_failures = 0
         stopping_flag = 0
 
         # minimizer loop
+        iter_num = 0
         for iter_num in range(max_iter):
             if iter_num % REPORT_AFTER == 0:
                 print(
                     'simplex: %i, mutation: %i, failed: %i'
-                    % (simplex_success, mutation_success, failure)
+                    % (num_simplex_successes, num_mutation_successes, num_failures)
                 )
 
             # break condition 1
-            if np.std(fx) < fn_std:
-                print('std below threshold, stopping.')
+            if np.std(fx) < min_fn_std:
                 stopping_flag = 1
                 break
 
             # break condition 2
             if no_improvement_counter > max_noimprovement:
-                print('no improvement found, stopping.')
                 stopping_flag = 2
                 break
 
-            # break condition 4
+            # break condition 3
             done = []
             stds = []
-            for dim, cond in zip(('x', 'y', 'z', 'time'), min_vertex):
-                if dim in names:
-                    std = np.std(S_cart[:, names.index(dim)])
+            for dim, cond in zip(('x', 'y', 'z', 'time'), min_vertex_std):
+                if dim in opt_param_names:
+                    std = np.std(s_cart[:, opt_param_names.index(dim)])
                     stds.append(std)
                     done.append(std < cond)
-
-            #print(stds)
-            if all(done) and len(done) > 0:
-                print('vertex std below threshold, stopping.')
+            if len(done) > 0 and all(done):
                 stopping_flag = 3
                 break
 
@@ -1271,28 +1352,28 @@ class RetroReco(object):
 
             # Cartesian centroid
             centroid_cart = (
-                (np.sum(S_cart[choice[:-1]], axis=0) + S_cart[best_idx]) / n_opt_params
+                (np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx]) / n_opt_params
             )
 
             # reflect point
-            new_x_cart = 2*centroid_cart - S_cart[choice[-1]]
+            new_x_cart = 2*centroid_cart - s_cart[choice[-1]]
 
             # spherical centroid
-            centroid_spher = np.zeros(n_spher, dtype=SPHER_T)
+            centroid_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
             centroid_spher['x'] = (
-                np.sum(S_spher['x'][choice[:-1]], axis=0) + S_spher['x'][best_idx]
+                np.sum(s_spher['x'][choice[:-1]], axis=0) + s_spher['x'][best_idx]
             ) / n_opt_params
             centroid_spher['y'] = (
-                np.sum(S_spher['y'][choice[:-1]], axis=0) + S_spher['y'][best_idx]
+                np.sum(s_spher['y'][choice[:-1]], axis=0) + s_spher['y'][best_idx]
             ) / n_opt_params
             centroid_spher['z'] = (
-                np.sum(S_spher['z'][choice[:-1]], axis=0) + S_spher['z'][best_idx]
+                np.sum(s_spher['z'][choice[:-1]], axis=0) + s_spher['z'][best_idx]
             ) / n_opt_params
             fill_from_cart(centroid_spher)
 
             # reflect point
-            new_x_spher = np.zeros(n_spher, dtype=SPHER_T)
-            reflect(S_spher[choice[-1]], centroid_spher, new_x_spher)
+            new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
+            reflect(s_spher[choice[-1]], centroid_spher, new_x_spher)
 
             if use_priors:
                 outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
@@ -1304,27 +1385,27 @@ class RetroReco(object):
 
                 if new_fx < fx[worst_idx]:
                     # found better point
-                    S_cart[worst_idx] = new_x_cart
-                    S_spher[worst_idx] = new_x_spher
+                    s_cart[worst_idx] = new_x_cart
+                    s_spher[worst_idx] = new_x_spher
                     fx[worst_idx] = new_fx
-                    simplex_success += 1
+                    num_simplex_successes += 1
                     continue
 
             # mutation
             w = rand.uniform(0, 1, n_cart)
-            new_x_cart2 = (1 + w) * S_cart[best_idx] - w * new_x_cart
+            new_x_cart2 = (1 + w) * s_cart[best_idx] - w * new_x_cart
 
             # first reflect at best point
-            reflected_new_x_spher = np.zeros(n_spher, dtype=SPHER_T)
-            reflect(new_x_spher, S_spher[best_idx], reflected_new_x_spher)
+            reflected_new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
+            reflect(new_x_spher, s_spher[best_idx], reflected_new_x_spher)
 
             new_x_spher2 = np.zeros_like(new_x_spher)
 
             # now do a combination of best and reflected point with weight w
-            for dim in ['x', 'y', 'z']:
-                w = rand.uniform(0, 1, n_spher)
+            for dim in ('x', 'y', 'z'):
+                w = rand.uniform(0, 1, n_spher_param_pairs)
                 new_x_spher2[dim] = (
-                    (1 - w) * S_spher[best_idx][dim]
+                    (1 - w) * s_spher[best_idx][dim]
                     + w * reflected_new_x_spher[dim]
                 )
             fill_from_cart(new_x_spher2)
@@ -1339,33 +1420,42 @@ class RetroReco(object):
 
                 if new_fx < fx[worst_idx]:
                     # found better point
-                    S_cart[worst_idx] = new_x_cart2
-                    S_spher[worst_idx] = new_x_spher2
+                    s_cart[worst_idx] = new_x_cart2
+                    s_spher[worst_idx] = new_x_spher2
                     fx[worst_idx] = new_fx
-                    mutation_success += 1
+                    num_mutation_successes += 1
                     continue
 
-            # if we get here no method was successful in replacing worst point -> start over
-            failure += 1
+            # if we get here no method was successful in replacing worst
+            # point -> start over
+            num_failures += 1
 
-        res = OrderedDict()
-        res['method'] = 'CRS2spherical+lm+sampling'
-        res['n_live'] = n_live
-        res['max_iter'] = max_iter
-        res['max_noimprovement'] = max_noimprovement
-        res['fn_std'] = fn_std
-        res['use_priors'] = use_priors
-        res['sobol'] = sobol
-        res['stopping_flag'] = stopping_flag
-        res['num_simplex'] = simplex_success
-        res['num_mutation'] = mutation_success
-        res['num_failure'] = failure
-        res['num+tot'] = iter_num
+        print(CRS_STOP_FLAGS[stopping_flag])
 
-        return res
+        fit_meta = sort_dict(dict(
+            stopping_flag=stopping_flag,
+            stopping_message=CRS_STOP_FLAGS[stopping_flag],
+            num_simplex_successes=num_simplex_successes,
+            num_mutation_successes=num_mutation_successes,
+            num_failures=num_failures,
+            iterations=iter_num,
+        ))
+
+        run_info = sort_dict(dict(
+            method='run_crs',
+            method_description='CRS2spherical+lm+sampling',
+            kwargs=kwargs,
+            fit_meta=fit_meta,
+        ))
+        return run_info
 
     def run_scipy(self, method, eps):
         from scipy import optimize
+
+        kwargs = sort_dict(dict(
+            method=method,
+            eps=eps,
+        ))
 
         # initial guess
         x0 = 0.5 * np.ones(shape=self.n_opt_params)
@@ -1386,7 +1476,8 @@ class RetroReco(object):
         else:
             optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
 
-        return settings
+        run_info = sort_dict(dict(method='run_scipy', kwargs=kwargs))
+        return run_info
 
     def run_skopt(self):
         from skopt import gp_minimize #, forest_minimize
@@ -1402,18 +1493,21 @@ class RetroReco(object):
             return -llh
 
         bounds = [(0, 1)]*self.n_opt_params
-        settings = OrderedDict()
+        settings = sort_dict(dict(
+            acq_func='EI',      # acquisition function
+            n_calls=1000,       # number of evaluations of f
+            n_random_starts=5,  # number of random initialization
+        ))
 
         _ = gp_minimize(
             fun,                # function to minimize
             bounds,             # bounds on each dimension of x
-            acq_func="EI",      # acquisition function
-            n_calls=1000,       # number of evaluations of f
-            n_random_starts=5,  # number of random initialization
             x0=list(x0),
+            **settings
         )
 
-        return settings
+        run_info = sort_dict(dict(method='run_skopt', settings=settings))
+        return run_info
 
     def run_nlopt(self):
         import nlopt
@@ -1476,9 +1570,9 @@ class RetroReco(object):
                 x0 = 0.5 * np.ones(shape=self.n_opt_params)
 
                 for i in range(self.n_opt_params):
-                    if 'azimuth' in self.hypo_handler.opt_param_names[i]:
+                    if 'az' in self.hypo_handler.opt_param_names[i]:
                         x0[i] = az
-                    elif 'zenith' in self.hypo_handler.opt_param_names[i]:
+                    elif 'zen' in self.hypo_handler.opt_param_names[i]:
                         x0[i] = zen
                 x = opt.optimize(x0) # pylint: disable=unused-variable
 
@@ -1539,17 +1633,19 @@ class RetroReco(object):
         #local_opt.set_initial_step(dx)
         #x = opt.optimize(x)
 
-        settings = OrderedDict()
-        settings['method'] = opt.get_algorithm_name()
-        settings['ftol_abs'] = opt.get_ftol_abs()
-        settings['ftol_rel'] = opt.get_ftol_rel()
-        settings['xtol_abs'] = opt.get_xtol_abs()
-        settings['xtol_rel'] = opt.get_xtol_rel()
-        settings['maxeval'] = opt.get_maxeval()
-        settings['maxtime'] = opt.get_maxtime()
-        settings['stopval'] = opt.get_stopval()
+        settings = sort_dict(dict(
+            method=opt.get_algorithm_name(),
+            ftol_abs=opt.get_ftol_abs(),
+            ftol_rel=opt.get_ftol_rel(),
+            xtol_abs=opt.get_xtol_abs(),
+            xtol_rel=opt.get_xtol_rel(),
+            maxeval=opt.get_maxeval(),
+            maxtime=opt.get_maxtime(),
+            stopval=opt.get_stopval(),
+        ))
 
-        return settings
+        run_info = sort_dict(dict(method='run_nlopt', settings=settings))
+        return run_info
 
     def run_multinest(
         self,
@@ -1576,57 +1672,124 @@ class RetroReco(object):
         evidence_tol
         sampling_eff
         max_iter
-            Note that this limit is the maximum number of sample replacements and
-            _not_ max number of likelihoods evaluated. A replacement only occurs
-            when a likelihood is found that exceeds the minimum likelihood among
-            the live points.
+            Note that this limit is the maximum number of sample replacements
+            and _not_ max number of likelihoods evaluated. A replacement only
+            occurs when a likelihood is found that exceeds the minimum
+            likelihood among the live points.
         seed
 
         Returns
         -------
-        settings : OrderedDict
-            Metadata used for running MultiNest, i.e.
-            the keyword args used to invoke the `pymultinest.run` function.
+        run_info : OrderedDict
+            Metadata dict containing MultiNest settings used and extra info returned by
+            MultiNest
 
         """
         # Import pymultinest here; it's a less common dependency, so other
         # functions / constants in this module will still be import-able w/o it.
         import pymultinest
 
-        settings = OrderedDict([
-            ('n_dims', self.n_opt_params),
-            ('n_params', self.n_params),
-            ('n_clustering_params', self.n_opt_params),
-            ('wrapped_params', [
-                ('azimuth' in p.lower()) for p in self.hypo_handler.all_param_names
-            ]),
-            ('importance_nested_sampling', importance_sampling),
-            ('multimodal', max_modes > 1),
-            ('const_efficiency_mode', const_eff),
-            ('n_live_points', n_live),
-            ('evidence_tolerance', evidence_tol),
-            ('sampling_efficiency', sampling_eff),
-            ('null_log_evidence', -1e90),
-            ('max_modes', max_modes),
-            ('mode_tolerance', -1e90),
-            ('seed', seed),
-            ('log_zero', -1e100),
-            ('max_iter', max_iter),
-        ])
+        kwargs = sort_dict(dict(
+            importance_sampling=importance_sampling,
+            max_modes=max_modes,
+            const_eff=const_eff,
+            n_live=n_live,
+            evidence_tol=evidence_tol,
+            sampling_eff=sampling_eff,
+            max_iter=max_iter,
+            seed=seed,
+        ))
+
+        mn_kwargs = sort_dict(dict(
+            n_dims=self.n_opt_params,
+            n_params=self.n_params,
+            n_clustering_params=self.n_opt_params,
+            wrapped_params=[
+                'az' in p.lower() for p in self.hypo_handler.all_param_names
+            ],
+            importance_nested_sampling=importance_sampling,
+            multimodal=max_modes > 1,
+            const_efficiency_mode=const_eff,
+            n_live_points=n_live,
+            evidence_tolerance=evidence_tol,
+            sampling_efficiency=sampling_eff,
+            null_log_evidence=-1e90,
+            max_modes=max_modes,
+            mode_tolerance=-1e90,
+            seed=seed,
+            log_zero=-1e100,
+            max_iter=max_iter,
+        ))
 
         print('Runing MultiNest...')
-        pymultinest.run(
-            LogLikelihood=self.loglike,
-            Prior=self.prior,
-            verbose=True,
-            outputfiles_basename=self.out_prefix,
-            resume=False,
-            write_output=False,
-            n_iter_before_update=5000,
-            **settings
-        )
 
-        return settings
+        fit_meta = {}
+        tmpdir = mkdtemp()
+        outputfiles_basename = join(tmpdir, '')
+        try:
+            pymultinest.run(
+                LogLikelihood=self.loglike,
+                Prior=self.prior,
+                verbose=True,
+                outputfiles_basename=outputfiles_basename,
+                resume=False,
+                write_output=True,
+                n_iter_before_update=REPORT_AFTER,
+                **mn_kwargs
+            )
+            fit_meta = get_multinest_meta(outputfiles_basename=outputfiles_basename)
+        finally:
+            rmtree(tmpdir)
+
+        run_info = sort_dict(dict(
+            method='run_multinest',
+            kwargs=kwargs,
+            mn_kwargs=mn_kwargs,
+            fit_meta=sort_dict(fit_meta),
+        ))
+        return run_info
+
+
+def get_multinest_meta(outputfiles_basename):
+    """Get metadata from files that MultiNest writes to disk.
+
+    Parameters
+    ----------
+    outputfiles_basename : str
+
+    Returns
+    -------
+    fit_meta : OrderedDict
+        Contains "logZ", "logZ_err" and, if importance nested sampling was run,
+        "ins_logZ" and "ins_logZ_err"
+
+    """
+    fit_meta = OrderedDict()
+    if isdir(outputfiles_basename):
+        stats_fpath = join(outputfiles_basename, 'stats.dat')
+    else:
+        stats_fpath = outputfiles_basename + 'stats.dat'
+
+    with open(stats_fpath, 'r') as stats_f:
+        stats = stats_f.readlines()
+
+    logZ, logZ_err = None, None
+    ins_logZ, ins_logZ_err = None, None
+
+    for line in stats:
+        if logZ is None and line.startswith('Nested Sampling Global Log-Evidence'):
+            logZ, logZ_err = [float(x) for x in line.split(':')[1].split('+/-')]
+        elif ins_logZ is None and line.startswith('Nested Importance Sampling Global Log-Evidence'):
+            ins_logZ, ins_logZ_err = [float(x) for x in line.split(':')[1].split('+/-')]
+
+    if logZ is not None:
+        fit_meta['logZ'] = logZ
+        fit_meta['logZ_err'] = logZ_err
+    if ins_logZ is not None:
+        fit_meta['ins_logZ'] = ins_logZ
+        fit_meta['ins_logZ_err'] = ins_logZ_err
+
+    return fit_meta
 
 
 def parse_args(description=__doc__):
@@ -1649,6 +1812,10 @@ def parse_args(description=__doc__):
         '--method', required=True, choices=METHODS,
         help='Method to use for performing reconstructions'
     )
+    parser.add_argument(
+        '--save-llhp', action='store_true',
+        help='Whether to save LLHP within 30 LLH of max-LLH to disk'
+    )
 
     split_kwargs = init_obj.parse_args(
         dom_tables=True, tdi_tables=True, events=True, parser=parser
@@ -1660,5 +1827,8 @@ def parse_args(description=__doc__):
 if __name__ == '__main__':
     # pylint: disable=invalid-name
     kwargs = parse_args()
-    my_reco = RetroReco(**kwargs)
-    my_reco.run(method=kwargs['other_kw']['method'])
+    other_kw = kwargs.pop('other_kw')
+    method = other_kw.pop('method')
+    kwargs.update(other_kw)
+    my_reco = Reco(**kwargs)
+    my_reco.run(method=method)
