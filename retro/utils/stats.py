@@ -11,6 +11,8 @@ __all__ = [
     'poisson_llh',
     'partial_poisson_llh',
     'weighted_average',
+    'weighted_percentile',
+    'test_weighted_percentile',
     'estimate_from_llhp',
 ]
 
@@ -29,7 +31,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from copy import copy
+from copy import copy, deepcopy
 from os.path import abspath, dirname
 import sys
 
@@ -45,14 +47,16 @@ if __name__ == '__main__' and __package__ is None:
 import retro
 from retro.utils.misc import sort_dict
 
+
 DELTA_LLH_CUTOFF = 15.5
 """What values of the llhp space to include relative to the max-LLH point"""
 
+
 def poisson_llh(expected, observed):
-    r"""Compute the log Poisson likelihood.
+    u"""Compute the log Poisson likelihood.
 
     .. math::
-        observed \times \log expected - expected \log \Gamma(observed)
+        observed × log(expected) - expected - log Γ(observed + 1)
 
     Parameters
     ----------
@@ -68,17 +72,16 @@ def poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    llh = observed * np.log(expected) - expected - gammaln(observed + 1)
-    return llh
+    return observed * np.log(expected) - expected - gammaln(observed + 1)
 
 
 def partial_poisson_llh(expected, observed):
-    r"""Compute the log Poisson likelihood _excluding_ subtracting off
+    u"""Compute the log Poisson likelihood _excluding_ subtracting off
     expected. This part, which constitutes an expected-but-not-observed
     penalty, is intended to be taken care of outside this function.
 
     .. math::
-        {\rm observed} \cdot \log {\rm expected} - \log \Gamma({\rm observed})
+        observed × log(expected) - log Γ(observed + 1)
 
     Parameters
     ----------
@@ -94,8 +97,7 @@ def partial_poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    llh = observed * np.log(expected) - expected - gammaln(observed)
-    return llh
+    return observed * np.log(expected) - gammaln(observed + 1)
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
@@ -118,37 +120,64 @@ def weighted_average(x, w):
     """
     sum_xw = 0.0
     sum_w = 0.0
-    for x_i, w_i in zip(x, w):
-        sum_xw += x_i * w_i
-        sum_w += w_i
+    for i in range(x.size):
+        sum_xw += x[i] * w[i]
+        sum_w += w[i]
     return sum_xw / sum_w
 
 
-def weighted_percentile(data, percentile, weights=None):
-    """
+def weighted_percentile(a, q, weights=None):
+    """Compute percentile(s) of data, optionally using weights.
 
     Parameters
     ----------
-    data : array
-    percentile : scalar in [0, 100]
-    weights
-        Frequency (count) of data
+    a : array
+        Data
+    q : scalar or array-like in [0, 100]
+        Percentile(s) to compute for data
+    weights : array, same shape as `data`
+        Frequencies (counts) of data
 
     Returns
     -------
-    wtd_pct : scalar
+    percentile : scalar or ndarray
 
     """
-    percentile = np.asarray(percentile)
     if weights is None:
-        return np.percentile(data, percentile)
-    ind = np.argsort(data)
-    sorted_data = data[ind]
-    sorted_weights = weights[ind]
+        return np.percentile(a=a, q=q)
+
+    sort_indices = np.argsort(a)
+    sorted_data = a[sort_indices]
+    sorted_weights = weights[sort_indices]
+
     # Samples from unnormed cdf via cumulative sum of sorted samples of pdf
     probs = sorted_weights.cumsum()
+
+    # Total (norm factor) can be read off as last value from cumsum
     tot = probs[-1]
-    return np.interp(percentile/100 * tot, probs, sorted_data)
+
+    # Scale `percentile` to be a fraction of the unnormed total of `probs` to
+    # avoid re-scaling the entire `probs` array
+    return np.interp(np.asarray(q) * (tot / 100), probs, sorted_data)
+
+
+def test_weighted_percentile():
+    """Unit test for `weighted_percentile` function."""
+    rand = np.random.RandomState(0)
+    data = rand.normal(size=1000)
+    weights = rand.uniform(size=1000)
+    pctiles = [0, 10, 25, 50, 75, 90, 100]
+    vals = weighted_percentile(a=data, q=pctiles, weights=weights)
+    ref_vals = np.array([
+        -3.046143054799927,
+        -1.231954827314273,
+        -0.659949597686861,
+        -0.041388356155877,
+        0.645261111851618,
+        1.322480276194482,
+        2.759355114021582,
+    ])
+    assert np.allclose(vals, ref_vals, atol=0, rtol=1e-12)
 
 
 def estimate_from_llhp(
@@ -205,9 +234,9 @@ def estimate_from_llhp(
     num_params = len(params)
     num_llh = len(llhp)
 
-    # cut away extremely low llh (30 or more below max llh)
+    # cut away extremely low llh
     max_llh = np.nanmax(llhp['llh'])
-    llhp = llhp[llhp['llh'] >= max_llh - 30]
+    llhp = llhp[llhp['llh'] >= (max_llh - 30)]
     if len(llhp) == 0:
         raise ValueError('no points')
     llh = llhp['llh']
@@ -216,13 +245,13 @@ def estimate_from_llhp(
         # weight points by their likelihood (_not_ log likelihood) relative to
         # max; keep prob_weights around for later use
         prob_weights = np.exp(llh - max_llh)
-        weights = copy(prob_weights)
+        weights = deepcopy(prob_weights)
     else:
         prob_weights = None
         weights = np.ones(shape=len(llh))
 
     if treat_dims_independently:
-        weights = {d: copy(weights) for d in priors_used.keys()}
+        weights = {d: deepcopy(weights) for d in priors_used.keys()}
 
     if remove_priors:
         # calculate the prior weights from the priors used
@@ -248,7 +277,8 @@ def estimate_from_llhp(
                 w = None
             else:
                 raise NotImplementedError(
-                    'Prior %s for dimension %s unknown' % (prior_kind, dim)
+                    'Prior "{}" for dimension/param "{}" is unhandled'
+                    .format(prior_kind, dim)
                 )
 
             if w is not None:
@@ -319,19 +349,19 @@ def estimate_from_llhp(
 
     # -- Calculate each kind of estimate for each param -- #
 
-    percentiles = np.array([13.35, 86.65])
+    # TODO: document origin of constants used: why 13.35, 86.65?
+    qth_percentiles = np.array([13.35, 50.0, 86.65])
 
     for param in params:
         if treat_dims_independently:
             this_postproc_llh = postproc_llh[param]
-            this_weights = weights[param]
             max_idx = np.nanargmax(this_postproc_llh)
             max_postproc_llh = this_postproc_llh[max_idx]
             param_vals = llhp[param]
             param_at_max_llh = param_vals[max_idx]
             cut = this_postproc_llh > max_postproc_llh - DELTA_LLH_CUTOFF
             this_postproc_llh = this_postproc_llh[cut]
-            this_weights = this_weights[cut]
+            this_weights = weights[param][cut]
             param_vals = param_vals[cut]
         else:
             param_at_max_llh = params_at_max_llh[param]
@@ -349,33 +379,29 @@ def estimate_from_llhp(
             shifted_vals = (param_vals - shift + np.pi) % (2*np.pi)
 
             mean = (stats.circmean(shifted_vals) + shift - np.pi) % (2*np.pi)
-            median = (np.median(shifted_vals) + shift - np.pi) % (2*np.pi)
-            lower_bound, upper_bound = (
-                weighted_percentile(
-                    data=shifted_vals,
-                    percentile=percentiles,
-                    weights=this_weights,
-                )
-                + shift - np.pi
-            ) % (2*np.pi)
+            vals_at_q = weighted_percentile(
+                a=shifted_vals,
+                q=qth_percentiles,
+                weights=this_weights,
+            )
+            lower, median, upper = (vals_at_q + shift - np.pi) % (2*np.pi)
         else:
-            mean = np.mean(param_vals)
-            median = np.median(param_vals)
-            lower_bound, upper_bound = weighted_percentile(
-                data=param_vals,
-                percentile=percentiles,
-                weights=weights,
+            mean = np.average(param_vals, weights=this_weights)
+            lower, median, upper = weighted_percentile(
+                a=param_vals,
+                q=qth_percentiles,
+                weights=this_weights,
             )
 
         estimate.loc[dict(kind='mean', param=param)] = mean
         estimate.loc[dict(kind='median', param=param)] = median
-        estimate.loc[dict(kind='lower_bound', param=param)] = lower_bound
-        estimate.loc[dict(kind='upper_bound', param=param)] = upper_bound
+        estimate.loc[dict(kind='lower_bound', param=param)] = lower
+        estimate.loc[dict(kind='upper_bound', param=param)] = upper
 
     if not averages_spherically_aware:
         return estimate
 
-    # Idea: calculate the medians on the sphere for az and zen combined
+    # Idea: calculate the meanns on the sphere for az and zen combined
     #
     # currently the below duplicates work done above but aware of spherical
     # coords, but just allowing this inefficiency for now since we're still
@@ -416,3 +442,7 @@ def estimate_from_llhp(
             ) % (2 * np.pi)
 
     return estimate
+
+
+if __name__ == '__main__':
+    test_weighted_percentile()

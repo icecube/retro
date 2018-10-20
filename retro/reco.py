@@ -489,9 +489,9 @@ class Reco(object):
                     llhp_fname = None
                 llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 self.make_estimate(
-                    run_info=run_info,
                     llhp=llhp,
-                    remove_priors=False,
+                    remove_priors=True,
+                    run_info=run_info,
                     fname='{}.estimate'.format(method),
                 )
 
@@ -523,7 +523,7 @@ class Reco(object):
                 #    t_start=t_start,
                 #)
 
-                #run_info = self.run_multinest(
+                #run_info_10d = self.run_multinest(
                 #    importance_sampling=True,
                 #    max_modes=1,
                 #    const_eff=True,
@@ -535,7 +535,7 @@ class Reco(object):
                 #)
 
                 #t3 = time.time()
-                #run_info['run_time'] = t3 - t2
+                #run_info_10d['run_time'] = t3 - t2
 
                 #if self.save_llhp:
                 #    llhp_fname = '{}.llhp_10d'.format(method)
@@ -544,7 +544,8 @@ class Reco(object):
                 #llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
                 #self.make_estimate(
                 #    llhp=llhp,
-                #    meta=opt_meta,
+                #    remove_priors=True,
+                #    run_info=run_info_10d,
                 #    fname='{}.estimate_10d'.format(method),
                 #)
 
