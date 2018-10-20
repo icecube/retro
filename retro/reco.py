@@ -176,8 +176,8 @@ class Reco(object):
         `current_event`, `current_event_idx`, and `event_counter` for each
         event retrieved."""
         for event_idx, event in self._get_events:
+            print('Operating on event: "{}"'.format(event_idx))
             self.event_prefix = join(self.outdir, 'evt{}.'.format(event_idx))
-            print('Output files prefix: "{}"\n'.format(self.event_prefix))
             self.current_event = event
             self.current_event_idx = event_idx
             self.event_counter += 1
@@ -214,7 +214,7 @@ class Reco(object):
                 'Unrecognized `method` "{}"; must be one of {}'.format(method, METHODS)
             )
 
-        print('Running reconstructions...')
+        print('Running "{}" reconstruction...'.format(method))
         t00 = time.time()
 
         for _ in self.events:
@@ -305,7 +305,6 @@ class Reco(object):
 
             elif method == 'fast':
                 t0 = time.time()
-
                 self.setup_hypo(
                      cascade_kernel='scaling_aligned_point_ckv',
                      track_kernel='pegleg',
@@ -495,7 +494,6 @@ class Reco(object):
                     fname='{}.estimate'.format(method),
                 )
 
-                # -- 10D -- #
                 #print('--- MN 10d fit ---')
 
                 #self.setup_hypo(
@@ -550,10 +548,9 @@ class Reco(object):
                 #)
 
             elif method == 'experimental_trackfit':
-                t0 = time.time()
-
                 print('--- track-only prefit ---')
 
+                t0 = time.time()
                 self.setup_hypo(track_kernel='pegleg', track_time_step=1.)
 
                 self.generate_prior_method(
@@ -602,11 +599,12 @@ class Reco(object):
 
                 print('--- hybrid fit ---')
 
+                t2 = time.time()
                 # track AND cascade to hypo
                 self.setup_hypo(
                     cascade_kernel='scaling_aligned_one_dim',
                     #track_kernel='pegleg',
-                    track_kernel='table_e_loss',
+                    track_kernel='table_energy_loss',
                     track_time_step=1.,
                 )
 
@@ -656,8 +654,8 @@ class Reco(object):
                     seed=0,
                 )
 
-                t2 = time.time()
-                run_info['run_time'] = t2 - t1
+                t3 = time.time()
+                run_info['run_time'] = t3 - t2
 
                 if self.save_llhp:
                     llhp_fname = '{}.llhp'.format(method)
@@ -1057,13 +1055,9 @@ class Reco(object):
             priors_used=self.priors_used if remove_priors else None,
         )
         attrs = estimate.attrs
-        attrs.update(
-            dict(
-                event_idx=self.current_event_idx,
-                params=list(self.hypo_handler.all_param_names),
-                priors_used=self.priors_used,
-            )
-        )
+        attrs['event_idx'] = self.current_event_idx
+        attrs['params'] = list(self.hypo_handler.all_param_names)
+        attrs['priors_used'] = self.priors_used
         if run_info is None:
             attrs['run_info'] = OrderedDict()
         else:
@@ -1247,15 +1241,16 @@ class Reco(object):
         cart_param_names = set(opt_param_names) & set(['time', 'x', 'y', 'z'])
         n_cart = len(cart_param_names)
         assert set(opt_param_names[:n_cart]) == cart_param_names
-        if n_opt_params > n_cart:
-            n_spher = int((n_opt_params - n_cart)/2)
-        for spher in range(n_spher):
-            assert 'az' in opt_param_names[n_cart+spher*2]
-            assert 'zen' in opt_param_names[n_cart+spher*2+1]
+        n_spher_param_pairs = int((n_opt_params - n_cart)/2)
+        for sph_pair_idx in range(n_spher_param_pairs):
+            az_param = opt_param_names[n_cart + sph_pair_idx*2]
+            zen_param = opt_param_names[n_cart + sph_pair_idx*2 + 1]
+            assert 'az' in az_param, '"{}" not azimuth param'.format(az_param)
+            assert 'zen' in zen_param, '"{}" not zenith param'.format(zen_param)
 
         # setup arrays to store points
         s_cart = np.zeros(shape=(n_live, n_cart))
-        s_spher = np.zeros(shape=(n_live, n_spher), dtype=SPHER_T)
+        s_spher = np.zeros(shape=(n_live, n_spher_param_pairs), dtype=SPHER_T)
         fx = np.zeros(shape=(n_live,))
 
         def fun(x):
@@ -1364,7 +1359,7 @@ class Reco(object):
             new_x_cart = 2*centroid_cart - s_cart[choice[-1]]
 
             # spherical centroid
-            centroid_spher = np.zeros(n_spher, dtype=SPHER_T)
+            centroid_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
             centroid_spher['x'] = (
                 np.sum(s_spher['x'][choice[:-1]], axis=0) + s_spher['x'][best_idx]
             ) / n_opt_params
@@ -1377,7 +1372,7 @@ class Reco(object):
             fill_from_cart(centroid_spher)
 
             # reflect point
-            new_x_spher = np.zeros(n_spher, dtype=SPHER_T)
+            new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
             reflect(s_spher[choice[-1]], centroid_spher, new_x_spher)
 
             if use_priors:
@@ -1401,14 +1396,14 @@ class Reco(object):
             new_x_cart2 = (1 + w) * s_cart[best_idx] - w * new_x_cart
 
             # first reflect at best point
-            reflected_new_x_spher = np.zeros(n_spher, dtype=SPHER_T)
+            reflected_new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
             reflect(new_x_spher, s_spher[best_idx], reflected_new_x_spher)
 
             new_x_spher2 = np.zeros_like(new_x_spher)
 
             # now do a combination of best and reflected point with weight w
             for dim in ('x', 'y', 'z'):
-                w = rand.uniform(0, 1, n_spher)
+                w = rand.uniform(0, 1, n_spher_param_pairs)
                 new_x_spher2[dim] = (
                     (1 - w) * s_spher[best_idx][dim]
                     + w * reflected_new_x_spher[dim]
