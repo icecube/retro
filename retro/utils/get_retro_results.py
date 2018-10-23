@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
 
+
 """
 Utilities for extracting and processing reconstruction information saved to disk
 """
@@ -12,13 +13,12 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     'extract_from_leaf_dir',
     'augment_info',
-    'parse_args',
     'get_retro_results',
+    'parse_args',
 ]
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from copy import deepcopy
 from glob import glob
 from operator import add
 from os import walk
@@ -40,7 +40,7 @@ from retro.utils.misc import expand, mkdir
 from retro.utils.stats import estimate_from_llhp
 
 
-KEEP_TRUTH_KEYS = [
+KEEP_TRUTH_KEYS = (
     'pdg',
      'x',
      'y',
@@ -69,26 +69,31 @@ KEEP_TRUTH_KEYS = [
      'OneWeight',
      'TargetPDGCode',
      'TotalInteractionProbabilityWeight',
-]
+)
 
 # apply to both "estimate_prefit" and "estimate"
-KEEP_ATTRS = ['num_llh', 'max_llh', 'max_postproc_llh']
-KEEP_RUN_INFO_KEYS = ['run_time']
+KEEP_ATTRS = ('num_llh', 'max_llh', 'max_postproc_llh')
+KEEP_RUN_INFO_KEYS = ('run_time',)
 
 # only for "estimate"
-KEEP_EST_FIT_META_KEYS = ['ins_logZ', 'ins_logZ_err', 'logZ', 'logZ_err']
+KEEP_EST_FIT_META_KEYS = ('ins_logZ', 'ins_logZ_err', 'logZ', 'logZ_err')
 
 # only for "estimate_prefit"
-KEEP_EST_PRFT_FIT_META_KEYS = [
+KEEP_EST_PRFT_FIT_META_KEYS = (
     'iterations',
     'num_failures',
     'num_mutation_successes',
     'num_simplex_successes',
     'stopping_flag',
-]
+)
 
-PL_RECO_NAMES = ['Pegleg_Fit_MN', 'Pegleg_Fit_SP_3Iter', 'Pegleg_Fit_LB_3Iter', 'pegleg']
-RETRO_RECO_NAMES = ['retro_pft', 'retro']
+PL_RECO_NAMES = (
+    'Pegleg_Fit_MN',
+    'Pegleg_Fit_SP_3Iter',
+    'Pegleg_Fit_LB_3Iter',
+    'pegleg',
+)
+RETRO_RECO_NAMES = ('retro_pft', 'retro')
 
 SIMPLE_ERR_PARAMS = (
     'x',
@@ -205,7 +210,11 @@ def extract_from_leaf_dir(
 
             try:
                 if info_key not in infos:
-                    info = infos[info_key] = deepcopy(info_key)
+                    info = infos[info_key] = dict(
+                        flavdir=flavdir,
+                        filenum=filenum,
+                        event_idx=event_idx,
+                    )
 
                     # -- Get truth into info dict -- #
 
@@ -379,46 +388,6 @@ def augment_info(info):
             info['{}_{}angle_error'.format(reco, pfx)] = q_theta
 
 
-def parse_args():
-    """Parse command line arguments.
-
-    Returns
-    -------
-    kw : dict
-        Arguments to be passed to
-    """
-    parser = ArgumentParser(
-        description="""Extract reco and truth information and merge into a Pandas
-        DataFrame. Results will be saved to "<outdir>/reconstructed_events.feather" in
-        the feather file format (https://github.com/wesm/feather)."""
-    )
-
-    parser.add_argument(
-        '--outdir', required=True
-    )
-    parser.add_argument(
-        '--recos-basedir', required=True,
-        help='Path to base directory containing Retro reconstruction information'
-    )
-    parser.add_argument(
-        '--events-basedir', required=True,
-        help='Path to base directory containing source events that were reconstructed'
-    )
-    parser.add_argument(
-        '--recompute-estimate', action='store_true',
-        help='''Recompute estimate from raw LLHP (if these are stored to disk; otherwise
-        fail)'''
-    )
-    parser.add_argument(
-        '--overwrite', action='store_true',
-        help='Overwrite output file if it already exists',
-    )
-
-    kw = vars(parser.parse_args())
-
-    return kw
-
-
 def get_retro_results(
     outdir,
     recos_basedir,
@@ -505,6 +474,46 @@ def get_retro_results(
     print('\nTook {:.3f} s to extract {} events'.format(dt, nevents))
 
     return all_events
+
+
+def parse_args():
+    """Parse command line arguments.
+
+    Returns
+    -------
+    kw : dict
+        Arguments to be passed to
+    """
+    parser = ArgumentParser(
+        description="""Extract reco and truth information and merge into a Pandas
+        DataFrame. Results will be saved to "<outdir>/reconstructed_events.feather" in
+        the feather file format (https://github.com/wesm/feather)."""
+    )
+
+    parser.add_argument(
+        '--outdir', required=True
+    )
+    parser.add_argument(
+        '--recos-basedir', required=True,
+        help='Path to base directory containing Retro reconstruction information'
+    )
+    parser.add_argument(
+        '--events-basedir', required=True,
+        help='Path to base directory containing source events that were reconstructed'
+    )
+    parser.add_argument(
+        '--recompute-estimate', action='store_true',
+        help='''Recompute estimate from raw LLHP (if these are stored to disk; otherwise
+        fail)'''
+    )
+    parser.add_argument(
+        '--overwrite', action='store_true',
+        help='Overwrite output file if it already exists',
+    )
+
+    kw = vars(parser.parse_args())
+
+    return kw
 
 
 if __name__ == '__main__':
