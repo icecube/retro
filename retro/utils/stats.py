@@ -32,6 +32,7 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from copy import copy, deepcopy
+import enum
 from os.path import abspath, dirname
 import sys
 
@@ -180,6 +181,17 @@ def test_weighted_percentile():
     assert np.allclose(vals, ref_vals, atol=0, rtol=1e-12)
 
 
+class Est(enum.IntEnum):
+    max = 0
+    mean = 1
+    median = 2
+    lower_bound = 3
+    upper_bound = 4
+
+EST_KINDS = [k.name for k in Est]
+NUM_EST_KINDS = len(Est)
+
+
 def estimate_from_llhp(
     llhp,
     treat_dims_independently,
@@ -321,38 +333,16 @@ def estimate_from_llhp(
         cut_postproc_llh = postproc_llh[cut]
         cut_weights = weights[cut]
 
-    # -- Construct xarray.DataArray for storing estimates & metadata -- #
+    # -- Construct ndarray for storing estimated values -- #
 
-    # Note that xarray requires list for `coords` (e.g. tuple fails)
-    est_kinds = ['max', 'mean', 'median', 'lower_bound', 'upper_bound']
-
-    estimate = xr.DataArray(
-        data=np.full(
-            fill_value=np.nan,
-            shape=(len(est_kinds), num_params),
-            dtype=np.float32,
-        ),
-        dims=('kind', 'param'),
-        coords=dict(kind=est_kinds, param=params),
-        attrs=sort_dict(dict(
-            estimation_settings=sort_dict(dict(
-                treat_dims_independently=treat_dims_independently,
-                use_prob_weights=use_prob_weights,
-                remove_priors=remove_priors,
-                averages_spherically_aware=averages_spherically_aware,
-            )),
-            num_llh=num_llh,
-            max_llh=max_llh,
-            max_postproc_llh=max_postproc_llh,
-        ))
-    )
+    est = np.empty(shape=(NUM_EST_KINDS, num_params), dtype=np.float32)
 
     # -- Calculate each kind of estimate for each param -- #
 
     # TODO: document origin of constants used: why 13.35, 86.65?
     qth_percentiles = np.array([13.35, 50.0, 86.65])
 
-    for param in params:
+    for param_idx, param in enumerate(params):
         if treat_dims_independently:
             this_postproc_llh = postproc_llh[param]
             max_idx = np.nanargmax(this_postproc_llh)
@@ -369,7 +359,7 @@ def estimate_from_llhp(
             this_weights = cut_weights
             param_vals = cut_llhp[param]
 
-        estimate.loc[dict(kind='max', param=param)] = param_at_max_llh
+        est[Est.max, param_idx] = param_at_max_llh
 
         if 'azimuth' in param:
             # azimuth is a cyclic function, so need some special treatment to
@@ -393,10 +383,29 @@ def estimate_from_llhp(
                 weights=this_weights,
             )
 
-        estimate.loc[dict(kind='mean', param=param)] = mean
-        estimate.loc[dict(kind='median', param=param)] = median
-        estimate.loc[dict(kind='lower_bound', param=param)] = lower
-        estimate.loc[dict(kind='upper_bound', param=param)] = upper
+        est[Est.mean, param_idx] = mean
+        est[Est.median, param_idx] = median
+        est[Est.lower_bound, param_idx] = lower
+        est[Est.upper_bound, param_idx] = upper
+
+    # -- Construct xarray.DataArray for storing estimates & metadata -- #
+
+    estimate = xr.DataArray(
+        data=est,
+        dims=('kind', 'param'),
+        coords=dict(kind=EST_KINDS, param=params),
+        attrs=sort_dict(dict(
+            estimation_settings=sort_dict(dict(
+                treat_dims_independently=treat_dims_independently,
+                use_prob_weights=use_prob_weights,
+                remove_priors=remove_priors,
+                averages_spherically_aware=averages_spherically_aware,
+            )),
+            num_llh=num_llh,
+            max_llh=max_llh,
+            max_postproc_llh=max_postproc_llh,
+        ))
+    )
 
     if not averages_spherically_aware:
         return estimate
@@ -407,11 +416,14 @@ def estimate_from_llhp(
     # coords, but just allowing this inefficiency for now since we're still
     # testing what's best
     for angle in ['', 'track_', 'cascade_']:
-        zen_name = angle + 'zenith'
         az_name = angle + 'azimuth'
+        zen_name = angle + 'zenith'
 
-        if not (zen_name in params and az_name in params):
+        if not (az_name in params and zen_name in params):
             continue
+
+        az_idx = params.index(az_name)
+        zen_idx = params.index(zen_name)
 
         az = cut_llhp[az_name]
         zen = cut_llhp[zen_name]
@@ -431,15 +443,11 @@ def estimate_from_llhp(
         # normalize if r > 0
         r = np.sqrt(np.sum(np.square(cart_mean)))
         if r == 0:
-            estimate.loc[dict(kind='mean', param=zen_name)] = 0
-            estimate.loc[dict(kind='mean', param=az_name)] = 0
+            est[Est.mean, zen_idx] = 0
+            est[Est.mean, az_idx] = 0
         else:
-            estimate.loc[dict(kind='mean', param=zen_name)] = (
-                np.arccos(cart_mean[2] / r)
-            )
-            estimate.loc[dict(kind='mean', param=az_name)] = np.arctan2(
-                cart_mean[1], cart_mean[0]
-            ) % (2 * np.pi)
+            est[Est.mean, zen_idx] = np.arccos(cart_mean[2] / r)
+            est[Est.mean, az_idx] = np.arctan2(cart_mean[1], cart_mean[0]) % (2 * np.pi)
 
     return estimate
 
