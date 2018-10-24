@@ -4,6 +4,11 @@
 Plotting tools and utilities.
 """
 
+from __future__ import absolute_import, division, print_function
+
+import matplotlib.pyplot as plt
+
+
 COLOR_CYCLE_ORTHOG = (
     '#000000', #  0  Black
     '#803E75', #  2  Strong Purple
@@ -34,3 +39,31 @@ COLOR_CYCLE_ORTHOG = (
 """Use via: ``mpl.rc('axes', color_cycle=colorCycleOrthog)``
 Modified from
 http://stackoverflow.com/questions/470690/how-to-automatically-generate-n-distinct-colors"""
+
+
+def remove_border(axes=None, top=False, right=False, left=True, bottom=True):
+    """
+    from ChrisBeaumont, https://github.com/cs109/content/blob/master/README.md
+    """
+    ax = axes or plt.gca()
+    ax.spines['top'].set_visible(top)
+    ax.spines['right'].set_visible(right)
+    ax.spines['left'].set_visible(left)
+    ax.spines['bottom'].set_visible(bottom)
+
+    # Turn off all ticks
+    ax.yaxis.set_ticks_position('none')
+    ax.xaxis.set_ticks_position('none')
+
+    # Re-enable visibles
+    if top:
+        ax.xaxis.tick_top()
+    if bottom:
+        ax.xaxis.tick_bottom()
+    if left:
+        ax.yaxis.tick_left()
+    if right:
+        ax.yaxis.tick_right()
+
+    ax.spines['bottom'].set_position(('axes', -0.02))
+    ax.spines['left'].set_position(('axes', -0.02))

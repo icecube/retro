@@ -357,6 +357,7 @@ SRC_T = np.dtype([
     ('photons', np.float32),
     ('dir_costheta', np.float32),
     ('dir_sintheta', np.float32),
+    ('dir_phi', np.float32),
     ('dir_cosphi', np.float32),
     ('dir_sinphi', np.float32),
     ('ckv_theta', np.float32),

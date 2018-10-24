@@ -60,7 +60,6 @@ PRI_SPEFIT2TIGHT = 'spefit2tight'
 PRI_CAUCHY = 'cauchy'
 
 
-
 def get_prior_fun(dim_num, dim_name, event, **kwargs):
     """Generate prior function given a prior definition and the actual event
 
@@ -81,7 +80,7 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
     """
     hits_summary = event['hits_summary']
 
-    # setup default values and prior defintions
+    # -- setup default values and prior defintions -- #
 
     if 'zenith' in  dim_name:
         kind = kwargs.get('kind', PRI_COSINE)
@@ -143,7 +142,6 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             prior_def = (PRI_CAUCHY, (loc, scale, low, high))
         else:
             raise ValueError()
-
 
     elif dim_name == 'y':
         kind = kwargs.get('kind', PRI_UNIFORM)
@@ -260,9 +258,7 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
 
     else:
         kind = kwargs.get('kind', None)
-        raise ValueError('Unknown prior %s for dim %s'%(kind,dim_name))
-
-
+        raise ValueError('Unknown prior %s for dim %s'%(kind, dim_name))
 
     # create prior function
 
@@ -295,7 +291,7 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             cube[n] = acos(x)
 
     elif kind == PRI_GAUSSIAN:
-        raise NotImplementedError('not correctly working limits, ToDo')
+        raise NotImplementedError('limits not correctly working') # TODO
         mean, stddev, low, high = args
         norm = 1 / (stddev * np.sqrt(TWO_PI))
         def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev): # pylint: disable=missing-docstring

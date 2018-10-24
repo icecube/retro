@@ -43,9 +43,15 @@ from retro.utils.misc import expand, wstderr
 
 
 TMPL_COMPR_CKV_TABLE_KEYS = [
-    'n_photons', 'group_refractive_index', 'phase_refractive_index',
-    'r_bin_edges', 'costheta_bin_edges', 't_bin_edges',
-    'costhetadir_bin_edges', 'deltaphidir_bin_edges', 'ckv_template_map',
+    'n_photons',
+    'group_refractive_index',
+    'phase_refractive_index',
+    'r_bin_edges',
+    'costheta_bin_edges',
+    't_bin_edges',
+    'costhetadir_bin_edges',
+    'deltaphidir_bin_edges',
+    'ckv_template_map',
     't_is_residual_time',
 ]
 

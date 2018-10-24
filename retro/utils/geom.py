@@ -16,11 +16,12 @@ __all__ = [
     'powerbin',
     'test_powerbin',
     'powerspace',
-    'generate_digitizer',
     'inv_power_2nd_diff',
     'infer_power',
     'test_infer_power',
     'sample_powerlaw_binning',
+    'generate_digitizer',
+    'test_generate_digitizer',
     'bin_edges_to_binspec',
     'linear_bin_centers',
     'spacetime_separation',
@@ -31,6 +32,7 @@ __all__ = [
     'cart2sph',
     'rotsph2cart',
     'rotate_point',
+    'rotate_points',
     'add_vectors',
     'fill_from_spher',
     'fill_from_cart',
@@ -65,7 +67,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DFLT_NUMBA_JIT_KWARGS, load_pickle, numba_jit
+from retro import DEBUG, DFLT_NUMBA_JIT_KWARGS, load_pickle, numba_jit
 from retro.const import SPEED_OF_LIGHT_M_PER_NS
 from retro.retro_types import TimeSphCoord
 from retro.utils.misc import hash_obj
@@ -325,211 +327,6 @@ def test_powerbin():
     print('<< PASS : test_powerbin >>')
 
 
-def generate_digitizer(bin_edges, overflow=False):
-    """Factory to generate a specialized Numba function for "digitizing" data
-    (i.e., returning which bin values fall within).
-
-    Parameters
-    ----------
-    bin_edges : array-like
-
-    overflow : bool
-        If True, return -1 for underflow or `num_bins` for overflow; if False,
-        clip values to valid range, returning 0 and `num_bins - 1`, respectively.
-
-    Returns
-    -------
-    digitize : callable
-
-    Notes
-    -----
-
-    bin_edges are interpreted as half open, i.e. [), excpet for the last bin,
-    which is closed []
-
-    The digitizer returned does not fail if a value lies outside the
-    binning boundaries. This condition is indicated by returned indices that
-    are either negative or > num_bins. Therefore a check can be performed on
-    the returned index to check for this, e.g. via .. ::
-
-        idx = digitize(val)
-        if idx < 0 or idx >= num_bins:
-            raise ValueError('val outside binning')
-
-    """
-    # pylint: disable=missing-docstring, function-redefined
-    bin_edges = np.asarray(bin_edges)
-    assert np.all(np.diff(bin_edges) > 0)
-    start = bin_edges[0]
-    stop = bin_edges[-1]
-    num_bin_edges = len(bin_edges)
-    num_bins = num_bin_edges - 1
-
-    if overflow:
-        underflow_idx = -1
-        overflow_idx = num_bins
-    else:
-        underflow_idx = 0
-        overflow_idx = num_bins - 1
-
-    power = None
-    bin_widths = np.diff(bin_edges)
-    if np.allclose(bin_widths, bin_widths[0]):
-        power = 1
-    else:
-        try:
-            power = infer_power(bin_edges)
-        except ValueError:
-            pass
-        else:
-            recip_power = 1 / power
-            start_recip_power = start**recip_power
-            stop_recip_power = stop**recip_power
-            power_width = (stop_recip_power - start_recip_power) / num_bins
-            recip_power_width = 1 / power_width
-
-    is_log = False
-    if power is None and start > 0:
-        log_bin_edges = np.log(bin_edges)
-        logwidth = np.diff(log_bin_edges)
-        if np.allclose(logwidth, logwidth[0]):
-            print('log')
-            is_log = True
-            logwidth = (log_bin_edges[-1] - log_bin_edges[0]) / num_bins
-            recip_logwidth = 1 / logwidth
-            log_start = log_bin_edges[0]
-
-    digitize = None
-    bindescr = None
-
-    if power == 1:
-        dx = (stop - start) / num_bins
-        recip_dx = 1 / dx
-        bindescr = (
-            '{} bins linearly spaced from {} to {}'.format(num_bins, start, stop)
-        )
-        def digitize(val):
-            if val < start:
-                return underflow_idx
-            if val > stop:
-                return overflow_idx
-            idx = int((val - start) * recip_dx)
-            return min(max(0, idx), num_bins - 1)
-
-    elif power:
-        bindescr = (
-            '{} bins spaced from {} to {} spaced with power of {}'
-            .format(num_bins, start, stop, power)
-        )
-        if np.isclose(power, 2):
-            def digitize(val):
-                if val < start:
-                    return underflow_idx
-                if val > stop:
-                    return overflow_idx
-                idx = int((math.sqrt(val) - start_recip_power) * recip_power_width)
-                return min(max(0, idx), num_bins - 1)
-
-        elif num_bins > 1e3: # faster to do binary search if fewer bins
-            def digitize(val):
-                if val < start:
-                    return underflow_idx
-                if val > stop:
-                    return overflow_idx
-                idx = int((val**recip_power - start_recip_power) * recip_power_width)
-                return min(max(0, idx), num_bins - 1)
-
-    elif is_log:
-        bindescr = (
-            '{} bins logarithmically spaced from {} to {}'.format(num_bins, start, stop)
-        )
-        if num_bins > 20: # faster to do binary search if fewer bins
-            def digitize(val):
-                if val < start:
-                    return underflow_idx
-                if val > stop:
-                    return overflow_idx
-                idx = int((math.log(val) - log_start) * recip_logwidth)
-                return min(max(0, idx), num_bins - 1)
-
-    if bindescr is None:
-        bindescr = (
-            '{} bins unevenly spaced from {} to {}'.format(num_bins, start, stop)
-        )
-
-    if digitize is None:
-        def digitize(val):
-            if val < start:
-                return underflow_idx
-            if val > stop:
-                return overflow_idx
-            # -- Binary search -- #
-            left_idx = 0
-            right_idx = num_bins
-            while left_idx < right_idx:
-                idx = left_idx + ((right_idx - left_idx) >> 1)
-                if val >= bin_edges[idx]:
-                    left_idx = idx + 1
-                else:
-                    right_idx = idx
-            idx = left_idx - 1
-            return min(max(0, idx), num_bins - 1)
-
-    digitize.__doc__ = (
-        """Find bin index for a value.
-
-        Binning is set to {}.
-
-        Parameters
-        ----------
-        val : scalar
-            Value for which to find bin index.
-
-        Returns
-        -------
-        idx : int
-			Bin index; `idx < 0` or `idx >= num_bins` indicates `val` is
-            outside binning.
-
-        """.format(bindescr)
-    )
-    digitize = numba_jit(fastmath=True, nogil=True, cache=True)(digitize)
-
-    print(bindescr)
-
-    return digitize
-
-
-def test_generate_digitizer():
-    """Test the functions that `generate_digitizer` produces."""
-    # TODO: use local file for this test
-    meta = load_pickle('/home/icecube/retro/tables/large_5d_notilt_combined/stacked/stacked_ckv_template_map_meta.pkl')
-    binning = meta['binning']
-
-    for dim, edges in binning.items():
-        assert np.all(np.diff(edges) > 0)
-        num_bins = len(edges) - 1
-        digitize = generate_digitizer(edges)
-        digitize_overflow = generate_digitizer(edges, overflow=True)
-        rand = np.random.RandomState(0)
-
-        # Check lots of values within the valid range of the binning
-        vals = rand.uniform(low=edges[0], high=edges[-1], size=int(1e5))
-        test = np.array([digitize(v) for v in vals])
-        ref = np.digitize(vals, bins=edges, right=False) - 1
-        assert np.all(test == ref), dim
-
-        # Check edge cases
-        assert digitize(edges[0]) == 0, dim
-        assert digitize(edges[0] - 1e-8) == 0, dim
-        assert digitize_overflow(edges[0] - 1e-8) < 0, dim
-        assert digitize(edges[-1]) == num_bins - 1, dim
-        assert digitize(edges[-1] + 1e-8) == num_bins - 1, dim
-        assert digitize_overflow(edges[-1] + 1e-8) == num_bins, dim
-
-    print('<< PASS : test_generate_digitizer >>')
-
-
 # TODO: add `endpoint`, `retstep`, and `dtype` kwargs
 def powerspace(start, stop, num, power):
     """Create bin edges evenly spaced w.r.t. ``x**power``.
@@ -646,6 +443,208 @@ def sample_powerlaw_binning(edges, samples_per_bin):
     ) ** pwr
 
     return samples
+
+
+def generate_digitizer(bin_edges, clip=True):
+    """Factory to generate a specialized Numba function for "digitizing" data
+    (i.e., returning which bin a value fall within).
+
+    Parameters
+    ----------
+    bin_edges : array-like
+
+    clip : bool
+        If `True`, clip values to valid range: return 0 for underflow or `num_bins - 1`
+        for overflow; if `False`, return -1 and `num_bins` for underflow and overflow,
+        respectively.
+
+    Returns
+    -------
+    digitize : callable
+
+    Notes
+    -----
+    All bins except the last are half open (i.e., include their lower edges but exclude
+    their upper edges), except for the last bin, which is closed (i.e., include both
+    lower and upper edges).
+
+    The digitizer returned does NOT fail if a value lies outside the
+    binning boundaries.
+
+    """
+    # pylint: disable=missing-docstring, function-redefined
+    bin_edges = np.asarray(bin_edges)
+    assert np.all(np.diff(bin_edges) > 0)
+    start = bin_edges[0]
+    stop = bin_edges[-1]
+    num_bin_edges = len(bin_edges)
+    num_bins = num_bin_edges - 1
+
+    if not clip:
+        underflow_idx = -1
+        overflow_idx = num_bins
+    else:
+        underflow_idx = 0
+        overflow_idx = num_bins - 1
+
+    power = None
+    bin_widths = np.diff(bin_edges)
+    if np.allclose(bin_widths, bin_widths[0]):
+        power = 1
+    else:
+        try:
+            power = infer_power(bin_edges)
+        except ValueError:
+            pass
+        else:
+            recip_power = 1 / power
+            start_recip_power = start**recip_power
+            stop_recip_power = stop**recip_power
+            power_width = (stop_recip_power - start_recip_power) / num_bins
+            recip_power_width = 1 / power_width
+
+    is_log = False
+    if power is None and start > 0:
+        log_bin_edges = np.log(bin_edges)
+        logwidth = np.diff(log_bin_edges)
+        if np.allclose(logwidth, logwidth[0]):
+            if DEBUG:
+                print('log')
+            is_log = True
+            logwidth = (log_bin_edges[-1] - log_bin_edges[0]) / num_bins
+            recip_logwidth = 1 / logwidth
+            log_start = log_bin_edges[0]
+
+    digitize = None
+    bindescr = None
+
+    if power == 1:
+        dx = (stop - start) / num_bins
+        recip_dx = 1 / dx
+        bindescr = (
+            '{} bins linearly spaced from {} to {}'.format(num_bins, start, stop)
+        )
+        def digitize(val):
+            if val < start:
+                return underflow_idx
+            if val > stop:
+                return overflow_idx
+            idx = int((val - start) * recip_dx)
+            return min(max(0, idx), num_bins - 1)
+
+    elif power:
+        bindescr = (
+            '{} bins spaced from {} to {} spaced with power of {}'
+            .format(num_bins, start, stop, power)
+        )
+        if np.isclose(power, 2):
+            def digitize(val):
+                if val < start:
+                    return underflow_idx
+                if val > stop:
+                    return overflow_idx
+                idx = int((math.sqrt(val) - start_recip_power) * recip_power_width)
+                return min(max(0, idx), num_bins - 1)
+
+        elif num_bins > 1e3: # faster to do binary search if fewer bins
+            def digitize(val):
+                if val < start:
+                    return underflow_idx
+                if val > stop:
+                    return overflow_idx
+                idx = int((val**recip_power - start_recip_power) * recip_power_width)
+                return min(max(0, idx), num_bins - 1)
+
+    elif is_log:
+        bindescr = (
+            '{} bins logarithmically spaced from {} to {}'.format(num_bins, start, stop)
+        )
+        if num_bins > 20: # faster to do binary search if fewer bins
+            def digitize(val):
+                if val < start:
+                    return underflow_idx
+                if val > stop:
+                    return overflow_idx
+                idx = int((math.log(val) - log_start) * recip_logwidth)
+                return min(max(0, idx), num_bins - 1)
+
+    if bindescr is None:
+        bindescr = (
+            '{} bins unevenly spaced from {} to {}'.format(num_bins, start, stop)
+        )
+
+    if digitize is None:
+        def digitize(val):
+            if val < start:
+                return underflow_idx
+            if val > stop:
+                return overflow_idx
+            # -- Binary search -- #
+            left_idx = 0
+            right_idx = num_bins
+            while left_idx < right_idx:
+                idx = left_idx + ((right_idx - left_idx) >> 1)
+                if val >= bin_edges[idx]:
+                    left_idx = idx + 1
+                else:
+                    right_idx = idx
+            idx = left_idx - 1
+            return min(max(0, idx), num_bins - 1)
+
+    digitize.__doc__ = (
+        """Find bin index for a value.
+
+        Binning is set to {}.
+
+        Parameters
+        ----------
+        val : scalar
+            Value for which to find bin index.
+
+        Returns
+        -------
+        idx : int
+			Bin index; `idx < 0` or `idx >= num_bins` indicates `val` is
+            outside binning.
+
+        """.format(bindescr)
+    )
+    digitize = numba_jit(fastmath=True, nogil=True, cache=True)(digitize)
+
+    if DEBUG:
+        print(bindescr)
+
+    return digitize
+
+
+def test_generate_digitizer():
+    """Test the functions that `generate_digitizer` produces."""
+    # TODO: use local file for this test
+    meta = load_pickle('/home/icecube/retro/tables/large_5d_notilt_combined/stacked/stacked_ckv_template_map_meta.pkl')
+    binning = meta['binning']
+
+    for dim, edges in binning.items():
+        assert np.all(np.diff(edges) > 0)
+        num_bins = len(edges) - 1
+        digitize = generate_digitizer(edges)
+        digitize_overflow = generate_digitizer(edges, clip=False)
+        rand = np.random.RandomState(0)
+
+        # Check lots of values within the valid range of the binning
+        vals = rand.uniform(low=edges[0], high=edges[-1], size=int(1e5))
+        test = np.array([digitize(v) for v in vals])
+        ref = np.digitize(vals, bins=edges, right=False) - 1
+        assert np.all(test == ref), dim
+
+        # Check edge cases
+        assert digitize(edges[0]) == 0, dim
+        assert digitize(edges[0] - 1e-8) == 0, dim
+        assert digitize_overflow(edges[0] - 1e-8) < 0, dim
+        assert digitize(edges[-1]) == num_bins - 1, dim
+        assert digitize(edges[-1] + 1e-8) == num_bins - 1, dim
+        assert digitize_overflow(edges[-1] + 1e-8) == num_bins, dim
+
+    print('<< PASS : test_generate_digitizer >>')
 
 
 def bin_edges_to_binspec(edges):
@@ -906,37 +905,83 @@ def rotsph2cart(p_sintheta, p_costheta, p_phi, rot_sintheta, rot_costheta,
     return q_x, q_y, q_z
 
 
-@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def rotate_point(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
+@numba_jit
+def rotate_point(p_theta, p_phi, rot_theta, rot_phi):
+    """Rotate a point `p` by `rot` resulting in a new point `q`.
+
+    Parameters
+    ----------
+    p_theta :  float
+        Zenith
+
+    p_phi : float
+        Azimuth
+
+    rot_theta : float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    rot_phi : float
+        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+
+    Returns
+    -------
+    q_theta : float
+        theta coordinate of rotated point
+
+    q_phi : float
+        phi coordinate of rotated point
+
     """
-    Rotate a point `p` by `rot` resulting in a new point `q` 
+    sin_rot_theta = math.sin(rot_theta)
+    cos_rot_theta = math.cos(rot_theta)
+
+    sin_rot_phi = math.sin(rot_phi)
+    cos_rot_phi = math.cos(rot_phi)
+
+    sin_p_theta = math.sin(p_theta)
+    cos_p_theta = math.cos(p_theta)
+
+    sin_p_phi = math.sin(p_phi)
+    cos_p_phi = math.cos(p_phi)
+
+    q_theta = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
+    q_phi = math.atan2(
+        (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
+        (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+    )
+
+    return q_theta, q_phi
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def rotate_points(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
+    """Rotate points `p` by `rot` resulting in new points `q`.
 
     Parameters
     ----------
     p_theta :  array of float
         theta coordinate.
-        
+
     p_phi : array of float
-        Azimuth  on the circle
-        
+        Azimuth on the circle
+
     rot_theta :  array of float
-        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
-        
+        Rotate the points to have axis of symmetry defined by (rot_theta, rot_phi)
+
     rot_phi :  array of float
-        Rotate the point to have axis of symmetry defined by (rot_theta, rot_phi)
+        Rotate the points to have axis of symmetry defined by (rot_theta, rot_phi)
 
     q_theta : array of float
-        theta coordinate of rotated point
-        
+        theta coordinate of rotated points
+
     q_phi : array of float
-        phi coordinate of rotated point
+        phi coordinate of rotated points
 
     """
     for i in range(len(p_theta)):
-
         sin_rot_theta = math.sin(rot_theta[i])
         cos_rot_theta = math.cos(rot_theta[i])
-        
+
         sin_rot_phi = math.sin(rot_phi[i])
         cos_rot_phi = math.cos(rot_phi[i])
 
@@ -945,7 +990,7 @@ def rotate_point(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
 
         sin_p_phi = math.sin(p_phi[i])
         cos_p_phi = math.cos(p_phi[i])
-        
+
         q_theta[i] = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
         q_phi[i] = math.atan2(
             (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
@@ -956,13 +1001,14 @@ def rotate_point(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
 
 
 def fill_from_spher(s):
-    '''
-    fill in the remaining values in SPHER_T type giving the two angles `zen` and `az`
+    """Fill in the remaining values in SPHER_T type giving the two angles `zen` and
+    `az`.
 
     Parameters
     ----------
     s : SPHER_T
-    '''
+
+    """
     s['sinzen'] = np.sin(s['zen'])
     s['coszen'] = np.cos(s['zen'])
     s['sinaz'] = np.sin(s['az'])
@@ -972,13 +1018,14 @@ def fill_from_spher(s):
     s['z'] = s['coszen']
 
 def fill_from_cart(s_vector):
-    '''
-    fill in the remaining values in SPHER_T type giving the cart, coords. `x`, `y` and `z`
+    """Fill in the remaining values in SPHER_T type giving the cart, coords. `x`, `y`
+    and `z`.
 
     Parameters
     ----------
     s_vector : SPHER_T
-    '''
+
+    """
     for s in s_vector:
         radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
         if not radius == 0:
@@ -1003,17 +1050,15 @@ def fill_from_cart(s_vector):
 
 
 def reflect(old, centroid, new):
-    '''
-    reflect the old point around the centroid into the new point on the sphere
-    
+    """Reflect the old point around the centroid into the new point on the sphere.
+
     Parameters
     ----------
-
     old : SPHER_T
     centroid : SPHER_T
     new : SPHER_T
-    '''
 
+    """
     x = old['x']
     y = old['y']
     z = old['z']
@@ -1022,7 +1067,7 @@ def reflect(old, centroid, new):
     sa = centroid['sinaz']
     cz = centroid['coszen']
     sz = centroid['sinzen']
-    
+
     new['x'] = 2*ca*cz*sz*z + x*(ca*(-ca*cz**2 + ca*sz**2) - sa**2) + y*(ca*sa + sa*(-ca*cz**2 + ca*sz**2))
     new['y'] = 2*cz*sa*sz*z + x*(ca*sa + ca*(-cz**2*sa + sa*sz**2)) + y*(-ca**2 + sa*(-cz**2*sa + sa*sz**2))
     new['z'] = 2*ca*cz*sz*x + 2*cz*sa*sz*y + z*(cz**2 - sz**2)
@@ -1032,9 +1077,7 @@ def reflect(old, centroid, new):
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def add_vectors(r1, theta1, phi1, r2, theta2, phi2, r3, theta3, phi3):
-    '''
-    add two vectors v1 + v2 = v3 in spherical coordinates
-    '''
+    """Add two vectors v1 + v2 = v3 in spherical coordinates."""
     for i in range(len(r1)):
         x1 = r1[i] * math.sin(theta1[i]) * math.cos(phi1[i])
         y1 = r1[i] * math.sin(theta1[i]) * math.sin(phi1[i])
@@ -1048,6 +1091,7 @@ def add_vectors(r1, theta1, phi1, r2, theta2, phi2, r3, theta3, phi3):
         r3[i] = math.sqrt(x3**2 + y3**2 + z3**2)
         theta3[i] = math.acos(z3/r3[i])
         phi3[i] = math.atan2(y3, x3) % (2 * math.pi)
+
 
 if __name__ == '__main__':
     test_infer_power()

@@ -41,10 +41,12 @@ setup(
     ],
     install_requires=[
         'enum34',
-        'scipy>=0.17',
         'matplotlib>=2.0',
+        'numba>=0.37',
         'pyfits',
-        'numba>=0.37'
+        'scipy>=0.17',
+        'sobol',
+        'xarray',
     ],
     packages=find_packages(),
     include_dirs=[np.get_include()],

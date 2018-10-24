@@ -4,17 +4,24 @@
 """
 Discrete-time kernels for muons generating photons, to be used as hypo_kernels
 in discrete_hypo/DiscreteHypo class.
+
+Note that muon track kernels (and only track kernels) must be functions with
+names ending in "_muon". Pegleg muon kernels must have names beginning with
+"pegleg_".
 """
 
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    'MUON_KINDS',
     'ALL_REALS',
     'MULEN_INTERP',
     'TABLE_LOWER_BOUND',
     'TABLE_UPPER_BOUND',
+    'pegleg_muon',
     'const_energy_loss_muon',
-    'table_energy_loss_muon'
+    'table_energy_loss_muon',
+    'pegleg_eval',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi, K. Crust'
@@ -51,7 +58,9 @@ from retro.const import (
 from retro.retro_types import SRC_T
 
 
+MUON_KINDS = sorted([k[:-len('_muon')] for k in __all__ if k.endswith('_muon')])
 ALL_REALS = (-np.inf, np.inf)
+
 
 def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000):
     """Simple discrete-time track hypothesis.
@@ -60,7 +69,14 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000)
 
     Parameters
     ----------
-    time, x, y, z, track_azimuth, track_zenith
+    time : float
+        Particle vertex (start) time in nanoseconds from trigger time
+
+    x, y, z : float
+        Particle vertex location in meters (in IceCube coordinate system)
+
+    track_azimuth, track_zenith : float
+        Angle from which particle arrived in radians
 
     dt : float
         Time step in nanoseconds
@@ -107,6 +123,7 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000)
     sources['dir_costheta'] = dir_costheta
     sources['dir_sintheta'] = dir_sintheta
 
+    sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
 
@@ -117,21 +134,37 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000)
     return sources
 
 
-def const_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zenith, dt):
+def const_energy_loss_muon(
+    time,
+    x,
+    y,
+    z,
+    track_energy,
+    track_azimuth,
+    track_zenith,
+    dt,
+):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
 
     Parameters
     ----------
-    time, x, y, z, track_energy, track_azimuth, track_zenith
+    time : float
+        Particle vertex (start) time in nanoseconds from trigger time
+
+    x, y, z : float
+        Particle vertex location in meters (in IceCube coordinate system)
+
+    track_azimuth, track_zenith : float
+        Angle from which particle arrived in radians
 
     dt : float
         Time step in nanoseconds
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_T
+    sources : shape (n_sources,) numpy.ndarray, dtype SRC_T
 
     """
     if track_energy == 0:
@@ -176,6 +209,7 @@ def const_energy_loss_muon(time, x, y, z, track_energy, track_azimuth, track_zen
     sources['dir_costheta'] = dir_costheta
     sources['dir_sintheta'] = dir_sintheta
 
+    sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
 
@@ -215,7 +249,14 @@ MUEN_INTERP = interpolate.UnivariateSpline(y=esamps[1:], x=lengths[1:], k=1, s=0
 
 
 def table_energy_loss_muon(
-        time, x, y, z, track_energy, track_azimuth, track_zenith, dt
+    time,
+    x,
+    y,
+    z,
+    track_energy,
+    track_azimuth,
+    track_zenith,
+    dt,
 ):
     """Discrete-time track hypothesis that calculates dE/dx as the muon travels
     using splined tabulated data.
@@ -224,14 +265,21 @@ def table_energy_loss_muon(
 
     Parameters
     ----------
-    time, x, y, z, track_energy, track_azimuth, track_zenith
+    time : float
+        Particle vertex (start) time in nanoseconds from trigger time
+
+    x, y, z : float
+        Particle vertex location in meters (in IceCube coordinate system)
+
+    track_azimuth, track_zenith : float
+        Angle from which particle arrived in radians
 
     dt : float
         Time step in nanoseconds
 
     Returns
     -------
-    sources : shape (N,) numpy.ndarray, dtype SRC_T
+    sources : shape (n_sources,) numpy.ndarray, dtype SRC_T
 
     """
     # Check for no-track condition
@@ -284,6 +332,7 @@ def table_energy_loss_muon(
     sources['dir_costheta'] = dir_costheta
     sources['dir_sintheta'] = dir_sintheta
 
+    sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
 
@@ -294,7 +343,7 @@ def table_energy_loss_muon(
     return sources
 
 
-def pegleg_eval(pegleg_idx, dt, const_e_loss):
+def pegleg_eval(pegleg_idx, dt, const_e_loss, mmc=False):
     """Convert a pegleg index into track energy in GeV.
 
     Parameters
@@ -302,6 +351,8 @@ def pegleg_eval(pegleg_idx, dt, const_e_loss):
     pegleg_idx : int
     dt : float
     const_e_loss : bool
+    mmc : bool
+        do calculation accordint to MMC paper
 
     Returns
     -------
@@ -311,4 +362,9 @@ def pegleg_eval(pegleg_idx, dt, const_e_loss):
     length = pegleg_idx * dt * SPEED_OF_LIGHT_M_PER_NS
     if const_e_loss:
         return length * TRACK_M_PER_GEV
+    elif mmc:
+        # values from MMC paper Table 4
+        a = 0.268
+        b = 0.00047
+        return (np.exp(length*b) - 1)*a/b
     return MUEN_INTERP(length)

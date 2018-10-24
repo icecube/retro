@@ -27,7 +27,6 @@ limitations under the License.'''
 from collections import Mapping, OrderedDict
 from copy import deepcopy
 import inspect
-from operator import add
 from os.path import abspath, dirname
 import sys
 
@@ -79,8 +78,9 @@ class DiscreteHypo(object):
     the pegleg kernel is a track hypothesis that is sampled along a dimension,
     which is used to determine the track energy in an inner loop
 
-    The scaling kernel is a hypothesis that can be adjusted with a scalefactor for the light yield
-    allowing to analytically calculate the maximum likelihood for its parameter
+    The scaling kernel is a hypothesis that can be adjusted with a scalefactor
+    for the light yield allowing to analytically calculate the maximum
+    likelihood for its parameter
 
     Parameters
     ----------
@@ -104,9 +104,15 @@ class DiscreteHypo(object):
     scaling_kernel_kwargs : None or dict
 
     """
-    def __init__(self, generic_kernels, generic_kernels_kwargs=None,
-                 pegleg_kernel=None, pegleg_kernel_kwargs=None, scaling_kernel=None,
-                 scaling_kernel_kwargs=None):
+    def __init__(
+        self,
+        generic_kernels,
+        generic_kernels_kwargs=None,
+        pegleg_kernel=None,
+        pegleg_kernel_kwargs=None,
+        scaling_kernel=None,
+        scaling_kernel_kwargs=None,
+    ):
         # If a single generic kernel is passed, make it into a singleton list
         if callable(generic_kernels):
             generic_kernels = [generic_kernels]
@@ -123,7 +129,9 @@ class DiscreteHypo(object):
         # If None or dict is passed, duplicate it to send to each generic
         # kernel
         if generic_kernels_kwargs is None or isinstance(generic_kernels_kwargs, Mapping):
-            generic_kernels_kwargs = [deepcopy(generic_kernels_kwargs) for _ in generic_kernels]
+            generic_kernels_kwargs = [
+                deepcopy(generic_kernels_kwargs) for _ in generic_kernels
+            ]
 
         # Translate each None into an empty dict
         self.generic_kernels_kwargs = [kw or {} for kw in generic_kernels_kwargs]
@@ -133,58 +141,78 @@ class DiscreteHypo(object):
         self.generic_param_names = tuple(
             get_hypo_param_names(kernel) for kernel in generic_kernels
         )
-        self.pegleg_param_names = (
-            get_hypo_param_names(pegleg_kernel) if pegleg_kernel else ()
-        )
-        self.scaling_param_names = (
-            get_hypo_param_names(scaling_kernel) if scaling_kernel else ()
-        )
+        """One set of param names for each kernel (possible to have duplicated names)"""
+
+        self.pegleg_param_names = ()
+        """All param names required by the pegleg kernel (if any)"""
+
+        if pegleg_kernel:
+            self.pegleg_param_names = tuple(get_hypo_param_names(pegleg_kernel))
+
+        self.scaling_param_names = ()
+        """All param names required by the scaling kernel (if any)"""
+
+        if scaling_kernel:
+            self.scaling_param_names = tuple(get_hypo_param_names(scaling_kernel))
 
         # Place param names first that are handled by external optimizers (e.g.
         # MultiNest), then include name(s) of paramters handled by pegleg and
         # finally scaling param names. It is required to do this for e.g.
         # MultiNest where the first n_opt_params params are optimized over
         # while the remaining dimensions are left alone.
-        all_param_names = list(reduce(add, self.generic_param_names, ()))
-        for name in self.pegleg_param_names + self.scaling_param_names:
-            if name not in all_param_names:
-                all_param_names.append(name)
-
-        self._opt_param_names = deepcopy(all_param_names)
-
+        all_param_names = []
+        for param_names in self.generic_param_names:
+            for param_name in param_names:
+                if param_name not in all_param_names:
+                    all_param_names.append(param_name)
+        for param_name in self.pegleg_param_names + self.scaling_param_names:
+            if param_name not in all_param_names:
+                all_param_names.append(param_name)
+        self._opt_param_names = tuple(all_param_names)
         self.fixed_params = OrderedDict()
 
     @property
     def opt_param_names(self):
+        """tuple of strings : Hypothesis parameter names to be handled by a
+        generic optimizer, i.e., non-fixed and not including pegleg and
+        scaling parameters"""
         # remove fixed params
-        return [n for n in self._opt_param_names if n not in self.fixed_params]
+        return tuple(n for n in self._opt_param_names if n not in self.fixed_params)
 
     @property
     def hypo_param_names(self):
+        """list of strings : Fixed and free hypothesis parameter names"""
         return self._opt_param_names
 
     @property
     def all_param_names(self):
-        names = self.opt_param_names + self.fixed_params.keys()
-        if self.pegleg_kernel:
-            names += PEGLEG_PARAM_NAMES
-        if self.scaling_kernel:
-            names += SCALING_PARAM_NAMES
-        return names
+        """tuple of strings : All parameter names: fixed, free, pegleg, and
+        scaling parameters"""
+        all_param_names = list(self._opt_param_names)
+        if self.pegleg_kernel is not None:
+            for param_name in PEGLEG_PARAM_NAMES:
+                if param_name not in all_param_names:
+                    all_param_names.append(param_name)
+        if self.scaling_kernel is not None:
+            for param_name in SCALING_PARAM_NAMES:
+                if param_name not in all_param_names:
+                    all_param_names.append(param_name)
+        return all_param_names
 
-    
     @property
     def n_params(self):
+        """int : Number of parameters (including all parameters kinds)"""
         return len(self.all_param_names)
 
     @property
     def n_hypo_params(self):
+        """int : Number of hypothesis parameters"""
         return len(self.hypo_param_names)
 
     @property
     def n_opt_params(self):
+        """int: Number of hypothesis parameters to be handled by a generic optimizer"""
         return len(self.opt_param_names)
-
 
     def get_generic_sources(self, hypo):
         """Evaluate the discrete hypothesis (all hypo kernels) given particular
@@ -201,9 +229,11 @@ class DiscreteHypo(object):
         """
         hypo.update(self.fixed_params)
         sources = []
-        for kernel, param_names, kwargs in zip(self.generic_kernels,
-                                               self.generic_param_names,
-                                               self.generic_kernels_kwargs):
+        for kernel, param_names, kwargs in zip(
+            self.generic_kernels,
+            self.generic_param_names,
+            self.generic_kernels_kwargs
+        ):
             total_kwargs = {a:hypo[a] for a in param_names}
             total_kwargs.update(kwargs)
             sources.append(kernel(**total_kwargs))

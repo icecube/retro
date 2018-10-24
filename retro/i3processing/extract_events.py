@@ -197,6 +197,21 @@ def extract_reco(frame, reco):
 
 
 def extract_trigger_hierarchy(frame, path):
+    """Extract trigger hierarchy from an I3 frame.
+
+    Parameters
+    ----------
+    frame : icetray.I3Frame
+        Frame object from which to extract the trigger hierarchy
+
+    path : string
+        Path to trigger hierarchy
+
+    Returns
+    -------
+    triggers : length n_triggers array of dtype retro_types.TRIGGER_T
+
+    """
     from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
     trigger_hierarchy = frame[path]
     triggers = []
@@ -330,7 +345,7 @@ def extract_truth(frame, run_id, event_id):
     """
     from icecube import dataclasses, icetray # pylint: disable=unused-variable
     try:
-        from icecube import multinest_icetray
+        from icecube import multinest_icetray # pylint: disable=unused-variable
     except ImportError:
         multinest_icetray = None
 
@@ -343,6 +358,8 @@ def extract_truth(frame, run_id, event_id):
     primary = mctree.primaries[0]
     pdg = primary.pdg_encoding
     abs_pdg = np.abs(pdg)
+
+    # TODO: deal with charged leptons e.g. for CORSIKA/MuonGun
 
     is_nu = False
     if abs_pdg in [11, 13, 15]:
@@ -479,6 +496,18 @@ def extract_truth(frame, run_id, event_id):
 
 
 def extract_metadata_from_frame(frame):
+    """Extract metadata from I3 frame.
+
+    Parameters
+    ----------
+    frame : icetray.I3Frame
+
+    Returns
+    -------
+    event_meta : OrderedDict
+        Keys are 'I3EventHeader', 'run', and 'event_id'
+
+    """
     event_meta = OrderedDict()
     event_header = frame['I3EventHeader']
     event_meta['run'] = event_header.run_id
@@ -487,21 +516,23 @@ def extract_metadata_from_frame(frame):
 
 
 def extract_events(
-        fpath,
-        outdir=None,
-        photons=tuple(),
-        pulses=tuple(),
-        recos=tuple(),
-        triggers=tuple(),
-        truth=False
-    ):
-    """Extract information from an i3 file.
+    fpath,
+    outdir=None,
+    photons=tuple(),
+    pulses=tuple(),
+    recos=tuple(),
+    triggers=tuple(),
+    truth=False
+):
+    """Extract event information from an i3 file.
 
     Parameters
     ----------
     fpath : str
+        Path to I3 file
 
     outdir : str, optional
+        Directory in which to place generated files
 
     photons : None, str, or iterable of str
         Names of photons series' to extract from each event
@@ -554,6 +585,7 @@ def extract_events(
     from icecube import dataclasses, dataio, icetray # pylint: disable=unused-variable
 
     fpath = expand(fpath)
+    # TODO: record file_info?
     file_info = None
     try:
         file_info = extract_metadata_from_filename(fpath)
@@ -634,7 +666,7 @@ def extract_events(
                       .format(fpath, event_id))
                 raise
             truths.append(event_truth)
-            event['unique_id'] = unique_id = truths[-1]['unique_id']
+            event['unique_id'] = truths[-1]['unique_id']
 
         events.append(event)
 

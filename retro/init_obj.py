@@ -13,7 +13,7 @@ __all__ = [
     'setup_dom_tables',
     'setup_discrete_hypo',
     'get_hits',
-    'parse_args'
+    'parse_args',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -75,21 +75,19 @@ I3_FNAME_INFO_RE = re.compile(
 
 
 def setup_dom_tables(
-        dom_tables_kind,
-        dom_tables_fname_proto,
-        gcd,
-        angsens_model,
-        norm_version,
-        use_sd_indices=const.ALL_STRS_DOMS,
-        step_length=1.0,
-        num_phi_samples=None,
-        ckv_sigma_deg=None,
-        template_library=None,
-        compute_t_indep_exp=True,
-        use_directionality=True,
-        no_noise=False,
-        force_no_mmap=False,
-    ):
+    dom_tables_kind,
+    dom_tables_fname_proto,
+    gcd,
+    norm_version='binvol2.5',
+    use_sd_indices=const.ALL_STRS_DOMS,
+    step_length=1.0,
+    num_phi_samples=None,
+    ckv_sigma_deg=None,
+    template_library=None,
+    compute_t_indep_exp=True,
+    no_noise=False,
+    force_no_mmap=False,
+):
     """Instantiate and load single-DOM tables.
 
     Parameters
@@ -97,17 +95,19 @@ def setup_dom_tables(
     dom_tables_kind : str
     dom_tables_fname_proto : str
     gcd : str
-    angsens_model : str
-    norm_version : str
-    use_sd_indices : sequence
-    step_length : float
+    norm_version : str, optional
+    use_sd_indices : sequence, optional
+    step_length : float, optional
     num_phi_samples : int, optional
     ckv_sigma_deg : float, optional
     template_library : str, optional
     compute_t_indep_exp : bool, optional
-    use_directionality : bool, optional
     no_noise : bool, optional
     force_no_mmap : bool, optional
+
+    Returns
+    -------
+    dom_tables : Retro5DTables
 
     """
     print('Instantiating and loading DOM tables')
@@ -137,14 +137,12 @@ def setup_dom_tables(
         geom=gcd['geo'],
         rde=gcd['rde'],
         noise_rate_hz=gcd['noise'],
-        angsens_model=angsens_model,
         compute_t_indep_exp=compute_t_indep_exp,
-        use_directionality=use_directionality,
         norm_version=norm_version,
         num_phi_samples=num_phi_samples,
         ckv_sigma_deg=ckv_sigma_deg,
         template_library=template_library,
-        use_sd_indices=use_sd_indices
+        use_sd_indices=use_sd_indices,
     )
 
     if '{subdet' in dom_tables_fname_proto:
@@ -227,14 +225,67 @@ def setup_dom_tables(
             mmap_t_indep=mmap,
         )
 
+    for table in dom_tables.tables:
+        assert np.all(np.isfinite(table['weight'])), 'table not finite!'
+        assert np.all(table['weight'] >= 0), 'table is negative!'
+        assert np.min(table['index']) >= 0, 'table has negative index'
+        if dom_tables.template_library is not None:
+            assert np.max(table['index']) < dom_tables.template_library.shape[0], \
+                    'table too large index'
+    if dom_tables.template_library is not None:
+        assert np.all(np.isfinite(dom_tables.template_library)), 'templates not finite!'
+        assert np.all(dom_tables.template_library >= 0), 'templates have negative values!'
+
     print('  -> {:.3f} s\n'.format(time.time() - t0))
 
     return dom_tables
 
 
-def setup_discrete_hypo(
-        cascade_kernel=None, track_kernel=None, track_time_step=None
-    ):
+def setup_tdi_tables(tdi=None, mmap=False):
+    """Load and instantiate (Cherenkov) TDI tables.
+
+    Parameters
+    ----------
+    tdi : sequence of strings, optional
+        Path to TDI tables' `ckv_tdi_table.npy` files, or paths to
+        directories containing those files; one entry per TDI table
+
+    mmap : bool
+
+    Returns
+    -------
+    tdi_tables : tuple of 0 or more numpy arrays
+    tdi_metas : tuple of 0 or more OrderedDicts
+
+    """
+    if tdi is None:
+        return (), ()
+
+    mmap_mode = 'r' if mmap else None
+
+    tdi_tables = []
+    tdi_metas = []
+    for tdi_ in tdi:
+        if tdi_ is None:
+            continue
+        tdi_ = expand(tdi_)
+        if isdir(tdi_):
+            tdi_ = join(tdi_, 'ckv_tdi_table.npy')
+
+        print('Loading and instantiating TDI table at "{}"'.format(tdi_))
+
+        be = load_pickle(join(dirname(tdi_), 'tdi_bin_edges.pkl'))
+        meta = load_pickle(join(dirname(tdi_), 'tdi_metadata.pkl'))
+        meta['bin_edges'] = be
+        tdi_table = np.load(tdi_, mmap_mode=mmap_mode)
+
+        tdi_metas.append(meta)
+        tdi_tables.append(tdi_table)
+
+    return tuple(tdi_tables), tuple(tdi_metas)
+
+
+def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=None):
     """Convenience function for instantiating a discrete hypothesis with
     specified kernel(s).
 
@@ -252,58 +303,39 @@ def setup_discrete_hypo(
     """
     generic_kernels = []
     generic_kernels_kwargs = []
+
     pegleg_kernel = None
     pegleg_kernel_kwargs = None
+
     scaling_kernel = None
     scaling_kernel_kwargs = None
+
     if cascade_kernel is not None:
-        if cascade_kernel == 'point':
-            generic_kernels.append(dck.point_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'point_ckv':
-            generic_kernels.append(dck.point_ckv_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'aligned_point_ckv':
-            generic_kernels.append(dck.aligned_point_ckv_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'one_dim':
-            generic_kernels.append(dck.one_dim_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'aligned_one_dim':
-            generic_kernels.append(dck.aligned_one_dim_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'one_dim_delta':
-            generic_kernels.append(dck.one_dim_delta_cascade)
-            generic_kernels_kwargs.append(dict())
-        elif cascade_kernel == 'scaling_aligned_one_dim':
-            scaling_kernel = dck.scaling_aligned_one_dim_cascade
-            scaling_kernel_kwargs = dict()
-        elif cascade_kernel == 'scaling_aligned_point_ckv':
-            scaling_kernel = dck.scaling_aligned_point_ckv_cascade
-            scaling_kernel_kwargs = dict()
-        elif cascade_kernel == 'scaling_one_dim':
-            scaling_kernel = dck.scaling_one_dim_cascade
-            scaling_kernel_kwargs = dict()
-        elif cascade_kernel == 'scaling_one_dim_delta':
-            scaling_kernel = dck.scaling_one_dim_delta_cascade
-            scaling_kernel_kwargs = dict()
+        assert cascade_kernel in dck.CASCADE_KINDS, str(cascade_kernel)
+        cascade_kernel_func = getattr(dck, cascade_kernel + '_cascade')
+        cascade_kernel_kwargs = dict()
+        if cascade_kernel.startswith('scaling'):
+            if scaling_kernel is not None:
+                raise ValueError('can only have one scaling kernel')
+            scaling_kernel = cascade_kernel_func
+            scaling_kernel_kwargs = cascade_kernel_kwargs
         else:
-            raise NotImplementedError('{} cascade not implemented yet.'
-                                      .format(cascade_kernel))
+            generic_kernels.append(cascade_kernel_func)
+            generic_kernels_kwargs.append(cascade_kernel_kwargs)
 
     if track_kernel is not None:
-        if track_kernel == 'const_e_loss':
-            generic_kernels.append(dmk.const_energy_loss_muon)
-            generic_kernels_kwargs.append(dict(dt=track_time_step))
-        elif track_kernel == 'pegleg':
-            pegleg_kernel = dmk.pegleg_muon
-            pegleg_kernel_kwargs = dict(dt=track_time_step)
-        elif track_kernel == 'table_e_loss':
-            generic_kernels.append(dmk.table_energy_loss_muon)
-            generic_kernels_kwargs.append(dict(dt=track_time_step))
+        assert track_kernel in dmk.MUON_KINDS, str(track_kernel)
+        print('track_kernel:', track_kernel)
+        track_kernel_func = getattr(dmk, track_kernel + '_muon')
+        track_kernel_kwargs = dict(dt=track_time_step)
+        if track_kernel.startswith('pegleg'):
+            if pegleg_kernel is not None:
+                raise ValueError('can only have one pegleg kernel')
+            pegleg_kernel = track_kernel_func
+            pegleg_kernel_kwargs = track_kernel_kwargs
         else:
-            raise NotImplementedError('{} track not implemented yet.'
-                                      .format(track_kernel))
+            generic_kernels.append(track_kernel_func)
+            generic_kernels_kwargs.append(dict(dt=track_time_step))
 
     hypo_handler = DiscreteHypo(
         generic_kernels=generic_kernels,
@@ -318,18 +350,18 @@ def setup_discrete_hypo(
 
 
 def get_events(
-        events_base,
-        start=0,
-        stop=None,
-        step=None,
-        truth=True,
-        photons=None,
-        pulses=None,
-        recos=None,
-        triggers=None,
-        angsens_model=None,
-        hits=None
-    ):
+    events_base,
+    start=0,
+    stop=None,
+    step=None,
+    truth=True,
+    photons=None,
+    pulses=None,
+    recos=None,
+    triggers=None,
+    angsens_model=None,
+    hits=None,
+):
     """Iterate through a Retro events directory, getting events in a
     the form of a nested OrderedDict, with leaf nodes numpy structured arrays.
 
@@ -369,7 +401,10 @@ def get_events(
         to not extract any trigger hierarchies.
 
     angsens_model : string
-        Required if `photons` specifies any photon series to extract.
+        Required if `photons` specifies any photon series to extract, as this angular
+        sensitivity model is applied to the photons to arrive at expectation for
+        detected photons (though without taking into account any further details of the
+        DOM's ability to detect photons)
 
     hits : string or sequence thereof, optional
         Path to photon or pulse series to extract as ``event["hits"]`` field.
@@ -710,7 +745,7 @@ def get_hits(event, path, angsens_model=None):
             total_num_hits,
             total_num_doms_hit,
             time_window_start,
-            time_window_stop
+            time_window_stop,
         ),
         dtype=HITS_SUMMARY_T
     )
@@ -742,8 +777,14 @@ def extract_next_event(file_iterator_tree, event=None):
     return event
 
 
-def parse_args(dom_tables=False, hypo=False, events=False, description=None,
-               parser=None):
+def parse_args(
+    dom_tables=False,
+    tdi_tables=False,
+    hypo=False,
+    events=False,
+    description=None,
+    parser=None,
+):
     """Parse command line arguments.
 
     If `parser` is supplied, args are added to that; otherwise, a new parser is
@@ -754,6 +795,10 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
     dom_tables : bool, optional
         Whether to include args for instantiating and loading single-DOM
         tables. Default is False.
+
+    tdi_tables : bool, optional
+        Whether to include args for instantiating and loading TDI tables.
+        Default is False.
 
     hypo : bool
         Whether to include args for instantiating a DiscreteHypo and its hypo
@@ -821,7 +866,7 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         )
         group.add_argument(
             '--norm-version',
-            required=True,
+            required=False, default='binvol2.5',
             choices=NORM_VERSIONS,
             help='''Norm version.'''
         )
@@ -849,13 +894,22 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
             would have to be handled by specifying a TDI table'''
         )
         group.add_argument(
-            '--no-dir', action='store_true',
-            help='''Do NOT use source photon directionality'''
-        )
-        group.add_argument(
             '--force-no-mmap', action='store_true',
             help='''Specify to NOT memory map the tables. If not specified, a
             sensible default is chosen for the type of tables being used.'''
+        )
+
+    if tdi_tables:
+        group = parser.add_argument_group(
+            title='TDI tables arguments',
+        )
+        group.add_argument(
+            '--tdi',
+            action='append',
+            help='''Path to TDI table's `ckv_tdi_table.npy` file or path
+            to directory containing that file; repeat --tdi to specify multiple
+            TDI tables (making sure more finely-binned tables are specified
+            BEFORE more coarsely-binned tables)'''
         )
 
     if hypo:
@@ -866,17 +920,12 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         group.add_argument(
             '--cascade-kernel',
             required=True,
-            choices=sorted([
-                'point', 'point_ckv', 'one_dim', 'aligned_point_ckv',
-                'aligned_one_dim', 'scaling_aligned_one_dim',
-                'scaling_aligned_point_ckv', 'scaling_one_dim',
-                'one_dim_delta', 'scaling_one_dim_delta'
-            ]),
+            choices=dck.CASCADE_KINDS,
         )
         group.add_argument(
             '--track-kernel',
             required=True,
-            choices=['const_e_loss', 'table_e_loss', 'pegleg'],
+            choices=dmk.MUON_KINDS,
         )
         group.add_argument(
             '--track-time-step', type=float,
@@ -895,10 +944,18 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
             files'''
         )
         group.add_argument(
-            '--start-idx', type=int, default=0
+            '--start', type=int, default=0,
+            help='''Process events defined by slice [start:stop:step]. Default is 0.'''
         )
         group.add_argument(
-            '--num-events', type=int, default=None
+            '--stop', type=int, default=None,
+            help='''Process events defined by slice [start:stop:step]. Default is None,
+            i.e., take events until they run out.'''
+        )
+        group.add_argument(
+            '--step', type=int, default=None,
+            help='''Process events defined by slice [start:stop:step]. Default is
+            None, i.e., take every event from `start` through `stop - 1`.'''
         )
         group.add_argument(
             '--photons', action='append',
@@ -933,20 +990,17 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
     args = parser.parse_args()
     kwargs = vars(args)
 
-    if events:
-        kwargs['start'] = kwargs.pop('start_idx')
-        if kwargs['num_events'] is None:
-            kwargs['stop'] = kwargs.pop('num_events')
-        else:
-            kwargs['stop'] = kwargs['start'] + kwargs.pop('num_events')
-
     dom_tables_kw = {}
+    tdi_tables_kw = {}
     hypo_kw = {}
     events_kw = {}
     other_kw = {}
     if dom_tables:
         code = setup_dom_tables.__code__
         dom_tables_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
+    if tdi_tables:
+        code = setup_tdi_tables.__code__
+        tdi_tables_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
     if hypo:
         code = setup_discrete_hypo.__code__
         hypo_kw = {k: None for k in code.co_varnames[:code.co_argcount]}
@@ -967,11 +1021,10 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
         print('nubmer of doms = {}'.format(len(use_sd_indices)))
         kwargs['use_sd_indices'] = use_sd_indices
         kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
-        kwargs['use_directionality'] = not kwargs.pop('no_dir')
 
     for key, val in kwargs.items():
         taken = False
-        for kw in [dom_tables_kw, hypo_kw, events_kw]:
+        for kw in [dom_tables_kw, tdi_tables_kw, hypo_kw, events_kw]:
             if key not in kw:
                 continue
             kw[key] = val
@@ -982,6 +1035,8 @@ def parse_args(dom_tables=False, hypo=False, events=False, description=None,
     split_kwargs = OrderedDict()
     if dom_tables:
         split_kwargs['dom_tables_kw'] = dom_tables_kw
+    if tdi_tables:
+        split_kwargs['tdi_tables_kw'] = tdi_tables_kw
     if hypo:
         split_kwargs['hypo_kw'] = hypo_kw
     if events:

@@ -49,7 +49,7 @@ from retro.const import (
 )
 from retro.i3info.angsens_model import load_angsens_model
 from retro.retro_types import DOM_INFO_T
-from retro.tables.pexp_5d import generate_pexp_5d_function
+#from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.utils.geom import spherical_volume
 from retro.utils.misc import expand
 
@@ -118,15 +118,13 @@ class Retro5DTables(object):
     noise_rate_hz : shape-(n_strings, n_doms) array
         Noise rate for each DOM, in Hz.
 
-    angsens_model : string
-
     compute_t_indep_exp : bool
 
-    use_directionality : bool
-        Enable or disable directionality when computing expected photons at
-        the DOMs
+    angsens_model : string, optional
+        For now, this must be "9" since it's hard-coded to that model (from Dima's
+        "as.9" file) in the retro branch of CLSim
 
-    norm_version : string
+    norm_version : string, optional
         (Temporary) Which version of the norm to use. Only for experimenting,
         and will be removed once we figure the norm out.
 
@@ -149,20 +147,25 @@ class Retro5DTables(object):
 
     """
     def __init__(
-            self,
-            table_kind,
-            geom,
-            rde,
-            noise_rate_hz,
-            angsens_model,
-            compute_t_indep_exp,
-            use_directionality,
-            norm_version,
-            num_phi_samples=None,
-            ckv_sigma_deg=None,
-            template_library=None,
-            use_sd_indices=ALL_STRS_DOMS
-        ):
+        self,
+        table_kind,
+        geom,
+        rde,
+        noise_rate_hz,
+        compute_t_indep_exp,
+        angsens_model='9',
+        norm_version='binvol2.5',
+        num_phi_samples=None,
+        ckv_sigma_deg=None,
+        template_library=None,
+        use_sd_indices=ALL_STRS_DOMS,
+    ):
+        # TODO: change that this is hard-coded in retro CLSim branch and make it
+        # metadata that gets passed through the entire table-generation chain.
+        if angsens_model != "9":
+            raise ValueError(
+                '`angsens_model` "9" is hard-coded in table gen; must use this for now'
+            )
         self.angsens_poly, self.avg_angsens = load_angsens_model(angsens_model)
         self.angsens_model = angsens_model
         self.compute_t_indep_exp = compute_t_indep_exp
@@ -214,7 +217,6 @@ class Retro5DTables(object):
             self.table_name = 'ckv_table'
 
         assert len(geom.shape) == 3
-        self.use_directionality = use_directionality
         self.num_phi_samples = num_phi_samples
         self.ckv_sigma_deg = ckv_sigma_deg
         self.norm_version = norm_version
@@ -289,27 +291,16 @@ class Retro5DTables(object):
             dtype=np.int32
         )
 
-        self._pexp = None
-        self._get_llh = None
-        self.pexp_meta = None
         self.is_stacked = None
         self.t_is_residual_time = None
 
-    def get_llh(self, *args, **kwargs):
-        return self._get_llh(*args, **kwargs)
-
-    def pexp(self, *args, **kwargs):
-        if self._pexp is None:
-            raise ValueError('No pexp function initialized. (Are tables loaded?)')
-        return self._pexp(*args, **kwargs)
-
     def load_stacked_tables(
-            self,
-            stacked_tables_meta_fpath,
-            stacked_tables_fpath,
-            stacked_t_indep_tables_fpath,
-            mmap_tables=False,
-            mmap_t_indep=False,
+        self,
+        stacked_tables_meta_fpath,
+        stacked_tables_fpath,
+        stacked_t_indep_tables_fpath,
+        mmap_tables=False,
+        mmap_t_indep=False,
     ):
         if self.is_stacked is not None:
             assert self.is_stacked
@@ -334,22 +325,6 @@ class Retro5DTables(object):
         )
         self.t_indep_tables.setflags(write=False, align=True, uic=False)
         assert self.t_indep_tables.shape[0] == num_tables
-
-        if self._pexp is None:
-            pexp, get_llh, pexp_meta = generate_pexp_5d_function(
-                table=self.table_meta,
-                table_kind=self.table_kind,
-                t_is_residual_time=self.t_is_residual_time,
-                compute_t_indep_exp=self.compute_t_indep_exp,
-                compute_unhit_doms=True, # TODO: modify when TDI table works
-                use_directionality=self.use_directionality,
-                num_phi_samples=self.num_phi_samples,
-                ckv_sigma_deg=self.ckv_sigma_deg,
-                template_library=self.template_library
-            )
-            self._pexp = pexp
-            self._get_llh = get_llh
-            self.pexp_meta = pexp_meta
 
         self.sd_idx_table_indexer = deepcopy(self.table_meta['sd_idx_table_indexer'])
         self.sd_idx_table_indexer.setflags(write=False, align=True, uic=False)
@@ -434,6 +409,8 @@ class Retro5DTables(object):
             table_meta[k] = table[k]
         table_meta['binning'] = binning
 
+        self.table_meta = table_meta
+
         if self.t_is_residual_time is None:
             self.t_is_residual_time = bool(table['t_is_residual_time'])
         else:
@@ -445,22 +422,6 @@ class Retro5DTables(object):
             norm_version=self.norm_version,
             **{k: table[k] for k in TABLE_NORM_KEYS}
         )
-
-        if self._pexp is None:
-            pexp, get_llh, pexp_meta = generate_pexp_5d_function(
-                table=table,
-                table_kind=self.table_kind,
-                t_is_residual_time=self.t_is_residual_time,
-                compute_t_indep_exp=self.compute_t_indep_exp,
-                use_directionality=self.use_directionality,
-                compute_unhit_doms=True, # TODO: modify when TDI works
-                num_phi_samples=self.num_phi_samples,
-                ckv_sigma_deg=self.ckv_sigma_deg,
-                template_library=self.template_library
-            )
-            self._pexp = pexp
-            self._get_llh = get_llh
-            self.pexp_meta = pexp_meta
 
         self.tables.append(table[self.table_name])
         self.table_norms.append(table_norm)
@@ -483,11 +444,18 @@ class Retro5DTables(object):
 
 
 def get_table_norm(
-        n_photons, group_refractive_index, step_length, r_bin_edges,
-        costheta_bin_edges, t_bin_edges, costhetadir_bin_edges,
-        deltaphidir_bin_edges, quantum_efficiency,
-        avg_angsens, norm_version
-    ):
+    n_photons,
+    group_refractive_index,
+    step_length,
+    r_bin_edges,
+    costheta_bin_edges,
+    t_bin_edges,
+    costhetadir_bin_edges,
+    deltaphidir_bin_edges,
+    quantum_efficiency,
+    avg_angsens,
+    norm_version,
+):
     """Get the normalization array to use a raw CLSim table with Retro reco.
 
     Note that the `norm` array returned is meant to _multiply_ the counts in
@@ -564,7 +532,7 @@ def get_table_norm(
 
     constant_part = (
         # Number of photons, divided equally among the costheta bins
-        0.45 * n_dir_bins / (n_photons ) #/ n_costheta_bins)
+        0.45 * n_dir_bins / n_photons
 
         # Correction for quantum efficiency of the DOM
         * quantum_efficiency
@@ -584,7 +552,7 @@ def get_table_norm(
 
     # t bin edges are in ns and speed_of_light_in_medum is m/ns
     t_bin_widths_in_m = t_bin_widths * speed_of_light_in_medum
-    t_bin_range_in_m = t_bin_range * speed_of_light_in_medum
+    #t_bin_range_in_m = t_bin_range * speed_of_light_in_medum
 
     # TODO: Note that the actual counts will be rounded down (or are one fewer
     # than indicated by this ratio if the ratio comres out to an integer). We
