@@ -216,9 +216,9 @@ EVT_HIT_INFO_T = np.dtype([
     ('event_dom_idx', np.uint32),
 ])
 
-# type to store spherical coordinates and handy quantities
+
 SPHER_T = np.dtype([
-    ('zen',np.float32),
+    ('zen', np.float32),
     ('az', np.float32),
     ('x', np.float32),
     ('y', np.float32),
@@ -228,6 +228,7 @@ SPHER_T = np.dtype([
     ('sinaz', np.float32),
     ('cosaz', np.float32),
 ])
+"""type to store spherical coordinates and handy quantities"""
 
 
 class ConfigID(enum.IntEnum):
@@ -364,4 +365,5 @@ SRC_T = np.dtype([
     ('ckv_costheta', np.float32),
     ('ckv_sintheta', np.float32),
 ], align=True)
-"""Each source point is described by (up to) these 9 fields"""
+"""Each source point is described by (up to) these fields (e.g., SRC_OMNI
+doesn't care what dir_* fields are)"""

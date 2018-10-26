@@ -2,30 +2,15 @@
 # pylint: disable=wrong-import-position, redefined-outer-name, invalid-name
 
 """
-Discrete-time kernels for muons generating photons, to be used as hypo_kernels
-in discrete_hypo/DiscreteHypo class.
-
-Note that muon track kernels (and only track kernels) must be functions with
-names ending in "_muon". Pegleg muon kernels must have names beginning with
-"pegleg_".
+Muon hypothesis class to generate photons expected from a muon.
 """
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    'MUON_KINDS',
-    'ALL_REALS',
-    'MULEN_INTERP',
-    'TABLE_LOWER_BOUND',
-    'TABLE_UPPER_BOUND',
-    'pegleg_muon',
-    'const_energy_loss_muon',
-    'table_energy_loss_muon',
-    'pegleg_eval',
-]
+__all__ = ['MuonModel', 'MuonHypo']
 
 __author__ = 'P. Eller, J.L. Lanfranchi, K. Crust'
-__license__ = '''Copyright 2017 Philipp Eller, Justin L. Lanfranchi, Kevin Crust
+__license__ = '''Copyright 2017-2018 Philipp Eller, Justin L. Lanfranchi, Kevin Crust
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,7 +24,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+
 import csv
+import enum
 import math
 from os.path import abspath, dirname, join
 import sys
@@ -51,16 +38,65 @@ RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
     COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
     TRACK_PHOTONS_PER_M, SRC_CKV_BETA1, EMPTY_SOURCES
 )
+from retro.hypo import Hypo
 from retro.retro_types import SRC_T
 
 
-MUON_KINDS = sorted([k[:-len('_muon')] for k in __all__ if k.endswith('_muon')])
-ALL_REALS = (-np.inf, np.inf)
+class MuonModel(enum.IntEnum):
+    const_energy_loss = 0
+    """constant energy loss per meter the muon travels"""
 
+    mmc_energy_loss = 1
+    """energy loss model from MMC paper, Table 4"""
+
+    table_energy_loss = 2
+    """"""
+
+
+class MuonHypo(Hypo):
+    def __init__(self):
+        pass
+
+    def pegleg_eval(pegleg_idx):
+        """Convert a pegleg index into track energy in GeV.
+    
+        Parameters
+        ----------
+        pegleg_idx : int
+        dt : float
+        const_e_loss : bool
+        mmc : bool
+            do calculation accordint to MMC paper
+    
+        Returns
+        -------
+        muon_energy : float
+    
+        """
+        length = pegleg_idx * dt * SPEED_OF_LIGHT_M_PER_NS
+        if self.model is MuonModel.const_energy_loss:
+            muon_energy = length * TRACK_M_PER_GEV
+
+        elif self.model is MuonModel.mmc:
+            # values from MMC paper Table 4
+            a = 0.268
+            b = 0.00047
+            muon_energy = (np.exp(length*b) - 1)*a/b
+
+        elif self.model is MuonModel.table_energy_loss:
+            muon_energy = MUEN_INTERP(length)
+
+        else:
+            raise NotImplementedError(
+                "{} muon model is not implemented'"
+            )
+
+        return muon_energy
 
 def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000):
     """Simple discrete-time track hypothesis.

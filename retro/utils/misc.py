@@ -21,15 +21,14 @@ __all__ = [
     'get_file_md5',
     'sort_dict',
     'convert_to_namedtuple',
-    'event_to_hypo_params',
-    'hypo_to_track_params',
+    'get_arg_names',
+    'hrlist2list',
+    'hr_range_formatter',
+    'list2hrlist',
     'generate_anisotropy_str',
     'generate_unique_ids',
     'get_primary_interaction_str',
     'get_primary_interaction_tex',
-    'hrlist2list',
-    'hr_range_formatter',
-    'list2hrlist'
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -52,6 +51,7 @@ from collections import Iterable, OrderedDict, Mapping, Sequence
 import pickle
 import errno
 import hashlib
+import inspect
 from numbers import Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
@@ -60,6 +60,7 @@ import struct
 from subprocess import Popen, PIPE
 import sys
 
+import numba
 import numpy as np
 from six import BytesIO
 from six.moves import map, range
@@ -68,7 +69,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const, retro_types
+from retro import const
 
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
@@ -350,82 +351,27 @@ def convert_to_namedtuple(val, nt_type):
     raise TypeError('Cannot convert %s to %s' % (type(val), nt_type))
 
 
-# -- Retro-specific functions -- #
-
-
-def generate_anisotropy_str(anisotropy):
-    """Generate a string from anisotropy specification parameters.
+def get_arg_names(func):
+    """Extract argument names from a pure-Python or Numba jit-compiled function.
 
     Parameters
     ----------
-    anisotropy : None or tuple of values
+    func : callable
 
     Returns
     -------
-    anisotropy_str : string
+    arg_names : tuple of strings
 
     """
-    if anisotropy is None:
-        anisotropy_str = 'none'
+    if isinstance(func, numba.targets.registry.CPUDispatcher):
+        py_func = func.py_func
     else:
-        anisotropy_str = '_'.join(str(param) for param in anisotropy)
-    return anisotropy_str
+        py_func = func
 
+    # Get all the function's argument names
+    arg_names = inspect.getargspec(py_func)[0]
 
-def generate_unique_ids(events):
-    """Generate unique IDs from `event` fields because people are lazy
-    inconsiderate assholes.
-
-    Parameters
-    ----------
-    events : array of int
-
-    Returns
-    -------
-    uids : array of int
-
-    """
-    uids = (
-        events
-        + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
-    ).astype(int)
-    return uids
-
-
-def get_primary_interaction_str(event):
-    """Produce simple string representation of event's primary neutrino and
-    interaction type (if present).
-
-    Parameters
-    ----------
-    event : Event namedtuple
-
-    Returns
-    -------
-    flavintstr : string
-
-    """
-    pdg = int(event.neutrino.pdg)
-    inter = int(event.interaction)
-    return const.PDG_INTER_STR[(pdg, inter)]
-
-
-def get_primary_interaction_tex(event):
-    """Produce latex representation of event's primary neutrino and interaction
-    type (if present).
-
-    Parameters
-    ----------
-    event : Event namedtuple
-
-    Returns
-    -------
-    flavinttex : string
-
-    """
-    pdg = int(event.neutrino.pdg)
-    inter = int(event.interaction)
-    return const.PDG_INTER_TEX[(pdg, inter)]
+    return tuple(arg_names)
 
 
 WHITESPACE_RE = re.compile(r'\s')
@@ -597,7 +543,7 @@ def list2hrlist(lst):
     if isinstance(lst, Number):
         lst = [lst]
     lst = sorted(lst)
-    rtol = np.finfo(np.float32).resolution
+    rtol = np.finfo(np.float32).resolution # pylint: disable=no-member
     n = len(lst)
     result = []
     scan = 0
@@ -623,6 +569,82 @@ def list2hrlist(lst):
     return ','.join(result)
 
 
+# -- Retro-specific functions -- #
+
+
+def generate_anisotropy_str(anisotropy):
+    """Generate a string from anisotropy specification parameters.
+
+    Parameters
+    ----------
+    anisotropy : None or tuple of values
+
+    Returns
+    -------
+    anisotropy_str : string
+
+    """
+    if anisotropy is None:
+        anisotropy_str = 'none'
+    else:
+        anisotropy_str = '_'.join(str(param) for param in anisotropy)
+    return anisotropy_str
+
+
+def generate_unique_ids(events):
+    """Generate unique IDs from `event` fields because people are lazy
+    inconsiderate assholes.
+
+    Parameters
+    ----------
+    events : array of int
+
+    Returns
+    -------
+    uids : array of int
+
+    """
+    uids = (
+        events
+        + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
+    ).astype(int)
+    return uids
+
+
+def get_primary_interaction_str(event):
+    """Produce simple string representation of event's primary neutrino and
+    interaction type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavintstr : string
+
+    """
+    pdg = int(event.neutrino.pdg)
+    inter = int(event.interaction)
+    return const.PDG_INTER_STR[(pdg, inter)]
+
+
+def get_primary_interaction_tex(event):
+    """Produce latex representation of event's primary neutrino and interaction
+    type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavinttex : string
+
+    """
+    pdg = int(event.neutrino.pdg)
+    inter = int(event.interaction)
+    return const.PDG_INTER_TEX[(pdg, inter)]
 
 
 if __name__ == '__main__':
