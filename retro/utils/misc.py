@@ -22,6 +22,8 @@ __all__ = [
     'sort_dict',
     'convert_to_namedtuple',
     'get_arg_names',
+    'check_kwarg_keys',
+    'validate_and_convert_enum',
     'hrlist2list',
     'hr_range_formatter',
     'list2hrlist',
@@ -48,13 +50,14 @@ limitations under the License.'''
 
 import base64
 from collections import Iterable, OrderedDict, Mapping, Sequence
-import pickle
+import enum
 import errno
 import hashlib
 import inspect
 from numbers import Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
+import pickle
 import re
 import struct
 from subprocess import Popen, PIPE
@@ -369,9 +372,81 @@ def get_arg_names(func):
         py_func = func
 
     # Get all the function's argument names
-    arg_names = inspect.getargspec(py_func)[0]
+    arg_names = inspect.getargspec(py_func).args
 
     return tuple(arg_names)
+
+
+def check_kwarg_keys(required_keys, provided_kwargs, meta_name, message_pfx):
+    """Check that provided kwargs' keys match exactly those required.
+
+    Raises
+    ------
+    TypeError
+        if there are too few or too many keys provided
+
+    """
+    provided_keys = provided_kwargs.keys()
+
+    provided_set = set(provided_keys)
+    required_set = set(required_keys)
+
+    missing_set = required_set.difference(provided_set)
+    excess_set = provided_set.difference(required_set)
+    missing_keys = [k for k in required_keys if k in missing_set]
+    excess_keys = [k for k in provided_keys if k in excess_set]
+
+    kwarg_error_strings = []
+    if missing_keys:
+        kwarg_error_strings.append("missing {} {}".format(meta_name, missing_keys))
+    if excess_keys:
+        kwarg_error_strings.append("excess {} {}".format(meta_name, excess_keys))
+    if kwarg_error_strings:
+        raise TypeError("{} ".format(message_pfx) + " and ".join(kwarg_error_strings))
+
+
+def validate_and_convert_enum(val, enum_type, none_evaluates_to=None):
+    """Validate `val` and, if valid, convert to the `enum_type` specified.
+
+    Validation proceeds via the following rules:
+        * If `val` is None and `none_evaluates_to` is specified, return the value
+          of `none_evaluates_to`
+        * If `val` is an enum, only accept it if it is of type `enum_type`.
+        * If `val` is a string, lookup the corresponding enum in `enum_type` by
+          attribute name (trying also lowercase and uppercase versions of `val`
+        * Otherwise, attempt to extract the enum corresponding to `val` by
+          calling the `enum_type` with `val`, i.e., ``enum_type(val)``
+
+    Parameters
+    ----------
+    val : numeric, string, or `enum_type`
+    enum_type : enum
+    none_evaluates_to : enum, optional
+
+    Returns
+    -------
+    enum : `enum_type`
+
+    """
+    if val is None:
+        val = none_evaluates_to
+
+    if isinstance(type(val), enum.EnumMeta) and not isinstance(val, enum_type):
+        raise TypeError(
+            "if enum, `val` must be a {}; got {} instead".format(enum_type, type(val))
+        )
+
+    if isinstance(val, basestring):
+        if hasattr(enum_type, val):
+            val = getattr(enum_type, val)
+        elif hasattr(enum_type, val.lower()):
+            val = getattr(enum_type, val.lower())
+        elif hasattr(enum_type, val.upper()):
+            val = getattr(enum_type, val.upper())
+
+    val = enum_type(val)
+
+    return val
 
 
 WHITESPACE_RE = re.compile(r'\s')

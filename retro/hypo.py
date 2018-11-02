@@ -7,7 +7,7 @@ Abstract/partially-concrete base class for hypotheses
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ["Hypo"]
+__all__ = ["get_partial_match_expr", "deduce_sph_pairs", "Hypo"]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017-2018 Philipp Eller and Justin L. Lanfranchi
@@ -25,7 +25,6 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import Mapping, OrderedDict
-from numbers import Number
 from os.path import abspath, dirname
 import re
 import sys
@@ -34,8 +33,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import get_arg_names
-
+from retro.utils.misc import check_kwarg_keys, get_arg_names
 
 
 def get_partial_match_expr(word, minchars):
@@ -56,8 +54,11 @@ def get_partial_match_expr(word, minchars):
     """
     return '|'.join(word[:i] for i in range(len(word), minchars - 1, -1))
 
+
 AZ_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("azimuthal", 2)))
+
 ZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("zenith", 3)))
+
 
 def deduce_sph_pairs(param_names):
     """Attempt to deduce which param names represent (azimuth, zenith) pairs.
@@ -80,7 +81,7 @@ def deduce_sph_pairs(param_names):
     Examples
     --------
     >>> deduce_sph_pairs(("x", "azimuth", "zenith", "cascade_azimuth", "cascade_zenith"))
-    (("azimuth", "zenith"), ("cascade_azimuth", "cascade_zenith"))
+    (('azimuth', 'zenith'), ('cascade_azimuth', 'cascade_zenith'))
 
     """
     az_pfxs_and_sfxs = OrderedDict()
@@ -114,27 +115,36 @@ class Hypo(object):
 
     Parameters
     ----------
-    param_mapping : mapping
-        mapping from external parameter names to internally-used parameter names (see
-        `Cascade.internal_param_names` for required internal param names)
+    param_mapping : mapping or callable
+        If mapping, keys are `external_param_names` and values are corresponding
+        `internal_param_names`
+
+        If callable, provide a function that takes named arguments discoverable via
+        :meth:`retro.utils.misc.get_arg_names` and all of which are
+        `external_param_names`; values passed to the function are the external
+        parameters' values. The function must return a Mapping whose keys are
+        `internal_param_names` and values are the corresonding internal parameter
+        values. Note that a callable should also be defined to handle arbitrary
+        additional **kwargs so parameters that the function doesn't care about will just
+        pass through. An example callable usable as a `param_mapping` is::
+
+            def mapper_func(cascade_energy, x, y, z, **kwargs):
+                return dict(energy=cascade_energy, x=x, y=y, z=z)
 
     internal_param_names : string or iterable of strings
+        names of paremeters used internally by :attr:`_generate_sources` method (which
+        is to be defined in subclasses)
 
     internal_sph_pairs : tuple of 0 or more 2-tuples of strings, optional
-        If None or not specified, pairs of spherical parameters are deduced by
-        `deduce_sph_pairs`.
+        pairs of (azimuth, zenith) parameters (in that order) from among
+        `internal_param_names`; if None (default), pairs of spherical parameters are
+        (attempted to be) deduced by their names (see :meth:`deduce_sph_pairs` for
+        details).
 
     external_sph_pairs : tuple of 0 or more 2-tuples of strings, optional
-        If None or not specified, pairs of spherical parameters are deduced by
-        `deduce_sph_pairs`.
-
-    scaling_proto_energy : None or scalar > 0
-        specify None to disable or specify scalar > 0 to treat the cascade as
-        "scaling," i.e., a prototypical set of light sources are generated for the
-        energy specified and modifying the energy from that merely scales the luminosity
-        of each of those sources as opposed to generating an entirely new set of light
-        sources; in this case, the topology of the cascade will not be as accurate but
-        the speed of computing likelihoods increases
+        pairs of (azimuth, zenith) pairs of "external" parameter names (in that order);
+        if None (default), pairs of spherical parameters are (attempted to be) deduced
+        using their names (see :meth:`deduce_sph_pairs` for details).
 
     """
     def __init__(
@@ -143,7 +153,6 @@ class Hypo(object):
         internal_param_names,
         internal_sph_pairs=None,
         external_sph_pairs=None,
-        scaling_proto_energy=None,
     ):
         # -- Validation and translation of args -- #
 
@@ -164,11 +173,24 @@ class Hypo(object):
         else: # isinstance(param_mapping, Mapping):
             # Validate internal params specified in map match those in this object
             internal_specd = param_mapping.values()
-            if set(internal_specd) != set(internal_param_names):
+            if not isinstance(param_mapping, OrderedDict):
+                internal_specd = sorted(internal_specd)
+            internal_specd_set = set(internal_specd)
+            if internal_specd_set != set(internal_param_names):
                 raise ValueError(
                     "`param_mapping` maps to internal names {} which don't match"
                     "`internal_param_names` {}"
                     .format(sorted(internal_specd), sorted(internal_param_names))
+                )
+            if len(internal_specd_set) != len(internal_specd):
+                dupes = []
+                for x in internal_specd:
+                    if internal_specd.count(x) > 1 and x not in dupes:
+                        dupes.append(x)
+                raise ValueError(
+                    "`param_mapping` must be a one-to-one mapping, but internal param"
+                    " names (i.e., values in the `param_mapping`) {} are specified"
+                    " multiple times".format(dupes)
                 )
 
             if isinstance(param_mapping, OrderedDict):
@@ -187,8 +209,7 @@ class Hypo(object):
             # dict _or_ callable every time)
             def _param_mapping(**kwargs):
                 internal_kwargs = {
-                    internal_name: kwargs[external_name]
-                    for external_name, internal_name in _pmap.items()
+                    intnam: kwargs[extnam] for extnam, intnam in _pmap.items()
                 }
                 return internal_kwargs
             param_mapping = _param_mapping
@@ -215,7 +236,7 @@ class Hypo(object):
             if is_singleton:
                 external_sph_pairs = (external_sph_pairs,)
 
-        # Validate and also generate *pair_idxs
+        # Validate and also generate `internal_pair_idxs`
         internal_sph_pair_idxs = []
         for pair in internal_sph_pairs:
             az_param_idx = None
@@ -238,7 +259,7 @@ class Hypo(object):
                     )
             internal_sph_pair_idxs.append((az_param_idx, zen_param_idx))
 
-        # Validate and also generate *pair_idxs
+        # Validate and also generate `external_pair_idxs`
         external_sph_pair_idxs = []
         for pair in external_sph_pairs:
             az_param_idx = None
@@ -261,37 +282,28 @@ class Hypo(object):
                     )
             external_sph_pair_idxs.append((az_param_idx, zen_param_idx))
 
-        if not (
-            scaling_proto_energy is None
-            or isinstance(scaling_proto_energy, Number)
-        ):
-            raise TypeError("`scaling_proto_energy` must be None or a scalar")
-
-        if isinstance(scaling_proto_energy, Number) and scaling_proto_energy <= 0:
-            raise ValueError("If scalar, `scaling_proto_energy` must be > 0")
-
         # -- Define class attributes to store the above values -- #
 
         self.param_mapping = param_mapping
-        """dict or callable : mapping from external to internal params"""
+        """callable : maps external param names/values to internal param names/values"""
 
         self.external_param_names = external_param_names
         """tuple of str : all param names that must be provided externally"""
 
         self.external_sph_pairs = tuple(external_sph_pairs)
-        """tuple of 2-tuples of strings : (az_param, zen_param) pairs"""
+        """tuple of zero or more 2-tuples of strings : (az, zen) external param name pairs"""
 
         self.external_sph_pair_idxs = tuple(external_sph_pair_idxs)
-        """tuple of 2-tuples of ints : (az_param_idx, zen_param_idx) pairs"""
+        """tuple of zero or more 2-tuples of ints : (az, zen) external param index pairs"""
 
         self.internal_param_names = tuple(internal_param_names)
         """tuple of str : all param names that are used internally"""
 
         self.internal_sph_pairs = tuple(internal_sph_pairs)
-        """tuple of zero or more 2-tuples of strings : (az, zen) interal param name pairs"""
+        """tuple of zero or more 2-tuples of strings : (az, zen) internal param name pairs"""
 
         self.internal_sph_pair_idxs = tuple(internal_sph_pair_idxs)
-        """tuple of 2-tuples of ints : (az_param_idx, zen_param_idx) pairs"""
+        """tuple of zero or more 2-tuples of ints : (az, zen) internal param name pairs"""
 
         self.num_external_params = len(self.external_param_names)
         """int : number of parameters used by the kernel"""
@@ -299,23 +311,18 @@ class Hypo(object):
         self.num_internal_params = len(self.internal_param_names)
         """int : number of parameters used by the kernel"""
 
-        self.scaling_proto_energy = scaling_proto_energy
-        """float or None : energy at which prototypical sources were generated"""
-
-        self.is_scaling = scaling_proto_energy is not None
-        """bool : whether the kernel's sources are to be treated as scaling sources"""
-
         # Define dummy function
-        def generate_sources(**kwargs): # pylint: disable=unused-argument
+        def _generate_sources(**kwargs): # pylint: disable=unused-argument
             """Must be replaced with your own callable"""
             raise NotImplementedError()
 
-        self._generate_sources = generate_sources
-        """callable : inheriting classes must override with a callable that returns an
-        ndarray of dtype SRC_T"""
+        self._generate_sources = _generate_sources
+        """callable : inheriting classes must override with a callable that returns a
+        list of ndarrays of dtype SRC_T and a list of same length of bools indicating if
+        the corresponding ndarray contains "scaling" sources"""
 
     def generate_sources(self, **kwargs):
-        """Generate sources from the hypothesis when called via .. ::
+        """Generate sources from the hypothesis when called via::
 
             generate_sources(external_param_name0=value0, ...)
 
@@ -332,5 +339,26 @@ class Hypo(object):
         sources : length-n_sources ndarray of dtype SRC_T
 
         """
-        internal_kwargs = self.param_mapping(**kwargs)
-        return self._generate_sources(**internal_kwargs)
+        try:
+            internal_kwargs = self.param_mapping(**kwargs)
+        except (TypeError, KeyError):
+            #check_kwarg_keys(
+            #    required_keys=self.external_param_names,
+            #    provided_kwargs=kwargs,
+            #    meta_name="kwarg(s)",
+            #    message_pfx="external param names (kwargs to `generate_sources`):",
+            #)
+            raise
+
+        try:
+            sources = self._generate_sources(**internal_kwargs)
+        except (TypeError, KeyError):
+            check_kwarg_keys(
+                required_keys=self.internal_param_names,
+                provided_kwargs=internal_kwargs,
+                meta_name="kwarg(s)",
+                message_pfx="internal param names (kwargs to `_generate_sources`):",
+            )
+            raise
+
+        return sources

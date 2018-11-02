@@ -153,15 +153,19 @@ def generate_llh_function(
     assert dom_tables.table_meta['deltaphidir_bin_edges'][0] == 0, 'only abs(deltaphidir) supported'
     assert dom_tables.table_meta['deltaphidir_bin_edges'][-1] == np.pi
 
-    # -- Define things used by `pexp*` closures defined below -- #
+    # -- Define vars used by `get_llh_` closure defined below -- #
 
     num_tdi_tables = len(tdi_metas)
     if num_tdi_tables == 0:
         # Numba needs an object that it can determine type of
         tdi_tables = 0
 
+    # Copy full dom_tables object to another var (suffixed with underscore) since
+    # we'll use the `dom_tables` name for just the table array in the closure
     dom_tables_ = dom_tables
 
+    # Extract everything we from the class attributes into "regular" vars that
+    # Numba can handle
     dom_tables = dom_tables_.tables
     dom_table_norms = dom_tables_.table_norms
     dom_tables_template_library = dom_tables_.template_library
@@ -199,7 +203,8 @@ def generate_llh_function(
         Parameters:
         -----------
         event_dom_info : array of dtype EVT_DOM_INFO_T
-            containing all relevant event per DOM info
+            All relevant per-DOM info for the event
+
         event_hit_info : array of dtype EVT_HIT_INFO_T
 
         Returns
@@ -235,7 +240,7 @@ def generate_llh_function(
         Parameters:
         -----------
         event_dom_info : array of dtype EVT_DOM_INFO_T
-            containing all relevant event per DOM info
+            All relevant per-DOM info for the event
         event_hit_info : array of dtype EVT_HIT_INFO_T
         nonscaling_hit_exp : shape (n_hits, 2) array of dtype float
             Detected-charge-rate expectation at each hit time due to pegleg sources;
