@@ -8,6 +8,15 @@ Muon hypothesis class to generate photons expected from a muon.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    "MMC_A_PARAM",
+    "MMC_B_PARAM",
+    "mmc_muon_energy_to_length",
+    "mmc_muon_length_to_energy",
+    "test_mmc_muon_energy_to_length",
+    "generate_table_interpolators",
+    "test_generate_table_interpolator",
+    "const_muon_energy_to_length",
+    "const_muon_length_to_energy",
     "ContinuousLossModel",
     "StochasticLossModel",
     "MuonHypo",
@@ -65,11 +74,11 @@ def mmc_muon_energy_to_length(muon_energy):
 
     Parameters
     ----------
-    length
+    muon_energy
 
     Returns
     -------
-    muon_energy
+    muon_length
 
     References
     ----------
@@ -86,7 +95,7 @@ def mmc_muon_length_to_energy(muon_length):
 
     Parameters
     ----------
-    length
+    muon_length
 
     Returns
     -------
@@ -125,7 +134,7 @@ def generate_table_interpolators():
         Call with a muon length to return its expected energy
 
     energy_bounds : tuple of 2 floats
-        lower, upper limits of table
+        (lower, upper) energy limits of table
 
     """
     # Create spline (for table_energy_loss_muon)
@@ -203,6 +212,42 @@ def test_generate_table_interpolator():
         )
         print(min_energy, max_energy, muon_energies, conv_muen)
     assert np.all(isclose)
+
+
+def const_muon_energy_to_length(muon_energy):
+    """Convert muon energy into an expected length using a constant factor, as used
+    elsewhere in low energy reconstructions.
+
+    Note that I do not know the exact derivation of the constant.
+
+    Parameters
+    ----------
+    muon_energy
+
+    Returns
+    -------
+    muon_length
+
+    """
+    return muon_energy * TRACK_M_PER_GEV
+
+
+def const_muon_length_to_energy(muon_length):
+    """Convert muon length into an expected energy using a constant factor, as used
+    elsewhere in low energy reconstructions.
+
+    Note that I do not know the exact derivation of the constant.
+
+    Parameters
+    ----------
+    muon_length
+
+    Returns
+    -------
+    muon_energy
+
+    """
+    return muon_length / TRACK_M_PER_GEV
 
 
 class ContinuousLossModel(enum.IntEnum):
@@ -376,8 +421,8 @@ class MuonHypo(Hypo):
         # -- Functons to find expected length from energy and vice versa -- #
 
         if continuous_loss_model is ContinuousLossModel.all_avg_const:
-            self.muon_energy_to_length = lambda e: e / TRACK_M_PER_GEV
-            self.muon_length_to_energy = lambda l: l * TRACK_M_PER_GEV
+            self.muon_energy_to_length = const_muon_energy_to_length
+            self.muon_length_to_energy = const_muon_length_to_energy
             self.muon_energy_bounds = (0, np.inf)
             self.muon_length_bounds = (0, np.inf)
         elif continuous_loss_model is ContinuousLossModel.all_avg_mmc:
