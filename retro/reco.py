@@ -59,10 +59,8 @@ from retro.utils.geom import (
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
 from retro.priors import get_prior_fun
-from retro.hypo.discrete_muon_kernels import pegleg_eval
 from retro.llh import generate_llh_function
 from retro.pexp import generate_pexp_function
-from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 
 
 METHODS = set([
@@ -155,13 +153,13 @@ class Reco(object):
         mkdir(self.outdir)
         self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
         self.tdi_tables, self.tdi_metas = init_obj.setup_tdi_tables(**tdi_tables_kw)
-        self.pexp_, self.pexp, _ = generate_pexp_function(
+        self.pexp, self.pexp_wrapper, self.pexp_meta = generate_pexp_function(
             dom_tables=self.dom_tables,
             tdi_tables=self.tdi_tables,
             tdi_metas=self.tdi_metas,
         )
         self.get_llh = generate_llh_function(
-            pexp=self.pexp_,
+            pexp=self.pexp,
             dom_tables=self.dom_tables,
             tdi_tables=self.tdi_tables,
             tdi_metas=self.tdi_metas,

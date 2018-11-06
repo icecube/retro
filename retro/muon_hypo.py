@@ -8,13 +8,17 @@ Muon hypothesis class to generate photons expected from a muon.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    "MMC_A_PARAM",
-    "MMC_B_PARAM",
-    "mmc_muon_energy_to_length",
-    "mmc_muon_length_to_energy",
+    "MMC_TBL3_A",
+    "MMC_TBL3_B",
+    "MMC_TBL4_A",
+    "MMC_TBL4_B",
+    "mmc3_muon_energy_to_length",
+    "mmc3_muon_length_to_energy",
+    "mmc4_muon_energy_to_length",
+    "mmc4_muon_length_to_energy",
     "test_mmc_muon_energy_to_length",
-    "generate_table_interpolators",
-    "test_generate_table_interpolator",
+    "generate_table_converters",
+    "test_generate_table_converters",
     "const_muon_energy_to_length",
     "const_muon_length_to_energy",
     "ContinuousLossModel",
@@ -51,9 +55,8 @@ RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
-    COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
+    SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
     TRACK_PHOTONS_PER_M, SRC_CKV_BETA1, EMPTY_SOURCES
 )
 from retro.hypo import Hypo
@@ -61,13 +64,63 @@ from retro.retro_types import SRC_T
 from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 
 
-MMC_A_PARAM = 0.268
-"""MMC paper, Table 4"""
-MMC_B_PARAM = 0.00047
-"""MMC paper, Table 4"""
+MMC_TBL3_A = 0.259
+"""The "a" parameter from MMC paper, Table 3; units GeV/mwe"""
+
+MMC_TBL3_B = 0.363e-3
+"""The "b" parameter from MMC paper, Table 3; units are 1/mwe"""
 
 
-def mmc_muon_energy_to_length(muon_energy):
+MMC_TBL4_A = 0.268
+"""The "a" parameter from MMC paper, Table 4; units GeV/mwe"""
+
+MMC_TBL4_B = 0.47e-3
+"""The "b" parameter from MMC paper, Table 4; units are 1/mwe"""
+
+
+def mmc3_muon_energy_to_length(muon_energy):
+    """Convert muon energy into a length, as parameterized in MMC paper [1]
+    (i.e., averaging all energy loss processes and parameterization optimized
+    for 20 GeV - 1 TeV).
+
+    Parameters
+    ----------
+    muon_energy
+
+    Returns
+    -------
+    muon_length
+
+    References
+    ----------
+    [1] arXiv:hep-ph/0407075, Table 3
+
+    """
+    return np.log(1 + muon_energy * (MMC_TBL3_B / MMC_TBL3_A)) / MMC_TBL3_B
+
+
+def mmc3_muon_length_to_energy(muon_length):
+    """Convert muon length into an energy, as parameterized in MMC paper [1]
+    (i.e., averaging all energy loss processes and parameterization optimized
+    for 20 GeV - 1 TeV).
+
+    Parameters
+    ----------
+    muon_length
+
+    Returns
+    -------
+    muon_energy
+
+    References
+    ----------
+    [1] arXiv:hep-ph/0407075, Table 3
+
+    """
+    return (np.exp(muon_length * MMC_TBL3_B) - 1) * (MMC_TBL3_A / MMC_TBL3_B)
+
+
+def mmc4_muon_energy_to_length(muon_energy):
     """Convert muon energy into a length, as parameterized in MMC paper [1]
     (i.e., averaging all energy loss processes and parameterization optimized
     for 20 GeV - 1 TeV).
@@ -85,10 +138,10 @@ def mmc_muon_energy_to_length(muon_energy):
     [1] arXiv:hep-ph/0407075, Table 4
 
     """
-    return np.log(muon_energy / MMC_A_PARAM * MMC_B_PARAM + 1) / MMC_B_PARAM
+    return np.log(1 + muon_energy * (MMC_TBL4_B / MMC_TBL4_A)) / MMC_TBL4_B
 
 
-def mmc_muon_length_to_energy(muon_length):
+def mmc4_muon_length_to_energy(muon_length):
     """Convert muon length into an energy, as parameterized in MMC paper [1]
     (i.e., averaging all energy loss processes and parameterization optimized
     for 20 GeV - 1 TeV).
@@ -106,35 +159,52 @@ def mmc_muon_length_to_energy(muon_length):
     [1] arXiv:hep-ph/0407075, Table 4
 
     """
-    return (np.exp(muon_length*MMC_B_PARAM) - 1) * MMC_A_PARAM / MMC_B_PARAM
+    return (np.exp(muon_length * MMC_TBL4_B) - 1) * (MMC_TBL4_A / MMC_TBL4_B)
 
 
 def test_mmc_muon_energy_to_length():
-    """Unit tests for `mmc_muon_energy_to_length` function"""
-    rand = np.random.RandomState(0)
-    muon_energies = rand.uniform(low=1, high=1000, size=int(1e4))
-    # round-trip test
+    """Unit tests for mmc*_muon_*_to_* functions:
+
+    `mmc3_muon_energy_to_length`
+    `mmc3_muon_length_to_energy`
+    `mmc4_muon_energy_to_length`
+    `mmc4_muon_length_to_energy`
+
+    """
+    # round-trip tests
+    muon_energies = np.logspace(start=-2, stop=4, num=int(1e4))
     assert np.allclose(
-        mmc_muon_length_to_energy(
-            mmc_muon_energy_to_length(muon_energies)
+        mmc3_muon_length_to_energy(
+            mmc3_muon_energy_to_length(muon_energies)
+        ),
+        muon_energies
+    )
+    assert np.allclose(
+        mmc4_muon_length_to_energy(
+            mmc4_muon_energy_to_length(muon_energies)
         ),
         muon_energies
     )
 
 
-def generate_table_interpolators():
-    """Generate interpolators for tabulated muon energy loss model.
+def generate_table_converters():
+    """Generate converters for expected values of muon length <--> muon energy based on
+    a tabulated muon energy loss model, spline-interpolated for smooth behavior within
+    the range of tabulated energies / lengths..
 
     Returns
     -------
-    muon_energy_to_length : scipy.interpolate.UnivariateSpline
+    muon_energy_to_length : callable
         Call with a muon energy to return its expected length
 
-    muon_length_to_energy : scipy.interpolate.UnivariateSpline
+    muon_length_to_energy : callable
         Call with a muon length to return its expected energy
 
     energy_bounds : tuple of 2 floats
-        (lower, upper) energy limits of table
+        (lower, upper) energy limits of table; below the lower limit, lengths are
+        estimated to be 0 and above the upper limit, a ValueError is raised;
+        corresponding behavior is enforced for lengths passed to `muon_length_to_energy`
+        as well.
 
     """
     # Create spline (for table_energy_loss_muon)
@@ -170,14 +240,14 @@ def generate_table_interpolators():
         lengths.append(np.trapz(y=dxde_samps[:idx+1], x=esamps[:idx+1]))
     lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
 
-    muon_energy_to_length = interpolate.UnivariateSpline(
+    muon_energy_to_length_interp = interpolate.UnivariateSpline(
         x=esamps,
         y=lengths,
         k=1,
         s=0,
         ext=2, # ValueError if exxtrapolating
     )
-    muon_length_to_energy = interpolate.UnivariateSpline(
+    muon_length_to_energy_interp = interpolate.UnivariateSpline(
         x=lengths[1:],
         y=esamps[1:],
         k=1,
@@ -185,13 +255,30 @@ def generate_table_interpolators():
         ext=2, # ValueError if exxtrapolating
     )
 
+    min_energy, max_energy = energy_bounds
+    min_length, max_length = muon_energy_to_length_interp(energy_bounds)
+
+    def muon_energy_to_length(muon_energy):
+        if muon_energy < min_energy:
+            return 0.
+        if muon_energy > max_energy:
+            raise ValueError("`muon_energy` exceeds max in table")
+        return muon_energy_to_length_interp(muon_energy)
+
+    def muon_length_to_energy(muon_length):
+        if muon_length < min_length:
+            return 0.
+        if muon_length > max_length:
+            raise ValueError("`muon_length` exceeds max in table")
+        return muon_length_to_energy_interp(muon_length)
+
     return muon_energy_to_length, muon_length_to_energy, energy_bounds
 
 
-def test_generate_table_interpolator():
-    """Unit tests for `generate_table_interpolators` function"""
+def test_generate_table_converters():
+    """Unit tests for `generate_table_converters` function"""
     muon_energy_to_length, muon_length_to_energy, (min_energy, max_energy) = (
-        generate_table_interpolators()
+        generate_table_converters()
     )
     muon_energies = np.logspace(
         np.log10(min_energy),
@@ -257,11 +344,15 @@ class ContinuousLossModel(enum.IntEnum):
     """energy loss averaged across all loss processes (continuous+stochastic),
     parameterized as a constant energy loss per meter the muon travels"""
 
-    all_avg_mmc = 1
+    all_avg_mmc3 = 1
+    """energy loss averaged across all loss processes (continuous+stochastic),
+    parameterized as in MMC paper (arXiv:hep-ph/0407075), Table 3"""
+
+    all_avg_mmc4 = 2
     """energy loss averaged across all loss processes (continuous+stochastic),
     parameterized as in MMC paper (arXiv:hep-ph/0407075), Table 4"""
 
-    all_avg_table = 2
+    all_avg_table = 3
     """energy loss averaged across all loss processes (continuous+stochastic),
     parameterization interpolated from a table"""
 
@@ -328,7 +419,7 @@ class MuonHypo(Hypo):
         keyword arguments required by chosen `continuous_loss_model`;
         if parameters in addition to those required by the model are passed, a
         ValueError will be raised
-            * `all_avg_const`, `all_avg_mmc`, and `all_avg_table` take a "time_step"
+            * `all_avg_const`, `all_avg_mmc*`, and `all_avg_table` take a "time_step"
               parmeter, in units of nanoseconds
 
     stochastic_loss_model_kwargs : mapping
@@ -372,7 +463,8 @@ class MuonHypo(Hypo):
 
         if continuous_loss_model in (
             ContinuousLossModel.all_avg_const,
-            ContinuousLossModel.all_avg_mmc,
+            ContinuousLossModel.all_avg_mmc3,
+            ContinuousLossModel.all_avg_mmc4,
             ContinuousLossModel.all_avg_table,
         ):
             required_keys = ("time_step",)
@@ -390,7 +482,7 @@ class MuonHypo(Hypo):
             meta_name="`continuous_loss_model_kwargs`",
             message_pfx=(
                 "{} muon continuous loss model:"
-                .format(continuous_loss_model.name)
+                .format(continuous_loss_model.name) # pylint: disable=no-member
             ),
         )
 
@@ -414,7 +506,7 @@ class MuonHypo(Hypo):
             meta_name="`stochastic_loss_model_kwargs`",
             message_pfx=(
                 "{} muon stochastic loss model:"
-                .format(stochastic_loss_model.name)
+                .format(stochastic_loss_model.name) # pylint: disable=no-member
             ),
         )
 
@@ -425,14 +517,19 @@ class MuonHypo(Hypo):
             self.muon_length_to_energy = const_muon_length_to_energy
             self.muon_energy_bounds = (0, np.inf)
             self.muon_length_bounds = (0, np.inf)
-        elif continuous_loss_model is ContinuousLossModel.all_avg_mmc:
-            self.muon_energy_to_length = mmc_muon_energy_to_length
-            self.muon_length_to_energy = mmc_muon_length_to_energy
+        elif continuous_loss_model is ContinuousLossModel.all_avg_mmc3:
+            self.muon_energy_to_length = mmc3_muon_energy_to_length
+            self.muon_length_to_energy = mmc3_muon_length_to_energy
+            self.muon_energy_bounds = (0, np.inf)
+            self.muon_length_bounds = (0, np.inf)
+        elif continuous_loss_model is ContinuousLossModel.all_avg_mmc4:
+            self.muon_energy_to_length = mmc4_muon_energy_to_length
+            self.muon_length_to_energy = mmc4_muon_length_to_energy
             self.muon_energy_bounds = (0, np.inf)
             self.muon_length_bounds = (0, np.inf)
         elif continuous_loss_model is ContinuousLossModel.all_avg_table:
             self.muon_energy_to_length, self.muon_length_to_energy, bounds = (
-                generate_table_interpolators()
+                generate_table_converters()
             )
             self.muon_energy_bounds = tuple(bounds)
             self.muon_length_bounds = tuple(self.muon_energy_to_length(bounds))
@@ -552,10 +649,6 @@ class MuonHypo(Hypo):
             sources['dir_cosphi'] = dir_cosphi
             sources['dir_sinphi'] = dir_sinphi
 
-            sources['ckv_theta'] = THETA_CKV
-            sources['ckv_costheta'] = COS_CKV
-            sources['ckv_sintheta'] = SIN_CKV
-
             return sources
 
         # TODO: implement stochastic loss model(s)
@@ -576,26 +669,47 @@ class MuonHypo(Hypo):
         else:
             self._generate_sources = _continuous_generator
 
-    def pegleg_eval(self, pegleg_idx):
-        """Convert a pegleg index into track energy in GeV.
+    def get_energy(self, pegleg_idx=None):
+        """Retrieve the estimated energy of the last-produced muon.
 
         Parameters
         ----------
-        pegleg_idx : int
+        pegleg_idx : int, required if `self.fixed_track_length` > 0
 
         Returns
         -------
-        muon_energy : float
+        estimated_muon_energy : float
+
+        Raises
+        ------
+        ValueError
+            * If fixed_track_length > 0 and no `pegleg_idx` is specified
+            * If no calls to generate_sources have been made
 
         """
-        length = (
-            pegleg_idx
-            * self.continuous_loss_model_kwargs["time_step"]
-            * SPEED_OF_LIGHT_M_PER_NS
-        )
-        return self.muon_length_to_energy(length)
+        if self.fixed_track_length <= 0:
+            continuous_energy = self.internal_param_values["continuous_energy"]
+        else:
+            if pegleg_idx is None:
+                raise ValueError(
+                    "Need to provide value for `pegleg_idx` since kernel was"
+                    " instantiated with a fixed track length"
+                )
+            length = (
+                pegleg_idx
+                * self.continuous_loss_model_kwargs["time_step"]
+                * SPEED_OF_LIGHT_M_PER_NS
+            )
+            continuous_energy = self.muon_length_to_energy(length)
+
+        if self.stochastic_loss_model is StochasticLossModel.none:
+            stochastic_energy = 0
+        else:
+            raise NotImplementedError("No handling of stochastic energy loss")
+
+        return continuous_energy + stochastic_energy
 
 
 if __name__ == "__main__":
     test_mmc_muon_energy_to_length()
-    test_generate_table_interpolator()
+    test_generate_table_converters()

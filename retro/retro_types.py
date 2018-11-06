@@ -361,9 +361,6 @@ SRC_T = np.dtype([
     ('dir_phi', np.float32),
     ('dir_cosphi', np.float32),
     ('dir_sinphi', np.float32),
-    ('ckv_theta', np.float32),
-    ('ckv_costheta', np.float32),
-    ('ckv_sintheta', np.float32),
 ], align=True)
 """Each source point is described by (up to) these fields (e.g., SRC_OMNI
 doesn't care what dir_* fields are)"""

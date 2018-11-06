@@ -9,15 +9,8 @@ survive from a 5D CLSim table.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'Minimizer',
-    'StepSpacing',
-    'LLHChoice',
     'MACHINE_EPS',
     'MAX_RAD_SQ',
-    'SCALE_FACTOR_MINIMIZER',
-    'PEGLEG_SPACING',
-    'PEGLEG_LLH_CHOICE',
-    'PEGLEG_BEST_DELTA_LLH_THRESHOLD',
     'USE_JITTER',
     'generate_pexp_function',
 ]
@@ -38,7 +31,6 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import OrderedDict
-import enum
 import math
 from os.path import abspath, dirname
 import sys
@@ -55,56 +47,17 @@ from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 from retro.utils.geom import generate_digitizer
 
 
-class Minimizer(enum.IntEnum):
-    """Minimizer to use for scale factor"""
-    GRADIENT_DESCENT = 0
-    NEWTON = 1
-    BINARY_SEARCH = 2
-
-
-class StepSpacing(enum.IntEnum):
-    """Pegleg step spacing"""
-    LINEAR = 0
-    LOG = 1
-
-
-class LLHChoice(enum.IntEnum):
-    """How to choose the "best" LLH"""
-    MAX = 0
-    MEAN = 1
-    MEDIAN = 2
-
-
 MACHINE_EPS = 1e-10
 
+# TODO: not currently using MAX_RAD_SQ...
 MAX_RAD_SQ = 500**2
 """Maximum radius to consider, squared (units of m^2)"""
-
-SCALE_FACTOR_MINIMIZER = Minimizer.BINARY_SEARCH
-"""Choice of which minimizer to use for computing scaling factor for scaling sources"""
-
-PEGLEG_SPACING = StepSpacing.LINEAR
-"""Pegleg adds segments either linearly (same number of segments independent of energy)
-or logarithmically (more segments are added the longer the track"""
-
-PEGLEG_LLH_CHOICE = LLHChoice.MEAN
-"""How to choose best LLH from all Pegleg steps"""
-
-PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
-"""For Pegleg `LLHChoice` that require a range of LLH and average (mean, median, etc.),
-take all LLH that are within this threshold of the maximum LLH"""
 
 # TODO: a "proper" jitter (and transit time spread) implementation should treat each DOM
 # independently and pick the time offset for each DOM that maximizes LLH (_not_ expected
 # photon detections)
-
 USE_JITTER = True
 """Whether to use a crude jitter implementation"""
-
-
-# Validation that module-level constants are consistent
-if PEGLEG_SPACING is StepSpacing.LOG:
-    assert PEGLEG_LLH_CHOICE is LLHChoice.MAX
 
 
 def generate_pexp_function(
@@ -138,15 +91,15 @@ def generate_pexp_function(
 
     Returns
     -------
-    pexp_ : callable
+    pexp : callable
         Function to find detected-photon expectations given a hypothesis; "raw" function
         that requires passing tables & norms
 
-    pexp : callable
+    pexp_wrapper : callable
         Function to find detected-photon expectations given a hypothesis; "wrapped"
         function that bakes in tables & norms, exposing a more simple interface
 
-    meta : OrderedDict
+    pexp_meta : OrderedDict
         Parameters, including the binning, that uniquely identify what the
         capabilities of the returned `pexp`. (Use this to eliminate
         redundant pexp functions.)
@@ -167,16 +120,16 @@ def generate_pexp_function(
         assert tdi_meta['bin_edges']['phidir'][0] == -np.pi
         assert tdi_meta['bin_edges']['phidir'][-1] == np.pi
 
-    meta = OrderedDict()
-    meta['table_kind'] = dom_tables.table_kind
-    meta['table_binning'] = OrderedDict()
+    pexp_meta = OrderedDict()
+    pexp_meta['table_kind'] = dom_tables.table_kind
+    pexp_meta['table_binning'] = OrderedDict()
     for key in (
         'r_bin_edges', 'costhetadir_bin_edges', 't_bin_edges', 'costhetadir_bin_edges',
         'deltaphidir_bin_edges'
     ):
-        meta['table_binning'][key] = dom_tables.table_meta[key]
+        pexp_meta['table_binning'][key] = dom_tables.table_meta[key]
 
-    meta['tdi'] = tdi_metas
+    pexp_meta['tdi'] = tdi_metas
     if len(tdi_tables) == 1:
         tdi_tables = (tdi_tables[0], tdi_tables[0])
 
@@ -487,7 +440,7 @@ def generate_pexp_function(
     if num_tdi_tables == 0:
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def pexp_(
+        def pexp(
             sources,
             sources_start,
             sources_stop,
@@ -599,7 +552,7 @@ def generate_pexp_function(
 
             return t_indep_exp
 
-        pexp_.__doc__ = pexp_docstr.format(
+        pexp.__doc__ = pexp_docstr.format(
             type='int',
             text="""Dummy argument for this version of `pexp` since it doesn't use TDI
             tables (but this argument needs to be present to maintain same
@@ -609,7 +562,7 @@ def generate_pexp_function(
     else: # pexp function given we are using TDI tables
 
         @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def pexp_(
+        def pexp(
             sources,
             sources_start,
             sources_stop,
@@ -742,7 +695,7 @@ def generate_pexp_function(
 
             return t_indep_exp
 
-        pexp_.__doc__ = pexp_docstr.format(
+        pexp.__doc__ = pexp_docstr.format(
             type='tuple of 1 or 2 arrays',
             text="""TDI tables"""
         )
@@ -750,7 +703,7 @@ def generate_pexp_function(
     # -- Define pexp closure to bake-in the tables -- #
 
     # Note: faster to _not_ jit-compile this function (why, though?)
-    def pexp(
+    def pexp_wrapper(
         sources,
         sources_start,
         sources_stop,
@@ -758,7 +711,7 @@ def generate_pexp_function(
         event_hit_info,
         hit_exp,
     ):
-        return pexp_(
+        return pexp(
             sources=sources,
             sources_start=sources_start,
             sources_stop=sources_stop,
@@ -772,4 +725,4 @@ def generate_pexp_function(
             tdi_tables=tdi_tables,
         )
 
-    return pexp_, pexp, meta
+    return pexp, pexp_wrapper, pexp_meta

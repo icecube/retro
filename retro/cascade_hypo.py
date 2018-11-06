@@ -38,8 +38,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
-    COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES,
-    SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
+    CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI,
+    SRC_CKV_BETA1
 )
 from retro.hypo import Hypo
 from retro.retro_types import SRC_T
@@ -191,7 +191,7 @@ class CascadeHypo(Hypo):
         self.scaling_proto_energy = scaling_proto_energy
         self.is_scaling = is_scaling
 
-        # -- Create the _generate_sources function -- #
+        # -- Create the self._generate_sources attribute/callable -- #
 
         self._create_source_generator_func()
 
@@ -209,7 +209,7 @@ class CascadeHypo(Hypo):
 
         if self.model is CascadeModel.spherical:
 
-            def _generate_sources(time, x, y, z, energy):
+            def __generate_sources(time, x, y, z, energy):
                 """Point-like spherically-radiating cascade.
 
                 Parameters
@@ -236,19 +236,19 @@ class CascadeHypo(Hypo):
                 return [sources], [is_scaling]
 
             if is_scaling:
-                def generate_sources(time, x, y, z): # pylint: disable=missing-docstring
-                    return _generate_sources(
+                def _generate_sources(time, x, y, z): # pylint: disable=missing-docstring
+                    return __generate_sources(
                         time=time,
                         x=x,
                         y=y,
                         z=z,
                         energy=scaling_proto_energy,
                     )
-                generate_sources.__doc__ = (
-                    _generate_sources.__doc__.replace(", energy", "")
+                _generate_sources.__doc__ = (
+                    __generate_sources.__doc__.replace(", energy", "")
                 )
             else:
-                generate_sources = _generate_sources
+                _generate_sources = __generate_sources
 
         elif self.model is CascadeModel.one_dim_v1:
             # TODO: use quasi-random (low discrepancy) numbers instead of pseudo-random
@@ -376,7 +376,7 @@ class CascadeHypo(Hypo):
             # TODO: speed up (~800 µs to generate sources at 10 GeV)...
             # * 70% of the time is spent instantiating the gamma dist
             # * 10% of the time is executing the `rvs` method of the gamma dist
-            def _generate_sources(time, x, y, z, energy, azimuth, zenith):
+            def __generate_sources(time, x, y, z, energy, azimuth, zenith):
                 """Cascade with both longitudinal and angular distributions (but no
                 distribution off-axis). All emitters are located on the shower axis.
 
@@ -432,10 +432,6 @@ class CascadeHypo(Hypo):
                     sources[0]['dir_phi'] = opposite_azimuth
                     sources[0]['dir_cosphi'] = cos_az
                     sources[0]['dir_sinphi'] = sin_az
-
-                    sources[0]['ckv_theta'] = THETA_CKV
-                    sources[0]['ckv_costheta'] = COS_CKV
-                    sources[0]['ckv_sintheta'] = SIN_CKV
 
                     return [sources], [is_scaling]
 
@@ -500,15 +496,11 @@ class CascadeHypo(Hypo):
                 sources['dir_cosphi'] = np.cos(final_phi_dist)
                 sources['dir_sinphi'] = np.sin(final_phi_dist)
 
-                sources['ckv_theta'] = THETA_CKV
-                sources['ckv_costheta'] = COS_CKV
-                sources['ckv_sintheta'] = SIN_CKV
-
                 return [sources], [is_scaling]
 
             if is_scaling:
-                def generate_sources(time, x, y, z, azimuth, zenith): # pylint: disable=missing-docstring
-                    return _generate_sources(
+                def _generate_sources(time, x, y, z, azimuth, zenith): # pylint: disable=missing-docstring
+                    return __generate_sources(
                         time=time,
                         x=x,
                         y=y,
@@ -517,11 +509,11 @@ class CascadeHypo(Hypo):
                         azimuth=azimuth,
                         zenith=zenith,
                     )
-                generate_sources.__doc__ = (
-                    _generate_sources.__doc__.replace(", energy", "")
+                _generate_sources.__doc__ = (
+                    __generate_sources.__doc__.replace(", energy", "")
                 )
             else:
-                generate_sources = _generate_sources
+                _generate_sources = __generate_sources
 
         else:
             raise NotImplementedError(
@@ -529,7 +521,7 @@ class CascadeHypo(Hypo):
 
             )
 
-        self._generate_sources = generate_sources
+        self._generate_sources = _generate_sources
 
 
 def test_CascadeHypo():

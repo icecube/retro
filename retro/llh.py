@@ -12,8 +12,6 @@ __all__ = [
     'Minimizer',
     'StepSpacing',
     'LLHChoice',
-    'MACHINE_EPS',
-    'MAX_RAD_SQ',
     'SCALE_FACTOR_MINIMIZER',
     'PEGLEG_SPACING',
     'PEGLEG_LLH_CHOICE',
@@ -70,11 +68,6 @@ class LLHChoice(enum.IntEnum):
     MEDIAN = 2
 
 
-MACHINE_EPS = 1e-10
-
-MAX_RAD_SQ = 500**2
-"""Maximum radius to consider, squared (units of m^2)"""
-
 SCALE_FACTOR_MINIMIZER = Minimizer.BINARY_SEARCH
 """Choice of which minimizer to use for computing scaling factor for scaling sources"""
 
@@ -89,11 +82,6 @@ PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
 """For Pegleg `LLHChoice` that require a range of LLH and average (mean, median, etc.),
 take all LLH that are within this threshold of the maximum LLH"""
 
-# TODO: a "proper" jitter (and transit time spread) implementation should treat each DOM
-# independently and pick the time offset for each DOM that maximizes LLH (_not_ expected
-# photon detections)
-
-
 # Validation that module-level constants are consistent
 if PEGLEG_SPACING is StepSpacing.LOG:
     assert PEGLEG_LLH_CHOICE is LLHChoice.MAX
@@ -105,10 +93,12 @@ def generate_llh_function(
     tdi_tables=None,
     tdi_metas=None,
 ):
-    """Generate a numba-compiled function for computing a log likelihood.
+    """Generate a numba-compiled function for computing log likelihoods.
 
     Parameters
     ----------
+    pexp
+
     dom_tables : Retro5DTables
         Fully-loaded set of single-DOM tables (time-dependent and, if no `tdi_tables`,
         time-independent)

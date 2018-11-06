@@ -287,7 +287,7 @@ class Hypo(object):
         self.param_mapping = param_mapping
         """callable : maps external param names/values to internal param names/values"""
 
-        self.external_param_names = external_param_names
+        self.external_param_names = tuple(external_param_names)
         """tuple of str : all param names that must be provided externally"""
 
         self.external_sph_pairs = tuple(external_sph_pairs)
@@ -311,6 +311,14 @@ class Hypo(object):
         self.num_internal_params = len(self.internal_param_names)
         """int : number of parameters used by the kernel"""
 
+        self.internal_param_values = OrderedDict([(n, None) for n in internal_param_names])
+        """OrderedDict : {internal_param_name: val or None}"""
+
+        self.external_param_values = OrderedDict([(n, None) for n in external_param_names])
+        """OrderedDict : {external_param_name: val or None}"""
+
+        self.sources = None
+
         # Define dummy function
         def _generate_sources(**kwargs): # pylint: disable=unused-argument
             """Must be replaced with your own callable"""
@@ -332,33 +340,32 @@ class Hypo(object):
         Parameters
         ----------
         **kwargs
-            Keyword arguments keyed by external param names
+            Keyword arguments keyed by (at least) external param names; extra kwargs are
+            ignored
 
         Returns
         -------
         sources : length-n_sources ndarray of dtype SRC_T
 
         """
-        try:
-            internal_kwargs = self.param_mapping(**kwargs)
-        except (TypeError, KeyError):
-            #check_kwarg_keys(
-            #    required_keys=self.external_param_names,
-            #    provided_kwargs=kwargs,
-            #    meta_name="kwarg(s)",
-            #    message_pfx="external param names (kwargs to `generate_sources`):",
-            #)
-            raise
+        for param_name in self.external_param_names:
+            try:
+                self.external_param_values[param_name] = kwargs[param_name]
+            except KeyError:
+                print('Missing param "{}" in passed args'.format(param_name))
+                raise
+
+        self.internal_param_values = self.param_mapping(**self.external_param_values)
 
         try:
-            sources = self._generate_sources(**internal_kwargs)
+            self.sources = self._generate_sources(**self.internal_param_values)
         except (TypeError, KeyError):
             check_kwarg_keys(
                 required_keys=self.internal_param_names,
-                provided_kwargs=internal_kwargs,
+                provided_kwargs=self.internal_param_values,
                 meta_name="kwarg(s)",
                 message_pfx="internal param names (kwargs to `_generate_sources`):",
             )
             raise
 
-        return sources
+        return self.sources
