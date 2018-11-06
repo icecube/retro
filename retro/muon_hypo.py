@@ -187,7 +187,7 @@ def test_mmc_muon_energy_to_length():
     )
 
 
-def generate_table_converters():
+def generate_table_converters_legacy():
     """Generate converters for expected values of muon length <--> muon energy based on
     a tabulated muon energy loss model, spline-interpolated for smooth behavior within
     the range of tabulated energies / lengths..
@@ -259,18 +259,129 @@ def generate_table_converters():
     min_length, max_length = muon_energy_to_length_interp(energy_bounds)
 
     def muon_energy_to_length(muon_energy):
-        if muon_energy < min_energy:
-            return 0.
-        if muon_energy > max_energy:
+        muon_energy = np.asarray(muon_energy)
+        if np.any(muon_energy > max_energy):
             raise ValueError("`muon_energy` exceeds max in table")
-        return muon_energy_to_length_interp(muon_energy)
+        valid_mask = muon_energy >= min_energy
+        muon_length = np.empty_like(muon_energy)
+        muon_length[~valid_mask] = 0
+        muon_length[valid_mask] = muon_energy_to_length_interp(muon_energy[valid_mask])
+        return muon_length
 
     def muon_length_to_energy(muon_length):
-        if muon_length < min_length:
-            return 0.
-        if muon_length > max_length:
+        muon_length = np.asarray(muon_length)
+        if np.any(muon_length > max_length):
             raise ValueError("`muon_length` exceeds max in table")
-        return muon_length_to_energy_interp(muon_length)
+        valid_mask = muon_length >= min_length
+        muon_energy = np.empty_like(muon_length)
+        muon_energy[~valid_mask] = 0
+        muon_energy[valid_mask] = muon_length_to_energy_interp(muon_length[valid_mask])
+        return muon_energy
+
+    return muon_energy_to_length, muon_length_to_energy, energy_bounds
+
+
+def generate_table_converters():
+    """Generate converters for expected values of muon length <--> muon energy based on
+    the tabulated muon energy loss model [1], spline-interpolated for smooth behavior
+    within the range of tabulated energies / lengths.
+
+    Returns
+    -------
+    muon_energy_to_length : callable
+        Call with a muon energy to return its expected length
+
+    muon_length_to_energy : callable
+        Call with a muon length to return its expected energy
+
+    energy_bounds : tuple of 2 floats
+        (lower, upper) energy limits of table; below the lower limit, lengths are
+        estimated to be 0 and above the upper limit, a ValueError is raised;
+        corresponding behavior is enforced for lengths passed to `muon_length_to_energy`
+        as well.
+
+    """
+    # Create spline (for table_energy_loss_muon)
+    fpath = join(RETRO_DIR, 'data', 'muon_stopping_power_and_range_table_II-28.csv')
+    table = np.loadtxt(fpath, delimiter=',')
+
+    muon_rest_mass = 105.65837e-3 # (GeV)
+    ice_density = 0.92 # (g/cm^3)
+
+    kinetic_energy = table[:, 0] # (GeV)
+    csda = table[:, 7] # (cm * g/cm^3)
+
+    mask = np.isfinite(csda)
+    kinetic_energy = kinetic_energy[mask]
+    csda = csda[mask]
+
+    total_energy = kinetic_energy + muon_rest_mass
+    ice_csda_range = csda / ice_density / 100 # (m)
+    spl = interpolate.UnivariateSpline(x=total_energy, y=ice_csda_range, s=0, k=3, ext=2)
+
+    max_energy = np.max(total_energy)
+    min_energy = np.min(total_energy)
+
+    # table fails roundtrip test below ~0.117 GeV, so set lower bound to 0.12 GeV
+    energy_bounds = (max(min_energy, 0.12), max_energy)
+
+    stopping_power = np.array([float(x) for x in rows[1][1:]])
+    dxde = interpolate.UnivariateSpline(
+        x=energies,
+        y=1/stopping_power,
+        s=0,
+        k=3,
+        ext=2, # ValueError if exxtrapolating
+    )
+    esamps = np.logspace(
+        np.log10(min_energy),
+        np.log10(max_energy),
+        int(1e4),
+    )
+    dxde_samps = np.clip(dxde(esamps), a_min=0, a_max=np.inf)
+
+    lengths = [0]
+    for idx in range(len(esamps[1:])):
+        lengths.append(np.trapz(y=dxde_samps[:idx+1], x=esamps[:idx+1]))
+    lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
+
+    muon_energy_to_length_interp = interpolate.UnivariateSpline(
+        x=esamps,
+        y=lengths,
+        k=1,
+        s=0,
+        ext=2, # ValueError if exxtrapolating
+    )
+    muon_length_to_energy_interp = interpolate.UnivariateSpline(
+        x=lengths[1:],
+        y=esamps[1:],
+        k=1,
+        s=0,
+        ext=2, # ValueError if exxtrapolating
+    )
+
+    min_energy, max_energy = energy_bounds
+    min_length, max_length = muon_energy_to_length_interp(energy_bounds)
+
+    def muon_energy_to_length(muon_energy):
+        muon_energy = np.asarray(muon_energy)
+        if np.any(muon_energy > max_energy):
+            raise ValueError("`muon_energy` exceeds max in table")
+        valid_mask = muon_energy >= min_energy
+        muon_length = np.empty_like(muon_energy)
+        muon_length[~valid_mask] = 0
+        muon_length[valid_mask] = muon_energy_to_length_interp(muon_energy[valid_mask])
+        return muon_length
+
+    def muon_length_to_energy(muon_length):
+        muon_length = np.asarray(muon_length)
+        if np.any(muon_length > max_length):
+            raise ValueError("`muon_length` exceeds max in table")
+        valid_mask = muon_length >= min_length
+        muon_energy = np.empty_like(muon_length)
+        muon_energy[~valid_mask] = 0
+        muon_energy[valid_mask] = muon_length_to_energy_interp(muon_length[valid_mask])
+        return muon_energy
 
     return muon_energy_to_length, muon_length_to_energy, energy_bounds
 
