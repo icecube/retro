@@ -179,16 +179,18 @@ def test_weighted_percentile():
         2.759355114021582,
     ])
     assert np.allclose(vals, ref_vals, atol=0, rtol=1e-12)
+    print("<< PASS : test_weighted_percentile >>")
 
 
 class Est(enum.IntEnum):
+    """Methods of estimating a value"""
     max = 0
     mean = 1
     median = 2
     lower_bound = 3
     upper_bound = 4
 
-EST_KINDS = [k.name for k in Est]
+EST_KINDS = [k.name for k in list(Est)]
 NUM_EST_KINDS = len(Est)
 
 

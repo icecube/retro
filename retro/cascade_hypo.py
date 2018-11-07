@@ -600,6 +600,7 @@ def test_CascadeHypo():
         num_sources=1,
     )
     cscd.generate_sources(**sph_params)
+    print("<< PASS : test_CascadeHypo >>")
 
 
 if __name__ == "__main__":
