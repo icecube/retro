@@ -93,11 +93,12 @@ def generate_llh_function(
     tdi_tables=None,
     tdi_metas=None,
 ):
-    """Generate a numba-compiled function for computing log likelihoods.
+    """Generate a function for computing log likelihoods.
 
     Parameters
     ----------
-    pexp
+    pexp : callable
+        As returned by :func:`retro.pexp.generate_pexp_function`
 
     dom_tables : Retro5DTables
         Fully-loaded set of single-DOM tables (time-dependent and, if no `tdi_tables`,
@@ -119,7 +120,7 @@ def generate_llh_function(
 
     Returns
     -------
-    llh : callable
+    get_llh : callable
         Function to compute log likelihood
 
     """
@@ -143,7 +144,7 @@ def generate_llh_function(
     assert dom_tables.table_meta['deltaphidir_bin_edges'][0] == 0, 'only abs(deltaphidir) supported'
     assert dom_tables.table_meta['deltaphidir_bin_edges'][-1] == np.pi
 
-    # -- Define vars used by `get_llh_` closure defined below -- #
+    # -- Define vars used by `_get_llh` closure defined below -- #
 
     num_tdi_tables = len(tdi_metas)
     if num_tdi_tables == 0:
@@ -182,7 +183,7 @@ def generate_llh_function(
     t_indep_dom_table_norms.flags.writeable = False
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def simple_llh(
+    def get_llh_no_scaling_sources(
         event_dom_info,
         event_hit_info,
         nonscaling_hit_exp,
@@ -439,7 +440,7 @@ def generate_llh_function(
         return scalefactor, llh
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-    def get_llh_(
+    def _get_llh(
         generic_sources,
         pegleg_sources,
         scaling_sources,
@@ -461,37 +462,51 @@ def generate_llh_function(
             If NOT using the pegleg/scaling procedure, all light sources are placed in
             this array; when using the pegleg/scaling procedure, `generic_sources` will
             be empty (i.e., `n_generic_sources = 0`)
+
         pegleg_sources : shape (n_pegleg_sources,) array of dtype SRC_T
             If using the pegleg/scaling procedure, the likelihood is maximized by
             including more and more of these sources (in the order given); if not using
             the pegleg/scaling procedures, `pegleg_sources` will be an empty array
             (i.e., `n_pegleg_sources = 0`)
+
         scaling_sources : shape (n_scaling_sources,) array of dtype SRC_T
             If using the pegleg/scaling procedure, the likelihood is maximized by
             scaling the luminosity of these sources; if not using the pegleg/scaling
             procedure, `scaling_sources` will be an empty array (i.e.,
             `n_scaling_sources = 0`)
+
+        scaling_cascade_energy
+
         event_hit_info : shape (n_hits,) array of dtype EVT_HIT_INFO_T
+
         event_dom_info : shape (n_operational_doms,) array of dtype EVT_DOM_INFO_T
+
         pegleg_stepsize : int > 0
             Number of pegleg sources to add each time around the pegleg loop; ignored if
             pegleg procedure is not performed (i.e., if there are no `pegleg_sources`)
+
         dom_tables
+
         dom_table_norms
+
         t_indep_dom_tables
+
         t_indep_dom_table_norms
+
         tdi_tables
 
         Returns
         -------
         llh : float
             Log-likelihood value at best pegleg hypo
+
         pegleg_stop_idx : int or float
             Pegleg stop index for `pegleg_sources` to obtain `llh`. If integer, .. ::
                 pegleg_sources[:pegleg_stop_idx]
             but float can also be returned if `PEGLEG_LLH_CHOICE` is not LLHChoice.MAX.
             `pegleg_stop_idx` is designed to be fed to
             :func:`retro.hypo.discrete_muon_kernels.pegleg_eval`
+
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
 
@@ -555,7 +570,7 @@ def generate_llh_function(
             )
         else:
             scalefactor = 0
-            llh = simple_llh(
+            llh = get_llh_no_scaling_sources(
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
                 nonscaling_hit_exp=nonscaling_hit_exp,
@@ -640,7 +655,7 @@ def generate_llh_function(
                 )
             else:
                 scalefactor = 0
-                llh = simple_llh(
+                llh = get_llh_no_scaling_sources(
                     event_dom_info=event_dom_info,
                     event_hit_info=event_hit_info,
                     nonscaling_hit_exp=nonscaling_hit_exp,
@@ -740,18 +755,23 @@ def generate_llh_function(
             If NOT using the pegleg/scaling procedure, all light sources are placed in
             this array; when using the pegleg/scaling procedure, `generic_sources` will
             be empty (i.e., `n_generic_sources = 0`)
+
         pegleg_sources : shape (n_pegleg_sources,) array of dtype SRC_T
             If using the pegleg/scaling procedure, the likelihood is maximized by
             including more and more of these sources (in the order given); if not using
             the pegleg/scaling procedures, `pegleg_sources` will be an empty array
             (i.e., `n_pegleg_sources = 0`)
+
         scaling_sources : shape (n_scaling_sources,) array of dtype SRC_T
             If using the pegleg/scaling procedure, the likelihood is maximized by
             scaling the luminosity of these sources; if not using the pegleg/scaling
             procedure, `scaling_sources` will be an empty array (i.e.,
             `n_scaling_sources = 0`)
+
         event_hit_info : shape (n_hits,) array of dtype EVT_HIT_INFO_T
+
         event_dom_info : shape (n_operational_doms,) array of dtype EVT_DOM_INFO_T
+
         pegleg_stepsize : int > 0
             Number of pegleg sources to add each time around the pegleg loop; ignored if
             pegleg procedure is not performed (i.e., if there are no `pegleg_sources`)
@@ -760,14 +780,16 @@ def generate_llh_function(
         -------
         llh : float
             Log-likelihood value at best pegleg hypo
+
         pegleg_stop_idx : int
             Stop index for `pegleg_sources` to obtain optimal LLH .. ::
                 pegleg_sources[:pegleg_stop_idx]
+
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
 
         """
-        return get_llh_(
+        return _get_llh(
             generic_sources=generic_sources,
             pegleg_sources=pegleg_sources,
             scaling_sources=scaling_sources,
@@ -781,6 +803,5 @@ def generate_llh_function(
             t_indep_dom_table_norms=t_indep_dom_table_norms,
             tdi_tables=tdi_tables,
         )
-    get_llh.__doc__ = get_llh_.__doc__
 
     return get_llh

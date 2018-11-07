@@ -17,8 +17,8 @@ __all__ = [
     "mmc4_muon_energy_to_length",
     "mmc4_muon_length_to_energy",
     "test_mmc_muon_energy_to_length",
-    "generate_table_converters",
-    "test_generate_table_converters",
+    "generate_gms_table_converters",
+    "test_generate_gms_table_converters",
     "const_muon_energy_to_length",
     "const_muon_length_to_energy",
     "ContinuousLossModel",
@@ -62,6 +62,7 @@ from retro.const import (
 from retro.hypo import Hypo
 from retro.retro_types import SRC_T
 from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
+from retro.utils.lerp import generate_lerp
 
 
 MMC_TBL3_A = 0.259
@@ -185,9 +186,10 @@ def test_mmc_muon_energy_to_length():
         ),
         muon_energies
     )
+    print("<< PASS : test_mmc_muon_energy_to_length >>")
 
 
-def generate_table_converters_legacy():
+def generate_gms_table_converters_legacy():
     """Generate converters for expected values of muon length <--> muon energy based on
     a tabulated muon energy loss model, spline-interpolated for smooth behavior within
     the range of tabulated energies / lengths..
@@ -214,8 +216,8 @@ def generate_table_converters_legacy():
 
     energies = np.array([float(x) for x in rows[0][1:]])
 
-    max_energy = np.max(energies)
     min_energy = np.min(energies)
+    max_energy = np.max(energies)
 
     # table fails roundtrip test below ~0.117 GeV, so set lower bound to 0.12 GeV
     energy_bounds = (max(min_energy, 0.12), max_energy)
@@ -281,10 +283,12 @@ def generate_table_converters_legacy():
     return muon_energy_to_length, muon_length_to_energy, energy_bounds
 
 
-def generate_table_converters():
+def generate_gms_table_converters():
     """Generate converters for expected values of muon length <--> muon energy based on
     the tabulated muon energy loss model [1], spline-interpolated for smooth behavior
     within the range of tabulated energies / lengths.
+
+    Note that "gms" in the name comes from the names of the authors of the table used.
 
     Returns
     -------
@@ -300,8 +304,12 @@ def generate_table_converters():
         corresponding behavior is enforced for lengths passed to `muon_length_to_energy`
         as well.
 
+    References
+    ----------
+    [1] D. E. Groom, N. V. Mokhov, and S. I. Striganov, Atomic Data and Nuclear Data
+        Tables, Vol. 78, No. 2, July 2001, p. 312. Table II-28.
+
     """
-    # Create spline (for table_energy_loss_muon)
     fpath = join(RETRO_DIR, 'data', 'muon_stopping_power_and_range_table_II-28.csv')
     table = np.loadtxt(fpath, delimiter=',')
 
@@ -309,87 +317,40 @@ def generate_table_converters():
     ice_density = 0.92 # (g/cm^3)
 
     kinetic_energy = table[:, 0] # (GeV)
-    csda = table[:, 7] # (cm * g/cm^3)
+    csda_range = table[:, 7] # continuous-slowing-down-approx (CSDA) range (cm*g/cm^3)
 
-    mask = np.isfinite(csda)
+    mask = np.isfinite(csda_range)
     kinetic_energy = kinetic_energy[mask]
-    csda = csda[mask]
+    csda_range = csda_range[mask]
 
     total_energy = kinetic_energy + muon_rest_mass
-    ice_csda_range = csda / ice_density / 100 # (m)
-    spl = interpolate.UnivariateSpline(x=total_energy, y=ice_csda_range, s=0, k=3, ext=2)
+    ice_csda_range_m = csda_range / ice_density / 100 # (m)
 
-    max_energy = np.max(total_energy)
-    min_energy = np.min(total_energy)
+    energy_bounds = (np.min(total_energy), np.max(total_energy))
 
-    # table fails roundtrip test below ~0.117 GeV, so set lower bound to 0.12 GeV
-    energy_bounds = (max(min_energy, 0.12), max_energy)
-
-    stopping_power = np.array([float(x) for x in rows[1][1:]])
-    dxde = interpolate.UnivariateSpline(
-        x=energies,
-        y=1/stopping_power,
-        s=0,
-        k=3,
-        ext=2, # ValueError if exxtrapolating
-    )
-    esamps = np.logspace(
-        np.log10(min_energy),
-        np.log10(max_energy),
-        int(1e4),
-    )
-    dxde_samps = np.clip(dxde(esamps), a_min=0, a_max=np.inf)
-
-    lengths = [0]
-    for idx in range(len(esamps[1:])):
-        lengths.append(np.trapz(y=dxde_samps[:idx+1], x=esamps[:idx+1]))
-    lengths = np.clip(np.array(lengths), a_min=0, a_max=np.inf)
-
-    muon_energy_to_length_interp = interpolate.UnivariateSpline(
-        x=esamps,
-        y=lengths,
-        k=1,
-        s=0,
-        ext=2, # ValueError if exxtrapolating
-    )
-    muon_length_to_energy_interp = interpolate.UnivariateSpline(
-        x=lengths[1:],
-        y=esamps[1:],
-        k=1,
-        s=0,
-        ext=2, # ValueError if exxtrapolating
+    _, muon_energy_to_length = generate_lerp(
+        x=total_energy,
+        y=ice_csda_range_m,
+        low_behavior="constant",
+        high_behavior="error",
+        low_val=0,
     )
 
-    min_energy, max_energy = energy_bounds
-    min_length, max_length = muon_energy_to_length_interp(energy_bounds)
-
-    def muon_energy_to_length(muon_energy):
-        muon_energy = np.asarray(muon_energy)
-        if np.any(muon_energy > max_energy):
-            raise ValueError("`muon_energy` exceeds max in table")
-        valid_mask = muon_energy >= min_energy
-        muon_length = np.empty_like(muon_energy)
-        muon_length[~valid_mask] = 0
-        muon_length[valid_mask] = muon_energy_to_length_interp(muon_energy[valid_mask])
-        return muon_length
-
-    def muon_length_to_energy(muon_length):
-        muon_length = np.asarray(muon_length)
-        if np.any(muon_length > max_length):
-            raise ValueError("`muon_length` exceeds max in table")
-        valid_mask = muon_length >= min_length
-        muon_energy = np.empty_like(muon_length)
-        muon_energy[~valid_mask] = 0
-        muon_energy[valid_mask] = muon_length_to_energy_interp(muon_length[valid_mask])
-        return muon_energy
+    _, muon_length_to_energy = generate_lerp(
+        x=ice_csda_range_m,
+        y=total_energy,
+        low_behavior="constant",
+        high_behavior="error",
+        low_val=0,
+    )
 
     return muon_energy_to_length, muon_length_to_energy, energy_bounds
 
 
-def test_generate_table_converters():
+def test_generate_gms_table_converters():
     """Unit tests for `generate_table_converters` function"""
     muon_energy_to_length, muon_length_to_energy, (min_energy, max_energy) = (
-        generate_table_converters()
+        generate_gms_table_converters()
     )
     muon_energies = np.logspace(
         np.log10(min_energy),
@@ -410,6 +371,7 @@ def test_generate_table_converters():
         )
         print(min_energy, max_energy, muon_energies, conv_muen)
     assert np.all(isclose)
+    print("<< PASS : test_generate_gms_table_converters >>")
 
 
 def const_muon_energy_to_length(muon_energy):
@@ -463,7 +425,7 @@ class ContinuousLossModel(enum.IntEnum):
     """energy loss averaged across all loss processes (continuous+stochastic),
     parameterized as in MMC paper (arXiv:hep-ph/0407075), Table 4"""
 
-    all_avg_table = 3
+    all_avg_gms_table = 3
     """energy loss averaged across all loss processes (continuous+stochastic),
     parameterization interpolated from a table"""
 
@@ -530,8 +492,8 @@ class MuonHypo(Hypo):
         keyword arguments required by chosen `continuous_loss_model`;
         if parameters in addition to those required by the model are passed, a
         ValueError will be raised
-            * `all_avg_const`, `all_avg_mmc*`, and `all_avg_table` take a "time_step"
-              parmeter, in units of nanoseconds
+            * `all_avg_const`, `all_avg_mmc*`, and `all_avg_gms_table` take a
+              "time_step" parmeter, in units of nanoseconds
 
     stochastic_loss_model_kwargs : mapping
         keyword arguments required by chosen `stochastic_loss_model`,
@@ -576,7 +538,7 @@ class MuonHypo(Hypo):
             ContinuousLossModel.all_avg_const,
             ContinuousLossModel.all_avg_mmc3,
             ContinuousLossModel.all_avg_mmc4,
-            ContinuousLossModel.all_avg_table,
+            ContinuousLossModel.all_avg_gms_table,
         ):
             required_keys = ("time_step",)
         else:
@@ -626,24 +588,16 @@ class MuonHypo(Hypo):
         if continuous_loss_model is ContinuousLossModel.all_avg_const:
             self.muon_energy_to_length = const_muon_energy_to_length
             self.muon_length_to_energy = const_muon_length_to_energy
-            self.muon_energy_bounds = (0, np.inf)
-            self.muon_length_bounds = (0, np.inf)
         elif continuous_loss_model is ContinuousLossModel.all_avg_mmc3:
             self.muon_energy_to_length = mmc3_muon_energy_to_length
             self.muon_length_to_energy = mmc3_muon_length_to_energy
-            self.muon_energy_bounds = (0, np.inf)
-            self.muon_length_bounds = (0, np.inf)
         elif continuous_loss_model is ContinuousLossModel.all_avg_mmc4:
             self.muon_energy_to_length = mmc4_muon_energy_to_length
             self.muon_length_to_energy = mmc4_muon_length_to_energy
-            self.muon_energy_bounds = (0, np.inf)
-            self.muon_length_bounds = (0, np.inf)
-        elif continuous_loss_model is ContinuousLossModel.all_avg_table:
-            self.muon_energy_to_length, self.muon_length_to_energy, bounds = (
-                generate_table_converters()
+        elif continuous_loss_model is ContinuousLossModel.all_avg_gms_table:
+            self.muon_energy_to_length, self.muon_length_to_energy, _ = (
+                generate_gms_table_converters()
             )
-            self.muon_energy_bounds = tuple(bounds)
-            self.muon_length_bounds = tuple(self.muon_energy_to_length(bounds))
         else:
             raise NotImplementedError()
 
@@ -684,21 +638,13 @@ class MuonHypo(Hypo):
     def _create_source_generator_func(self):
         muon_energy_to_length = self.muon_energy_to_length
         muon_length_to_energy = self.muon_length_to_energy
-        min_energy, max_energy = self.muon_energy_bounds
-        min_length = muon_energy_to_length(min_energy)
         time_step = self.continuous_loss_model_kwargs["time_step"]
         segment_length = time_step * SPEED_OF_LIGHT_M_PER_NS
         photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
         fixed_track_length = self.fixed_track_length
         if fixed_track_length > 0:
-            if fixed_track_length < min_length:
-                raise ValueError(
-                    "(fixed_track_length = {} m) is less than (min_length = {} m)"
-                    .format(fixed_track_length, min_length)
-                )
             fixed_energy = muon_length_to_energy(fixed_track_length)
-            assert min_energy <= fixed_energy <= max_energy
         else:
             fixed_track_length = 0
             fixed_energy = 0
@@ -710,12 +656,7 @@ class MuonHypo(Hypo):
             if fixed_track_length > 0:
                 length = fixed_track_length
             else:
-                if continuous_energy < min_energy:
-                    length = 0
-                elif continuous_energy > max_energy:
-                    raise ValueError("continuous_energy > max_energy")
-                else:
-                    length = muon_energy_to_length(continuous_energy)
+                length = muon_energy_to_length(continuous_energy)
 
             sampled_dt = np.arange(
                 start=time_step*0.5,
@@ -823,4 +764,4 @@ class MuonHypo(Hypo):
 
 if __name__ == "__main__":
     test_mmc_muon_energy_to_length()
-    test_generate_table_converters()
+    test_generate_gms_table_converters()

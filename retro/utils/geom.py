@@ -447,7 +447,7 @@ def sample_powerlaw_binning(edges, samples_per_bin):
 
 def generate_digitizer(bin_edges, clip=True):
     """Factory to generate a specialized Numba function for "digitizing" data
-    (i.e., returning which bin a value fall within).
+    (i.e., returning which bin a value falls within).
 
     Parameters
     ----------
