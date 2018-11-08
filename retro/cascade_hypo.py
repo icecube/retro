@@ -7,7 +7,7 @@ Cascade hypothesis class to generate photons expected from a cascade.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['CascadeModel', 'CascadeHypo']
+__all__ = ['CASCADE_PHOTONS_PER_GEV', 'CascadeModel', 'CascadeHypo']
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
@@ -38,7 +38,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
-    CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI,
+    EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI,
     SRC_CKV_BETA1
 )
 from retro.hypo import Hypo
@@ -46,10 +46,14 @@ from retro.retro_types import SRC_T
 from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 
 
-# TODO: a "pegleg"-like cascade which can simply add sources to an existing set to
-# increase the energy of the cascade while maintaining more accurate topolgy (as opposed
-# to the scaling cascade, which has a fixed topology at one energy and simply scales
-# luminosity)
+CASCADE_PHOTONS_PER_GEV = 12805.3383311
+"""Cascade photons per energy, in units of 1/GeV (see ``nphotons.py``)"""
+
+
+# TODO: a "pegleg"-like cascade which can add sources to an existing set to increase the
+# energy of the cascade while maintaining more accurate topolgy with higher energy (as
+# opposed to the scaling cascade, which has a fixed topology at one energy and simply
+# scales luminosity of those sources to increase energy)
 
 class CascadeModel(enum.IntEnum):
     """Cascade models defined"""

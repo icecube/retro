@@ -13,8 +13,8 @@
 # E_mu_c (GeV) = 1032.
 # <-dE/dx>_min (MeV cm^2/g) = 1.992
 #
-#                                         [           <-dE/dx> (MeV cm^2/g)            ]
-# Kinetic energy (GeV), momentum (MeV/c), Ionization, Brems, Pair prod, Photonucl, Total, CSDA range (cm*g/cm^2)
+#                                         [          <-dE/dx> (MeV/cm cm^3/g)          ]
+# kinetic energy (GeV), momentum (MeV/c), ionization, brems, pair prod, photonucl, total, CSDA range (cm*g/cm^2)
 10.0e-3, 4.704e+1,   7.965,     nan,     nan,     nan,   7.965, 7.030e-1
 14.0e-3, 5.616e+1,   6.213,     nan,     nan,     nan,   6.213, 1.278e+0
 20.0e-3, 6.802e+1,   4.852,     nan,     nan,     nan,   4.852, 2.383e+0

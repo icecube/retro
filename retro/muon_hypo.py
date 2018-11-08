@@ -8,7 +8,10 @@ Muon hypothesis class to generate photons expected from a muon.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    "TRACK_M_PER_GEV",
+    "TRACK_PHOTONS_PER_M",
     "ConstABModel",
+    "CONST_AB_MODEL_PARAMS",
     "ContinuousLossModel",
     "StochasticLossModel",
     "generate_const_a_b_converters",
@@ -48,8 +51,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
-    SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-    TRACK_PHOTONS_PER_M, SRC_CKV_BETA1, EMPTY_SOURCES
+    ICE_DENSITY, MUON_REST_MASS, SPEED_OF_LIGHT_M_PER_NS, SRC_CKV_BETA1, EMPTY_SOURCES
 )
 from retro.hypo import Hypo
 from retro.retro_types import SRC_T
@@ -57,9 +59,15 @@ from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 from retro.utils.lerp import generate_lerp
 
 
+TRACK_PHOTONS_PER_M = 2451.4544553
+"""Track Cherenkov photons per length, in units of 1/m (see ``nphotons.py``)"""
+
+TRACK_M_PER_GEV = 15 / 3.3
+"""Constant model track length per energy, in units of m/GeV"""
+
 class ConstABModel(enum.IntEnum):
-    """Muon range vs. muon enegy simplifies if `a` and `b` parameters are constant to
-    model::
+    """Muon range <--> muon enegy simplifies if `a` (ionization loss) and `b` (stochastic
+    loss) parameters are constant to ::
 
         range = log(1 + energy * b / a) / b
 
@@ -67,19 +75,31 @@ class ConstABModel(enum.IntEnum):
         * MMC paper, table 3 [1]
         * MMC paper, table 4 [1]
         * PROPOSAL paper [2]
-        * LEERA2 source code [3]
+        * LEERA2 source code [3] (those are the values actually used here; rounded
+          versions of the same were reported in the LEERA internal IceCube report [4])
 
     References
     ----------
     [1] arXiv:hep-ph/0407075
     [2] http://dx.doi.org/10.1016/j.cpc.2013.04.001
     [3] http://code.icecube.wisc.edu/svn/sandbox/terliuk/LEERA2/trunk_spl_tables/python/LEERA.py
+    [4] https://internal-apps.icecube.wisc.edu/reports/data/icecube/2013/04/001/icecube_201304001_v2.pdf
 
     """
-    mmc3 = 0
-    mmc4 = 1
-    proposal = 2
-    leera2 = 3
+    proposal = 1
+    leera2 = 2
+    mmc3 = 3
+    mmc4 = 4
+
+
+CONST_AB_MODEL_PARAMS = {
+    ConstABModel.proposal: dict(a=0.249, b=0.422e-3),
+    ConstABModel.leera2: dict(a=0.225649, b=0.00046932),
+    ConstABModel.mmc3: dict(a=0.259, b=0.363e-3),
+    ConstABModel.mmc4: dict(a=0.268, b=0.47e-3),
+}
+"""`a` & `b` parameter values for various fits to constant-a&b model.
+See :class:`ConstABModel` for details"""
 
 
 class ContinuousLossModel(enum.IntEnum):
@@ -126,8 +146,8 @@ class StochasticLossModel(enum.IntEnum):
 
 
 def generate_const_a_b_converters(a=None, b=None, model=None):
-    """Generate functions to convert between muon length and energy, based on a
-    simplified model of average energy losses. See :func:`ConstABModel` for details of
+    """Factory to generate functions to convert between muon length and energy, based on
+    a simplified model of average energy losses. See :func:`ConstABModel` for details of
     the model.
 
     Either specify values for both `a` and `b` (and don't specfy `model`) or specify a
@@ -155,69 +175,77 @@ def generate_const_a_b_converters(a=None, b=None, model=None):
 
     """
     if a is not None or b is not None:
-        assert a is not None
-        assert b is not None
+        assert a is not None and b is not None
         assert model is None
         a = float(a)
         b = float(b)
+        model_descr = "with a ~ {:.4e} & b ~ {:.4e}".format(a, b)
+
     if model is not None:
-        assert a is None
-        assert b is None
+        assert a is None and b is None
+        model_descr = "using a and b from {} model".format(model.name)
 
     if model is not None:
         model = validate_and_convert_enum(
             val=model,
             enum_type=ConstABModel,
         )
-        if model is ConstABModel.mmc3:
-            a = 0.259
-            b = 0.363e-3
-        elif model is ConstABModel.mmc4:
-            a = 0.268
-            b = 0.47e-3
-        elif model is ConstABModel.proposal:
-            a = 0.249
-            b = 0.422e-3
-        elif model is ConstABModel.leera2:
-            a = 0.225649
-            b = 0.00046932
+        params = CONST_AB_MODEL_PARAMS[model]
+        a = params["a"]
+        b = params["b"]
 
     a_over_b = a / b
     b_over_a = b / a
 
-    def muon_energy_to_length(muon_energy):
-        """Convert a muon energy to expected length.
+    # -- Define functions -- #
 
-        Parameters
-        ----------
-        muon_energy
-
-        Returns
-        -------
-        muon_length
-
-        """
+    def muon_energy_to_length(muon_energy): # pylint: disable=missing-docstring
         return np.log(1 + muon_energy * b_over_a) / b
 
-    def muon_length_to_energy(muon_length):
-        """Convert a muon length to expected energy.
+    def muon_length_to_energy(muon_length): # pylint: disable=missing-docstring
+        return (np.exp(muon_length * b) - 1) * a_over_b
+
+    # -- Add docstring to functions -- #
+
+    docstr = """Convert a muon {src} to expected {dst}.
+
+        Model assumes `a` and `b` are constant, whereupon the range integral evaluates
+        to ::
+
+            range = log(1 + muon_energy * b/a) / b
+
+        {model_descr}
 
         Parameters
         ----------
-        muon_length
+        muon_{src}
 
         Returns
         -------
-        muon_energy
+        muon_{dst}
 
         """
-        return (np.exp(muon_length * b) - 1) * a_over_b
+
+    muon_energy_to_length.__doc__ = docstr.format(
+        src="energy", dst="length", model_descr=model_descr,
+    )
+    muon_length_to_energy.__doc__ = docstr.format(
+        src="length", dst="energy", model_descr=model_descr,
+    )
 
     return muon_energy_to_length, muon_length_to_energy
 
 
 def test_generate_const_a_b_converters():
     """Unit tests for `generate_const_a_b_converters` and the functions it produces."""
+    required_param_names = set(["a", "b"])
+    for model in list(ConstABModel):
+        # parameters exist for all models
+        assert model in CONST_AB_MODEL_PARAMS
+        # names match exactly
+        param_names = set(CONST_AB_MODEL_PARAMS[model].keys())
+        assert param_names == required_param_names
+
     # round-trip tests
     muon_energies = np.logspace(start=-2, stop=4, num=int(1e4))
     for model in list(ConstABModel):
@@ -231,12 +259,20 @@ def test_generate_const_a_b_converters():
     print("<< PASS : test_generate_const_a_b_converters >>")
 
 
-def generate_gms_table_converters():
+def generate_gms_table_converters(losses="all"):
     """Generate converters for expected values of muon length <--> muon energy based on
     the tabulated muon energy loss model [1], spline-interpolated for smooth behavior
     within the range of tabulated energies / lengths.
 
     Note that "gms" in the name comes from the names of the authors of the table used.
+
+    Parameters
+    ----------
+    losses : comma-separated str or iterable of strs
+        Valid sub-values are {"all", "ionization", "brems", "photonucl", "pair_prod"}
+        where if any in the list is specified to be "all" or if all of {"ionization",
+        "brems", "photonucl", and "pair_prod"} are specified, this supercedes all
+        other choices and the CSDA range values from the table are used..
 
     Returns
     -------
@@ -258,39 +294,89 @@ def generate_gms_table_converters():
         Tables, Vol. 78, No. 2, July 2001, p. 312. Table II-28.
 
     """
-    fpath = join(RETRO_DIR, 'data', 'muon_stopping_power_and_range_table_II-28.csv')
-    table = np.loadtxt(fpath, delimiter=',')
+    if isinstance(losses, basestring):
+        losses = tuple(x.strip().lower() for x in losses.split(","))
 
-    muon_rest_mass = 105.65837e-3 # (GeV)
-    ice_density = 0.92 # (g/cm^3)
+    VALID_MECHANISMS = ("ionization", "brems", "pair_prod", "photonucl", "all")
+    for mechanism in losses:
+        assert mechanism in VALID_MECHANISMS
+
+    if "all" in losses or set(losses) == set(m for m in VALID_MECHANISMS if m != "all"):
+        losses = ("all",)
+
+    fpath = join(RETRO_DIR, "data", "muon_stopping_power_and_range_table_II-28.csv")
+    table = np.loadtxt(fpath, delimiter=",")
 
     kinetic_energy = table[:, 0] # (GeV)
-    csda_range = table[:, 7] # continuous-slowing-down-approx (CSDA) range (cm*g/cm^3)
+    total_energy = kinetic_energy + MUON_REST_MASS
 
-    mask = np.isfinite(csda_range)
-    kinetic_energy = kinetic_energy[mask]
-    csda_range = csda_range[mask]
+    if "all" in losses:
+        # Continuous-slowing-down-approximation (CSDA) range (cm * g / cm^3)
+        csda_range = table[:, 7]
+        mask = np.isfinite(csda_range)
+        csda_range = csda_range[mask]
+        ice_csda_range_m = csda_range / ICE_DENSITY / 100 # (m)
+        energy_bounds = (np.min(total_energy[mask]), np.max(total_energy[mask]))
+        _, muon_energy_to_length = generate_lerp(
+            x=total_energy[mask],
+            y=ice_csda_range_m,
+            low_behavior="constant",
+            high_behavior="extrapolate",
+            low_val=0,
+        )
+        _, muon_length_to_energy = generate_lerp(
+            x=ice_csda_range_m,
+            y=total_energy[mask],
+            low_behavior="constant",
+            high_behavior="extrapolate",
+            low_val=0,
+        )
+    else:
+        from scipy.interpolate import UnivariateSpline
 
-    total_energy = kinetic_energy + muon_rest_mass
-    ice_csda_range_m = csda_range / ice_density / 100 # (m)
+        # All stopping powers given in (MeV / cm * cm^3 / g)
+        stopping_power_by_mechanism = dict(
+            ionization=table[:, 2],
+            brems=table[:, 3],
+            pair_prod=table[:, 4],
+            photonucl=table[:, 5],
+        )
 
-    energy_bounds = (np.min(total_energy), np.max(total_energy))
+        stopping_powers = []
+        mask = np.zeros_like(stopping_powers, dtype=bool)
+        for mechanism in losses:
+            addl_stopping_power = stopping_power_by_mechanism[mechanism]
+            mask |= np.isfinite(addl_stopping_power)
+            stopping_powers.append(addl_stopping_power)
+        stopping_power = np.nansum(stopping_powers)[mask]
+        mev_per_gev = 1/1000
+        cm_per_m = 100
+        stopping_power *= cm_per_m * mev_per_gev
 
-    _, muon_energy_to_length = generate_lerp(
-        x=total_energy,
-        y=ice_csda_range_m,
-        low_behavior="constant",
-        high_behavior="extrapolate",
-        low_val=0,
-    )
-
-    _, muon_length_to_energy = generate_lerp(
-        x=ice_csda_range_m,
-        y=total_energy,
-        low_behavior="constant",
-        high_behavior="extrapolate",
-        low_val=0,
-    )
+        valid_energies = total_energy[mask]
+        sample_energies = np.logspace(
+            start=np.log10(valid_energies.min()),
+            stop=np.log10(valid_energies.maxx()),
+            num=1000,
+        )
+        spl = UnivariateSpline(x=valid_energies, y=1/stopping_power, s=0, k=3)
+        ice_range = np.array(
+            [spl.integral(valid_energies.min(), e) for e in valid_energies]
+        )
+        _, muon_energy_to_length = generate_lerp(
+            x=sample_energies,
+            y=ice_range,
+            low_behavior="constant",
+            high_behavior="extrapolate",
+            low_val=0,
+        )
+        _, muon_length_to_energy = generate_lerp(
+            x=ice_range,
+            y=sample_energies,
+            low_behavior="constant",
+            high_behavior="extrapolate",
+            low_val=0,
+        )
 
     return muon_energy_to_length, muon_length_to_energy, energy_bounds
 

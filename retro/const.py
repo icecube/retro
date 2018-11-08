@@ -11,11 +11,11 @@ __all__ = [
     'omkeys_to_sd_indices', 'get_sd_idx', 'get_string_dom_pair',
 
     # Constants
-    'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS',
+    'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS', 'MUON_REST_MASS',
+    'ICE_DENSITY',
 
     # Pre-calculated values
     'COS_CKV', 'THETA_CKV', 'SIN_CKV',
-    'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'CASCADE_PHOTONS_PER_GEV',
     'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'POL_TABLE_DCOSTHETA',
     'POL_TABLE_DRPWR', 'POL_TABLE_DT', 'POL_TABLE_RPWR', 'POL_TABLE_RMAX',
     'POL_TABLE_NTBINS', 'POL_TABLE_NRBINS', 'POL_TABLE_NTHETABINS',
@@ -29,6 +29,7 @@ __all__ = [
     # "Enum"-like things
     'STR_ALL', 'STR_IC', 'STR_DC', 'AGG_STR_NONE', 'AGG_STR_ALL',
     'AGG_STR_SUBDET', 'DOM_ALL',
+    'SRC_OMNI', 'SRC_CKV_BETA1',
 
     'NUM_STRINGS', 'NUM_DOMS_PER_STRING', 'NUM_DOMS_TOT',
 
@@ -38,9 +39,6 @@ __all__ = [
     'ALL_STRS_DOMS_SET', 'DC_ALL_STRS_DOMS',
 
     'EMPTY_HITS', 'EMPTY_SOURCES',
-    'SRC_OMNI', 'SRC_CKV_BETA1',
-
-    'PARAM_NAMES', 'PEGLEG_PARAM_NAMES', 'SCALING_PARAM_NAMES',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -148,6 +146,13 @@ PI_BY_TWO = FTYPE(np.pi / 2)
 SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 """Speed of light in units of m/ns"""
 
+MUON_REST_MASS = 105.65837e-3 # (GeV)
+"""Rest mass of muon in GeV, ~ from wikipedia"""
+
+ICE_DENSITY = 0.917
+"""Average South Pole Ice density in (g/cm^3) from ref:
+J.-H. Koehne et al. / Computer Physics Communications 184 (2013) 2070–2090"""
+
 
 # -- Pre-calculated values -- #
 
@@ -159,15 +164,6 @@ THETA_CKV = np.arccos(0.764540803152)
 
 SIN_CKV = np.sin(THETA_CKV)
 """Cosine of the Cherenkov angle for beta ~1 and IceCube phase index as used"""
-
-TRACK_M_PER_GEV = FTYPE(15 / 3.3)
-"""Track length per energy, in units of m/GeV"""
-
-TRACK_PHOTONS_PER_M = FTYPE(2451.4544553)
-"""Track photons per length, in units of 1/m (see ``nphotons.py``)"""
-
-CASCADE_PHOTONS_PER_GEV = FTYPE(12805.3383311)
-"""Cascade photons per energy, in units of 1/GeV (see ``nphotons.py``)"""
 
 # TODO: Is jitter same (or close enough to the same) for all DOMs? Is it
 #       different for DeepCore vs. non-DeepCore DOMs? Didn't see as much in
@@ -196,6 +192,7 @@ IC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) IceCube (i.e. non-DeepCore)
 DOM quantum efficiency. Multiplies the tabulated detection probabilities to
 yield the actual probabilitiy that a photon is detected."""
+
 #DC_DOM_QUANT_EFF = 0.35
 DC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) DeepCore DOM quantum
@@ -230,9 +227,17 @@ STR_TO_PDG_INTER = {v: k for k, v in PDG_INTER_STR.items()}
 
 
 # -- "enums" -- #
+
 STR_ALL, STR_IC, STR_DC = -1, -2, -3
 AGG_STR_NONE, AGG_STR_ALL, AGG_STR_SUBDET = 0, 1, 2
 DOM_ALL = -1
+
+SRC_OMNI = np.uint32(0)
+"""Source kind designator for a point emitting omnidirectional light"""
+
+SRC_CKV_BETA1 = np.uint32(1)
+"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
+
 
 # -- geom constants --- #
 
@@ -270,23 +275,3 @@ DC_ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(DC_STRS, ALL_D
 EMPTY_HITS = np.empty(shape=0, dtype=retro_types.HIT_T)
 
 EMPTY_SOURCES = np.empty(shape=0, dtype=retro_types.SRC_T)
-
-SRC_OMNI = np.uint32(0)
-"""Source kind designator for a point emitting omnidirectional light"""
-
-SRC_CKV_BETA1 = np.uint32(1)
-"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
-
-
-PARAM_NAMES = [
-    'time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth',
-    'cascade_zenith', 'track_energy', 'cascade_energy', 'cascade_d_zenith',
-    'cascade_d_azimuth'
-]
-"""All possible hypothesis param names"""
-
-PEGLEG_PARAM_NAMES = ['track_energy']
-"""Hypothesis param names handled by pegleg, if it's used"""
-
-SCALING_PARAM_NAMES = ['cascade_energy']
-"""Hypothesis param names handled by scaling, if it's used"""
