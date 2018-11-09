@@ -310,12 +310,15 @@ def generate_gms_table_converters(losses="all"):
     kinetic_energy = table[:, 0] # (GeV)
     total_energy = kinetic_energy + MUON_REST_MASS
 
+    mev_per_gev = 1e-3
+    cm_per_m = 1e2
+
     if "all" in losses:
         # Continuous-slowing-down-approximation (CSDA) range (cm * g / cm^3)
         csda_range = table[:, 7]
         mask = np.isfinite(csda_range)
         csda_range = csda_range[mask]
-        ice_csda_range_m = csda_range / ICE_DENSITY / 100 # (m)
+        ice_csda_range_m = csda_range / ICE_DENSITY / cm_per_m # (m)
         energy_bounds = (np.min(total_energy[mask]), np.max(total_energy[mask]))
         _, muon_energy_to_length = generate_lerp(
             x=total_energy[mask],
@@ -343,25 +346,24 @@ def generate_gms_table_converters(losses="all"):
         )
 
         stopping_powers = []
-        mask = np.zeros_like(stopping_powers, dtype=bool)
+        mask = np.zeros(shape=table.shape[0], dtype=bool)
         for mechanism in losses:
             addl_stopping_power = stopping_power_by_mechanism[mechanism]
             mask |= np.isfinite(addl_stopping_power)
             stopping_powers.append(addl_stopping_power)
-        stopping_power = np.nansum(stopping_powers)[mask]
-        mev_per_gev = 1/1000
-        cm_per_m = 100
-        stopping_power *= cm_per_m * mev_per_gev
+        stopping_power = np.nansum(stopping_powers, axis=0)[mask]
+        stopping_power *= cm_per_m * mev_per_gev * ICE_DENSITY
 
         valid_energies = total_energy[mask]
+        energy_bounds = (valid_energies.min(), valid_energies.max())
         sample_energies = np.logspace(
             start=np.log10(valid_energies.min()),
-            stop=np.log10(valid_energies.maxx()),
+            stop=np.log10(valid_energies.max()),
             num=1000,
         )
         spl = UnivariateSpline(x=valid_energies, y=1/stopping_power, s=0, k=3)
         ice_range = np.array(
-            [spl.integral(valid_energies.min(), e) for e in valid_energies]
+            [spl.integral(valid_energies.min(), e) for e in sample_energies]
         )
         _, muon_energy_to_length = generate_lerp(
             x=sample_energies,
