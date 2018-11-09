@@ -149,9 +149,11 @@ SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 MUON_REST_MASS = 105.65837e-3 # (GeV)
 """Rest mass of muon in GeV, ~ from wikipedia"""
 
-ICE_DENSITY = 0.917
-"""Average South Pole Ice density in (g/cm^3) from ref:
-J.-H. Koehne et al. / Computer Physics Communications 184 (2013) 2070–2090"""
+ICE_DENSITY = 0.92
+"""Average South Pole Ice density in (g/cm^3 = 10^3 kg / m^3); one ref I found uses
+0.917: J.-H. Koehne et al. / Computer Physics Communications 184 (2013) 2070–2090, but
+this shows bias when comparing secondary-muon length vs. energy in low-energy GRECO
+simulation, so the 0.92 value is chosen instead (which shows little to no bias)"""
 
 
 # -- Pre-calculated values -- #
