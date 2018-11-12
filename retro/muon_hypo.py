@@ -18,6 +18,8 @@ __all__ = [
     "test_generate_const_a_b_converters",
     "generate_gms_table_converters",
     "test_generate_gms_table_converters",
+    "generate_min_energy_fit_converters",
+    "test_generate_min_energy_fit_converters",
     "const_muon_energy_to_length",
     "const_muon_length_to_energy",
     "MuonHypo",
@@ -38,7 +40,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-
 import enum
 import math
 from os.path import abspath, dirname, join
@@ -50,6 +51,7 @@ RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import (
     ICE_DENSITY, MUON_REST_MASS, SPEED_OF_LIGHT_M_PER_NS, SRC_CKV_BETA1, EMPTY_SOURCES
 )
@@ -59,11 +61,16 @@ from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 from retro.utils.lerp import generate_lerp
 
 
+# TODO: add ice density correction, bedrock, and possibly even air to muon model(s)
+# TODO: implement stochastic loss model(s)
+
+
 TRACK_PHOTONS_PER_M = 2451.4544553
 """Track Cherenkov photons per length, in units of 1/m (see ``nphotons.py``)"""
 
 TRACK_M_PER_GEV = 15 / 3.3
 """Constant model track length per energy, in units of m/GeV"""
+
 
 class ConstABModel(enum.IntEnum):
     """Muon range <--> muon enegy simplifies if `a` (ionization loss) and `b` (stochastic
@@ -124,6 +131,10 @@ class ContinuousLossModel(enum.IntEnum):
     all_avg_gms_table = 5
     """energy loss averaged across all loss processes (continuous+stochastic),
     parameterization interpolated from a table"""
+
+    min_energy_fit = 6
+    """Assign the minimum energy to a given muon length seen in simulation; assumes
+    energy will be added to this via some stochastic-loss model"""
 
 
 class StochasticLossModel(enum.IntEnum):
@@ -385,29 +396,71 @@ def generate_gms_table_converters(losses="all"):
 
 def test_generate_gms_table_converters():
     """Unit tests for `generate_table_converters` function"""
-    muon_energy_to_length, muon_length_to_energy, (min_energy, max_energy) = (
-        generate_gms_table_converters()
-    )
-    muon_energies = np.logspace(
-        np.log10(min_energy),
-        np.log10(max_energy),
-        int(1e6),
-    )
+    e2l, l2e, (emin, emax) = generate_gms_table_converters()
     # round-trip test
-    isclose = np.isclose(
-        muon_length_to_energy(
-            muon_energy_to_length(muon_energies)
-        ),
-        muon_energies
-    )
+    en = np.logspace(np.log10(emin), np.log10(emax), int(1e6))
+    isclose = np.isclose(l2e(e2l(en)), en)
     if not np.all(isclose):
-        muon_energies = muon_energies[~isclose]
-        conv_muen = muon_length_to_energy(
-            muon_energy_to_length(muon_energies)
-        )
-        print(min_energy, max_energy, muon_energies, conv_muen)
-    assert np.all(isclose)
+        en = en[~isclose]
+        conv_muen = l2e(e2l(en))
+        print(emin, emax, en, conv_muen)
+        assert False
     print("<< PASS : test_generate_gms_table_converters >>")
+
+
+def generate_min_energy_fit_converters(fit_data_path=None):
+    """Generate muon energy <--> length conversion functions from fit data file.
+
+    Parameters
+    ----------
+    fit_data_path : string, optional
+        If not specified, default fit data file will be loaded.
+
+    Returns
+    -------
+    muon_energy_to_length : callable
+    muon_length_to_energy : callable
+    energy_bounds : tuple of 2 floats
+
+    """
+    if fit_data_path is None:
+        fit_data_path = join(RETRO_DIR, "data", "muon_min_energy_vs_len_fit.csv")
+
+    en_len = np.loadtxt(fit_data_path, delimiter=", ")
+
+    _, muon_energy_to_length = generate_lerp(
+        x=en_len[:, 0],
+        y=en_len[:, 1],
+        low_behavior="constant",
+        high_behavior="extrapolate",
+        low_val=0,
+    )
+
+    _, muon_length_to_energy = generate_lerp(
+        x=en_len[:, 1],
+        y=en_len[:, 0],
+        low_behavior="constant",
+        high_behavior="extrapolate",
+        low_val=0,
+    )
+
+    energy_bounds = np.min(en_len[:, 0]), np.max(en_len[:, 0])
+
+    return muon_energy_to_length, muon_length_to_energy, energy_bounds
+
+
+def test_generate_min_energy_fit_converters():
+    """Unit tests for `generate_min_energy_fit_converters` function."""
+    e2l, l2e, (emin, emax) = generate_min_energy_fit_converters()
+    # round-trip test
+    en = np.logspace(np.log10(emin), np.log10(emax), int(1e6))
+    isclose = np.isclose(l2e(e2l(en)), en)
+    if not np.all(isclose):
+        en = en[~isclose]
+        conv_muen = l2e(e2l(en))
+        print(emin, emax, en, conv_muen)
+        assert False
+    print("<< PASS : test_generate_min_energy_fit_converters >>")
 
 
 def const_muon_energy_to_length(muon_energy):
@@ -538,6 +591,7 @@ class MuonHypo(Hypo):
             ContinuousLossModel.all_avg_proposal,
             ContinuousLossModel.all_avg_leera2,
             ContinuousLossModel.all_avg_gms_table,
+            ContinuousLossModel.min_energy_fit,
         ):
             required_keys = ("time_step",)
         else:
@@ -601,22 +655,23 @@ class MuonHypo(Hypo):
             self.muon_energy_to_length, self.muon_length_to_energy, _ = (
                 generate_gms_table_converters()
             )
+        elif continuous_loss_model is ContinuousLossModel.min_energy_fit:
+            self.muon_energy_to_length, self.muon_length_to_energy, _ = (
+                generate_min_energy_fit_converters()
+            )
         else:
             raise NotImplementedError()
 
         # -- Define `internal_param_names` -- #
 
-        # All models have the following...
+        # All models specify vertex and track direction
         internal_param_names = ("x", "y", "z", "time", "azimuth", "zenith")
 
         # If pegleg-ing (fixed_track_length > 0), energy/length are found
-        # within the llh function, while this kernel simply produces _all_ possible
-        # sources once
+        # within the llh function and this kernel simply produces _all_ possible
+        # sources the first time called
         if fixed_track_length == 0:
-            if stochastic_loss_model is StochasticLossModel.none:
-                internal_param_names += ("continuous_energy",)
-            elif stochastic_loss_model is StochasticLossModel.scaled_cascades:
-                raise NotImplementedError()
+            internal_param_names += ("length",)
 
         # -- Initialize base class (retro.hypo.Hypo) -- #
 
@@ -639,27 +694,21 @@ class MuonHypo(Hypo):
         self._create_source_generator_func()
 
     def _create_source_generator_func(self):
-        muon_energy_to_length = self.muon_energy_to_length
-        muon_length_to_energy = self.muon_length_to_energy
         time_step = self.continuous_loss_model_kwargs["time_step"]
         segment_length = time_step * SPEED_OF_LIGHT_M_PER_NS
         photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
 
         fixed_track_length = self.fixed_track_length
-        if fixed_track_length > 0:
-            fixed_energy = muon_length_to_energy(fixed_track_length)
-        else:
+        if fixed_track_length <= 0:
             fixed_track_length = 0
-            fixed_energy = 0
 
-        def _continuous_generator(x, y, z, time, azimuth, zenith, continuous_energy):
-            if continuous_energy == 0:
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+        def _continuous_generator(x, y, z, time, azimuth, zenith, length):
+            if length == 0:
                 return [EMPTY_SOURCES], [False]
 
             if fixed_track_length > 0:
                 length = fixed_track_length
-            else:
-                length = muon_energy_to_length(continuous_energy)
 
             sampled_dt = np.arange(
                 start=time_step*0.5,
@@ -681,8 +730,8 @@ class MuonHypo(Hypo):
             dir_costheta = math.cos(opposite_zenith)
             dir_sintheta = math.sin(opposite_zenith)
 
-            dir_cosphi = np.cos(opposite_azimuth)
-            dir_sinphi = np.sin(opposite_azimuth)
+            dir_cosphi = math.cos(opposite_azimuth)
+            dir_sinphi = math.sin(opposite_azimuth)
 
             dir_x = dir_sintheta * dir_cosphi
             dir_y = dir_sintheta * dir_sinphi
@@ -706,10 +755,10 @@ class MuonHypo(Hypo):
 
             return sources
 
-        # TODO: implement stochastic loss model(s)
         assert self.stochastic_loss_model is StochasticLossModel.none
 
         if fixed_track_length > 0:
+            @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
             def _generate_sources(x, y, z, time, azimuth, zenith):
                 return _continuous_generator(
                     x=x,
@@ -718,7 +767,7 @@ class MuonHypo(Hypo):
                     time=time,
                     azimuth=azimuth,
                     zenith=zenith,
-                    continuous_energy=fixed_energy,
+                    length=fixed_track_length,
                 )
             self._generate_sources = _generate_sources
         else:
@@ -768,3 +817,4 @@ class MuonHypo(Hypo):
 if __name__ == "__main__":
     test_generate_const_a_b_converters()
     test_generate_gms_table_converters()
+    test_generate_min_energy_fit_converters()

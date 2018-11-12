@@ -31,6 +31,7 @@ __all__ = [
     'AGG_STR_SUBDET', 'DOM_ALL',
     'SRC_OMNI', 'SRC_CKV_BETA1',
 
+    'I3_Z0_DEPTH', 'BEDROCK_DEPTH',
     'NUM_STRINGS', 'NUM_DOMS_PER_STRING', 'NUM_DOMS_TOT',
 
     'IC_STRS', 'DC_STRS', 'DC_IC_STRS', 'DC_ALL_STRS', 'DC_SUBDUST_DOMS',
@@ -146,14 +147,17 @@ PI_BY_TWO = FTYPE(np.pi / 2)
 SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 """Speed of light in units of m/ns"""
 
-MUON_REST_MASS = 105.65837e-3 # (GeV)
-"""Rest mass of muon in GeV, ~ from wikipedia"""
+MUON_REST_MASS = 105.65837e-3 # (GeV/c^2)
+"""Rest mass of muon in GeV/c^2, ~ from ref
+  K.A. Olive et al. (Particle Data Group), Chin. Phys. C38 , 090001 (2014)"""
 
 ICE_DENSITY = 0.92
-"""Average South Pole Ice density in (g/cm^3 = 10^3 kg / m^3); one ref I found uses
-0.917: J.-H. Koehne et al. / Computer Physics Communications 184 (2013) 2070–2090, but
-this shows bias when comparing secondary-muon length vs. energy in low-energy GRECO
-simulation, so the 0.92 value is chosen instead (which shows little to no bias)"""
+"""Average South Pole Ice density in (g/cm^3 = Mg/m^3); one ref I found uses 0.917:
+  J.-H. Koehne et al. / Computer Physics Communications 184 (2013) 2070–2090,
+but this shows bias when comparing secondary-muon length vs. energy in low-energy GRECO
+simulation, so the 0.92 value is chosen instead (which shows little to no bias), which
+is in the range reported at, e.g.,
+  https://icecube.wisc.edu/~mnewcomb/radio/density"""
 
 
 # -- Pre-calculated values -- #
@@ -242,6 +246,12 @@ SRC_CKV_BETA1 = np.uint32(1)
 
 
 # -- geom constants --- #
+
+I3_Z0_DEPTH = 1948.07
+"""Depth of IceCube coordinate system's origin beneath the "surface" (m)"""
+
+BEDROCK_DEPTH = 2832.0
+"""Depth of bedrock beneath the "surface" of IceCube (m)"""
 
 NUM_STRINGS = 86
 NUM_DOMS_PER_STRING = 60
