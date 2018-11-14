@@ -55,14 +55,16 @@ from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import (
     ICE_DENSITY, MUON_REST_MASS, SPEED_OF_LIGHT_M_PER_NS, SRC_CKV_BETA1, EMPTY_SOURCES
 )
-from retro.hypo import Hypo
+from retro.hypo import Hypo, SrcHandling
 from retro.retro_types import SRC_T
 from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 from retro.utils.lerp import generate_lerp
 
 
-# TODO: add ice density correction, bedrock, and possibly even air to muon model(s)
+# TODO: add ice density correction, bedrock, and possibly even air to muon model(s); see
+#       `retro/notebooks/muon_length_vs_energy.ipynb`
 # TODO: implement stochastic loss model(s)
+# TODO: pegleg able to take logarithmic steps
 
 
 TRACK_PHOTONS_PER_M = 2451.4544553
@@ -532,6 +534,10 @@ class MuonHypo(Hypo):
         an `energy` parameter), e.g. for pegleg-ing; if None or <= 0 is passed,
         the hypothesis number of sources depends on the energy specified
 
+    pegleg_step_size : int, optional
+        number of continuous-loss model sources to add each pegleg step; required if
+        pegleg-ing (i.e., `fixed_track_length` > 0)
+
     param_mapping : Mapping or callable
         see :class:`retro.hypo.Hypo` for details
 
@@ -557,6 +563,7 @@ class MuonHypo(Hypo):
         param_mapping,
         external_sph_pairs=None,
         fixed_track_length=None,
+        pegleg_step_size=None,
         continuous_loss_model_kwargs=None,
         stochastic_loss_model_kwargs=None,
     ):
@@ -581,6 +588,16 @@ class MuonHypo(Hypo):
 
         if fixed_track_length is None or fixed_track_length <= 0:
             fixed_track_length = 0
+
+        # `pegleg_step_size`
+
+        if fixed_track_length == 0 and pegleg_step_size is not None:
+            raise ValueError(
+                "`pegleg_step_size` must be None if fixed_track_length <= 0"
+            )
+        if fixed_track_length > 0:
+            assert float(pegleg_step_size) == int(pegleg_step_size)
+            pegleg_step_size = int(pegleg_step_size)
 
         # `continuous_loss_model_kwargs`
 
@@ -671,7 +688,7 @@ class MuonHypo(Hypo):
         # within the llh function and this kernel simply produces _all_ possible
         # sources the first time called
         if fixed_track_length == 0:
-            internal_param_names += ("length",)
+            internal_param_names += ("track_length",)
 
         # -- Initialize base class (retro.hypo.Hypo) -- #
 
@@ -686,14 +703,15 @@ class MuonHypo(Hypo):
         self.continuous_loss_model = continuous_loss_model
         self.stochastic_loss_model = stochastic_loss_model
         self.fixed_track_length = fixed_track_length
+        self.pegleg_step_size = pegleg_step_size
         self.continuous_loss_model_kwargs = continuous_loss_model_kwargs
         self.stochastic_loss_model_kwargs = stochastic_loss_model_kwargs
 
-        # -- Create the _generate_sources function -- #
+        # -- Create the _get_sources function -- #
 
-        self._create_source_generator_func()
+        self._create_get_sources_func()
 
-    def _create_source_generator_func(self):
+    def _create_get_sources_func(self):
         time_step = self.continuous_loss_model_kwargs["time_step"]
         segment_length = time_step * SPEED_OF_LIGHT_M_PER_NS
         photons_per_segment = segment_length * TRACK_PHOTONS_PER_M
@@ -702,23 +720,19 @@ class MuonHypo(Hypo):
         if fixed_track_length <= 0:
             fixed_track_length = 0
 
-        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-        def _continuous_generator(x, y, z, time, azimuth, zenith, length):
-            if length == 0:
-                return [EMPTY_SOURCES], [False]
-
-            if fixed_track_length > 0:
-                length = fixed_track_length
+        def get_continuous_sources(x, y, z, time, azimuth, zenith, track_length): # pylint: disable=missing-docstring
+            if track_length == 0:
+                return [EMPTY_SOURCES], [SrcHandling.none]
 
             sampled_dt = np.arange(
                 start=time_step*0.5,
-                stop=length/SPEED_OF_LIGHT_M_PER_NS,
+                stop=track_length / SPEED_OF_LIGHT_M_PER_NS,
                 step=time_step,
             )
 
             # At least one segment
             if len(sampled_dt) == 0:
-                sampled_dt = np.array([length/2./SPEED_OF_LIGHT_M_PER_NS])
+                sampled_dt = np.array([track_length / 2. / SPEED_OF_LIGHT_M_PER_NS])
 
             # NOTE: add pi to make dir vector go in "math-standard" vector notation
             # (vector components point in direction of motion), as opposed to "IceCube"
@@ -753,32 +767,58 @@ class MuonHypo(Hypo):
             sources['dir_cosphi'] = dir_cosphi
             sources['dir_sinphi'] = dir_sinphi
 
-            return sources
+            return [sources], [SrcHandling.nonscaling]
 
         assert self.stochastic_loss_model is StochasticLossModel.none
 
         if fixed_track_length > 0:
-            @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-            def _generate_sources(x, y, z, time, azimuth, zenith):
-                return _continuous_generator(
+            pegleg_step_size = self.pegleg_step_size
+            def _get_sources(x, y, z, time, azimuth, zenith):
+                pegleg_sources = get_continuous_sources(
                     x=x,
                     y=y,
                     z=z,
                     time=time,
                     azimuth=azimuth,
                     zenith=zenith,
-                    length=fixed_track_length,
+                    track_length=fixed_track_length,
                 )
-            self._generate_sources = _generate_sources
-        else:
-            self._generate_sources = _continuous_generator
+                num_pegleg_sources = len(pegleg_sources)
 
-    def get_energy(self, pegleg_idx=None):
+                @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+                def pegleg_generator(): # pylint: disable=missing-docstring
+                    for idx in range(0, num_pegleg_sources, pegleg_step_size):
+                        yield (
+                            [pegleg_sources[idx : idx + pegleg_step_size]],
+                            [SrcHandling.nonscaling]
+                        )
+
+                return [pegleg_generator], [SrcHandling.pegleg]
+
+        else:
+
+            def _get_sources(x, y, z, time, azimuth, zenith, track_length):
+                nonscaling_sources = get_continuous_sources(
+                    x=x,
+                    y=y,
+                    z=z,
+                    time=time,
+                    azimuth=azimuth,
+                    zenith=zenith,
+                    track_length=track_length,
+                )
+                return [nonscaling_sources], [SrcHandling.nonscaling]
+
+        self._get_sources = _get_sources
+
+    def get_energy(self, pegleg_step=None, scalefactors=None): # pylint: disable=unused-argument
         """Retrieve the estimated energy of the last-produced muon.
 
         Parameters
         ----------
-        pegleg_idx : int, required if `self.fixed_track_length` > 0
+        pegleg_step : int
+
+        scalefactors : scalar or iterable thereof, required if scaling sources present
 
         Returns
         -------
@@ -787,24 +827,25 @@ class MuonHypo(Hypo):
         Raises
         ------
         ValueError
-            * If fixed_track_length > 0 and no `pegleg_idx` is specified
-            * If no calls to generate_sources have been made
+            * If fixed_track_length > 0 and no `pegleg_step` is specified
+            * If no calls to get_sources have been made
 
         """
         if self.fixed_track_length <= 0:
-            continuous_energy = self.internal_param_values["continuous_energy"]
+            track_length = self.internal_param_values["track_length"]
         else:
-            if pegleg_idx is None:
+            if pegleg_step is None:
                 raise ValueError(
-                    "Need to provide value for `pegleg_idx` since kernel was"
+                    "Need to provide value for `pegleg_step` since kernel was"
                     " instantiated with a fixed track length"
                 )
-            length = (
-                pegleg_idx
+            track_length = (
+                pegleg_step
                 * self.continuous_loss_model_kwargs["time_step"]
                 * SPEED_OF_LIGHT_M_PER_NS
             )
-            continuous_energy = self.muon_length_to_energy(length)
+
+        continuous_energy = self.muon_length_to_energy(track_length)
 
         if self.stochastic_loss_model is StochasticLossModel.none:
             stochastic_energy = 0

@@ -854,7 +854,7 @@ class Reco(object):
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
             scaling_sources = hypo_handler.get_scaling_sources(hypo)
 
-            llh, pegleg_idx, scalefactor = self.get_llh(
+            llh, pegleg_step, scalefactor = self.get_llh(
                 generic_sources=generic_sources,
                 pegleg_sources=pegleg_sources,
                 scaling_sources=scaling_sources,
@@ -871,7 +871,7 @@ class Reco(object):
 
             if self.hypo_handler.pegleg_kernel:
                 pegleg_result = pegleg_eval(
-                    pegleg_idx=pegleg_idx,
+                    pegleg_step=pegleg_step,
                     dt=pegleg_muon_dt,
                     const_e_loss=pegleg_muon_const_e_loss,
                     mmc=True,

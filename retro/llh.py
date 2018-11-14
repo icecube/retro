@@ -678,10 +678,10 @@ def generate_llh_function(
 
             # break condition
             if getting_worse_counter > 100: # 10?
-                #for idx in range(pegleg_idx+1,n_pegleg_steps):
+                #for idx in range(pegleg_step+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100
-                #print('break at step ',pegleg_idx)
+                #print('break at step ', pegleg_step)
                 break
 
         if PEGLEG_LLH_CHOICE is LLHChoice.MAX:

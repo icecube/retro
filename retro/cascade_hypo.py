@@ -41,7 +41,7 @@ from retro.const import (
     EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI,
     SRC_CKV_BETA1
 )
-from retro.hypo import Hypo
+from retro.hypo import Hypo, SrcHandling
 from retro.retro_types import SRC_T
 from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 
@@ -195,25 +195,30 @@ class CascadeHypo(Hypo):
         self.scaling_proto_energy = scaling_proto_energy
         self.is_scaling = is_scaling
 
-        # -- Create the self._generate_sources attribute/callable -- #
+        # -- Create the self._get_sources attribute/callable -- #
 
-        self._create_source_generator_func()
+        self._create_get_sources_func()
 
-    def _create_source_generator_func(self):
+    def _create_get_sources_func(self):
         """Create the function that generates photon sources for a hypothesis.
 
         The created function is attached to this class as the private attribute
-        `self._generate_sources` and is intended to be called externally from
-        `self.generate_sources` (which does the appropriate translations from
-        external names/values to internal names/values as used by _generate_sources).
+        `self._get_sources` and is intended to be called externally from
+        `self.get_sources` (which does the appropriate translations from
+        external names/values to internal names/values as used by _get_sources).
 
         """
         is_scaling = self.is_scaling
+        if is_scaling:
+            src_handling = SrcHandling.scaling
+        else:
+            src_handling = SrcHandling.nonscaling
+
         scaling_proto_energy = self.scaling_proto_energy
 
         if self.model is CascadeModel.spherical:
 
-            def __generate_sources(time, x, y, z, energy):
+            def __get_sources(time, x, y, z, energy):
                 """Point-like spherically-radiating cascade.
 
                 Parameters
@@ -222,12 +227,11 @@ class CascadeHypo(Hypo):
 
                 Returns
                 -------
-                sources : list of 0 or 1 ndarray of dtype SRC_T
-                is_scaling : list of 0 or 1 bool
+                sources
 
                 """
                 if energy == 0:
-                    return [EMPTY_SOURCES], [is_scaling]
+                    return [EMPTY_SOURCES], [SrcHandling.none]
 
                 sources = np.empty(shape=(1,), dtype=SRC_T)
                 sources[0]['kind'] = SRC_OMNI
@@ -237,22 +241,23 @@ class CascadeHypo(Hypo):
                 sources[0]['z'] = z
                 sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * energy
 
-                return [sources], [is_scaling]
+                return [sources], [src_handling]
 
             if is_scaling:
-                def _generate_sources(time, x, y, z): # pylint: disable=missing-docstring
-                    return __generate_sources(
+                def ___get_sources(time, x, y, z): # pylint: disable=missing-docstring
+                    return __get_sources(
                         time=time,
                         x=x,
                         y=y,
                         z=z,
                         energy=scaling_proto_energy,
                     )
-                _generate_sources.__doc__ = (
-                    __generate_sources.__doc__.replace(", energy", "")
+                ___get_sources.__doc__ = (
+                    __get_sources.__doc__.replace(", energy", "")
                 )
+                _get_sources = ___get_sources
             else:
-                _generate_sources = __generate_sources
+                _get_sources = __get_sources
 
         elif self.model is CascadeModel.one_dim_v1:
             # TODO: use quasi-random (low discrepancy) numbers instead of pseudo-random
@@ -380,7 +385,7 @@ class CascadeHypo(Hypo):
             # TODO: speed up (~800 µs to generate sources at 10 GeV)...
             # * 70% of the time is spent instantiating the gamma dist
             # * 10% of the time is executing the `rvs` method of the gamma dist
-            def __generate_sources(time, x, y, z, energy, azimuth, zenith):
+            def __get_sources(time, x, y, z, energy, azimuth, zenith):
                 """Cascade with both longitudinal and angular distributions (but no
                 distribution off-axis). All emitters are located on the shower axis.
 
@@ -395,12 +400,12 @@ class CascadeHypo(Hypo):
 
                 Returns
                 -------
-                sources : list of one ndarray of dtype SRC_T
-                is_scaling : list of one bool
+                sources
+                source_handling
 
                 """
                 if energy == 0:
-                    return [EMPTY_SOURCES], [is_scaling]
+                    return [EMPTY_SOURCES], [SrcHandling.none]
 
                 if is_scaling:
                     n_sources = actual_num_sources
@@ -437,7 +442,7 @@ class CascadeHypo(Hypo):
                     sources[0]['dir_cosphi'] = cos_az
                     sources[0]['dir_sinphi'] = sin_az
 
-                    return [sources], [is_scaling]
+                    return [sources], [src_handling]
 
                 # Create rotation matrix
                 rot_mat = np.array(
@@ -500,11 +505,11 @@ class CascadeHypo(Hypo):
                 sources['dir_cosphi'] = np.cos(final_phi_dist)
                 sources['dir_sinphi'] = np.sin(final_phi_dist)
 
-                return [sources], [is_scaling]
+                return [sources], [src_handling]
 
             if is_scaling:
-                def _generate_sources(time, x, y, z, azimuth, zenith): # pylint: disable=missing-docstring
-                    return __generate_sources(
+                def ___get_sources(time, x, y, z, azimuth, zenith): # pylint: disable=missing-docstring
+                    return __get_sources(
                         time=time,
                         x=x,
                         y=y,
@@ -513,11 +518,12 @@ class CascadeHypo(Hypo):
                         azimuth=azimuth,
                         zenith=zenith,
                     )
-                _generate_sources.__doc__ = (
-                    __generate_sources.__doc__.replace(", energy", "")
+                ___get_sources.__doc__ = (
+                    __get_sources.__doc__.replace(", energy", "")
                 )
+                _get_sources = ___get_sources
             else:
-                _generate_sources = __generate_sources
+                _get_sources = __get_sources
 
         else:
             raise NotImplementedError(
@@ -525,7 +531,7 @@ class CascadeHypo(Hypo):
 
             )
 
-        self._generate_sources = _generate_sources
+        self._get_sources = _get_sources
 
 
 def test_CascadeHypo():
@@ -568,7 +574,7 @@ def test_CascadeHypo():
         num_sources=-1,
         scaling_proto_energy=None,
     )
-    cscd.generate_sources(**params)
+    cscd.get_sources(**params)
 
     # dict for param mapping, enum model, dynamic num sources, not scaling
     cscd = CascadeHypo(
@@ -578,7 +584,7 @@ def test_CascadeHypo():
         scaling_proto_energy=None,
     )
 
-    cscd.generate_sources(**params)
+    cscd.get_sources(**params)
     # callable for param mapping, str model, fixed num sources, scaling
     cscd = CascadeHypo(
         param_mapping=callable_scaling_param_mapping,
@@ -586,7 +592,7 @@ def test_CascadeHypo():
         num_sources=100,
         scaling_proto_energy=100,
     )
-    cscd.generate_sources(**params)
+    print(cscd.get_sources(**params))
 
     # dict for param mapping, int model, auto num sources, scaling
     cscd = CascadeHypo(
@@ -595,7 +601,7 @@ def test_CascadeHypo():
         num_sources=-1,
         scaling_proto_energy=100,
     )
-    cscd.generate_sources(**sph_params)
+    cscd.get_sources(**sph_params)
 
     # dict for param mapping, int model, fixed num sources, not scaling
     cscd = CascadeHypo(
@@ -603,7 +609,7 @@ def test_CascadeHypo():
         model=CascadeModel.spherical,
         num_sources=1,
     )
-    cscd.generate_sources(**sph_params)
+    cscd.get_sources(**sph_params)
     print("<< PASS : test_CascadeHypo >>")
 
 
