@@ -24,6 +24,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from collections import Iterable
 import enum
 import math
 from numbers import Number
@@ -38,10 +39,10 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
-    EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI,
-    SRC_CKV_BETA1
+    EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1, SrcHandling,
+    dummy_pegleg_gens
 )
-from retro.hypo import Hypo, SrcHandling
+from retro.hypo import Hypo
 from retro.retro_types import SRC_T
 from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 
@@ -62,7 +63,8 @@ class CascadeModel(enum.IntEnum):
     """spherical point-radiator"""
 
     one_dim_v1 = 1
-    """parameterization inspired by but not strictly following arXiv:1210.5140v2"""
+    """parameterization inspired by but not strictly following arXiv:1210.5140v2; set
+    num_sources to 1 to produce a point-like Chrenkov cascade"""
 
 
 class CascadeHypo(Hypo):
@@ -84,7 +86,7 @@ class CascadeHypo(Hypo):
         specify an integer >= 1 to fix the number of sources, or specify None or an
         integer <= 0 to dynamically adjust the number of sources based on the energy of
         the cascade. See `retro/notebooks/energy_dependent_cascade_num_samples.ipynb`
-        for the reasoning behind how `num_sources` is computed in this case
+        for the logic behind how `num_sources` is computed in this case
 
     scaling_proto_energy : None or scalar > 0
         specify None to disable or specify scalar > 0 to treat the cascade as
@@ -132,7 +134,7 @@ class CascadeHypo(Hypo):
         else:
             num_sources = int(num_sources)
 
-        if model is CascadeModel.spherical:
+        if model == CascadeModel.spherical:
             if num_sources < 1:
                 num_sources = 1
             elif num_sources != 1:
@@ -141,7 +143,7 @@ class CascadeHypo(Hypo):
                     " got `num_sources` = {}".format(num_sources)
                 )
             internal_param_names = ("x", "y", "z", "time", "energy")
-        else: # model is CascadeModel.one_dim_v1
+        else: # model == CascadeModel.one_dim_v1
             internal_param_names = ("x", "y", "z", "time", "energy", "azimuth", "zenith")
 
         if not (
@@ -180,13 +182,14 @@ class CascadeHypo(Hypo):
             message_pfx="{} cascade model:".format(model.name), # pylint: disable=no-member
         )
 
-        # -- Initialize base class (retro.hypo.Hypo) -- #
+        # -- Initialize base class -- #
 
         super(CascadeHypo, self).__init__(
             param_mapping=param_mapping,
             internal_param_names=internal_param_names,
             external_sph_pairs=external_sph_pairs,
         )
+        self.max_num_scalefactors = 1 if is_scaling else 0
 
         # -- Store attrs unique to a cascade -- #
 
@@ -194,6 +197,12 @@ class CascadeHypo(Hypo):
         self.num_sources = num_sources
         self.scaling_proto_energy = scaling_proto_energy
         self.is_scaling = is_scaling
+
+        # -- Record configuration items unique to a muon hypo -- #
+
+        self.config["model"] = model.name # pylint: disable=no-member
+        self.config["num_sources"] = num_sources
+        self.config["scaling_proto_energy"] = scaling_proto_energy
 
         # -- Create the self._get_sources attribute/callable -- #
 
@@ -216,7 +225,7 @@ class CascadeHypo(Hypo):
 
         scaling_proto_energy = self.scaling_proto_energy
 
-        if self.model is CascadeModel.spherical:
+        if self.model == CascadeModel.spherical:
 
             def __get_sources(time, x, y, z, energy):
                 """Point-like spherically-radiating cascade.
@@ -228,10 +237,13 @@ class CascadeHypo(Hypo):
                 Returns
                 -------
                 sources
+                sources_handling
+                num_pegleg_generators
+                pegleg_generators
 
                 """
                 if energy == 0:
-                    return [EMPTY_SOURCES], [SrcHandling.none]
+                    return (EMPTY_SOURCES,), (SrcHandling.none,), 0, dummy_pegleg_gens
 
                 sources = np.empty(shape=(1,), dtype=SRC_T)
                 sources[0]['kind'] = SRC_OMNI
@@ -241,7 +253,7 @@ class CascadeHypo(Hypo):
                 sources[0]['z'] = z
                 sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * energy
 
-                return [sources], [src_handling]
+                return (sources,), (SrcHandling.none,), 0, dummy_pegleg_gens
 
             if is_scaling:
                 def ___get_sources(time, x, y, z): # pylint: disable=missing-docstring
@@ -259,7 +271,7 @@ class CascadeHypo(Hypo):
             else:
                 _get_sources = __get_sources
 
-        elif self.model is CascadeModel.one_dim_v1:
+        elif self.model == CascadeModel.one_dim_v1:
             # TODO: use quasi-random (low discrepancy) numbers instead of pseudo-random
             #       (e.g., Sobol sequence)
 
@@ -402,10 +414,12 @@ class CascadeHypo(Hypo):
                 -------
                 sources
                 source_handling
+                num_pegleg_generators
+                pegleg_generators
 
                 """
                 if energy == 0:
-                    return [EMPTY_SOURCES], [SrcHandling.none]
+                    return (EMPTY_SOURCES,), (SrcHandling.none,), 0, dummy_pegleg_gens
 
                 if is_scaling:
                     n_sources = actual_num_sources
@@ -442,7 +456,7 @@ class CascadeHypo(Hypo):
                     sources[0]['dir_cosphi'] = cos_az
                     sources[0]['dir_sinphi'] = sin_az
 
-                    return [sources], [src_handling]
+                    return (sources,), (src_handling,), 0, dummy_pegleg_gens
 
                 # Create rotation matrix
                 rot_mat = np.array(
@@ -505,7 +519,7 @@ class CascadeHypo(Hypo):
                 sources['dir_cosphi'] = np.cos(final_phi_dist)
                 sources['dir_sinphi'] = np.sin(final_phi_dist)
 
-                return [sources], [src_handling]
+                return (sources,), (src_handling,), 0, dummy_pegleg_gens
 
             if is_scaling:
                 def ___get_sources(time, x, y, z, azimuth, zenith): # pylint: disable=missing-docstring
@@ -532,6 +546,31 @@ class CascadeHypo(Hypo):
             )
 
         self._get_sources = _get_sources
+
+    def get_energy(self, pegleg_indices=None, scalefactors=None):
+        """Get cascade energy.
+
+        Parameters
+        ----------
+        pegleg_indices : must be None
+        scalefactors : scalar or iterable of one scalar; required if is_scaling
+
+        Returns
+        -------
+        energy
+            Energy of cascade in GeV
+
+        """
+        assert pegleg_indices is None
+
+        if isinstance(scalefactors, Iterable):
+            scalefactors = tuple(scalefactors)[0]
+
+        if self.is_scaling:
+            assert scalefactors is not None
+            return self.scaling_proto_energy * scalefactors
+
+        return self.internal_params["energy"]
 
 
 def test_CascadeHypo():
@@ -574,7 +613,7 @@ def test_CascadeHypo():
         num_sources=-1,
         scaling_proto_energy=None,
     )
-    cscd.get_sources(**params)
+    _, _, _, _ = cscd.get_sources(**params)
 
     # dict for param mapping, enum model, dynamic num sources, not scaling
     cscd = CascadeHypo(
@@ -584,7 +623,7 @@ def test_CascadeHypo():
         scaling_proto_energy=None,
     )
 
-    cscd.get_sources(**params)
+    _, _, _, _ = cscd.get_sources(**params)
     # callable for param mapping, str model, fixed num sources, scaling
     cscd = CascadeHypo(
         param_mapping=callable_scaling_param_mapping,
@@ -592,7 +631,9 @@ def test_CascadeHypo():
         num_sources=100,
         scaling_proto_energy=100,
     )
-    print(cscd.get_sources(**params))
+    _, _, _, _ = out = cscd.get_sources(**params)
+    print(out[0][0][:10])
+    print(out[1][0])
 
     # dict for param mapping, int model, auto num sources, scaling
     cscd = CascadeHypo(
@@ -601,7 +642,7 @@ def test_CascadeHypo():
         num_sources=-1,
         scaling_proto_energy=100,
     )
-    cscd.get_sources(**sph_params)
+    _, _, _, _ = cscd.get_sources(**sph_params)
 
     # dict for param mapping, int model, fixed num sources, not scaling
     cscd = CascadeHypo(
@@ -609,7 +650,8 @@ def test_CascadeHypo():
         model=CascadeModel.spherical,
         num_sources=1,
     )
-    cscd.get_sources(**sph_params)
+    _, _, _, _ = cscd.get_sources(**sph_params)
+
     print("<< PASS : test_CascadeHypo >>")
 
 

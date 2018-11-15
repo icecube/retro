@@ -12,7 +12,7 @@ __all__ = [
 
     # Constants
     'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS', 'MUON_REST_MASS',
-    'ICE_DENSITY',
+    'NOMINAL_ICE_DENSITY',
 
     # Pre-calculated values
     'COS_CKV', 'THETA_CKV', 'SIN_CKV',
@@ -30,6 +30,7 @@ __all__ = [
     'STR_ALL', 'STR_IC', 'STR_DC', 'AGG_STR_NONE', 'AGG_STR_ALL',
     'AGG_STR_SUBDET', 'DOM_ALL',
     'SRC_OMNI', 'SRC_CKV_BETA1',
+    'SrcHandling',
 
     'I3_Z0_DEPTH', 'BEDROCK_DEPTH',
     'NUM_STRINGS', 'NUM_DOMS_PER_STRING', 'NUM_DOMS_TOT',
@@ -39,7 +40,7 @@ __all__ = [
     'DC_ALL_SUBDUST_STRS_DOMS', 'ALL_STRS', 'ALL_DOMS', 'ALL_STRS_DOMS',
     'ALL_STRS_DOMS_SET', 'DC_ALL_STRS_DOMS',
 
-    'EMPTY_HITS', 'EMPTY_SOURCES',
+    'EMPTY_HITS', 'EMPTY_SOURCES', 'dummy_pegleg_gens',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -57,6 +58,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from enum import IntEnum
 from itertools import product
 from os.path import abspath, dirname
 import sys
@@ -67,7 +69,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import FTYPE
+from retro import DFLT_NUMBA_JIT_KWARGS, FTYPE, numba_jit
 from retro import retro_types
 
 
@@ -151,13 +153,14 @@ MUON_REST_MASS = 105.65837e-3 # (GeV/c^2)
 """Rest mass of muon in GeV/c^2, ~ from ref
   K.A. Olive et al. (Particle Data Group), Chin. Phys. C38 , 090001 (2014)"""
 
-ICE_DENSITY = 0.92
-"""Average South Pole Ice density in (g/cm^3 = Mg/m^3); one ref I found uses 0.917:
+NOMINAL_ICE_DENSITY = 0.92
+"""Nominal value of South Pole Ice density in (g/cm^3 = Mg/m^3); one ref I found uses 0.917:
   J.-H. Koehne et al. / Computer Physics Communications 184 (2013) 2070–2090,
 but this shows bias when comparing secondary-muon length vs. energy in low-energy GRECO
 simulation, so the 0.92 value is chosen instead (which shows little to no bias), which
 is in the range reported at, e.g.,
-  https://icecube.wisc.edu/~mnewcomb/radio/density"""
+  https://icecube.wisc.edu/~mnewcomb/radio/density
+but if you want to be more precise, a depth-dependent model should be used"""
 
 
 # -- Pre-calculated values -- #
@@ -244,6 +247,12 @@ SRC_OMNI = np.uint32(0)
 SRC_CKV_BETA1 = np.uint32(1)
 """Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
 
+class SrcHandling(IntEnum):
+    """Kinds of sources each hypothesis can generate"""
+    none = 0
+    nonscaling = 1
+    scaling = 2
+
 
 # -- geom constants --- #
 
@@ -287,3 +296,9 @@ DC_ALL_STRS_DOMS = np.array([get_sd_idx(s, d) for s, d in product(DC_STRS, ALL_D
 EMPTY_HITS = np.empty(shape=0, dtype=retro_types.HIT_T)
 
 EMPTY_SOURCES = np.empty(shape=0, dtype=retro_types.SRC_T)
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def dummy_pegleg_gens(gen_idx): # pylint: disable=unused-argument
+    """Pegleg generator stand-in that yields "empty" / "none" values that pass Numba
+    type checking but don't contribute to photon expectations"""
+    yield (EMPTY_SOURCES,), (SrcHandling.none,)

@@ -7,13 +7,7 @@ Base class for hypotheses and associated helper functions
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    "SrcHandling",
-    "get_partial_match_expr",
-    "deduce_sph_pairs",
-    "aggregate_sources",
-    "Hypo",
-]
+__all__ = ["AZ_REGEX", "ZEN_REGEX", "deduce_sph_pairs", "Hypo"]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017-2018 Philipp Eller and Justin L. Lanfranchi
@@ -31,48 +25,17 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import Mapping, OrderedDict
-from enum import IntEnum
-from inspect import cleandoc
 from os.path import abspath, dirname
 import re
 import sys
 
-import numba
+from funcsigs import signature # use builtin `inspect` in python 3
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
-from retro.const import EMPTY_SOURCES
-from retro.utils.misc import check_kwarg_keys, get_arg_names
-
-
-class SrcHandling(IntEnum):
-    """Kinds of sources each hypothesis can generate"""
-    none = 0
-    pegleg = 1
-    nonscaling = 2
-    scaling = 3
-
-
-def get_partial_match_expr(word, minchars):
-    """Generate regex sub-expression for matching first `minchars` of a word or
-    `minchars` + 1 of the word, or `minchars` + 2, ....
-
-    Adapted from user sberry at https://stackoverflow.com/a/13405331
-
-    Parameters
-    ----------
-    word : str
-    minchars : int
-
-    Returns
-    -------
-    expr : str
-
-    """
-    return '|'.join(word[:i] for i in range(len(word), minchars - 1, -1))
+from retro.utils.misc import check_kwarg_keys, get_arg_names, get_partial_match_expr
 
 
 AZ_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("azimuthal", 2)))
@@ -126,104 +89,6 @@ def deduce_sph_pairs(param_names):
             sph_pairs.append((az_param_name, zen_param_name))
 
     return tuple(sph_pairs)
-
-
-def aggregate_sources(hypos, **kwargs):
-    """Aggregate sources from all hypotheses and create a single function to call into
-    each hypothesis's pegleg function (if any exist).
-
-    Parameters
-    ----------
-    **kwargs
-        Passed into each hypo.get_sources method
-
-    Returns
-    -------
-    sources : list of 1 or more ndarrays of dtype SRC_T
-        Required to be at least 1 element for use by Numba
-
-    source_kinds : list of SrcHandling of same length as `sources`
-        Required to be at least 1 element for use by Numba
-
-    num_pegleg_generators : int >= 0
-
-    pegleg_generators : numba-callable generator
-        Takes integer parameter `generator_num` and then acts as an iterator through
-        that pegleg generator, which yields [sources], [source_kinds] on each iteration.
-        A dummy generator is created if no hypotheses have pegleg generators (i.e.,
-        `num_pegleg_generators == 0`) such that Numba gets consistent types
-
-    """
-    sources = []
-    source_kinds = []
-    pegleg_generators = []
-
-    for hypo in hypos:
-        for kind, val in hypo.get_sources(**kwargs).items():
-            if kind in (SrcHandling.nonscaling, SrcHandling.scaling):
-                sources.append(val)
-                source_kinds.append(kind)
-            elif kind is SrcHandling.pegleg:
-                pegleg_generators.append(val)
-            else:
-                raise ValueError("Invalid sources kind")
-
-    if len(sources) == 0:
-        sources.append(EMPTY_SOURCES)
-        source_kinds.append(SrcHandling.none)
-
-    for func_num, func in enumerate(pegleg_generators):
-        if not isinstance(func, numba.targets.registry.CPUDispatcher):
-            try:
-                func = numba.njit(cache=True, fastmath=True, nogil=True)(func)
-            except:
-                print("failed to numba-jit-compile func {}".format(func))
-                raise
-        pegleg_generators[func_num] = func
-
-    num_pegleg_generators = len(pegleg_generators)
-
-    conditional_lines = []
-    lcls = locals()
-    for func_num, func in enumerate(pegleg_generators):
-        if func is None:
-            continue
-
-        # Define a variable (f0, f1, etc.) in local scope that is the callee
-        func_name = "f{:d}".format(func_num)
-        lcls[func_name] = func
-
-        # Define the conditional
-        conditional = "if" if len(conditional_lines) == 0 else "elif"
-        conditional_lines.append(
-            "    {} func_num == {}:".format(conditional, func_num)
-        )
-
-        # Define the execution statement
-        conditional_lines.append(
-            "        return {}(pegleg_step=pegleg_step)".format(func_name)
-        )
-
-    # Remove leading spaces uniformly in string
-    py_pegleg_generators_str = cleandoc(
-        """
-        def py_pegleg_generators(generator_num):
-        {body}
-            raise ValueError("Invalid `generator_num`")
-        """
-    ).format(body="\n".join(conditional_lines))
-
-    try:
-        exec py_pegleg_generators_str in locals() # pylint: disable=exec-used
-    except:
-        print(py_pegleg_generators_str)
-        raise
-
-    pegleg_generators = numba_jit(**DFLT_NUMBA_JIT_KWARGS)(
-        py_pegleg_generators # pylint: disable=undefined-variable
-    )
-
-    return sources, source_kinds, num_pegleg_generators, pegleg_generators
 
 
 class Hypo(object):
@@ -405,6 +270,9 @@ class Hypo(object):
         self.param_mapping = param_mapping
         """callable : maps external param names/values to internal param names/values"""
 
+        self.external_params = OrderedDict([(n, None) for n in external_param_names])
+        """OrderedDict : {external_param_name: val or None}"""
+
         self.external_param_names = tuple(external_param_names)
         """tuple of str : all param names that must be provided externally"""
 
@@ -414,7 +282,7 @@ class Hypo(object):
         self.external_sph_pair_idxs = tuple(external_sph_pair_idxs)
         """tuple of zero or more 2-tuples of ints : (az, zen) external param index pairs"""
 
-        self.internal_param_names = tuple(internal_param_names)
+        self.internal_param_names = (tuple(internal_param_names),)
         """tuple of str : all param names that are used internally"""
 
         self.internal_sph_pairs = tuple(internal_sph_pairs)
@@ -426,23 +294,44 @@ class Hypo(object):
         self.num_external_params = len(self.external_param_names)
         """int : number of parameters used by the kernel"""
 
-        self.num_internal_params = len(self.internal_param_names)
+        self.num_internal_params = len(internal_param_names)
         """int : number of parameters used by the kernel"""
 
-        self.internal_param_values = OrderedDict([(n, None) for n in internal_param_names])
+        self.internal_params = OrderedDict([(n, None) for n in internal_param_names])
         """OrderedDict : {internal_param_name: val or None}"""
-
-        self.external_param_values = OrderedDict([(n, None) for n in external_param_names])
-        """OrderedDict : {external_param_name: val or None}"""
 
         self.sources = None
 
-        self.source_kinds = None
+        self.sources_handling = None
+
+        self.max_num_scalefactors = None
+
+        self.num_pegleg_generators = None
+
+        self.pegleg_generators = None
 
         self.num_calls = 0
         """Number of calls to `get_sources`"""
 
-        # Define dummy function
+        # -- Record configuration -- #
+
+        self.config = OrderedDict()
+        self.config["class"] = type(self).__name__
+        self.config["internal_param_names"] = internal_param_names
+        self.config["external_param_names"] = external_param_names
+        self.config["internal_sph_pairs"] = internal_sph_pairs
+        self.config["external_sph_pairs"] = external_sph_pairs
+        if callable(param_mapping):
+            self.config["param_mapping"] = (
+                param_mapping.__name__ + str(signature(param_mapping))
+            )
+        elif isinstance(param_mapping, Mapping):
+            self.config["param_mapping"] = param_mapping
+        else:
+            raise ValueError("Cannot handle {}".format(type(param_mapping)))
+
+        # -- Define dummy _get_sources function -- #
+
         def _get_sources(**kwargs): # pylint: disable=unused-argument
             """Must be replaced with your own callable"""
             raise NotImplementedError()
@@ -468,30 +357,50 @@ class Hypo(object):
         Returns
         -------
         sources : list of one or more ndarrays of dtype SRC_T
-        kinds : list of SrcHandling enums
+        sources_handling : list of SrcHandling enums
+        num_pegleg_generators
+        pegleg_generators
 
         """
         self.num_calls += 1
         for external_param_name in self.external_param_names:
             try:
-                self.external_param_values[external_param_name] = kwargs[external_param_name]
+                self.external_params[external_param_name] = kwargs[external_param_name]
             except KeyError:
-                print('Missing param "{}" in passed args'.format(external_param_name))
+                print(
+                    'Missing param "{}" in passed kwargs {}'
+                    .format(external_param_name, kwargs)
+                )
                 raise
 
         # Map external param names/values onto internal param names/values
-        self.internal_param_values = self.param_mapping(**self.external_param_values)
+        self.internal_params = self.param_mapping(**self.external_params)
 
         # Call internal function
         try:
-            self.sources = self._get_sources(**self.internal_param_values)
+            (
+                self.sources,
+                self.sources_handling,
+                self.num_pegleg_generators,
+                self.pegleg_generators,
+            ) = self._get_sources(**self.internal_params)
         except (TypeError, KeyError):
             check_kwarg_keys(
                 required_keys=self.internal_param_names,
-                provided_kwargs=self.internal_param_values,
+                provided_kwargs=self.internal_params,
                 meta_name="kwarg(s)",
                 message_pfx="internal param names (kwargs to `_get_sources`):",
             )
             raise
 
-        return self.sources
+        return (
+            self.sources,
+            self.sources_handling,
+            self.num_pegleg_generators,
+            self.pegleg_generators
+        )
+
+    def get_energy(self, pegleg_indices=None, scalefactors=None):
+        """Get energy (in units of GeV) from current parameter values. Must
+        implement/override in subclasses."""
+        raise NotImplementedError("Must define `get_energy` in subclasses of Hypo")

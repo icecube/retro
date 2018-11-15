@@ -31,6 +31,7 @@ __all__ = [
     'generate_unique_ids',
     'get_primary_interaction_str',
     'get_primary_interaction_tex',
+    'get_partial_match_expr',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -720,6 +721,25 @@ def get_primary_interaction_tex(event):
     pdg = int(event.neutrino.pdg)
     inter = int(event.interaction)
     return const.PDG_INTER_TEX[(pdg, inter)]
+
+
+def get_partial_match_expr(word, minchars):
+    """Generate regex sub-expression for matching first `minchars` of a word or
+    `minchars` + 1 of the word, or `minchars` + 2, ....
+
+    Adapted from user sberry at https://stackoverflow.com/a/13405331
+
+    Parameters
+    ----------
+    word : str
+    minchars : int
+
+    Returns
+    -------
+    expr : str
+
+    """
+    return '|'.join(word[:i] for i in range(len(word), minchars - 1, -1))
 
 
 if __name__ == '__main__':

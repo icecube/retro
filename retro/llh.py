@@ -224,7 +224,7 @@ def generate_llh_function(
         nominal_scaling_hit_exp,
         nominal_scaling_t_indep_exp,
         initial_scalefactor,
-        scaling_cascade_energy,
+        max_scalefactor,
     ):
         """Find optimal (highest-likelihood) `scalefactor` for scaling sources.
 
@@ -362,7 +362,7 @@ def generate_llh_function(
                 print('exceeded gradient descent iteration limit!')
                 print('arrived at ', scalefactor)
             #print('\n')
-            scalefactor = max(0., min(1000./scaling_cascade_energy, scalefactor))
+            scalefactor = max(0., min(max_scalefactor, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
             scalefactor = initial_scalefactor
@@ -388,7 +388,7 @@ def generate_llh_function(
             #    print('exceeded gradient descent iteration limit!')
             #    print('arrived at ',scalefactor)
             #print('\n')
-            scalefactor = max(0., min(1000./scaling_cascade_energy, scalefactor))
+            scalefactor = max(0., min(max_scalefactor, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
             epsilon = 1e-2
@@ -400,7 +400,7 @@ def generate_llh_function(
                 done = True
                 #print('trivial 0')
             if not done:
-                last = 1000./scaling_cascade_energy
+                last = max_scalefactor
                 last_grad = get_grad_neg_llh_wrt_scalefactor(last)
                 if last_grad < 0 or abs(last_grad) < epsilon:
                     scalefactor = last
@@ -441,10 +441,10 @@ def generate_llh_function(
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def _get_llh(
-        generic_sources,
+        nonscaling_sources,
         pegleg_sources,
         scaling_sources,
-        scaling_cascade_energy,
+        max_scalefactor,
         event_hit_info,
         event_dom_info,
         pegleg_stepsize,
@@ -458,10 +458,10 @@ def generate_llh_function(
 
         Parameters
         ----------
-        generic_sources : shape (n_generic_sources,) array of dtype SRC_T
+        nonscaling_sources : shape (n_nonscaling_sources,) array of dtype SRC_T
             If NOT using the pegleg/scaling procedure, all light sources are placed in
-            this array; when using the pegleg/scaling procedure, `generic_sources` will
-            be empty (i.e., `n_generic_sources = 0`)
+            this array; when using the pegleg/scaling procedure, `nonscaling_sources`
+            will be empty (i.e., `n_nonscaling_sources = 0`)
 
         pegleg_sources : shape (n_pegleg_sources,) array of dtype SRC_T
             If using the pegleg/scaling procedure, the likelihood is maximized by
@@ -475,7 +475,7 @@ def generate_llh_function(
             procedure, `scaling_sources` will be an empty array (i.e.,
             `n_scaling_sources = 0`)
 
-        scaling_cascade_energy
+        max_scalefactor
 
         event_hit_info : shape (n_hits,) array of dtype EVT_HIT_INFO_T
 
@@ -535,17 +535,17 @@ def generate_llh_function(
                 tdi_tables=tdi_tables,
             )
 
-        # -- Storage for exp due to generic + pegleg (non-scaling) sources -- #
+        # -- Storage for exp due to nonscaling + pegleg (non-scaling) sources -- #
 
         nonscaling_t_indep_exp = 0.
         nonscaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
-        # Expectations for generic-only sources (i.e. pegleg=0 at this point)
-        if len(generic_sources) > 0:
+        # Expectations for nonscaling-only sources (i.e. pegleg=0 at this point)
+        if len(nonscaling_sources) > 0:
             nonscaling_t_indep_exp += pexp(
-                sources=generic_sources,
+                sources=nonscaling_sources,
                 sources_start=0,
-                sources_stop=len(generic_sources),
+                sources_stop=len(nonscaling_sources),
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
                 hit_exp=nonscaling_hit_exp,
@@ -557,7 +557,7 @@ def generate_llh_function(
             )
 
         if num_scaling_sources > 0:
-            # Compute initial scalefactor & LLH for generic-only (no pegleg) sources
+            # Compute initial scalefactor & LLH for nonscaling-only (no pegleg) sources
             scalefactor, llh = get_optimal_scalefactor(
                 event_dom_info=event_dom_info,
                 event_hit_info=event_hit_info,
@@ -566,7 +566,7 @@ def generate_llh_function(
                 nominal_scaling_hit_exp=nominal_scaling_hit_exp,
                 nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
                 initial_scalefactor=10.,
-                scaling_cascade_energy=scaling_cascade_energy,
+                max_scalefactor=max_scalefactor,
             )
         else:
             scalefactor = 0
@@ -584,28 +584,6 @@ def generate_llh_function(
                 0, # pegleg_stop_idx = 0: no pegleg sources
                 scalefactor,
             )
-
-        # -- Pegleg loop -- #
-
-        if PEGLEG_SPACING is StepSpacing.LINEAR:
-            pass
-            #pegleg_steps = np.arange(num_pegleg_sources)
-            #n_pegleg_steps = len(pegleg_steps)
-        elif PEGLEG_SPACING is StepSpacing.LOG:
-            raise NotImplementedError(
-                'Only ``PEGLEG_SPACING = StepSpacing.LINEAR`` is implemented'
-            )
-            #logstep = np.log(num_pegleg_sources) / 300
-            #x = -1e-8
-            #logspace = np.zeros(shape=301, dtype=np.int32)
-            #for i in range(len(logspace)):
-            #    logspace[i] = np.int32(np.exp(x))
-            #    x+= logstep
-            #pegleg_steps = np.unique(logspace)
-            #assert pegleg_steps[0] == 0
-            #n_pegleg_steps = len(pegleg_steps)
-        else:
-            raise ValueError('Unknown `PEGLEG_SPACING`')
 
         # -- Loop initialization -- #
 
@@ -651,7 +629,7 @@ def generate_llh_function(
                     nominal_scaling_hit_exp=nominal_scaling_hit_exp,
                     nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
                     initial_scalefactor=scalefactor,
-                    scaling_cascade_energy=scaling_cascade_energy,
+                    max_scalefactor=max_scalefactor,
                 )
             else:
                 scalefactor = 0
@@ -739,22 +717,22 @@ def generate_llh_function(
 
     # Note: numba fails w/ TDI tables if this is set to be jit-compiled (why?)
     def get_llh(
-        generic_sources,
-        pegleg_sources,
+        nonscaling_sources,
         scaling_sources,
-        scaling_cascade_energy,
+        num_pegleg_generators,
+        pegleg_generators,
+        max_scalefactor,
         event_hit_info,
         event_dom_info,
-        pegleg_stepsize,
     ):
         """Compute log likelihood for hypothesis sources given an event.
 
         Parameters
         ----------
-        generic_sources : shape (n_generic_sources,) array of dtype SRC_T
+        nonscaling_sources : shape (n_nonscaling_sources,) array of dtype SRC_T
             If NOT using the pegleg/scaling procedure, all light sources are placed in
-            this array; when using the pegleg/scaling procedure, `generic_sources` will
-            be empty (i.e., `n_generic_sources = 0`)
+            this array; when using the pegleg/scaling procedure, `nonscaling_sources` will
+            be empty (i.e., `n_nonscaling_sources = 0`)
 
         pegleg_sources : shape (n_pegleg_sources,) array of dtype SRC_T
             If using the pegleg/scaling procedure, the likelihood is maximized by
@@ -790,10 +768,10 @@ def generate_llh_function(
 
         """
         return _get_llh(
-            generic_sources=generic_sources,
+            nonscaling_sources=nonscaling_sources,
             pegleg_sources=pegleg_sources,
             scaling_sources=scaling_sources,
-            scaling_cascade_energy=scaling_cascade_energy,
+            max_scalefactor=max_scalefactor,
             event_hit_info=event_hit_info,
             event_dom_info=event_dom_info,
             pegleg_stepsize=pegleg_stepsize,

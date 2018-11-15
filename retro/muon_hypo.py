@@ -40,22 +40,24 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-import enum
-import math
+from collections import Iterable
+from enum import IntEnum
+from math import cos, sin
 from os.path import abspath, dirname, join
-import sys
+from sys import path
 
 import numpy as np
 
 RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
-    if RETRO_DIR not in sys.path:
-        sys.path.append(RETRO_DIR)
+    if RETRO_DIR not in path:
+        path.append(RETRO_DIR)
 from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import (
-    ICE_DENSITY, MUON_REST_MASS, SPEED_OF_LIGHT_M_PER_NS, SRC_CKV_BETA1, EMPTY_SOURCES
+    NOMINAL_ICE_DENSITY, MUON_REST_MASS, SPEED_OF_LIGHT_M_PER_NS, SRC_CKV_BETA1,
+    EMPTY_SOURCES, SrcHandling, dummy_pegleg_gens
 )
-from retro.hypo import Hypo, SrcHandling
+from retro.hypo import Hypo
 from retro.retro_types import SRC_T
 from retro.utils.misc import check_kwarg_keys, validate_and_convert_enum
 from retro.utils.lerp import generate_lerp
@@ -74,7 +76,7 @@ TRACK_M_PER_GEV = 15 / 3.3
 """Constant model track length per energy, in units of m/GeV"""
 
 
-class ConstABModel(enum.IntEnum):
+class ConstABModel(IntEnum):
     """Muon range <--> muon enegy simplifies if `a` (ionization loss) and `b` (stochastic
     loss) parameters are constant to ::
 
@@ -111,7 +113,7 @@ CONST_AB_MODEL_PARAMS = {
 See :class:`ConstABModel` for details"""
 
 
-class ContinuousLossModel(enum.IntEnum):
+class ContinuousLossModel(IntEnum):
     """Muon continouous-loss models"""
 
     all_avg_const = 0
@@ -139,7 +141,7 @@ class ContinuousLossModel(enum.IntEnum):
     energy will be added to this via some stochastic-loss model"""
 
 
-class StochasticLossModel(enum.IntEnum):
+class StochasticLossModel(IntEnum):
     """Muon stochastic-loss models"""
 
     none = 0
@@ -196,13 +198,11 @@ def generate_const_a_b_converters(a=None, b=None, model=None):
 
     if model is not None:
         assert a is None and b is None
-        model_descr = "using a and b from {} model".format(model.name)
-
-    if model is not None:
         model = validate_and_convert_enum(
             val=model,
             enum_type=ConstABModel,
         )
+        model_descr = "using a and b from {} model".format(model.name) # pylint: disable=no-member
         params = CONST_AB_MODEL_PARAMS[model]
         a = params["a"]
         b = params["b"]
@@ -331,7 +331,7 @@ def generate_gms_table_converters(losses="all"):
         csda_range = table[:, 7]
         mask = np.isfinite(csda_range)
         csda_range = csda_range[mask]
-        ice_csda_range_m = csda_range / ICE_DENSITY / cm_per_m # (m)
+        ice_csda_range_m = csda_range / NOMINAL_ICE_DENSITY / cm_per_m # (m)
         energy_bounds = (np.min(total_energy[mask]), np.max(total_energy[mask]))
         _, muon_energy_to_length = generate_lerp(
             x=total_energy[mask],
@@ -365,7 +365,7 @@ def generate_gms_table_converters(losses="all"):
             mask |= np.isfinite(addl_stopping_power)
             stopping_powers.append(addl_stopping_power)
         stopping_power = np.nansum(stopping_powers, axis=0)[mask]
-        stopping_power *= cm_per_m * mev_per_gev * ICE_DENSITY
+        stopping_power *= cm_per_m * mev_per_gev * NOMINAL_ICE_DENSITY
 
         valid_energies = total_energy[mask]
         energy_bounds = (valid_energies.min(), valid_energies.max())
@@ -631,9 +631,9 @@ class MuonHypo(Hypo):
 
         # `stochastic_loss_model_kwargs`
 
-        if stochastic_loss_model is StochasticLossModel.none:
+        if stochastic_loss_model == StochasticLossModel.none:
             required_keys = ()
-        elif stochastic_loss_model is StochasticLossModel.scaled_cascades:
+        elif stochastic_loss_model == StochasticLossModel.scaled_cascades:
             required_keys = ("cascade_model", "spacing",)
         else:
             raise NotImplementedError(
@@ -655,7 +655,7 @@ class MuonHypo(Hypo):
 
         # -- Functons to find expected length from energy and vice versa -- #
 
-        if continuous_loss_model is ContinuousLossModel.all_avg_const:
+        if continuous_loss_model == ContinuousLossModel.all_avg_const:
             self.muon_energy_to_length = const_muon_energy_to_length
             self.muon_length_to_energy = const_muon_length_to_energy
         elif continuous_loss_model in (
@@ -668,11 +668,11 @@ class MuonHypo(Hypo):
             self.muon_energy_to_length, self.muon_length_to_energy = (
                 generate_const_a_b_converters(model=model)
             )
-        elif continuous_loss_model is ContinuousLossModel.all_avg_gms_table:
+        elif continuous_loss_model == ContinuousLossModel.all_avg_gms_table:
             self.muon_energy_to_length, self.muon_length_to_energy, _ = (
                 generate_gms_table_converters()
             )
-        elif continuous_loss_model is ContinuousLossModel.min_energy_fit:
+        elif continuous_loss_model == ContinuousLossModel.min_energy_fit:
             self.muon_energy_to_length, self.muon_length_to_energy, _ = (
                 generate_min_energy_fit_converters()
             )
@@ -690,13 +690,14 @@ class MuonHypo(Hypo):
         if fixed_track_length == 0:
             internal_param_names += ("track_length",)
 
-        # -- Initialize base class (retro.hypo.Hypo) -- #
+        # -- Initialize base class -- #
 
         super(MuonHypo, self).__init__(
             param_mapping=param_mapping,
             internal_param_names=internal_param_names,
             external_sph_pairs=external_sph_pairs,
         )
+        self.max_num_scalefactors = 0
 
         # -- Store attrs unique to a muon hypo -- #
 
@@ -706,6 +707,15 @@ class MuonHypo(Hypo):
         self.pegleg_step_size = pegleg_step_size
         self.continuous_loss_model_kwargs = continuous_loss_model_kwargs
         self.stochastic_loss_model_kwargs = stochastic_loss_model_kwargs
+
+        # -- Record configuration items unique to a muon hypo -- #
+
+        self.config["continuous_loss_model"] = continuous_loss_model.name # pylint: disable=no-member
+        self.config["continuous_loss_model_kwargs"] = continuous_loss_model_kwargs
+        self.config["stochastic_loss_model"] = stochastic_loss_model.name # pylint: disable=no-member
+        self.config["stochastic_loss_model_kwargs"] = stochastic_loss_model_kwargs
+        self.config["fixed_track_length"] = fixed_track_length
+        self.config["pegleg_step_size"] = pegleg_step_size
 
         # -- Create the _get_sources function -- #
 
@@ -722,7 +732,7 @@ class MuonHypo(Hypo):
 
         def get_continuous_sources(x, y, z, time, azimuth, zenith, track_length): # pylint: disable=missing-docstring
             if track_length == 0:
-                return [EMPTY_SOURCES], [SrcHandling.none]
+                return (EMPTY_SOURCES,), (SrcHandling.none,), 0, dummy_pegleg_gens
 
             sampled_dt = np.arange(
                 start=time_step*0.5,
@@ -734,18 +744,18 @@ class MuonHypo(Hypo):
             if len(sampled_dt) == 0:
                 sampled_dt = np.array([track_length / 2. / SPEED_OF_LIGHT_M_PER_NS])
 
-            # NOTE: add pi to make dir vector go in "math-standard" vector notation
+            # Add pi to make dir vector go in "math-standard" vector notation
             # (vector components point in direction of motion), as opposed to "IceCube"
             # vector notation (vector components point opposite to direction of
             # motion).
             opposite_zenith = np.pi - zenith
             opposite_azimuth = np.pi + azimuth
 
-            dir_costheta = math.cos(opposite_zenith)
-            dir_sintheta = math.sin(opposite_zenith)
+            dir_costheta = cos(opposite_zenith)
+            dir_sintheta = sin(opposite_zenith)
 
-            dir_cosphi = math.cos(opposite_azimuth)
-            dir_sinphi = math.sin(opposite_azimuth)
+            dir_cosphi = cos(opposite_azimuth)
+            dir_sinphi = sin(opposite_azimuth)
 
             dir_x = dir_sintheta * dir_cosphi
             dir_y = dir_sintheta * dir_sinphi
@@ -767,7 +777,7 @@ class MuonHypo(Hypo):
             sources['dir_cosphi'] = dir_cosphi
             sources['dir_sinphi'] = dir_sinphi
 
-            return [sources], [SrcHandling.nonscaling]
+            return sources
 
         assert self.stochastic_loss_model is StochasticLossModel.none
 
@@ -786,14 +796,15 @@ class MuonHypo(Hypo):
                 num_pegleg_sources = len(pegleg_sources)
 
                 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-                def pegleg_generator(): # pylint: disable=missing-docstring
+                def pegleg_generators(gen_idx): # pylint: disable=missing-docstring
+                    assert gen_idx == 0
                     for idx in range(0, num_pegleg_sources, pegleg_step_size):
                         yield (
-                            [pegleg_sources[idx : idx + pegleg_step_size]],
-                            [SrcHandling.nonscaling]
+                            (pegleg_sources[idx : idx + pegleg_step_size],),
+                            (SrcHandling.nonscaling,)
                         )
 
-                return [pegleg_generator], [SrcHandling.pegleg]
+                return (EMPTY_SOURCES,), (SrcHandling.none,), 1, pegleg_generators
 
         else:
 
@@ -807,16 +818,21 @@ class MuonHypo(Hypo):
                     zenith=zenith,
                     track_length=track_length,
                 )
-                return [nonscaling_sources], [SrcHandling.nonscaling]
+                return (
+                    (nonscaling_sources,),
+                    (SrcHandling.nonscaling,),
+                    0,
+                    dummy_pegleg_gens
+                )
 
         self._get_sources = _get_sources
 
-    def get_energy(self, pegleg_step=None, scalefactors=None): # pylint: disable=unused-argument
+    def get_energy(self, pegleg_indices=None, scalefactors=None): # pylint: disable=unused-argument
         """Retrieve the estimated energy of the last-produced muon.
 
         Parameters
         ----------
-        pegleg_step : int
+        pegleg_indices : int >= 0 or iterable thereof
 
         scalefactors : scalar or iterable thereof, required if scaling sources present
 
@@ -827,27 +843,32 @@ class MuonHypo(Hypo):
         Raises
         ------
         ValueError
-            * If fixed_track_length > 0 and no `pegleg_step` is specified
+            * If fixed_track_length > 0 and no `pegleg_indices` is specified
             * If no calls to get_sources have been made
 
         """
         if self.fixed_track_length <= 0:
-            track_length = self.internal_param_values["track_length"]
+            track_length = self.internal_params["track_length"]
         else:
-            if pegleg_step is None:
+            if pegleg_indices is None:
                 raise ValueError(
-                    "Need to provide value for `pegleg_step` since kernel was"
+                    "Need to provide value for `pegleg_indices` since kernel was"
                     " instantiated with a fixed track length"
                 )
+            if isinstance(pegleg_indices, Iterable):
+                pegleg_indices = tuple(pegleg_indices)
+                assert len(pegleg_indices) == 1
+                pegleg_indices = pegleg_indices[0]
+
             track_length = (
-                pegleg_step
+                pegleg_indices
                 * self.continuous_loss_model_kwargs["time_step"]
                 * SPEED_OF_LIGHT_M_PER_NS
             )
 
         continuous_energy = self.muon_length_to_energy(track_length)
 
-        if self.stochastic_loss_model is StochasticLossModel.none:
+        if self.stochastic_loss_model == StochasticLossModel.none:
             stochastic_energy = 0
         else:
             raise NotImplementedError("No handling of stochastic energy loss")
@@ -855,7 +876,44 @@ class MuonHypo(Hypo):
         return continuous_energy + stochastic_energy
 
 
+def test_MuonHypo():
+    """Unit tests for :class:`MuonHypo`"""
+    # Pegleg muon
+    mu_mapping = dict(
+        x='x', y='y', z='z', time='time', azimuth='azimuth', zenith='zenith'
+    )
+    muon0 = MuonHypo(
+        fixed_track_length=1000,
+        pegleg_step_size=10,
+        param_mapping=mu_mapping,
+        continuous_loss_model=ContinuousLossModel.all_avg_gms_table,
+        stochastic_loss_model=None,
+        continuous_loss_model_kwargs=dict(time_step=1),
+    )
+
+    params_kw = {k: np.random.uniform(1, 3) for k in mu_mapping}
+    _, _, _, _ = muon0.get_sources(**params_kw)
+
+    # Non-pegleg muon
+    mu_mapping = dict(
+        x='x', y='y', z='z', time='time', track_length='track_length',
+        azimuth='azimuth', zenith='zenith'
+    )
+    rand = np.random.RandomState(0)
+    params_kw = {k: rand.uniform(1, 3) for k in mu_mapping}
+    muon1 = MuonHypo(
+        param_mapping=mu_mapping,
+        continuous_loss_model=ContinuousLossModel.all_avg_leera2,
+        stochastic_loss_model=None,
+        continuous_loss_model_kwargs=dict(time_step=1),
+    )
+    _, _, _, _ = muon1.get_sources(**params_kw)
+
+    print("<< PASS : test_MuonHypo >>")
+
+
 if __name__ == "__main__":
     test_generate_const_a_b_converters()
     test_generate_gms_table_converters()
     test_generate_min_energy_fit_converters()
+    test_MuonHypo()
