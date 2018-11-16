@@ -7,13 +7,10 @@ Aggregate together multiple hypotheses (objects of type :class:`retro.hypo.Hypo`
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    "AggregateHypo",
-    "test_AggregateHypo",
-]
+__all__ = ["AggregateHypo", "test_AggregateHypo"]
 
-__author__ = 'J.L. Lanfranchi'
-__license__ = '''Copyright 2018 Philipp Eller and Justin L. Lanfranchi
+__author__ = "J.L. Lanfranchi"
+__license__ = """Copyright 2018 Philipp Eller and Justin L. Lanfranchi
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,8 +22,9 @@ Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
-limitations under the License.'''
+limitations under the License."""
 
+from collections import OrderedDict
 from copy import copy
 from inspect import cleandoc
 from os.path import abspath, dirname
@@ -35,7 +33,7 @@ import sys
 import numba
 import numpy as np
 
-if __name__ == '__main__' and __package__ is None:
+if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
@@ -44,19 +42,52 @@ from retro.const import (
     EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS, SrcHandling, dummy_pegleg_gens
 )
 from retro.hypo import Hypo
+from retro.utils.misc import make_valid_python_name
 
 
 class AggregateHypo(Hypo):
     """
     Aggregate together multiple hypotheses (objects of type :class:`retro.hypo.Hypo`).
+
+    Parameters
+    ----------
+    hypos : Hypo or Iterable thereof
+    hypo_names : str or Iterable thereof, same number as there are `hypos`
+
     """
-    def __init__(self, hypos):
-        # -- Convert hypos to a tuple of one or more hypos -- #
+    def __init__(self, hypos, hypo_names):
+        # -- Convert `hypos` to a tuple of one or more hypos -- #
 
         if isinstance(hypos, Hypo):
             hypos = (hypos,)
         else:
             hypos = tuple(hypos)
+
+        # -- Convert `hypo_names` to tuple of strs and validate -- #
+
+        if isinstance(hypo_names, basestring):
+            hypo_names = (hypo_names,)
+        else:
+            hypo_names = tuple(hypo_names)
+
+        if len(hypo_names) != len(hypos):
+            raise ValueError(
+                "got {} `hypo_names` but there are {} `hypos`"
+                .format(len(hypo_names), len(hypos))
+            )
+
+        invalid_names = []
+        for name in hypo_names:
+            valid_name = make_valid_python_name(name).lower()
+            if name != valid_name:
+                invalid_names.append(name)
+
+        if invalid_names:
+            raise ValueError(
+                'Invalid hypo_name(s) "{}"; must be lower-case and formatted as a'
+                ' valid Python identifier'
+                .format(invalid_names)
+            )
 
         # -- Make a trivial mapping from ext -> ext param names -- #
 
@@ -79,6 +110,7 @@ class AggregateHypo(Hypo):
         # -- Store attrs unique to AggregateHypo -- #
 
         self.hypos = hypos
+        self.hypo_names = hypo_names
         self.internal_param_names = tuple(h.internal_param_names for h in hypos)
         self.max_num_scalefactors_per_hypo = tuple(max_num_scalefactors_per_hypo)
         self.max_max_num_scalefactors = np.max(max_num_scalefactors_per_hypo)
@@ -127,7 +159,7 @@ class AggregateHypo(Hypo):
 
             # Aggregate the sources, sources_handling & generators into separate lists
             # and record how many pegleg generators & scalefactors apply to the hypo so
-            # that pegleg indices and scalefactors can be divied up appropriately to
+            # that pegleg indices and scalefactors can be divvied up appropriately to
             # each component hypo later
             num_sf = 0
             for srcs, srcs_hndl in zip(sources_, sources_handling_):
@@ -303,6 +335,53 @@ class AggregateHypo(Hypo):
 
         return np.sum(energy_per_hypo)
 
+    def get_derived_params(self, pegleg_indices=None, scalefactors=None):
+        """Retrieve any derived params from component hypotheses.
+
+        Parameters
+        ----------
+        pegleg_indices : optional
+        scalefactors : optional
+
+        Returns
+        -------
+        derived_params : OrderedDict
+            Keys are strings concatenating the name of the hypo with the
+            derived param name (as returned by the hypo), separated by an underscore
+
+        """
+        derived_params = OrderedDict()
+
+        pl_start_idx = 0
+        sf_hypo_idx = 0
+        for name, n_pl, n_sf, hypo in zip(
+            self.hypo_names,
+            self.num_pegleg_generators_per_hypo,
+            self.num_scalefactors_per_hypo,
+            self.hypos,
+        ):
+            if n_pl > 0:
+                pl_stop_idx = pl_start_idx + n_pl
+                hypo_pegleg_indices = pegleg_indices[pl_start_idx:pl_stop_idx]
+            else:
+                hypo_pegleg_indices = None
+
+            if n_sf > 0:
+                hypo_scalefactors = scalefactors[sf_hypo_idx, 0:n_sf]
+            else:
+                hypo_scalefactors = None
+
+            this_derived_params = hypo.get_derived_params(
+                pegleg_indices=hypo_pegleg_indices,
+                scalefactors=hypo_scalefactors,
+            )
+            for key, val in this_derived_params.items():
+                derived_params[name + "_" + key] = val
+
+            pl_start_idx = pl_stop_idx
+
+        return derived_params
+
 
 def test_AggregateHypo():
     """Unit tests for :class:`AggregateHypo`"""
@@ -315,8 +394,8 @@ def test_AggregateHypo():
     # -- Pegleg muon -- #
 
     mu0_mapping = dict(
-        x='x', y='y', z='z', time='time', track0_azimuth='azimuth',
-        track0_zenith='zenith'
+        x="x", y="y", z="z", time="time", track0_azimuth="azimuth",
+        track0_zenith="zenith"
     )
     muon0 = MuonHypo(
         fixed_track_length=pl_track_lengths[0],
@@ -330,8 +409,8 @@ def test_AggregateHypo():
     # -- Non-pegleg muon -- #
 
     mu1_mapping = dict(
-        x='x', y='y', z='z', time='time', track1_length='track_length',
-        track1_azimuth='azimuth', track1_zenith='zenith'
+        x="x", y="y", z="z", time="time", track1_length="track_length",
+        track1_azimuth="azimuth", track1_zenith="zenith"
     )
     muon1 = MuonHypo(
         param_mapping=mu1_mapping,
@@ -343,8 +422,8 @@ def test_AggregateHypo():
     # -- Another pegleg muon -- #
 
     mu2_mapping = dict(
-        x='x', y='y', z='z', time='time', track2_azimuth='azimuth',
-        track2_zenith='zenith'
+        x="x", y="y", z="z", time="time", track2_azimuth="azimuth",
+        track2_zenith="zenith"
     )
     muon2 = MuonHypo(
         fixed_track_length=pl_track_lengths[1],
@@ -358,8 +437,8 @@ def test_AggregateHypo():
     # -- Scaling cascade -- #
 
     cscd0_mapping = dict(
-        x='x', y='y', z='z', time='time', cscd0_azimuth='azimuth',
-        cscd0_zenith='zenith',
+        x="x", y="y", z="z", time="time", cscd0_azimuth="azimuth",
+        cscd0_zenith="zenith",
     )
     cscd0 = CascadeHypo(
         param_mapping=cscd0_mapping,
@@ -373,7 +452,7 @@ def test_AggregateHypo():
     def cscd1_param_mapping(
         x, y, z, time, track1_azimuth, track1_zenith, cscd1_offset, cscd1_energy,
     ):
-        """Put cascade colinear but translated along the track"""
+        """Put cascade collinear but translated along the track"""
         dt = SPEED_OF_LIGHT_M_PER_NS * cscd1_offset
         cos_zen = np.cos(track1_zenith)
         sin_zen = np.sin(track1_zenith)
@@ -418,7 +497,7 @@ def test_AggregateHypo():
     _, _, _, _ = cscd1.get_sources(**params_kw)
 
     #sources, handling, n_pl, pl_gen = aggregate_sources(hypos=hypos, **params_kw)
-    agg_hypo = AggregateHypo(hypos)
+    agg_hypo = AggregateHypo(hypos, hypo_names=["mu0", "mu1", "mu2", "cscd0", "cscd1"])
     sources, handling, n_pl, pl_gen = agg_hypo.get_sources(**params_kw)
     print("len(sources):", len(sources))
     print("handling:", handling)

@@ -9,18 +9,19 @@ Reco class for performing reconstructions
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'METHODS',
-    'CRS_STOP_FLAGS',
-    'REPORT_AFTER',
-    'APPEND_FILE',
-    'MIN_NOISE_RATE_PER_DOM',
-    'Reco',
-    'get_multinest_meta',
-    'parse_args',
+    "CRS_STOP_FLAGS",
+    "REPORT_AFTER",
+    "APPEND_FILE",
+    "MIN_NOISE_RATE_PER_DOM",
+    "Recipe",
+    "ParamOrder",
+    "Reco",
+    "get_multinest_meta",
+    "parse_args",
 ]
 
-__author__ = 'J.L. Lanfranchi, P. Eller'
-__license__ = '''Copyright 2017-2018 Justin L. Lanfranchi and Philipp Eller
+__author__ = "J.L. Lanfranchi, P. Eller"
+__license__ = """Copyright 2017-2018 Justin L. Lanfranchi and Philipp Eller
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,64 +33,81 @@ Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
-limitations under the License.'''
+limitations under the License."""
 
 
 from argparse import ArgumentParser
-from collections import OrderedDict
+from collections import OrderedDict, Iterable
 from copy import deepcopy
-import os
-from os.path import abspath, dirname, isdir, join
+from enum import IntEnum
+from operator import add
+from os.path import abspath, dirname, isdir, isfile, join
 import pickle
 from shutil import rmtree
-import sys
+from sys import path
 from tempfile import mkdtemp
-import time
+from time import time
 
 import numpy as np
-import xarray as xr
+from xarray import Dataset
 
-if __name__ == '__main__' and __package__ is None:
+if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
-    if RETRO_DIR not in sys.path:
-        sys.path.append(RETRO_DIR)
+    if RETRO_DIR not in path:
+        path.append(RETRO_DIR)
 from retro import init_obj
+from retro.aggregate_hypo import AggregateHypo
+from retro.cascade_hypo import CascadeModel, CascadeHypo
+from retro.llh import generate_llh_function
 from retro.muon_hypo import ContinuousLossModel, MuonHypo
+from retro.pexp import generate_pexp_function
+from retro.priors import get_prior_func
 from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T
 from retro.utils.geom import (
     rotate_points, add_vectors, fill_from_spher, fill_from_cart, reflect
 )
-from retro.utils.misc import expand, mkdir, sort_dict
+from retro.utils.misc import (
+    deduce_sph_pairs, expand, mkdir, sort_dict, validate_and_convert_enum
+)
 from retro.utils.stats import estimate_from_llhp
-from retro.priors import get_prior_fun
-from retro.llh import generate_llh_function
-from retro.pexp import generate_pexp_function
 
-
-METHODS = set([
-    "multinest",
-    "crs",
-    "crs_prefit_mn",
-    "nlopt",
-    "scipy",
-    "skopt",
-    "experimental_trackfit",
-    "fast",
-    "test",
-    "truth",
-])
 
 CRS_STOP_FLAGS = {
-    0: 'max iterations reached',
-    1: 'stddev below threshold',
-    2: 'no improvement',
-    3: 'vertex stddev below threshold'
+    0: "max iterations reached",
+    1: "stddev below threshold",
+    2: "no improvement",
+    3: "vertex stddev below threshold"
 }
 
 # TODO: make following args to `__init__` or `run`
 REPORT_AFTER = 100
 APPEND_FILE = True
 MIN_NOISE_RATE_PER_DOM = 1e-7
+
+
+class Recipe(IntEnum):
+    """Reconstruction recipes implemented in :method:`Reco.run`"""
+    multinest = 0
+    crs = 1
+    crs_prefit_mn = 2
+    nlopt = 3
+    scipy = 4
+    skopt = 5
+    experimental_trackfit = 6
+    fast = 7
+    test = 8
+    truth = 9
+
+
+class ParamOrder(IntEnum):
+    """How to order parameters as they will be populated by a minimizer"""
+
+    none = 0
+    """Do not reorder param names"""
+
+    cartesian_first = 1
+    """Cartesian parameters first then pairs of corresponding (az, zen) parameters"""
+
 
 class Reco(object):
     """
@@ -176,8 +194,8 @@ class Reco(object):
         self.priors_used = None
         self.loglike = None
         self.external_free_param_names = None
-        #self.n_params = None
-        #self.n_opt_params = None
+        self.num_external_free_params = None
+        self.external_free_param_sph_pairs = None
 
     @property
     def events(self):
@@ -192,37 +210,31 @@ class Reco(object):
             self.event_counter += 1
             yield self.current_event
 
-    def run(self, method):
-        """Run reconstructions on events.
-
-        This method collects many recipes for performing different kinds of
-        reconstructions.
+    def run(self, recipe):
+        """Run a reconstruction "recipe" on events.
 
         Parameters
         ----------
-        method : string
-            One of {}
+        recipe : Recipe enum or string or int translatable into Recipe
+            See :class:`Recipe` for options
 
-        """.format(sorted(METHODS))
-        if method not in METHODS:
-            raise ValueError(
-                'Unrecognized `method` "{}"; must be one of {}'.format(method, METHODS)
-            )
-
-        print('Running "{}" reconstruction...'.format(method))
-        t00 = time.time()
+        """
+        recipe = validate_and_convert_enum(recipe, enum_type=Recipe)
+        recipe_name = recipe.name # pylint: disable=no-member
+        print('Running "{}" reconstruction recipe...'.format(recipe_name))
+        t00 = time()
 
         for _ in self.events:
-            #if method in (
-            #    'multinest',
-            #    'test',
-            #    'truth',
-            #    'crs',
-            #    'scipy',
-            #    'nlopt',
-            #    'skopt',
+            #if recipe in (
+            #    Recipe.multinest,
+            #    Recipe.test,
+            #    Recipe.truth,
+            #    Recipe.crs,
+            #    Recipe.scipy,
+            #    Recipe.nlopt,
+            #    Recipe.skopt,
             #):
-            #    t0 = time.time()
+            #    t0 = time()
             #    self.setup_hypo(
             #        cascade_kernel='scaling_aligned_one_dim',
             #        track_kernel='pegleg',
@@ -238,20 +250,14 @@ class Reco(object):
             #        ])
             #    )
 
-            #    param_values = []
-            #    log_likelihoods = []
-            #    t_start = []
-            #    self.generate_loglike_method(
-            #        param_values=param_values,
-            #        log_likelihoods=log_likelihoods,
-            #        t_start=t_start,
+            #    self.setup_for_optimization(
             #    )
 
-            #    if method == 'test':
+            #    if recipe == Recipe.test:
             #        run_info = self.run_test(seed=0)
-            #    if method == 'truth':
+            #    if recipe == Recipe.truth:
             #        run_info = self.run_with_truth()
-            #    elif method == 'crs':
+            #    elif recipe == Recipe.crs:
             #        run_info = self.run_crs(
             #            n_live=250,
             #            max_iter=20000,
@@ -262,7 +268,7 @@ class Reco(object):
             #            use_sobol=True,
             #            seed=0,
             #        )
-            #    elif method == 'multinest':
+            #    elif recipe == Recipe.multinest:
             #        run_info = self.run_multinest(
             #            importance_sampling=True,
             #            max_modes=1,
@@ -273,33 +279,33 @@ class Reco(object):
             #            max_iter=10000,
             #            seed=0,
             #        )
-            #    elif method == 'scipy':
+            #    elif recipe == Recipe.scipy:
             #        run_info = self.run_scipy(
             #            method='differential_evolution',
             #            eps=0.02
             #        )
-            #    elif method == 'nlopt':
+            #    elif recipe == Recipe.nlopt:
             #        run_info = self.run_nlopt()
-            #    elif method == 'skopt':
+            #    elif recipe == Recipe.skopt:
             #        run_info = self.run_skopt()
 
-            #    t1 = time.time()
+            #    t1 = time()
             #    run_info['run_time'] = t1 - t0
 
             #    if self.save_llhp:
-            #        llhp_fname = '{}.llhp'.format(method)
+            #        llhp_fname = '{}.llhp'.format(recipe.name)
             #    else:
             #        llhp_fname = None
-            #    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+            #    llhp = self.make_llhp(llh, pvals, fname=llhp_fname)
             #    self.make_estimate(
             #        llhp=llhp,
             #        remove_priors=True,
             #        run_info=run_info,
-            #        fname='{}.estimate'.format(method),
+            #        fname='{}.estimate'.format(recipe.name),
             #    )
 
-            #lif method == 'fast':
-            #    t0 = time.time()
+            #lif recipe == Recipe.fast:
+            #    t0 = time()
             #    self.setup_hypo(
             #         cascade_kernel='scaling_aligned_point_ckv',
             #         track_kernel='pegleg',
@@ -315,13 +321,7 @@ class Reco(object):
             #        ])
             #    )
 
-            #    param_values = []
-            #    log_likelihoods = []
-            #    t_start = []
-            #    self.generate_loglike_method(
-            #        param_values=param_values,
-            #        log_likelihoods=log_likelihoods,
-            #        t_start=t_start,
+            #    self.setup_for_optimization(
             #    )
 
             #    run_info = self.run_crs(
@@ -335,36 +335,36 @@ class Reco(object):
             #        seed=0,
             #    )
 
-            #    t1 = time.time()
+            #    t1 = time()
             #    run_info['run_time'] = t1 - t0
 
             #    if self.save_llhp:
-            #        llhp_fname = '{}.llhp'.format(method)
+            #        llhp_fname = '{}.llhp'.format(recipe.name)
             #    else:
             #        llhp_fname = None
-            #    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+            #    llhp = self.make_llhp(llh, pvals, fname=llhp_fname)
             #    self.make_estimate(
             #        llhp=llhp,
             #        remove_priors=False,
             #        run_info=run_info,
-            #        fname='{}.estimate'.format(method),
+            #        fname='{}.estimate'.format(recipe.name),
             #    )
 
-            if method == 'crs_prefit_mn':
-                t0 = time.time()
+            if recipe == Recipe.crs_prefit_mn:
+                t0 = time()
 
                 print('--- Track-only CRS prefit ---')
 
                 # -- Setup hypothesis -- #
 
-                muon_param_name_mapping = dict(
-                    x='x',
-                    y='y',
-                    z='z',
-                    time='time',
-                    track_azimuth='azimuth',
-                    track_zenith='zenith',
-                )
+                muon_param_name_mapping = OrderedDict([
+                    ('x', 'x'),
+                    ('y', 'y'),
+                    ('z', 'z'),
+                    ('time', 'time'),
+                    ('track_azimuth', 'azimuth'),
+                    ('track_zenith', 'zenith'),
+                ])
                 muon_hypo = MuonHypo(
                     fixed_track_length=1000, # (m)
                     pegleg_step_size=1,
@@ -376,24 +376,14 @@ class Reco(object):
                     ),
                 )
 
-                self.hypo = muon_hypo
-
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(kind='SPEFit2', extent='tight')),
-                        ('y', dict(kind='SPEFit2', extent='tight')),
-                        ('z', dict(kind='SPEFit2', extent='tight')),
-                        ('time', dict(kind='SPEFit2', extent='tight')),
-                    ])
-                )
-
-                param_values = []
-                log_likelihoods = []
-                prefit_t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=prefit_t_start,
+                llh, pvals, _ = self.setup_for_optimization(
+                    hypo=muon_hypo,
+                    prior_defs=dict(
+                        x=dict(kind='SPEFit2', extent='tight'),
+                        y=dict(kind='SPEFit2', extent='tight'),
+                        z=dict(kind='SPEFit2', extent='tight'),
+                        time=dict(kind='SPEFit2', extent='tight'),
+                    )
                 )
 
                 prefit_run_info = self.run_crs(
@@ -407,78 +397,54 @@ class Reco(object):
                     seed=0,
                 )
 
-                t1 = time.time()
+                t1 = time()
                 prefit_run_info['run_time'] = t1 - t0
 
                 if self.save_llhp:
-                    llhp_fname = '{}.llhp_prefit'.format(method)
+                    llhp_fname = '{}.llhp_prefit'.format(recipe.name)
                 else:
                     llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                llhp = self.make_llhp(llh, pvals, fname=llhp_fname)
                 prefit_estimate = self.make_estimate(
                     llhp=llhp,
                     remove_priors=False,
                     run_info=prefit_run_info,
-                    fname='{}.estimate_prefit'.format(method),
+                    fname='{}.estimate_prefit'.format(recipe.name),
                 )
 
                 print('--- MultiNest fit including aligned 1D cascade ---')
 
-                self.setup_hypo(
-                    cascade_kernel='scaling_aligned_one_dim',
-                    track_kernel='pegleg',
-                    track_time_step=1.,
+                cascade_param_mapping = dict(
+                    x='x', y='y', z='z', time='time', track_azimuth='azimuth',
+                    track_zenith='zenith',
+                )
+                cascade_hypo = CascadeHypo(
+                    param_mapping=cascade_param_mapping,
+                    model=CascadeModel.one_dim_v1,
+                    num_sources=-1,
+                    scaling_proto_energy=1,
+                )
+
+                aggregate_hypo = AggregateHypo(
+                    hypos=[muon_hypo, cascade_hypo],
+                    hypo_names=["muon", "cascade"],
                 )
 
                 # Setup prior
 
                 pft_est = prefit_estimate.sel(kind='mean')
-                pft_x = float(pft_est.sel(param='x'))
-                pft_y = float(pft_est.sel(param='y'))
-                pft_z = float(pft_est.sel(param='z'))
-                pft_time = float(pft_est.sel(param='time'))
-
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(
-                            kind='cauchy',
-                            loc=pft_x,
-                            scale=15,
-                            low=pft_x - 300,
-                            high=pft_x + 300,
-                        )),
-                        ('y', dict(
-                            kind='cauchy',
-                            loc=pft_y,
-                            scale=15,
-                            low=pft_y - 300,
-                            high=pft_y + 300,
-                        )),
-                        ('z', dict(
-                            kind='cauchy',
-                            loc=pft_z,
-                            scale=10,
-                            low=pft_z - 200,
-                            high=pft_z + 200,
-                        )),
-                        ('time', dict(
-                            kind='cauchy',
-                            loc=pft_time,
-                            scale=40,
-                            low=pft_time - 800,
-                            high=pft_time + 800,
-                        )),
-                    ])
+                px = float(pft_est.sel(param='x'))
+                py = float(pft_est.sel(param='y'))
+                pz = float(pft_est.sel(param='z'))
+                pt = float(pft_est.sel(param='time'))
+                prior_defs = dict(
+                    x=dict(kind='cauchy', loc=px, scale=15, low=px-300, high=px+300),
+                    y=dict(kind='cauchy', loc=py, scale=15, low=py-300, high=py+300),
+                    z=dict(kind='cauchy', loc=pz, scale=10, low=pz-200, high=pz+200),
+                    time=dict(kind='cauchy', loc=pt, scale=40, low=pt-800, high=pt+800),
                 )
 
-                param_values = []
-                log_likelihoods = []
-                t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=t_start,
-                )
+                self.setup_for_optimization(hypo=aggregate_hypo, prior_defs=prior_defs)
 
                 run_info = self.run_multinest(
                     importance_sampling=True,
@@ -491,19 +457,19 @@ class Reco(object):
                     seed=0,
                 )
 
-                t2 = time.time()
+                t2 = time()
                 run_info['run_time'] = t2 - t1
 
                 if self.save_llhp:
-                    llhp_fname = '{}.llhp'.format(method)
+                    llhp_fname = '{}.llhp'.format(recipe_name)
                 else:
                     llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                llhp = self.make_llhp(llh, pvals, fname=llhp_fname)
                 self.make_estimate(
                     llhp=llhp,
                     remove_priors=True,
                     run_info=run_info,
-                    fname='{}.estimate'.format(method),
+                    fname='{}.estimate'.format(recipe_name),
                 )
 
                 #print('--- MN 10d fit ---')
@@ -520,17 +486,11 @@ class Reco(object):
                 #self.hypo_handler.fixed_params['z'] = estimate['mean']['z']
                 #self.hypo_handler.fixed_params['time'] = estimate['mean']['time']
 
-                #param_values = []
-                #log_likelihoods = []
-
                 ## Setup prior (none)
                 #prior_defs = OrderedDict()
                 #self.generate_prior_method(prior_defs)
 
-                #self.generate_loglike_method(
-                #    param_values=param_values,
-                #    log_likelihoods=log_likelihoods,
-                #    t_start=t_start,
+                #self.setup_for_optimization(
                 #)
 
                 #run_info_10d = self.run_multinest(
@@ -544,25 +504,25 @@ class Reco(object):
                 #    seed=0,
                 #)
 
-                #t3 = time.time()
+                #t3 = time()
                 #run_info_10d['run_time'] = t3 - t2
 
                 #if self.save_llhp:
-                #    llhp_fname = '{}.llhp_10d'.format(method)
+                #    llhp_fname = '{}.llhp_10d'.format(recipe_name)
                 #else:
                 #    llhp_fname = None
-                #llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                #llhp = self.make_llhp(llh, pvals, fname=llhp_fname)
                 #self.make_estimate(
                 #    llhp=llhp,
                 #    remove_priors=True,
                 #    run_info=run_info_10d,
-                #    fname='{}.estimate_10d'.format(method),
+                #    fname='{}.estimate_10d'.format(recipe_name),
                 #)
 
-            #elif method == 'experimental_trackfit':
+            #elif recipe == Recipe.experimental_trackfit:
             #    print('--- track-only prefit ---')
 
-            #    t0 = time.time()
+            #    t0 = time()
             #    self.setup_hypo(track_kernel='pegleg', track_time_step=1.)
 
             #    self.generate_prior_method(
@@ -574,13 +534,7 @@ class Reco(object):
             #        ])
             #    )
 
-            #    param_values = []
-            #    log_likelihoods = []
-            #    prefit_t_start = []
-            #    self.generate_loglike_method(
-            #        param_values=param_values,
-            #        log_likelihoods=log_likelihoods,
-            #        t_start=t_start,
+            #    self.setup_for_optimization(
             #    )
 
             #    prefit_run_info = self.run_crs(
@@ -594,24 +548,24 @@ class Reco(object):
             #        seed=0,
             #    )
 
-            #    t1 = time.time()
+            #    t1 = time()
             #    prefit_run_info['run_time'] = t1 - t0
 
             #    if self.save_llhp:
-            #        llhp_fname = '{}.llhp_prefit'.format(method)
+            #        llhp_fname = '{}.llhp_prefit'.format(recipe_name)
             #    else:
             #        llhp_fname = None
-            #    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+            #    llhp = self.make_llhp(llh, pvals, fname=llhp_fname)
             #    prefit_estimate = self.make_estimate(
             #        llhp=llhp,
             #        remove_priors=False,
             #        run_info=prefit_run_info,
-            #        fname='{}.estimate_prefit'.format(method),
+            #        fname='{}.estimate_prefit'.format(recipe_name),
             #    )
 
             #    print('--- hybrid fit ---')
 
-            #    t2 = time.time()
+            #    t2 = time()
             #    # track AND cascade to hypo
             #    self.setup_hypo(
             #        cascade_kernel='scaling_aligned_one_dim',
@@ -646,13 +600,7 @@ class Reco(object):
             #        ])
             #    )
 
-            #    param_values = []
-            #    log_likelihoods = []
-            #    t_start = []
-            #    self.generate_loglike_method(
-            #        param_values=param_values,
-            #        log_likelihoods=log_likelihoods,
-            #        t_start=t_start,
+            #    self.setup_for_optimization(
             #    )
 
             #    run_info = self.run_crs(
@@ -666,46 +614,37 @@ class Reco(object):
             #        seed=0,
             #    )
 
-            #    t3 = time.time()
+            #    t3 = time()
             #    run_info['run_time'] = t3 - t2
 
             #    if self.save_llhp:
-            #        llhp_fname = '{}.llhp'.format(method)
+            #        llhp_fname = '{}.llhp'.format(recipe_name)
             #    else:
             #        llhp_fname = None
-            #    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+            #    llhp = self.make_llhp(llh, pvals, fname=llhp_fname)
             #    self.make_estimate(
             #        llhp=llhp,
             #        remove_priors=False,
             #        run_info=run_info,
-            #        fname='{}.estimate'.format(method),
+            #        fname='{}.estimate'.format(recipe_name),
             #    )
             else:
-                raise ValueError('Unknown `Method` {}'.format(method))
+                raise NotImplementedError("`recipe` {}".format(recipe_name))
 
-        print('Total script run time is {:.3f} s'.format(time.time() - t00))
+        print('Total script run time is {:.3f} s'.format(time() - t00))
 
-    def generate_loglike_method(
-        self, param_values, log_likelihoods, t_start, prior_defs=None, fixed_params=None
+    def setup_for_optimization(
+        self,
+        hypo,
+        param_order=None,
+        prior_defs=None,
+        fixed_params=None,
     ):
         """Generate the LLH callback method `self.loglike` for a given event.
 
         Parameters
         ----------
-        param_values : list (mutable sequence)
-            This is a list (which is, critically, mutable) that starts empty when passed
-            in, is passed through to the `loglike` function, and that function appends
-            its results to the list; then the "external" function that called
-            `generate_loglike_method` can retrieve the results
-
-        log_likelihoods : list (mutable sequence)
-            Similar to `param_values`, `log_likelihoods` is populated by `loglike`
-            function; one value per entry in `param_values`
-
-        t_start : list
-            Needs to be a list for start time to be passed by reference and
-            therefore universally accessible within all methods that require
-            knowing the start time
+        hypo : Hypo subclass
 
         prior_defs : mapping, optional
             {param0_name: prior_spec, param1_name: prior_spec, ...}
@@ -713,8 +652,22 @@ class Reco(object):
         fixed_params : mapping, optional
             {fixed_param0_name: value, fixed_param1_name: value, ...}
 
+        Returns
+        -------
+        pvals, llh, t_start : empty lists
+            Each will be populated by calls to the generated `loglike` function
+
         Out
         ---
+        self.hypo
+            Populated with `hypo`
+
+        self.priors_used
+            Populated with prior specifications used
+
+        self.prior
+            Populated with generated `prior` function
+
         self.loglike
             Populated with the generated `loglike` function
 
@@ -725,27 +678,83 @@ class Reco(object):
         if fixed_params is None:
             fixed_params = {}
 
-        #
-        # -- Generate prior function -- #
-        #
+        if isinstance(param_order, Iterable):
+            param_order = tuple(param_order)
+        else:
+            param_order = validate_and_convert_enum(
+                val=param_order,
+                enum_type=ParamOrder,
+                none_evaluates_to=ParamOrder.none,
+            )
+
+        # -- Variables used below -- #
+
+        event = self.current_event
+        hits = event['hits']
+        hits_indexer = event['hits_indexer']
+
+        external_params = deepcopy(hypo.external_params)
+        assert isinstance(external_params, OrderedDict)
+        external_free_param_names = sorted(external_params.keys())
+        for pname, pval in fixed_params.items():
+            if pname not in external_params:
+                raise KeyError('"{}" not a valid external param name'.format(pname))
+            external_params[pname] = pval
+            external_free_param_names.remove(pname)
+        num_external_free_params = len(external_free_param_names)
+        external_free_param_sph_pairs = sorted(deduce_sph_pairs(external_free_param_names))
+
+        if isinstance(param_order, Iterable):
+            if not set(external_free_param_names).issubset(param_order):
+                raise ValueError(
+                    "external_free_param_names = {} not subset of param_order = {}"
+                    .format(external_free_param_names, param_order)
+                )
+            external_free_param_names = [
+                n for n in param_order if n in external_free_param_names
+            ]
+        elif param_order == ParamOrder.cartesian_first:
+            sph_param_names = reduce(add, external_free_param_sph_pairs, ())
+            cart_param_names = sorted([
+                n for n in external_free_param_names if n not in sph_param_names
+            ])
+            ordered = cart_param_names
+            ordered.extend(sph_param_names)
+            external_free_param_names = ordered
+        elif param_order == ParamOrder.none:
+            pass
+        else:
+            raise NotImplementedError(
+                '`param_order` "{}" not implemented'.format(param_order.name)
+            )
+
+        dom_info = self.dom_tables.dom_info
+        sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
+        num_operational_doms = np.sum(dom_info['operational'])
+
+        # Create empty lists captured by `loglike` closure and populated during
+        # calls to `loglike` by an optimizer
+        pvals = []
+        llh = []
+        t_start = []
 
         prior_funcs = []
-        self.priors_used = OrderedDict()
-
-        for dim_num, dim_name in enumerate(self.hypo_handler.opt_param_names):
+        priors_used = OrderedDict()
+        for dim_num, dim_name in enumerate(external_free_param_names):
             if prior_defs.has_key(dim_name):
                 kwargs = prior_defs[dim_name]
             else:
                 kwargs = {}
-
-            prior_fun, prior_def = get_prior_fun(
+            prior_func, prior_def = get_prior_func(
                 dim_num=dim_num,
                 dim_name=dim_name,
-                event=self.current_event,
+                event=event,
                 **kwargs
             )
-            prior_funcs.append(prior_fun)
-            self.priors_used[dim_name] = prior_def
+            prior_funcs.append(prior_func)
+            priors_used[dim_name] = prior_def
+
+        # -- Generate `prior` func -- #
 
         def prior(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Apply `prior_funcs` to the hypercube to map values from the unit
@@ -763,27 +772,7 @@ class Reco(object):
             for prior_func in prior_funcs:
                 prior_func(cube)
 
-        self.prior = prior
-
-        #
-        # -- Generate `loglike` function -- #
-        #
-
-        # -- Variables to be captured by `loglike` closure -- #
-
-        event = self.current_event
-        hits = event['hits']
-        hits_indexer = event['hits_indexer']
-
-        hypo = self.hypo
-        external_param_values = deepcopy(hypo.external_params)
-        external_free_param_names = hypo.external_param_names
-
         # -- Populate `event_dom_info` and `event_hit_info` arrays -- #
-
-        dom_info = self.dom_tables.dom_info
-        sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
-        num_operational_doms = np.sum(dom_info['operational'])
 
         # Array containing only DOMs operational during the event & info
         # relevant to the hits these DOMs got (if any)
@@ -838,6 +827,8 @@ class Reco(object):
         assert np.sum(event_dom_info['total_observed_charge']) > 0, 'no charge'
         assert np.all(np.isfinite(event_dom_info['total_observed_charge'])), 'non-finite charge'
 
+        # -- Generate `loglike` function -- #
+
         def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Get log likelihood values.
 
@@ -856,23 +847,33 @@ class Reco(object):
 
             Returns
             -------
-            llh : float
+            this_llh : float
+
+            Out
+            ---
+            pvals : list
+                Appended with parameter values used
+
+            llh : list
+                Appended with `this_llh` corresponding to `pvals`
+
+            t_start : list
+                If no elements, the first element is set to start time (sec since epoch,
+                i.e., output of :func:`time.time`)
 
             """
-            t0 = time.time()
+            t0 = time()
             if len(t_start) == 0:
-                t_start.append(time.time())
+                t_start.append(time())
 
             for param_name, val in zip(external_free_param_names, cube):
-                external_param_values[param_name] = val
+                external_params[param_name] = val
 
-            sources, sources_handling, n_pl, pl_gens = hypo.get_sources(
-                **external_param_values
-            )
+            srcs, srcs_handling, n_pl, pl_gens = hypo.get_sources(**external_params)
 
-            llh, pegleg_steps, scalefactors = self.get_llh(
-                sources=sources,
-                sources_handling=sources_handling,
+            this_llh, pegleg_indices, scalefactors = self.get_llh(
+                sources=srcs,
+                sources_handling=srcs_handling,
                 num_pegleg_generators=n_pl,
                 pegleg_generators=pl_gens,
                 max_scalefactors=max_scalefactors,
@@ -880,43 +881,33 @@ class Reco(object):
                 event_dom_info=event_dom_info,
             )
 
-            assert np.isfinite(llh), 'LLH not finite'
-            assert llh < 0, 'LLH positive'
+            assert np.isfinite(this_llh), 'LLH not finite'
+            assert this_llh < 0, 'LLH positive'
 
-            additional_results = []
-
-            if self.hypo_handler.pegleg_kernel:
-                pegleg_result = pegleg_eval(
-                    pegleg_step=pegleg_step,
-                    const_e_loss=pegleg_muon_const_e_loss,
-                )
-                additional_results.append(pegleg_result)
-
-            if self.hypo_handler.scaling_kernel:
-                additional_results.append(scalefactor*SCALING_CASCADE_ENERGY)
-
-            result = (
-                tuple(cube[:n_opt_params])
-                + tuple(fixed_params.values())
-                + tuple(additional_results)
+            derived_params = hypo.get_derived_params(
+                pegleg_indices=pegleg_indices,
+                scalefactors=scalefactors,
             )
-            param_values.append(result)
 
-            log_likelihoods.append(llh)
-            n_calls = len(log_likelihoods)
-            t1 = time.time()
+            result = deepcopy(external_params)
+            result.update(derived_params)
+            pvals.append(result)
+
+            llh.append(this_llh)
+            n_calls = len(llh)
+            t1 = time()
 
             if n_calls % REPORT_AFTER == 0:
-                t_now = time.time()
-                best_idx = np.argmax(log_likelihoods)
-                best_llh = log_likelihoods[best_idx]
-                best_p = param_values[best_idx]
+                t_now = time()
+                best_idx = np.argmax(llh)
+                best_llh = llh[best_idx]
+                best_p = pvals[best_idx]
                 msg = 'best llh = {:.3f} @ '.format(best_llh)
-                for key, val in zip(all_param_names, best_p):
+                for key, val in best_p.items():
                     msg += ' %s=%.1f'%(key, val)
                 print(msg)
                 msg = 'this llh = {:.3f} @ '.format(llh)
-                for key, val in zip(all_param_names, result):
+                for key, val in result.items():
                     msg += ' %s=%.1f'%(key, val)
                 print(msg)
                 print('{} LLH computed'.format(n_calls))
@@ -926,19 +917,29 @@ class Reco(object):
                 print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
                 print('')
 
-            return llh
+            return this_llh
 
+        # -- Store attrs for further access -- #
+
+        self.hypo = hypo
+        self.priors_used = priors_used
+        self.prior = prior
         self.loglike = loglike
+        self.external_free_param_names = external_free_param_names
+        self.num_external_free_params = num_external_free_params
+        self.external_free_param_sph_pairs = external_free_param_sph_pairs
 
-    def make_llhp(self, log_likelihoods, param_values, fname=None):
+        return llh, pvals, t_start
+
+    def make_llhp(self, llh, pvals, fname=None):
         """Create a structured numpy array containing the reco information;
         also add derived dimensions, and optionally save to disk.
 
         Parameters
         ----------
-        log_likelihoods : array
+        llh : sequence
 
-        param_values : array
+        pvals : sequence
 
         fname : str, optional
             If provided, llhp for the event reco are saved to file at path
@@ -951,7 +952,7 @@ class Reco(object):
 
         """
         # Setup LLHP dtype
-        dim_names = list(self.hypo_handler.all_param_names)
+        dim_names = pvals[0].keys()
 
         # add derived quantities
         derived_dim_names = ['energy', 'azimuth', 'zenith']
@@ -963,9 +964,9 @@ class Reco(object):
         llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + all_dim_names])
 
         # dump
-        llhp = np.zeros(shape=len(param_values), dtype=llhp_t)
-        llhp['llh'] = log_likelihoods
-        llhp[dim_names] = param_values
+        llhp = np.zeros(shape=len(pvals), dtype=llhp_t)
+        llhp['llh'] = llh
+        llhp[dim_names] = pvals
 
         # create derived dimensions
         if 'energy' in derived_dim_names:
@@ -1068,7 +1069,7 @@ class Reco(object):
         )
         attrs = estimate.attrs
         attrs['event_idx'] = self.current_event_idx
-        attrs['params'] = list(self.hypo_handler.all_param_names)
+        attrs['params'] = list(self.external_free_param_names)
         attrs['priors_used'] = self.priors_used
         if run_info is None:
             attrs['run_info'] = OrderedDict()
@@ -1080,15 +1081,15 @@ class Reco(object):
             return estimate
 
         if APPEND_FILE:
-            estimate_outf = os.path.join(
+            estimate_outf = join(
                 self.outdir, '{}{}.pkl'.format(self.slice_prefix, fname)
             )
-            file_exists = os.path.isfile(estimate_outf)
+            file_exists = isfile(estimate_outf)
             if self.event_counter == 0:
                 if file_exists:
                     raise IOError('File already exists at "{}"'.format(estimate_outf))
                 # create new Dataset
-                dataset = xr.Dataset()
+                dataset = Dataset()
                 dataset.attrs = self.attrs
             else:
                 if not file_exists:
@@ -1120,7 +1121,7 @@ class Reco(object):
         kwargs = sort_dict(dict(seed=seed))
         rand = np.random.RandomState(seed=seed)
         for i in range(100):
-            param_vals = rand.uniform(0, 1, self.n_opt_params)
+            param_vals = rand.uniform(0, 1, len(self.num_external_free_params))
             self.prior(param_vals)
             llh = self.loglike(param_vals)
         run_info = sort_dict(dict(method='run_test', kwargs=kwargs))
@@ -1144,9 +1145,9 @@ class Reco(object):
             rand_dims = []
 
         truth = self.current_event['truth']
-        true_params = np.zeros(self.n_opt_params)
+        true_params = np.zeros(self.num_external_free_params)
 
-        for i, name in enumerate(self.hypo_handler.opt_param_names):
+        for i, name in enumerate(self.external_free_param_names):
             if name in ('x', 'y', 'z', 'time'):
                 true_params[i] = truth[name]
             elif name == 'track_zenith':
@@ -1159,9 +1160,9 @@ class Reco(object):
         rand = np.random.RandomState(seed=seed)
         if len(rand_dims) > 1:
             for i in range(n_samples):
-                rand_params = rand.uniform(0, 1, self.n_opt_params)
+                rand_params = rand.uniform(0, 1, self.num_external_free_params)
                 self.prior(rand_params)
-                param_vals = np.zeros(self.n_opt_params)
+                param_vals = np.zeros(self.num_external_free_params)
                 param_vals[:] = true_params[:]
                 param_vals[rand_dims] = rand_params[rand_dims]
                 llh = self.loglike(param_vals)
@@ -1241,46 +1242,37 @@ class Reco(object):
             use_sobol=use_sobol,
             seed=seed,
         ))
-
         rand = np.random.RandomState(seed=seed)
 
-        n_opt_params = self.n_opt_params
-        # absolute minimum number of points necessary
-        assert n_live > n_opt_params + 1
+        external_free_param_names = self.external_free_param_names
+        num_external_free_params = self.num_external_free_params
+        external_free_param_sph_pairs = self.external_free_param_sph_pairs
+        n_spher_param_pairs = len(external_free_param_sph_pairs)
+        n_cart = len(external_free_param_names) - 2 * n_spher_param_pairs
 
-        # figure out which variables are Cartesian and which spherical
-        opt_param_names = self.hypo_handler.opt_param_names
-        cart_param_names = set(opt_param_names) & set(['time', 'x', 'y', 'z'])
-        n_cart = len(cart_param_names)
-        assert set(opt_param_names[:n_cart]) == cart_param_names
-        n_spher_param_pairs = int((n_opt_params - n_cart)/2)
-        for sph_pair_idx in range(n_spher_param_pairs):
-            az_param = opt_param_names[n_cart + sph_pair_idx*2]
-            zen_param = opt_param_names[n_cart + sph_pair_idx*2 + 1]
-            assert 'az' in az_param, '"{}" not azimuth param'.format(az_param)
-            assert 'zen' in zen_param, '"{}" not zenith param'.format(zen_param)
+        # absolute minimum number of points necessary
+        assert n_live > self.num_external_free_params + 1
 
         # setup arrays to store points
         s_cart = np.zeros(shape=(n_live, n_cart))
         s_spher = np.zeros(shape=(n_live, n_spher_param_pairs), dtype=SPHER_T)
         fx = np.zeros(shape=(n_live,))
 
-        def fun(x):
+        def func(x):
             """Callable for minimizer"""
             if use_priors:
-                param_vals = np.zeros_like(x)
+                param_vals = np.empty_like(x)
                 param_vals[:n_cart] = x[:n_cart]
                 self.prior(param_vals)
                 param_vals[n_cart:] = x[n_cart:]
             else:
                 param_vals = x
-            llh = self.loglike(param_vals)
-            return -llh
+            return -self.loglike(param_vals)
 
         def create_x(x_cart, x_spher):
             """Patch Cartesian and spherical coordinates into one array"""
             # TODO: make proper
-            x = np.empty(shape=n_opt_params)
+            x = np.empty(shape=num_external_free_params)
             x[:n_cart] = x_cart
             x[n_cart+1::2] = x_spher['zen']
             x[n_cart::2] = x_spher['az']
@@ -1290,9 +1282,9 @@ class Reco(object):
         for i in range(n_live):
             if use_sobol:
                 # sobol seems to do slightly better
-                x, _ = i4_sobol(n_opt_params, i+1)
+                x, _ = i4_sobol(num_external_free_params, i+1)
             else:
-                x = rand.uniform(0, 1, n_opt_params)
+                x = rand.uniform(0, 1, num_external_free_params)
             param_vals = np.copy(x)
             self.prior(param_vals)
             # always transform angles!
@@ -1305,7 +1297,7 @@ class Reco(object):
             s_spher[i]['zen'] = x[n_cart+1::2]
             s_spher[i]['az'] = x[n_cart::2]
             fill_from_spher(s_spher[i])
-            fx[i] = fun(x)
+            fx[i] = func(x)
 
         best_llh = np.min(fx)
         no_improvement_counter = -1
@@ -1339,8 +1331,8 @@ class Reco(object):
             done = []
             stds = []
             for dim, cond in zip(('x', 'y', 'z', 'time'), min_vertex_std):
-                if dim in opt_param_names:
-                    std = np.std(s_cart[:, opt_param_names.index(dim)])
+                if dim in external_free_param_names:
+                    std = np.std(s_cart[:, external_free_param_names.index(dim)])
                     stds.append(std)
                     done.append(std < cond)
             if len(done) > 0 and all(done):
@@ -1358,13 +1350,14 @@ class Reco(object):
             worst_idx = np.argmax(fx)
             best_idx = np.argmin(fx)
 
-            # choose n_opt_params random points but not best
-            choice = rand.choice(n_live - 1, n_opt_params, replace=False)
+            # choose num_external_free_params random points but not best
+            choice = rand.choice(n_live - 1, num_external_free_params, replace=False)
             choice[choice >= best_idx] += 1
 
             # Cartesian centroid
             centroid_cart = (
-                (np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx]) / n_opt_params
+                (np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx])
+                / num_external_free_params
             )
 
             # reflect point
@@ -1374,13 +1367,13 @@ class Reco(object):
             centroid_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
             centroid_spher['x'] = (
                 np.sum(s_spher['x'][choice[:-1]], axis=0) + s_spher['x'][best_idx]
-            ) / n_opt_params
+            ) / num_external_free_params
             centroid_spher['y'] = (
                 np.sum(s_spher['y'][choice[:-1]], axis=0) + s_spher['y'][best_idx]
-            ) / n_opt_params
+            ) / num_external_free_params
             centroid_spher['z'] = (
                 np.sum(s_spher['z'][choice[:-1]], axis=0) + s_spher['z'][best_idx]
-            ) / n_opt_params
+            ) / num_external_free_params
             fill_from_cart(centroid_spher)
 
             # reflect point
@@ -1393,7 +1386,7 @@ class Reco(object):
                 outside = False
 
             if not outside:
-                new_fx = fun(create_x(new_x_cart, new_x_spher))
+                new_fx = func(create_x(new_x_cart, new_x_spher))
 
                 if new_fx < fx[worst_idx]:
                     # found better point
@@ -1428,7 +1421,7 @@ class Reco(object):
                 outside = False
 
             if not outside:
-                new_fx = fun(create_x(new_x_cart2, new_x_spher2))
+                new_fx = func(create_x(new_x_cart2, new_x_spher2))
 
                 if new_fx < fx[worst_idx]:
                     # found better point
@@ -1470,23 +1463,21 @@ class Reco(object):
         ))
 
         # initial guess
-        x0 = 0.5 * np.ones(shape=self.n_opt_params)
+        x0 = 0.5 * np.ones(shape=self.num_external_free_params)
 
-        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
+        def func(x, *args): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
             self.prior(param_vals)
-            llh = self.loglike(param_vals)
-            del param_vals
-            return -llh
+            return -self.loglike(param_vals)
 
-        bounds = [(eps, 1 - eps)]*self.n_opt_params
+        bounds = [(eps, 1 - eps)]*self.num_external_free_params
         settings = OrderedDict()
         settings['eps'] = eps
 
         if method == 'differential_evolution':
-            optimize.differential_evolution(fun, bounds=bounds, popsize=100)
+            optimize.differential_evolution(func, bounds=bounds, popsize=100)
         else:
-            optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
+            optimize.minimize(func, x0, method=method, bounds=bounds, options=settings)
 
         run_info = sort_dict(dict(method='run_scipy', kwargs=kwargs))
         return run_info
@@ -1495,25 +1486,23 @@ class Reco(object):
         from skopt import gp_minimize #, forest_minimize
 
         # initial guess
-        x0 = 0.5 * np.ones(shape=self.n_opt_params)
+        x0 = 0.5 * np.ones(shape=self.num_external_free_params)
 
-        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
+        def func(x, *args): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
             self.prior(param_vals)
-            llh = self.loglike(param_vals)
-            del param_vals
-            return -llh
+            return -self.loglike(param_vals)
 
-        bounds = [(0, 1)]*self.n_opt_params
+        bounds = [(0, 1)]*self.num_external_free_params
         settings = sort_dict(dict(
-            acq_func='EI',      # acquisition function
-            n_calls=1000,       # number of evaluations of f
-            n_random_starts=5,  # number of random initialization
+            acq_func='EI', # acquisition function
+            n_calls=1000, # number of evaluations of f
+            n_random_starts=5, # number of random initialization
         ))
 
         _ = gp_minimize(
-            fun,                # function to minimize
-            bounds,             # bounds on each dimension of x
+            func, # function to minimize
+            bounds, # bounds on each dimension of x
             x0=list(x0),
             **settings
         )
@@ -1524,52 +1513,48 @@ class Reco(object):
     def run_nlopt(self):
         import nlopt
 
-        def fun(x, grad): # pylint: disable=unused-argument, missing-docstring
+        def func(x, grad): # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
-            #print(param_vals)
             self.prior(param_vals)
-            #print(param_vals)
-            llh = self.loglike(param_vals)
-            del param_vals
-            return -llh
+            return -self.loglike(param_vals)
 
         # bounds
-        lower_bounds = np.zeros(shape=self.n_opt_params)
-        upper_bounds = np.ones(shape=self.n_opt_params)
+        lower_bounds = np.zeros(shape=self.num_external_free_params)
+        upper_bounds = np.ones(shape=self.num_external_free_params)
 
         # for angles make bigger
-        for i, name in enumerate(self.hypo_handler.opt_param_names):
-            if 'azimuth' in name:
+        for i, name in enumerate(self.external_free_param_names):
+            if 'az' in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
-            if 'zenith' in name:
+            if 'zen' in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
 
         # initial guess
-        x0 = 0.5 * np.ones(shape=self.n_opt_params)
+        x0 = 0.5 * np.ones(shape=self.num_external_free_params)
 
         # stepsize
-        dx = np.zeros(shape=self.n_opt_params)
-        for i in range(self.n_opt_params):
-            if 'azimuth' in self.hypo_handler.opt_param_names[i]:
+        dx = np.zeros(shape=self.num_external_free_params)
+        for i in range(self.num_external_free_params):
+            if 'az' in self.external_free_param_names[i]:
                 dx[i] = 0.001
-            elif 'zenith' in self.hypo_handler.opt_param_names[i]:
+            elif 'zen' in self.external_free_param_names[i]:
                 dx[i] = 0.001
-            elif self.hypo_handler.opt_param_names[i] in ('x', 'y'):
+            elif self.external_free_param_names[i] in ('x', 'y'):
                 dx[i] = 0.005
-            elif self.hypo_handler.opt_param_names[i] == 'z':
+            elif self.external_free_param_names[i] == 'z':
                 dx[i] = 0.002
-            elif self.hypo_handler.opt_param_names[i] == 'time':
+            elif self.external_free_param_names[i] == 'time':
                 dx[i] = 0.01
 
         # seed from several angles
-        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.LN_PRAXIS, self.n_opt_params)
-        opt.set_lower_bounds([0.]*self.n_opt_params)
-        opt.set_upper_bounds([1.]*self.n_opt_params)
-        opt.set_min_objective(fun)
+        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.num_external_free_params)
+        opt = nlopt.opt(nlopt.GN_CRS2_LM, self.num_external_free_params)
+        #opt = nlopt.opt(nlopt.LN_PRAXIS, self.num_external_free_params)
+        opt.set_lower_bounds([0.]*self.num_external_free_params)
+        opt.set_upper_bounds([1.]*self.num_external_free_params)
+        opt.set_min_objective(func)
         opt.set_ftol_abs(0.1)
 
         # initial guess
@@ -1579,42 +1564,42 @@ class Reco(object):
 
         for zen in angles:
             for az in angles:
-                x0 = 0.5 * np.ones(shape=self.n_opt_params)
+                x0 = 0.5 * np.ones(shape=self.num_external_free_params)
 
-                for i in range(self.n_opt_params):
-                    if 'az' in self.hypo_handler.opt_param_names[i]:
+                for i in range(self.num_external_free_params):
+                    if 'az' in self.external_free_param_names[i]:
                         x0[i] = az
-                    elif 'zen' in self.hypo_handler.opt_param_names[i]:
+                    elif 'zen' in self.external_free_param_names[i]:
                         x0[i] = zen
                 x = opt.optimize(x0) # pylint: disable=unused-variable
 
-        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        #local_opt.set_lower_bounds([0.]*self.n_opt_params)
-        #local_opt.set_upper_bounds([1.]*self.n_opt_params)
-        #local_opt.set_min_objective(fun)
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.num_external_free_params)
+        #local_opt.set_lower_bounds([0.]*self.num_external_free_params)
+        #local_opt.set_upper_bounds([1.]*self.num_external_free_params)
+        #local_opt.set_min_objective(func)
         ##local_opt.set_ftol_abs(0.5)
         ##local_opt.set_ftol_abs(100)
         ##local_opt.set_xtol_rel(10)
         #local_opt.set_ftol_abs(1)
         # global
-        #opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
-        #opt.set_lower_bounds([0.]*self.n_opt_params)
-        #opt.set_upper_bounds([1.]*self.n_opt_params)
-        #opt.set_min_objective(fun)
+        #opt = nlopt.opt(nlopt.G_MLSL, self.num_external_free_params)
+        #opt.set_lower_bounds([0.]*self.num_external_free_params)
+        #opt.set_upper_bounds([1.]*self.num_external_free_params)
+        #opt.set_min_objective(func)
         #opt.set_local_optimizer(local_opt)
         #opt.set_ftol_abs(10)
         #opt.set_xtol_rel(1)
         #opt.set_maxeval(1111)
 
-        #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        #opt = nlopt.opt(nlopt.GN_ESCH, self.num_external_free_params)
+        #opt = nlopt.opt(nlopt.GN_ISRES, self.num_external_free_params)
+        #opt = nlopt.opt(nlopt.GN_CRS2_LM, self.num_external_free_params)
+        #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.num_external_free_params)
+        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.num_external_free_params)
 
         #opt.set_lower_bounds(lower_bounds)
         #opt.set_upper_bounds(upper_bounds)
-        #opt.set_min_objective(fun)
+        #opt.set_min_objective(func)
         #opt.set_ftol_abs(0.1)
         #opt.set_population([x0])
         #opt.set_initial_step(dx)
@@ -1626,11 +1611,11 @@ class Reco(object):
         # polish it up
         #print('***************** polishing ******************')
 
-        #dx = np.ones(shape=self.n_opt_params) * 0.001
+        #dx = np.ones(shape=self.num_external_free_params) * 0.001
         #dx[0] = 0.1
         #dx[1] = 0.1
 
-        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.num_external_free_params)
         #lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
         #upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
         #lower_bounds[0] = 0
@@ -1640,7 +1625,7 @@ class Reco(object):
 
         #local_opt.set_lower_bounds(lower_bounds)
         #local_opt.set_upper_bounds(upper_bounds)
-        #local_opt.set_min_objective(fun)
+        #local_opt.set_min_objective(func)
         #local_opt.set_ftol_abs(0.1)
         #local_opt.set_initial_step(dx)
         #x = opt.optimize(x)
@@ -1713,11 +1698,11 @@ class Reco(object):
         ))
 
         mn_kwargs = sort_dict(dict(
-            n_dims=self.n_opt_params,
-            n_params=self.n_params,
-            n_clustering_params=self.n_opt_params,
+            n_dims=self.num_external_free_params,
+            n_params=self.num_external_free_params,
+            n_clustering_params=self.num_external_free_params,
             wrapped_params=[
-                'az' in p.lower() for p in self.hypo_handler.all_param_names
+                'az' in p.lower() for p in self.external_free_param_names
             ],
             importance_nested_sampling=importance_sampling,
             multimodal=max_modes > 1,
@@ -1821,8 +1806,8 @@ def parse_args(description=__doc__):
         '--outdir', required=True
     )
     parser.add_argument(
-        '--method', required=True, choices=METHODS,
-        help='Method to use for performing reconstructions'
+        '--recipe', required=True, choices=[r.name for r in list(Recipe)],
+        help='Recipe to use for performing reconstructions'
     )
     parser.add_argument(
         '--save-llhp', action='store_true',
@@ -1840,7 +1825,7 @@ if __name__ == '__main__':
     # pylint: disable=invalid-name
     kwargs = parse_args()
     other_kw = kwargs.pop('other_kw')
-    method = other_kw.pop('method')
+    recipe = other_kw.pop('recipe')
     kwargs.update(other_kw)
     my_reco = Reco(**kwargs)
-    my_reco.run(method=method)
+    my_reco.run(recipe=recipe)

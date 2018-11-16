@@ -17,7 +17,7 @@ __all__ = [
     'PRI_SPEFIT2',
     'PRI_SPEFIT2TIGHT',
     'PRI_CAUCHY',
-    'get_prior_fun',
+    'get_prior_func',
 ]
 
 __author__ = 'J.L. Lanfranchi, P. Eller'
@@ -36,17 +36,16 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from math import acos, exp
-
 from os.path import abspath, dirname
-import sys
+from sys import path
 
 import numpy as np
 from scipy import stats
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
-    if RETRO_DIR not in sys.path:
-        sys.path.append(RETRO_DIR)
+    if RETRO_DIR not in path:
+        path.append(RETRO_DIR)
 from retro.const import TWO_PI
 
 
@@ -60,7 +59,7 @@ PRI_SPEFIT2TIGHT = 'spefit2tight'
 PRI_CAUCHY = 'cauchy'
 
 
-def get_prior_fun(dim_num, dim_name, event, **kwargs):
+def get_prior_func(dim_num, dim_name, event, **kwargs):
     """Generate prior function given a prior definition and the actual event
 
     Parameters

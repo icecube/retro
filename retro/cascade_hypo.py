@@ -7,10 +7,10 @@ Cascade hypothesis class to generate photons expected from a cascade.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ['CASCADE_PHOTONS_PER_GEV', 'CascadeModel', 'CascadeHypo']
+__all__ = ["CASCADE_PHOTONS_PER_GEV", "CascadeModel", "CascadeHypo"]
 
-__author__ = 'P. Eller, J.L. Lanfranchi'
-__license__ = '''Copyright 2017 Philipp Eller and Justin L. Lanfranchi
+__author__ = "P. Eller, J.L. Lanfranchi"
+__license__ = """Copyright 2017-2018 Philipp Eller and Justin L. Lanfranchi
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,9 +22,9 @@ Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
-limitations under the License.'''
+limitations under the License."""
 
-from collections import Iterable
+from collections import Iterable, OrderedDict
 import enum
 import math
 from numbers import Number
@@ -34,7 +34,7 @@ import sys
 import numpy as np
 from scipy.stats import gamma, pareto
 
-if __name__ == '__main__' and __package__ is None:
+if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
@@ -246,12 +246,12 @@ class CascadeHypo(Hypo):
                     return (EMPTY_SOURCES,), (SrcHandling.none,), 0, dummy_pegleg_gens
 
                 sources = np.empty(shape=(1,), dtype=SRC_T)
-                sources[0]['kind'] = SRC_OMNI
-                sources[0]['time'] = time
-                sources[0]['x'] = x
-                sources[0]['y'] = y
-                sources[0]['z'] = z
-                sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * energy
+                sources[0]["kind"] = SRC_OMNI
+                sources[0]["time"] = time
+                sources[0]["x"] = x
+                sources[0]["y"] = y
+                sources[0]["z"] = z
+                sources[0]["photons"] = CASCADE_PHOTONS_PER_GEV * energy
 
                 return (sources,), (SrcHandling.none,), 0, dummy_pegleg_gens
 
@@ -442,19 +442,19 @@ class CascadeHypo(Hypo):
 
                 if n_sources == 1:
                     sources = np.empty(shape=(1,), dtype=SRC_T)
-                    sources[0]['kind'] = SRC_CKV_BETA1
-                    sources[0]['time'] = time
-                    sources[0]['x'] = x
-                    sources[0]['y'] = y
-                    sources[0]['z'] = z
-                    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * energy
+                    sources[0]["kind"] = SRC_CKV_BETA1
+                    sources[0]["time"] = time
+                    sources[0]["x"] = x
+                    sources[0]["y"] = y
+                    sources[0]["z"] = z
+                    sources[0]["photons"] = CASCADE_PHOTONS_PER_GEV * energy
 
-                    sources[0]['dir_costheta'] = cos_zen
-                    sources[0]['dir_sintheta'] = sin_zen
+                    sources[0]["dir_costheta"] = cos_zen
+                    sources[0]["dir_sintheta"] = sin_zen
 
-                    sources[0]['dir_phi'] = opposite_azimuth
-                    sources[0]['dir_cosphi'] = cos_az
-                    sources[0]['dir_sinphi'] = sin_az
+                    sources[0]["dir_phi"] = opposite_azimuth
+                    sources[0]["dir_cosphi"] = cos_az
+                    sources[0]["dir_sinphi"] = sin_az
 
                     return (sources,), (src_handling,), 0, dummy_pegleg_gens
 
@@ -503,21 +503,21 @@ class CascadeHypo(Hypo):
                 # Create photon array
                 sources = np.empty(shape=n_sources, dtype=SRC_T)
 
-                sources['kind'] = SRC_CKV_BETA1
+                sources["kind"] = SRC_CKV_BETA1
 
-                sources['time'] = time + longitudinal_samples / SPEED_OF_LIGHT_M_PER_NS
-                sources['x'] = x + longitudinal_samples * dir_x
-                sources['y'] = y + longitudinal_samples * dir_y
-                sources['z'] = z + longitudinal_samples * dir_z
+                sources["time"] = time + longitudinal_samples / SPEED_OF_LIGHT_M_PER_NS
+                sources["x"] = x + longitudinal_samples * dir_x
+                sources["y"] = y + longitudinal_samples * dir_y
+                sources["z"] = z + longitudinal_samples * dir_z
 
-                sources['photons'] = photons_per_sample
+                sources["photons"] = photons_per_sample
 
-                sources['dir_costheta'] = final_ang_dist[2]
-                sources['dir_sintheta'] = np.sin(final_theta_dist)
+                sources["dir_costheta"] = final_ang_dist[2]
+                sources["dir_sintheta"] = np.sin(final_theta_dist)
 
-                sources['dir_phi'] = final_phi_dist
-                sources['dir_cosphi'] = np.cos(final_phi_dist)
-                sources['dir_sinphi'] = np.sin(final_phi_dist)
+                sources["dir_phi"] = final_phi_dist
+                sources["dir_cosphi"] = np.cos(final_phi_dist)
+                sources["dir_sinphi"] = np.sin(final_phi_dist)
 
                 return (sources,), (src_handling,), 0, dummy_pegleg_gens
 
@@ -541,7 +541,7 @@ class CascadeHypo(Hypo):
 
         else:
             raise NotImplementedError(
-                '{} cascade model is not implemented'.format(self.model.name) # pylint: disable=no-member
+                "{} cascade model is not implemented".format(self.model.name) # pylint: disable=no-member
 
             )
 
@@ -572,21 +572,45 @@ class CascadeHypo(Hypo):
 
         return self.internal_params["energy"]
 
+    def get_derived_params(self, pegleg_indices=None, scalefactors=None):
+        """Retrieve any derived params from component hypotheses.
+
+        Parameters
+        ----------
+        pegleg_indices : optional
+        scalefactors : optional
+
+        Returns
+        -------
+        derived_params : OrderedDict
+
+        """
+        derived_params = OrderedDict()
+
+        # If scaling, energy is derived from scaling_proto_energy & scalefactor
+        if self.is_scaling:
+            derived_params["energy"] = self.get_energy(
+                pegleg_indices=pegleg_indices,
+                scalefactors=scalefactors,
+            )
+
+        return derived_params
+
 
 def test_CascadeHypo():
     """Unit tests for CascadeHypo class"""
     dict_param_mapping = dict(
-        x='x', y='y', z='z', time='time', cascade_energy='energy',
-        cascade_azimuth='azimuth', cascade_zenith='zenith',
+        x="x", y="y", z="z", time="time", cascade_energy="energy",
+        cascade_azimuth="azimuth", cascade_zenith="zenith",
     )
     scaling_dict_param_mapping = {
-        k: v for k, v in dict_param_mapping.items() if v != 'energy'
+        k: v for k, v in dict_param_mapping.items() if v != "energy"
     }
     sph_dict_param_mapping = {
-        k: v for k, v in dict_param_mapping.items() if 'zen' not in k and 'az' not in k
+        k: v for k, v in dict_param_mapping.items() if "zen" not in k and "az" not in k
     }
     sph_dict_scaling_param_mapping = {
-        k: v for k, v in scaling_dict_param_mapping.items() if 'zen' not in k and 'az' not in k
+        k: v for k, v in scaling_dict_param_mapping.items() if "zen" not in k and "az" not in k
     }
 
     def callable_param_mapping(
@@ -604,7 +628,7 @@ def test_CascadeHypo():
     params = dict(x=0, y=0, z=0, time=0, cascade_energy=50, cascade_azimuth=np.pi/2,
                   cascade_zenith=np.pi/4)
 
-    sph_params = {k: v for k, v in params.items() if 'zen' not in k and 'az' not in k}
+    sph_params = {k: v for k, v in params.items() if "zen" not in k and "az" not in k}
 
     # dict for param mapping, enum model, dynamic num sources, not scaling
     cscd = CascadeHypo(

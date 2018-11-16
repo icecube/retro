@@ -224,7 +224,7 @@ def generate_llh_function(
         nominal_scaling_hit_exp,
         nominal_scaling_t_indep_exp,
         initial_scalefactor,
-        max_scalefactor,
+        max_scalefactors,
     ):
         """Find optimal (highest-likelihood) `scalefactor` for scaling sources.
 
@@ -362,7 +362,7 @@ def generate_llh_function(
                 print('exceeded gradient descent iteration limit!')
                 print('arrived at ', scalefactor)
             #print('\n')
-            scalefactor = max(0., min(max_scalefactor, scalefactor))
+            scalefactor = max(0., min(max_scalefactors, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
             scalefactor = initial_scalefactor
@@ -388,7 +388,7 @@ def generate_llh_function(
             #    print('exceeded gradient descent iteration limit!')
             #    print('arrived at ',scalefactor)
             #print('\n')
-            scalefactor = max(0., min(max_scalefactor, scalefactor))
+            scalefactor = max(0., min(max_scalefactors, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
             epsilon = 1e-2
@@ -400,7 +400,7 @@ def generate_llh_function(
                 done = True
                 #print('trivial 0')
             if not done:
-                last = max_scalefactor
+                last = max_scalefactors
                 last_grad = get_grad_neg_llh_wrt_scalefactor(last)
                 if last_grad < 0 or abs(last_grad) < epsilon:
                     scalefactor = last
@@ -441,13 +441,13 @@ def generate_llh_function(
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def _get_llh(
-        nonscaling_sources,
-        pegleg_sources,
-        scaling_sources,
-        max_scalefactor,
+        sources,
+        sources_handling,
+        num_pegleg_generators,
+        pegleg_generators,
+        max_scalefactors,
         event_hit_info,
         event_dom_info,
-        pegleg_stepsize,
         dom_tables,
         dom_table_norms,
         t_indep_dom_tables,
@@ -475,7 +475,7 @@ def generate_llh_function(
             procedure, `scaling_sources` will be an empty array (i.e.,
             `n_scaling_sources = 0`)
 
-        max_scalefactor
+        max_scalefactors
 
         event_hit_info : shape (n_hits,) array of dtype EVT_HIT_INFO_T
 
@@ -566,7 +566,7 @@ def generate_llh_function(
                 nominal_scaling_hit_exp=nominal_scaling_hit_exp,
                 nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
                 initial_scalefactor=10.,
-                max_scalefactor=max_scalefactor,
+                max_scalefactors=max_scalefactors,
             )
         else:
             scalefactor = 0
@@ -629,7 +629,7 @@ def generate_llh_function(
                     nominal_scaling_hit_exp=nominal_scaling_hit_exp,
                     nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
                     initial_scalefactor=scalefactor,
-                    max_scalefactor=max_scalefactor,
+                    max_scalefactors=max_scalefactors,
                 )
             else:
                 scalefactor = 0
@@ -717,11 +717,11 @@ def generate_llh_function(
 
     # Note: numba fails w/ TDI tables if this is set to be jit-compiled (why?)
     def get_llh(
-        nonscaling_sources,
-        scaling_sources,
+        sources,
+        sources_handling,
         num_pegleg_generators,
         pegleg_generators,
-        max_scalefactor,
+        max_scalefactors,
         event_hit_info,
         event_dom_info,
     ):
@@ -768,13 +768,13 @@ def generate_llh_function(
 
         """
         return _get_llh(
-            nonscaling_sources=nonscaling_sources,
-            pegleg_sources=pegleg_sources,
-            scaling_sources=scaling_sources,
-            max_scalefactor=max_scalefactor,
+            sources=sources,
+            sources_handling=sources_handling,
+            num_pegleg_generators=num_pegleg_generators,
+            pegleg_generators=pegleg_generators,
+            max_scalefactors=max_scalefactors,
             event_hit_info=event_hit_info,
             event_dom_info=event_dom_info,
-            pegleg_stepsize=pegleg_stepsize,
             dom_tables=dom_tables,
             dom_table_norms=dom_table_norms,
             t_indep_dom_tables=t_indep_dom_tables,

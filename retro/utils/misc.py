@@ -32,6 +32,12 @@ __all__ = [
     'get_primary_interaction_str',
     'get_primary_interaction_tex',
     'get_partial_match_expr',
+    'AZ_REGEX',
+    'ZEN_REGEX',
+    'deduce_sph_pairs',
+    'RE_INVALID_CHARS',
+    'RE_LEADING_INVALID',
+    'make_valid_python_name',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -740,6 +746,106 @@ def get_partial_match_expr(word, minchars):
 
     """
     return '|'.join(word[:i] for i in range(len(word), minchars - 1, -1))
+
+
+AZ_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("azimuthal", 2)))
+
+ZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("zenith", 3)))
+
+#COSZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("coszenith", 4)))
+#
+#CZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("czenith", 2)))
+#
+#COSINEZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("cosinezenith", 7)))
+
+
+def deduce_sph_pairs(param_names):
+    """Attempt to deduce which param names represent (azimuth, zenith) pairs.
+
+    Parameters
+    ----------
+    param_names : iterable of strings
+
+    Returns
+    -------
+    sph_pairs : tuple of 2-tuples of strings
+        Sub-tuples are sorted to ensure result is the same regardless of the order
+        of `param_names`
+
+    Notes
+    -----
+    Works by looking for the prefix and suffix (if any) surrounding
+      "az", "azi", ..., or "azimuthal"
+    to match the prefix and suffix (if any) surrounding
+      "zen", "zeni", ..., or "zenith"
+
+    Examples
+    --------
+    >>> deduce_sph_pairs(("x", "azimuth", "zenith", "cascade_azimuth", "cascade_zenith"))
+    (('azimuth', 'zenith'), ('cascade_azimuth', 'cascade_zenith'))
+
+    """
+    az_pfxs_and_sfxs = OrderedDict()
+    zen_pfxs_and_sfxs = OrderedDict()
+    for param_name in param_names:
+        match = AZ_REGEX.match(param_name)
+        if match:
+            groups = match.groups()
+            az_pfxs_and_sfxs[param_name] = (groups[0], groups[2])
+            continue
+        match = ZEN_REGEX.match(param_name)
+        if match:
+            groups = match.groups()
+            zen_pfxs_and_sfxs[param_name] = (groups[0], groups[2])
+            continue
+
+    sph_pairs = []
+    matched_params = []
+    for az_param_name, az_pfx_and_sfx in az_pfxs_and_sfxs.items():
+        zen_match_found = False
+        for zen_param_name, zen_pfx_and_sfx in zen_pfxs_and_sfxs.items():
+            if zen_pfx_and_sfx == az_pfx_and_sfx and zen_param_name != az_param_name:
+                zen_match_found = True
+                pair = (az_param_name, zen_param_name)
+                sph_pairs.append(pair)
+                matched_params.extend(pair)
+        if not zen_match_found:
+            print(
+                'Warning: azimuthal parameter "{}" has no {{cos}}zenith counterpart'
+                .format(az_param_name)
+            )
+
+    for zen_param_name in zen_pfxs_and_sfxs.keys():
+        if zen_param_name not in matched_params:
+            print(
+                'Warning: {{cos}}zenith parameter "{}" has no azimuthal counterpart'
+                .format(zen_param_name)
+            )
+
+    return tuple(sorted(sph_pairs))
+
+
+RE_INVALID_CHARS = re.compile('[^0-9a-zA-Z_]')
+RE_LEADING_INVALID = re.compile('^[^a-zA-Z_]+')
+def make_valid_python_name(name):
+    """Make a name a valid Python identifier.
+
+    From user Triptych at http://stackoverflow.com/questions/3303312
+
+    Parameters
+    ----------
+    name : string
+
+    Returns
+    -------
+    valid_name : string
+
+    """
+    # Remove invalid characters
+    name = RE_INVALID_CHARS.sub('', name)
+    # Remove leading characters until we find a letter or underscore
+    name = RE_LEADING_INVALID.sub('', name)
+    return name
 
 
 if __name__ == '__main__':

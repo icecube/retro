@@ -40,7 +40,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from collections import Iterable
+from collections import Iterable, OrderedDict
 from enum import IntEnum
 from math import cos, sin
 from os.path import abspath, dirname, join
@@ -730,9 +730,20 @@ class MuonHypo(Hypo):
         if fixed_track_length <= 0:
             fixed_track_length = 0
 
-        def get_continuous_sources(x, y, z, time, azimuth, zenith, track_length): # pylint: disable=missing-docstring
+        def get_continuous_sources(x, y, z, time, azimuth, zenith, track_length):
+            """
+
+            Parameters
+            ----------
+            x, y, z, time, azimuth, zenith, track_length : scalars
+
+            Returns
+            -------
+            sources : length-num_sources array of dtype SRC_T
+
+            """
             if track_length == 0:
-                return (EMPTY_SOURCES,), (SrcHandling.none,), 0, dummy_pegleg_gens
+                return EMPTY_SOURCES
 
             sampled_dt = np.arange(
                 start=time_step*0.5,
@@ -742,7 +753,7 @@ class MuonHypo(Hypo):
 
             # At least one segment
             if len(sampled_dt) == 0:
-                sampled_dt = np.array([track_length / 2. / SPEED_OF_LIGHT_M_PER_NS])
+                sampled_dt = np.array([track_length / 2 / SPEED_OF_LIGHT_M_PER_NS])
 
             # Add pi to make dir vector go in "math-standard" vector notation
             # (vector components point in direction of motion), as opposed to "IceCube"
@@ -784,6 +795,20 @@ class MuonHypo(Hypo):
         if fixed_track_length > 0:
             pegleg_step_size = self.pegleg_step_size
             def _get_sources(x, y, z, time, azimuth, zenith):
+                """
+                Parameters
+                ----------
+                x, y, z, time, azimuth, zenith : scalars
+
+                Returns
+                -------
+                sources : tuple containing EMPTY_SOURCES
+                sources_handling : tuple containing SrcHandling.none
+                num_pegleg_generators : int == 1
+                pegleg_generators : numba callable
+
+                """
+                # Produce all sources to be iterated through for pegleg process
                 pegleg_sources = get_continuous_sources(
                     x=x,
                     y=y,
@@ -809,6 +834,19 @@ class MuonHypo(Hypo):
         else:
 
             def _get_sources(x, y, z, time, azimuth, zenith, track_length):
+                """
+                Parameters
+                ----------
+                x, y, z, time, azimuth, zenith, track_length : scalars
+
+                Returns
+                -------
+                sources : tuple containing one ndarray of dtype SRC_T
+                sources_handling : tuple containing SrcHandling.nonscaling
+                num_pegleg_sources : int == 0
+                pegleg_generators : numba callable == dummy_pegleg_gens
+
+                """
                 nonscaling_sources = get_continuous_sources(
                     x=x,
                     y=y,
@@ -874,6 +912,32 @@ class MuonHypo(Hypo):
             raise NotImplementedError("No handling of stochastic energy loss")
 
         return continuous_energy + stochastic_energy
+
+    def get_derived_params(self, pegleg_indices=None, scalefactors=None):
+        """Retrieve any derived params from component hypotheses.
+
+        Parameters
+        ----------
+        pegleg_indices : optional
+        scalefactors : optional
+
+        Returns
+        -------
+        derived_params : OrderedDict
+
+        """
+        derived_params = OrderedDict()
+
+        # All implemented muon models use track_length and possibly contain secondary
+        # cascades, and therefore energy is derived for all models
+        energy = self.get_energy(
+            pegleg_indices=pegleg_indices,
+            scalefactors=scalefactors,
+        )
+
+        derived_params["energy"] = energy
+
+        return derived_params
 
 
 def test_MuonHypo():

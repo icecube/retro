@@ -7,7 +7,7 @@ Base class for hypotheses and associated helper functions
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ["AZ_REGEX", "ZEN_REGEX", "deduce_sph_pairs", "Hypo"]
+__all__ = ["Hypo"]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
 __license__ = '''Copyright 2017-2018 Philipp Eller and Justin L. Lanfranchi
@@ -26,7 +26,6 @@ limitations under the License.'''
 
 from collections import Mapping, OrderedDict
 from os.path import abspath, dirname
-import re
 import sys
 
 from funcsigs import signature # use builtin `inspect` in python 3
@@ -35,60 +34,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import check_kwarg_keys, get_arg_names, get_partial_match_expr
-
-
-AZ_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("azimuthal", 2)))
-
-ZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("zenith", 3)))
-
-
-def deduce_sph_pairs(param_names):
-    """Attempt to deduce which param names represent (azimuth, zenith) pairs.
-
-    Parameters
-    ----------
-    param_names : iterable of strings
-
-    Returns
-    -------
-    sph_pairs : tuple of 2-tuples of strings
-
-    Notes
-    -----
-    Works by looking for the prefix and suffix (if any) surrounding
-      "az", "azi", ..., or "azimuthal"
-    to match the prefix and suffix (if any) surrounding
-      "zen", "zeni", ..., or "zenith"
-
-    Examples
-    --------
-    >>> deduce_sph_pairs(("x", "azimuth", "zenith", "cascade_azimuth", "cascade_zenith"))
-    (('azimuth', 'zenith'), ('cascade_azimuth', 'cascade_zenith'))
-
-    """
-    az_pfxs_and_sfxs = OrderedDict()
-    zen_pfxs_and_sfxs = OrderedDict()
-    for param_name in param_names:
-        match = AZ_REGEX.match(param_name)
-        if match:
-            groups = match.groups()
-            az_pfxs_and_sfxs[param_name] = (groups[0], groups[2])
-            continue
-        match = ZEN_REGEX.match(param_name)
-        if match:
-            groups = match.groups()
-            zen_pfxs_and_sfxs[param_name] = (groups[0], groups[2])
-            continue
-
-    sph_pairs = []
-    for az_param_name, az_pfx_and_sfx in az_pfxs_and_sfxs.items():
-        for zen_param_name, zen_pfx_and_sfx in zen_pfxs_and_sfxs.items():
-            if zen_pfx_and_sfx != az_pfx_and_sfx:
-                continue
-            sph_pairs.append((az_param_name, zen_param_name))
-
-    return tuple(sph_pairs)
+from retro.utils.misc import check_kwarg_keys, deduce_sph_pairs, get_arg_names
 
 
 class Hypo(object):
@@ -265,6 +211,29 @@ class Hypo(object):
                     )
             external_sph_pair_idxs.append((az_param_idx, zen_param_idx))
 
+        # -- Record configuration -- #
+
+        config = OrderedDict()
+        config["class"] = type(self).__name__
+        config["internal_param_names"] = internal_param_names
+        config["external_param_names"] = external_param_names
+        config["internal_sph_pairs"] = internal_sph_pairs
+        config["external_sph_pairs"] = external_sph_pairs
+        if callable(param_mapping):
+            config["param_mapping"] = (
+                param_mapping.__name__ + str(signature(param_mapping))
+            )
+        elif isinstance(param_mapping, Mapping):
+            config["param_mapping"] = param_mapping
+        else:
+            raise ValueError("Cannot handle {}".format(type(param_mapping)))
+
+        # -- Define dummy _get_sources function -- #
+
+        def _get_sources(**kwargs): # pylint: disable=unused-argument
+            """Must be replaced with your own callable"""
+            raise NotImplementedError()
+
         # -- Define class attributes to store the above values -- #
 
         self.param_mapping = param_mapping
@@ -301,44 +270,42 @@ class Hypo(object):
         """OrderedDict : {internal_param_name: val or None}"""
 
         self.sources = None
+        """tuple of ndarrays of dtype SRC_T : Arrays of sources"""
 
         self.sources_handling = None
+        """tuple of retro.const.SrcHandling enums : How each corresponding sources array
+        in `self.sources` is to be handled"""
 
         self.max_num_scalefactors = None
+        """Maximum number of scalefactors hypo might use (the actual number of
+        scalefactors used can change, e.g., as a function of pegleg step)"""
+
+        self.max_scalefactors = None
+        """tuple of scalars : Maximum values each scalefactor can take"""
 
         self.num_pegleg_generators = None
+        """int >= 0 : Number of generators contained within `self.pegleg_generators`,
+        i.e., it is valid to call .. ::
+
+            self.pegleg_generators(i)
+
+        where i is in range(self.num_pegleg_generators)"""
 
         self.pegleg_generators = None
+        """numba callable : call via .. ::
+
+            self.pegleg_generators(i)
+
+        where i is in range(self.num_pegleg_generators)"""
 
         self.num_calls = 0
-        """Number of calls to `get_sources`"""
+        """int > = 0 : Number of calls to `get_sources`"""
 
-        # -- Record configuration -- #
-
-        self.config = OrderedDict()
-        self.config["class"] = type(self).__name__
-        self.config["internal_param_names"] = internal_param_names
-        self.config["external_param_names"] = external_param_names
-        self.config["internal_sph_pairs"] = internal_sph_pairs
-        self.config["external_sph_pairs"] = external_sph_pairs
-        if callable(param_mapping):
-            self.config["param_mapping"] = (
-                param_mapping.__name__ + str(signature(param_mapping))
-            )
-        elif isinstance(param_mapping, Mapping):
-            self.config["param_mapping"] = param_mapping
-        else:
-            raise ValueError("Cannot handle {}".format(type(param_mapping)))
-
-        # -- Define dummy _get_sources function -- #
-
-        def _get_sources(**kwargs): # pylint: disable=unused-argument
-            """Must be replaced with your own callable"""
-            raise NotImplementedError()
+        self.config = config
+        """OrderedDict : configuration settings critical for recording run state"""
 
         self._get_sources = _get_sources
-        """callable : inheriting classes must override with a callable that returns a
-        dict"""
+        """callable : inheriting classes must replace"""
 
     def get_sources(self, **kwargs):
         """Get sources corresponding to hypothesis parameters when called via::
@@ -404,3 +371,18 @@ class Hypo(object):
         """Get energy (in units of GeV) from current parameter values. Must
         implement/override in subclasses."""
         raise NotImplementedError("Must define `get_energy` in subclasses of Hypo")
+
+    def get_derived_params(self, pegleg_indices=None, scalefactors=None):
+        """Retrieve any derived params from component hypotheses.
+
+        Parameters
+        ----------
+        pegleg_indices : optional
+        scalefactors : optional
+
+        Returns
+        -------
+        derived_params : OrderedDict
+
+        """
+        raise NotImplementedError()
