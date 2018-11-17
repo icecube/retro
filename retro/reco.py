@@ -184,6 +184,7 @@ class Reco(object):
             dom_tables=self.dom_tables,
             tdi_tables=self.tdi_tables,
             tdi_metas=self.tdi_metas,
+            scaling_proto_energy=1.,
         )
         self.event_prefix = None
         self.current_event = None
@@ -636,6 +637,7 @@ class Reco(object):
     def setup_for_optimization(
         self,
         hypo,
+        max_scalefactor=1000.,
         param_order=None,
         prior_defs=None,
         fixed_params=None,

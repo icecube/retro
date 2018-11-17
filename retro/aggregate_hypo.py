@@ -111,9 +111,8 @@ class AggregateHypo(Hypo):
 
         self.hypos = hypos
         self.hypo_names = hypo_names
-        self.internal_param_names = tuple(h.internal_param_names for h in hypos)
         self.max_num_scalefactors_per_hypo = tuple(max_num_scalefactors_per_hypo)
-        self.max_max_num_scalefactors = np.max(max_num_scalefactors_per_hypo)
+        self.max_num_scalefactors = np.max(max_num_scalefactors_per_hypo)
         self.num_hypos_with_scalefactors = (
             np.count_nonzero(max_num_scalefactors_per_hypo)
         )
@@ -145,6 +144,21 @@ class AggregateHypo(Hypo):
         pegleg_generators
 
         """
+        self.num_calls += 1
+
+        for external_param_name in self.external_param_names:
+            try:
+                self.external_params[external_param_name] = kwargs[external_param_name]
+            except KeyError:
+                print(
+                    'Missing param "{}" in passed kwargs {}'
+                    .format(external_param_name, kwargs)
+                )
+                raise
+
+        # Map external param names/values onto internal param names/values
+        self.internal_params = self.param_mapping(**self.external_params)
+
         # -- Create generator to call `pegleg_generators` from each hypo -- #
 
         sources = [] # all scaling and nonscaling sources
@@ -340,8 +354,8 @@ class AggregateHypo(Hypo):
 
         Parameters
         ----------
-        pegleg_indices : optional
-        scalefactors : optional
+        pegleg_indices : required if a component hypothesis is pegleg
+        scalefactors : required if a component hypothesis is scaling
 
         Returns
         -------
@@ -361,12 +375,14 @@ class AggregateHypo(Hypo):
             self.hypos,
         ):
             if n_pl > 0:
+                assert pegleg_indices is not None
                 pl_stop_idx = pl_start_idx + n_pl
                 hypo_pegleg_indices = pegleg_indices[pl_start_idx:pl_stop_idx]
             else:
                 hypo_pegleg_indices = None
 
             if n_sf > 0:
+                assert scalefactors is not None
                 hypo_scalefactors = scalefactors[sf_hypo_idx, 0:n_sf]
             else:
                 hypo_scalefactors = None
@@ -394,8 +410,7 @@ def test_AggregateHypo():
     # -- Pegleg muon -- #
 
     mu0_mapping = dict(
-        x="x", y="y", z="z", time="time", track0_azimuth="azimuth",
-        track0_zenith="zenith"
+        x="x", y="y", z="z", time="time", mu0_azimuth="azimuth", mu0_zenith="zenith"
     )
     muon0 = MuonHypo(
         fixed_track_length=pl_track_lengths[0],
@@ -409,8 +424,8 @@ def test_AggregateHypo():
     # -- Non-pegleg muon -- #
 
     mu1_mapping = dict(
-        x="x", y="y", z="z", time="time", track1_length="track_length",
-        track1_azimuth="azimuth", track1_zenith="zenith"
+        x="x", y="y", z="z", time="time", mu1_length="track_length",
+        mu1_azimuth="azimuth", mu1_zenith="zenith"
     )
     muon1 = MuonHypo(
         param_mapping=mu1_mapping,
@@ -422,8 +437,8 @@ def test_AggregateHypo():
     # -- Another pegleg muon -- #
 
     mu2_mapping = dict(
-        x="x", y="y", z="z", time="time", track2_azimuth="azimuth",
-        track2_zenith="zenith"
+        x="x", y="y", z="z", time="time", mu2_azimuth="azimuth",
+        mu2_zenith="zenith"
     )
     muon2 = MuonHypo(
         fixed_track_length=pl_track_lengths[1],
@@ -450,14 +465,14 @@ def test_AggregateHypo():
     # -- Non-scaling cascade -- #
 
     def cscd1_param_mapping(
-        x, y, z, time, track1_azimuth, track1_zenith, cscd1_offset, cscd1_energy,
+        x, y, z, time, mu1_azimuth, mu1_zenith, cscd1_offset, cscd1_energy,
     ):
         """Put cascade collinear but translated along the track"""
         dt = SPEED_OF_LIGHT_M_PER_NS * cscd1_offset
-        cos_zen = np.cos(track1_zenith)
-        sin_zen = np.sin(track1_zenith)
-        sin_az = np.sin(track1_azimuth)
-        cos_az = np.cos(track1_azimuth)
+        cos_zen = np.cos(mu1_zenith)
+        sin_zen = np.sin(mu1_zenith)
+        sin_az = np.sin(mu1_azimuth)
+        cos_az = np.cos(mu1_azimuth)
         dz = cos_zen * cscd1_offset
         rho = sin_zen * cscd1_offset
         dx = rho * cos_az
@@ -467,8 +482,8 @@ def test_AggregateHypo():
             y=y + dy,
             z=z + dz,
             time=time + dt,
-            azimuth=track1_azimuth,
-            zenith=track1_zenith,
+            azimuth=mu1_azimuth,
+            zenith=mu1_zenith,
             energy=cscd1_energy,
         )
 
@@ -484,25 +499,29 @@ def test_AggregateHypo():
 
     external_param_names = set()
     for hypo in hypos:
+        print(hypo.external_param_names)
         external_param_names.update(hypo.external_param_names)
 
     rand = np.random.RandomState(0)
     params_kw = {k: rand.uniform(1, 3) for k in external_param_names}
 
     # Make sure each hypo works on its own
-    _, _, _, _ = muon0.get_sources(**params_kw)
-    _, _, _, _ = muon1.get_sources(**params_kw)
-    _, _, _, _ = muon2.get_sources(**params_kw)
-    _, _, _, _ = cscd0.get_sources(**params_kw)
-    _, _, _, _ = cscd1.get_sources(**params_kw)
+    for hypo in hypos:
+        _, _, _, _ = hypo.get_sources(**params_kw)
 
     #sources, handling, n_pl, pl_gen = aggregate_sources(hypos=hypos, **params_kw)
     agg_hypo = AggregateHypo(hypos, hypo_names=["mu0", "mu1", "mu2", "cscd0", "cscd1"])
     sources, handling, n_pl, pl_gen = agg_hypo.get_sources(**params_kw)
+    derived_params = agg_hypo.get_derived_params(
+        pegleg_indices=[50, 100],
+        scalefactors=np.array([[20]]),
+    )
     print("len(sources):", len(sources))
     print("handling:", handling)
     print("n_pl:", n_pl)
     print("pl_gen:", pl_gen)
+    print("params:        ", agg_hypo.external_params)
+    print("derived_params:", derived_params)
 
     for pl_gen_num in range(n_pl):
         all_pl_sources = []

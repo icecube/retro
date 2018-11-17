@@ -86,9 +86,12 @@ take all LLH that are within this threshold of the maximum LLH"""
 if PEGLEG_SPACING is StepSpacing.LOG:
     assert PEGLEG_LLH_CHOICE is LLHChoice.MAX
 
+MAX_SCALING_ENERGY = 1000.
+
 
 def generate_llh_function(
-    pexp,
+    pexp_func,
+    scaling_proto_energy,
     dom_tables,
     tdi_tables=None,
     tdi_metas=None,
@@ -97,7 +100,7 @@ def generate_llh_function(
 
     Parameters
     ----------
-    pexp : callable
+    pexp_func : callable
         As returned by :func:`retro.pexp.generate_pexp_function`
 
     dom_tables : Retro5DTables
@@ -138,7 +141,7 @@ def generate_llh_function(
 
     # NOTE: For now, we only support absolute value of deltaphidir (which
     # assumes azimuthal symmetry). In future, this could be revisited (and then
-    # the abs(...) applied before binning in the pexp code will have to be
+    # the abs(...) applied before binning in the pexp_func code will have to be
     # removed or replaced with behavior that depend on the range of the
     # deltaphidir_bin_edges).
     assert dom_tables.table_meta['deltaphidir_bin_edges'][0] == 0, 'only abs(deltaphidir) supported'
@@ -182,6 +185,11 @@ def generate_llh_function(
     t_indep_dom_tables.flags.writeable = False
     t_indep_dom_table_norms.flags.writeable = False
 
+    # TODO: handle scalefactor range outside via mapping supplied that maps from unit
+    # cube to "valid" range (and this can include a simple prior); also allow for more
+    # than one scalefactors (but this makes everything much more complicated)
+    max_scalefactor = MAX_SCALING_ENERGY / scaling_proto_energy
+
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh_no_scaling_sources(
         event_dom_info,
@@ -224,7 +232,6 @@ def generate_llh_function(
         nominal_scaling_hit_exp,
         nominal_scaling_t_indep_exp,
         initial_scalefactor,
-        max_scalefactors,
     ):
         """Find optimal (highest-likelihood) `scalefactor` for scaling sources.
 
@@ -351,10 +358,7 @@ def generate_llh_function(
                 scalefactor = max(scalefactor, 0)
                 #print('scalef: ',scalefactor)
                 iters += 1
-                if (
-                    abs(step) < epsilon
-                    or iters >= max_iter
-                ):
+                if abs(step) < epsilon or iters >= max_iter:
                     break
 
             #print('arrived at ',scalefactor)
@@ -362,7 +366,7 @@ def generate_llh_function(
                 print('exceeded gradient descent iteration limit!')
                 print('arrived at ', scalefactor)
             #print('\n')
-            scalefactor = max(0., min(max_scalefactors, scalefactor))
+            scalefactor = max(0., min(max_scalefactor, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
             scalefactor = initial_scalefactor
@@ -388,7 +392,7 @@ def generate_llh_function(
             #    print('exceeded gradient descent iteration limit!')
             #    print('arrived at ',scalefactor)
             #print('\n')
-            scalefactor = max(0., min(max_scalefactors, scalefactor))
+            scalefactor = max(0., min(max_scalefactor, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
             epsilon = 1e-2
@@ -400,7 +404,7 @@ def generate_llh_function(
                 done = True
                 #print('trivial 0')
             if not done:
-                last = max_scalefactors
+                last = max_scalefactor
                 last_grad = get_grad_neg_llh_wrt_scalefactor(last)
                 if last_grad < 0 or abs(last_grad) < epsilon:
                     scalefactor = last
@@ -445,7 +449,6 @@ def generate_llh_function(
         sources_handling,
         num_pegleg_generators,
         pegleg_generators,
-        max_scalefactors,
         event_hit_info,
         event_dom_info,
         dom_tables,
@@ -474,8 +477,6 @@ def generate_llh_function(
             scaling the luminosity of these sources; if not using the pegleg/scaling
             procedure, `scaling_sources` will be an empty array (i.e.,
             `n_scaling_sources = 0`)
-
-        max_scalefactors
 
         event_hit_info : shape (n_hits,) array of dtype EVT_HIT_INFO_T
 
@@ -511,17 +512,23 @@ def generate_llh_function(
             Best scale factor for `scaling_sources` at best pegleg hypo
 
         """
-        num_pegleg_sources = len(pegleg_sources)
-        num_pegleg_steps = 1 + int(num_pegleg_sources / pegleg_stepsize)
-        num_scaling_sources = len(scaling_sources)
         num_hits = len(event_hit_info)
+
+        nonscaling_sources = []
+        scaling_sources = []
+        for i in range(len(sources)):
+            if sources_handling[i] == SrcHandling.nonscaling:
+                nonscaling_sources.append(sources[i])
+            else:
+                scaling_sources.append(sources[i])
+        num_scaling_sources = len(scaling_sources)
 
         if num_scaling_sources > 0:
             # -- Storage for exp due to nominal (`scalefactor = 1`) scaling sources -- #
             nominal_scaling_t_indep_exp = 0.
             nominal_scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
 
-            nominal_scaling_t_indep_exp += pexp(
+            nominal_scaling_t_indep_exp += pexp_func(
                 sources=scaling_sources,
                 sources_start=0,
                 sources_stop=num_scaling_sources,
@@ -542,7 +549,7 @@ def generate_llh_function(
 
         # Expectations for nonscaling-only sources (i.e. pegleg=0 at this point)
         if len(nonscaling_sources) > 0:
-            nonscaling_t_indep_exp += pexp(
+            nonscaling_t_indep_exp += pexp_func(
                 sources=nonscaling_sources,
                 sources_start=0,
                 sources_stop=len(nonscaling_sources),
@@ -566,7 +573,6 @@ def generate_llh_function(
                 nominal_scaling_hit_exp=nominal_scaling_hit_exp,
                 nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
                 initial_scalefactor=10.,
-                max_scalefactors=max_scalefactors,
             )
         else:
             scalefactor = 0
@@ -576,6 +582,10 @@ def generate_llh_function(
                 nonscaling_hit_exp=nonscaling_hit_exp,
                 nonscaling_t_indep_exp=nonscaling_t_indep_exp,
             )
+
+        for pl_gen_num in range(num_pegleg_generators):
+            pl_llhs = []
+            for pl_sources, pl_sources_handling in pegleg_generators(pl_gen_num): 
 
         if num_pegleg_sources == 0:
             # in this case we're done
@@ -605,7 +615,7 @@ def generate_llh_function(
 
             # Add to expectations by including another "batch" or segment of pegleg
             # sources
-            nonscaling_t_indep_exp += pexp(
+            nonscaling_t_indep_exp += pexp_func(
                 sources=pegleg_sources,
                 sources_start=pegleg_start_idx,
                 sources_stop=pegleg_stop_idx,
@@ -629,7 +639,6 @@ def generate_llh_function(
                     nominal_scaling_hit_exp=nominal_scaling_hit_exp,
                     nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
                     initial_scalefactor=scalefactor,
-                    max_scalefactors=max_scalefactors,
                 )
             else:
                 scalefactor = 0
@@ -721,7 +730,6 @@ def generate_llh_function(
         sources_handling,
         num_pegleg_generators,
         pegleg_generators,
-        max_scalefactors,
         event_hit_info,
         event_dom_info,
     ):
@@ -772,7 +780,6 @@ def generate_llh_function(
             sources_handling=sources_handling,
             num_pegleg_generators=num_pegleg_generators,
             pegleg_generators=pegleg_generators,
-            max_scalefactors=max_scalefactors,
             event_hit_info=event_hit_info,
             event_dom_info=event_dom_info,
             dom_tables=dom_tables,

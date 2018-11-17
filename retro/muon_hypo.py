@@ -895,7 +895,10 @@ class MuonHypo(Hypo):
                 )
             if isinstance(pegleg_indices, Iterable):
                 pegleg_indices = tuple(pegleg_indices)
-                assert len(pegleg_indices) == 1
+                if len(pegleg_indices) != 1:
+                    raise ValueError(
+                        "{} pegleg indices but must be 1".format(len(pegleg_indices))
+                    )
                 pegleg_indices = pegleg_indices[0]
 
             track_length = (
