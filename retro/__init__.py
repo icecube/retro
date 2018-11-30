@@ -82,7 +82,7 @@ else:
 
 # -- Datatype choices for consistency throughout code -- #
 
-FTYPE = np.float64
+FTYPE = np.float32
 """Datatype to use for explicitly-typed floating point numbers"""
 
 UITYPE = np.int64
