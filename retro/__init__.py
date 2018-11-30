@@ -93,7 +93,13 @@ UITYPE = np.int64
 DEBUG = 0
 """Level of debug messages to display"""
 
-DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, fastmath=True, cache=True)
+DFLT_NUMBA_JIT_KWARGS = dict(
+    nopython=True,
+    nogil=True,
+    fastmath=True,
+    cache=True,
+    error_model='numpy',
+)
 """kwargs to pass to numba.jit"""
 
 DFLT_PULSE_SERIES = 'SRTInIcePulses'
