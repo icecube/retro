@@ -32,7 +32,9 @@ from collections import OrderedDict
 import gzip
 import hashlib
 import os
-from os.path import abspath, basename, expanduser, expandvars, dirname, isfile, join, splitext
+from os.path import (
+    abspath, basename, expanduser, expandvars, dirname, isfile, join, splitext
+)
 from shutil import copyfile
 import sys
 
@@ -77,7 +79,13 @@ def extract_gcd(gcd_file, outdir=None):
     gcd_file = expanduser(expandvars(gcd_file))
     src_gcd_dir = dirname(gcd_file)
     src_gcd_basename = basename(gcd_file)
-    src_gcd_stripped = src_gcd_basename.rstrip('.bz2').rstrip('.gz').rstrip('.i3').rstrip('.pkl')
+    src_gcd_stripped = (
+        src_gcd_basename
+        .rstrip('.bz2')
+        .rstrip('.gz')
+        .rstrip('.i3')
+        .rstrip('.pkl')
+    )
 
     outfname = src_gcd_stripped + '.pkl'
     data_dir_fpath = abspath(join(DATA_DIR, outfname))

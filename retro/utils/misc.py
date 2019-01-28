@@ -21,7 +21,6 @@ __all__ = [
     'get_file_md5',
     'sort_dict',
     'convert_to_namedtuple',
-    'get_arg_names',
     'check_kwarg_keys',
     'validate_and_convert_enum',
     'hrlist2list',
@@ -60,7 +59,6 @@ from collections import Iterable, OrderedDict, Mapping, Sequence
 import enum
 import errno
 import hashlib
-import inspect
 from numbers import Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
@@ -70,7 +68,6 @@ import struct
 from subprocess import Popen, PIPE
 import sys
 
-import numba
 import numpy as np
 from six import BytesIO
 from six.moves import map, range
@@ -359,29 +356,6 @@ def convert_to_namedtuple(val, nt_type):
         return nt_type(*val)
 
     raise TypeError('Cannot convert %s to %s' % (type(val), nt_type))
-
-
-def get_arg_names(func):
-    """Extract argument names from a pure-Python or Numba jit-compiled function.
-
-    Parameters
-    ----------
-    func : callable
-
-    Returns
-    -------
-    arg_names : tuple of strings
-
-    """
-    if isinstance(func, numba.targets.registry.CPUDispatcher):
-        py_func = func.py_func
-    else:
-        py_func = func
-
-    # Get all the function's argument names
-    arg_names = inspect.getargspec(py_func).args
-
-    return tuple(arg_names)
 
 
 def check_kwarg_keys(required_keys, provided_kwargs, meta_name, message_pfx):

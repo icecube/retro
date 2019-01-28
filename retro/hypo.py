@@ -34,7 +34,8 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import check_kwarg_keys, deduce_sph_pairs, get_arg_names
+from retro.utils.misc import check_kwarg_keys, deduce_sph_pairs
+from retro.utils.get_arg_names import get_arg_names
 
 
 class Hypo(object):
