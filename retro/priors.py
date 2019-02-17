@@ -47,6 +47,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import GarbageInputError
 from retro.const import TWO_PI
 
 
@@ -129,8 +130,9 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             prior_def = (kind, (low, high))
         elif kind == PRI_SPEFIT2:
             spe_fit_val = event['recos']['SPEFit2'][dim_name]
-            loc = -0.19687812829978152
-            loc += spe_fit_val
+            if not np.isfinite(spe_fit_val):
+                raise GarbageInputError('SPEFit2 dim "{}" val = {}'.format(dim_name, spe_fit_val))
+            loc = -0.19687812829978152 + spe_fit_val
             scale = 14.282171566308806
             if extent.lower() == 'tight':
                 low += loc
@@ -160,8 +162,10 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
         elif kind == PRI_SPEFIT2:
-            loc = -0.2393645701205161
-            loc += event['recos']['SPEFit2'][dim_name]
+            spe_fit_val = event['recos']['SPEFit2'][dim_name]
+            if not np.isfinite(spe_fit_val):
+                raise GarbageInputError('SPEFit2 dim "{}" val = {}'.format(dim_name, spe_fit_val))
+            loc = -0.2393645701205161 + spe_fit_val
             scale = 15.049528023495354
             if extent.lower() == 'tight':
                 low += loc
@@ -195,8 +199,10 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
         elif kind == PRI_SPEFIT2:
-            loc = -5.9170661027492546
-            loc += event['recos']['SPEFit2'][dim_name]
+            spe_fit_val = event['recos']['SPEFit2'][dim_name]
+            if not np.isfinite(spe_fit_val):
+                raise GarbageInputError('SPEFit2 dim "{}" val = {}'.format(dim_name, spe_fit_val))
+            loc = -5.9170661027492546 + spe_fit_val
             scale = 12.089399308036718
             if extent.lower() == 'tight':
                 low += loc
@@ -225,8 +231,10 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
         elif kind == PRI_SPEFIT2:
-            loc = -82.631395081663754
-            loc += event['recos']['SPEFit2'][dim_name]
+            spe_fit_val = event['recos']['SPEFit2'][dim_name]
+            if not np.isfinite(spe_fit_val):
+                raise GarbageInputError('SPEFit2 dim "{}" val = {}'.format(dim_name, spe_fit_val))
+            loc = -82.631395081663754 + spe_fit_val
             scale = 75.619895703067343
             if extent.lower() == 'tight':
                 low += loc
@@ -263,6 +271,12 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
     # create prior function
 
     kind, args = prior_def
+
+    if not np.all(np.isfinite(args)):
+        raise ValueError(
+            'Dimension "{}" got non-finite arg(s) for prior kind "{}"; args = {}'
+            .format(dim_name, kind, args)
+        )
 
     if kind == PRI_UNIFORM:
         if args == (0, 1):
