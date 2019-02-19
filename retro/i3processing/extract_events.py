@@ -52,7 +52,10 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.retro_types import PHOTON_T, PULSE_T, TRIGGER_T
+from retro.retro_types import (
+    PHOTON_T, PULSE_T, TRIGGER_T, ParticleType, ParticleShape, LocationType,
+    FitStatus
+)
 from retro.utils.misc import expand, mkdir
 
 
@@ -77,6 +80,25 @@ GENERIC_I3_FNAME_RE = re.compile(
     $                              # End of string
     ''', (re.VERBOSE | re.IGNORECASE)
 )
+
+I3PARTICLE_ATTRS = OrderedDict([
+    ('major_id', dict(dtype=np.uint64, default=0)),
+    ('minor_id', dict(dtype=np.int32, default=0)),
+    ('zenith', dict(path='dir.zenith', dtype=np.float32, default=np.nan)),
+    ('azimuth', dict(path='dir.zenith', dtype=np.float32, default=np.nan)),
+    ('x', dict(path='pos.x', dtype=np.float32, default=np.nan)),
+    ('y', dict(path='pos.y', dtype=np.float32, default=np.nan)),
+    ('z', dict(path='pos.z', dtype=np.float32, default=np.nan)),
+    ('time', dict(dtype=np.float32, default=np.nan)),
+    ('energy', dict(dtype=np.float32, default=np.nan)),
+    ('speed', dict(dtype=np.float32, default=np.nan)),
+    ('length', dict(dtype=np.float32, default=np.nan)),
+    ('type', dict(enum=ParticleType, dtype=np.int32, default=ParticleType.unknown)),
+    ('pdg_encoding', dict(enum=ParticleType, dtype=np.int32, default=ParticleType.unknown)),
+    ('shape', dict(enum=ParticleShape, dtype=np.uint8, default=ParticleShape.Null)),
+    ('fit_status', dict(enum=FitStatus, dtype=np.int8, default=FitStatus.NotSet)),
+    ('location_type', dict(enum=LocationType, dtype=np.uint8, default=LocationType.Anywhere)),
+])
 
 
 def extract_file_metadata(fname):
@@ -147,6 +169,8 @@ def extract_reco(frame, reco):
             reco_dict['track_azimuth'] = np.nan
             reco_dict['cascade_energy'] = np.nan
 
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
+
     # -- HybridReco, as seen in DRAGON 1{2,4,6}60 Monte Carlo -- #
 
     # MultiNest7D is a cascade-only fit to the event
@@ -162,6 +186,8 @@ def extract_reco(frame, reco):
         reco_dict['zenith'] = neutrino.dir.zenith
         reco_dict['azimuth'] = neutrino.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
+
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
 
     # MultiNest8D fits a cascade & track, with casscade in the track direction
     elif reco.endswith('MultiNest8D'):
@@ -180,6 +206,8 @@ def extract_reco(frame, reco):
         reco_dict['track_zenith'] = track.dir.zenith
         reco_dict['track_azimuth'] = track.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
+
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
 
     # MultiNest8D fits a cascade & track with their directions independnent
     elif reco.endswith('MultiNest10D'):
@@ -201,19 +229,26 @@ def extract_reco(frame, reco):
         reco_dict['cascade_zenith'] = track.dir.zenith
         reco_dict['cascade_azimuth'] = track.dir.azimuth
 
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
+
     # -- Anything else -- #
 
     else:
-        i3particle = frame[reco]
-        reco_dict['x'] = i3particle.pos.x
-        reco_dict['y'] = i3particle.pos.y
-        reco_dict['z'] = i3particle.pos.z
-        reco_dict['time'] = i3particle.time
-        reco_dict['energy'] = i3particle.energy
-        reco_dict['zenith'] = i3particle.dir.zenith
-        reco_dict['azimuth'] = i3particle.dir.azimuth
+        dt_spec = [(attr, info['dtype']) for attr, info in I3PARTICLE_ATTRS.items()]
+        if reco in frame:
+            i3particle = frame[reco]
+            for attr, info in I3PARTICLE_ATTRS.items():
+                # If "path" key present in `info`, get its value; otherwise,
+                # path is just attr's name
+                path = info.get('path', attr)
 
-    reco = np.array(tuple(reco_dict.values()), dtype=[(k, np.float32) for k in reco_dict.keys()])
+                # Recursively apply getattr on the i3particle for each path
+                reco_dict[attr] = reduce(getattr, path.split('.'), i3particle)
+        else:
+            for attr, info in I3PARTICLE_ATTRS.items():
+                reco_dict[attr] = info['default']
+
+    reco = np.array(tuple(reco_dict.values()), dtype=dt_spec)
 
     return reco
 
@@ -794,11 +829,17 @@ def extract_events(
                     protocol=pickle.HIGHEST_PROTOCOL)
 
     for name in pulses:
-        pickle.dump(pulses_d[name],
-                    open(join(pulse_series_dir, name + '.pkl'), 'wb'),
-                    protocol=pickle.HIGHEST_PROTOCOL)
-        np.save(join(pulse_series_dir, name + 'TimeRange' + '.npy'),
-                np.array(pulses_d[name + 'TimeRange'], dtype=np.float32))
+        pickle.dump(
+            pulses_d[name],
+            open(join(pulse_series_dir, name + '.pkl'), 'wb'),
+            protocol=pickle.HIGHEST_PROTOCOL
+        )
+        key = name + 'TimeRange'
+        if key in pulses_d and pulses_d[key]:
+            np.save(
+                join(pulse_series_dir, key + '.npy'),
+                np.array(pulses_d[key], dtype=np.float32)
+            )
 
     for name in recos:
         np.save(join(recos_dir, name + '.npy'), np.array(recos_d[name]))

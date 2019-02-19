@@ -53,7 +53,7 @@ from retro.hypo import discrete_muon_kernels as dmk
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
 from retro.retro_types import (
-    HIT_T, SD_INDEXER_T, HITS_SUMMARY_T, ConfigID, TypeID, SourceID
+    HIT_T, SD_INDEXER_T, HITS_SUMMARY_T, TriggerConfigID, TriggerTypeID, TriggerSourceID
 )
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
@@ -654,35 +654,35 @@ def get_hits(event, path, angsens_model=None):
             source = trigger['source']
 
             # Do not expand the in-ice window based on GLOBAL triggers (of
-            # any TypeID)
-            if source == SourceID.GLOBAL:
+            # any TriggerTypeID)
+            if source == TriggerSourceID.GLOBAL:
                 continue
 
             tr_type = trigger['type']
             config_id = trigger['config_id']
             tr_time = trigger['time']
 
-            # TODO: rework to _only_ use ConfigID?
+            # TODO: rework to _only_ use TriggerConfigID?
             # Below values can be extracted by running
             # $I3_SRC/trigger-sim/resources/scripts/print_trigger_configuration.py -g GCDFILE
             trigger_handled = False
-            if tr_type == TypeID.SIMPLE_MULTIPLICITY:
-                if source == SourceID.IN_ICE:
-                    if config_id == ConfigID.SMT8_IN_ICE:
+            if tr_type == TriggerTypeID.SIMPLE_MULTIPLICITY:
+                if source == TriggerSourceID.IN_ICE:
+                    if config_id == TriggerConfigID.SMT8_IN_ICE:
                         trigger_handled = True
                         left_dt = -4e3
                         right_dt = 5e3 + 6e3
-                    elif config_id == ConfigID.SMT3_DeepCore:
+                    elif config_id == TriggerConfigID.SMT3_DeepCore:
                         trigger_handled = True
                         left_dt = -4e3
                         right_dt = 2.5e3 + 6e3
-            elif tr_type == TypeID.VOLUME:
-                if source == SourceID.IN_ICE:
+            elif tr_type == TriggerTypeID.VOLUME:
+                if source == TriggerSourceID.IN_ICE:
                     trigger_handled = True
                     left_dt = -4e3
                     right_dt = 1e3 + 6e3
-            elif tr_type == TypeID.STRING:
-                if source == SourceID.IN_ICE:
+            elif tr_type == TriggerTypeID.STRING:
+                if source == TriggerSourceID.IN_ICE:
                     trigger_handled = True
                     left_dt = -4e3
                     right_dt = 1.5e3 + 6e3
@@ -691,8 +691,8 @@ def get_hits(event, path, angsens_model=None):
                 raise NotImplementedError(
                     'Trigger TypeID {}, SourceID {}, config_id {} not'
                     ' implemented'
-                    .format(TypeID(tr_type).name, # pylint: disable=no-member
-                            SourceID(source).name, # pylint: disable=no-member
+                    .format(TriggerTypeID(tr_type).name, # pylint: disable=no-member
+                            TriggerSourceID(source).name, # pylint: disable=no-member
                             config_id)
                 )
 
