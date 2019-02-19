@@ -122,7 +122,7 @@ $retro_dir/retro/reco.py \
     --outdir "$outdir" \
     --method "crs_prefit_mn" \
     \
-    --gcd "GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise" \
+    --gcd "/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.pkl" \
     --dom-tables-kind "$tblkind" \
     --dom-tables-fname-proto "$proto" \
     --use-doms "all" \
@@ -138,6 +138,7 @@ $retro_dir/retro/reco.py \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SplitInIcePulses" \
+    --truth \
     --angsens-model "9"
 
 wait

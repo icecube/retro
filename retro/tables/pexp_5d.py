@@ -74,6 +74,7 @@ class LLHChoice(enum.IntEnum):
     MAX = 0
     MEAN = 1
     MEDIAN = 2
+    FOURPOINTS = 3 # storing additionalpoints at 0 track lnegth and a fixed number of steps before and after max
 
 
 MACHINE_EPS = 1e-10
@@ -88,12 +89,15 @@ PEGLEG_SPACING = StepSpacing.LINEAR
 """Pegleg adds segments either linearly (same number of segments independent of energy)
 or logarithmically (more segments are added the longer the track"""
 
-PEGLEG_LLH_CHOICE = LLHChoice.MEAN
+PEGLEG_LLH_CHOICE = LLHChoice.FOURPOINTS
 """How to choose best LLH from all Pegleg steps"""
 
 PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
 """For Pegleg `LLHChoice` that require a range of LLH and average (mean, median, etc.),
 take all LLH that are within this threshold of the maximum LLH"""
+
+PEGLEG_BREAK_COUNTER = 100
+"""After how many steps without improving the llh to exit the pegleg loop adding more track segments"""
 
 # TODO: a "proper" jitter (and transit time spread) implementation should treat each DOM
 # independently and pick the time offset for each DOM that maximizes LLH (_not_ expected
@@ -1130,6 +1134,9 @@ def generate_pexp_and_llh_functions(
                 llh,
                 0, # pegleg_stop_idx = 0: no pegleg sources
                 scalefactor,
+                0.,
+                0.,
+                0.,
             )
 
         # -- Pegleg loop -- #
@@ -1223,7 +1230,7 @@ def generate_pexp_and_llh_functions(
             previous_llh = llh
 
             # break condition
-            if getting_worse_counter > 100: # 10?
+            if getting_worse_counter > PEGLEG_BREAK_COUNTER:
                 #for idx in range(pegleg_idx+1,n_pegleg_steps):
                 #    # fill up with bad llhs. just to make sure they're not used
                 #    llhs[idx] = best_llh - 100
@@ -1235,6 +1242,9 @@ def generate_pexp_and_llh_functions(
                 llhs[pegleg_max_llh_step],
                 pegleg_max_llh_step * pegleg_stepsize,
                 scalefactors[pegleg_max_llh_step],
+                0.,
+                0.,
+                0.,
             )
 
         elif PEGLEG_LLH_CHOICE is LLHChoice.MEAN:
@@ -1254,6 +1264,9 @@ def generate_pexp_and_llh_functions(
                 total_llh_above_thresh / counter,
                 total_idx_above_thresh / counter,
                 total_scalefactor_above_thresh / counter,
+                0.,
+                0.,
+                0.,
             )
 
         elif PEGLEG_LLH_CHOICE is LLHChoice.MEDIAN:
@@ -1279,6 +1292,18 @@ def generate_pexp_and_llh_functions(
             #print(llhs[:10])
             #print(scalefactors[:10])
             #print(pegleg_steps[:10])
+
+        elif PEGLEG_LLH_CHOICE is LLHChoice.FOURPOINTS:
+            lower_idx = max(0, pegleg_max_llh_step - 10)
+            upper_idx = pegleg_max_llh_step + 10
+            return (
+                llhs[pegleg_max_llh_step],
+                pegleg_max_llh_step * pegleg_stepsize,
+                scalefactors[pegleg_max_llh_step],
+                llhs[0], 
+                llhs[lower_idx],
+                llhs[upper_idx], 
+            )
 
         else:
             raise ValueError('Unknown `PEGLEG_LLH_CHOICE`')

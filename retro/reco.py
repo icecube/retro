@@ -247,10 +247,12 @@ class Reco(object):
 
                     param_values = []
                     log_likelihoods = []
+                    aux_values = []
                     t_start = []
                     self.generate_loglike_method(
                         param_values=param_values,
                         log_likelihoods=log_likelihoods,
+                        aux_values=aux_values,
                         t_start=t_start,
                     )
 
@@ -297,7 +299,7 @@ class Reco(object):
                         llhp_fname = '{}.llhp'.format(method)
                     else:
                         llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
                     self.make_estimate(
                         llhp=llhp,
                         remove_priors=True,
@@ -324,10 +326,12 @@ class Reco(object):
 
                     param_values = []
                     log_likelihoods = []
+                    aux_values = []
                     t_start = []
                     self.generate_loglike_method(
                         param_values=param_values,
                         log_likelihoods=log_likelihoods,
+                        aux_values=aux_values,
                         t_start=t_start,
                     )
 
@@ -349,7 +353,7 @@ class Reco(object):
                         llhp_fname = '{}.llhp'.format(method)
                     else:
                         llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
                     self.make_estimate(
                         llhp=llhp,
                         remove_priors=False,
@@ -379,10 +383,12 @@ class Reco(object):
 
                     param_values = []
                     log_likelihoods = []
+                    aux_values = []
                     prefit_t_start = []
                     self.generate_loglike_method(
                         param_values=param_values,
                         log_likelihoods=log_likelihoods,
+                        aux_values=aux_values,
                         t_start=prefit_t_start,
                     )
 
@@ -404,7 +410,7 @@ class Reco(object):
                         llhp_fname = '{}.llhp_prefit'.format(method)
                     else:
                         llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
                     prefit_estimate = self.make_estimate(
                         llhp=llhp,
                         remove_priors=False,
@@ -463,10 +469,12 @@ class Reco(object):
 
                     param_values = []
                     log_likelihoods = []
+                    aux_values = []
                     t_start = []
                     self.generate_loglike_method(
                         param_values=param_values,
                         log_likelihoods=log_likelihoods,
+                        aux_values=aux_values,
                         t_start=t_start,
                     )
 
@@ -488,7 +496,7 @@ class Reco(object):
                         llhp_fname = '{}.llhp'.format(method)
                     else:
                         llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
                     self.make_estimate(
                         llhp=llhp,
                         remove_priors=True,
@@ -566,10 +574,12 @@ class Reco(object):
 
                     param_values = []
                     log_likelihoods = []
+                    aux_values = []
                     prefit_t_start = []
                     self.generate_loglike_method(
                         param_values=param_values,
                         log_likelihoods=log_likelihoods,
+                        aux_values=aux_values,
                         t_start=t_start,
                     )
 
@@ -591,7 +601,7 @@ class Reco(object):
                         llhp_fname = '{}.llhp_prefit'.format(method)
                     else:
                         llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
                     prefit_estimate = self.make_estimate(
                         llhp=llhp,
                         remove_priors=False,
@@ -638,10 +648,12 @@ class Reco(object):
 
                     param_values = []
                     log_likelihoods = []
+                    aux_values = []
                     t_start = []
                     self.generate_loglike_method(
                         param_values=param_values,
                         log_likelihoods=log_likelihoods,
+                        aux_values=aux_values,
                         t_start=t_start,
                     )
 
@@ -663,7 +675,7 @@ class Reco(object):
                         llhp_fname = '{}.llhp'.format(method)
                     else:
                         llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
                     self.make_estimate(
                         llhp=llhp,
                         remove_priors=False,
@@ -734,13 +746,14 @@ class Reco(object):
 
         self.prior = prior
 
-    def generate_loglike_method(self, param_values, log_likelihoods, t_start):
+    def generate_loglike_method(self, param_values, log_likelihoods, aux_values, t_start):
         """Generate the LLH callback method `self.loglike` for a given event.
 
         Parameters
         ----------
         param_values : list
         log_likelihoods : list
+        aux_values : list
         t_start : list
             Needs to be a list for start time to be passed by reference and
             therefore universally accessible within all methods that require
@@ -772,11 +785,15 @@ class Reco(object):
                 ('track_azimuth', event['truth']['longest_daughter_azimuth']),
                 ('track_zenith', np.arccos(event['truth']['longest_daughter_coszen'])),
                 ('track_energy', event['truth']['longest_daughter_energy']),
-                ('cascade_azimuth', event['truth']['cascade_azimuth']),
-                ('cascade_zenith', np.arccos(event['truth']['cascade_coszen'])),
-                ('cascade_energy', event['truth']['cascade_energy']),
-                ('neutrino_energy', event['truth']['energy']),
             ])
+            try:
+                truth_info['cascade_azimuth'] = event['truth']['cascade_azimuth']
+                truth_info['cascade_zenith'] = np.arccos(event['truth']['cascade_coszen'])
+                truth_info['cascade_energy'] = event['truth']['cascade_energy']
+            except ValueError:
+                truth_info['cascade_energy'] = event['truth']['energy'] - event['truth']['longest_daughter_energy']
+            truth_info['neutrino_energy'] = event['truth']['energy']
+
         else:
             truth_info = None
 
@@ -873,7 +890,7 @@ class Reco(object):
             pegleg_sources = hypo_handler.get_pegleg_sources(hypo)
             scaling_sources = hypo_handler.get_scaling_sources(hypo)
 
-            llh, pegleg_idx, scalefactor = self.get_llh(
+            get_llh_retval = self.get_llh(
                 generic_sources=generic_sources,
                 pegleg_sources=pegleg_sources,
                 scaling_sources=scaling_sources,
@@ -882,6 +899,12 @@ class Reco(object):
                 pegleg_stepsize=1,
             )
 
+            llh, pegleg_idx, scalefactor = get_llh_retval[:3]
+
+            if len(get_llh_retval) > 3:
+                aux_values.append(get_llh_retval[3:])
+
+            
             assert np.isfinite(llh), 'LLH not finite'
             assert llh < 0, 'LLH positive'
 
@@ -943,7 +966,7 @@ class Reco(object):
 
         self.loglike = loglike
 
-    def make_llhp(self, log_likelihoods, param_values, fname=None):
+    def make_llhp(self, log_likelihoods, param_values, aux_values, fname=None):
         """Create a structured numpy array containing the reco information;
         also add derived dimensions, and optionally save to disk.
 
@@ -952,6 +975,8 @@ class Reco(object):
         log_likelihoods : array
 
         param_values : array
+
+        aux_values : array
 
         fname : str, optional
             If provided, llhp for the event reco are saved to file at path
@@ -971,7 +996,13 @@ class Reco(object):
         if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
             derived_dim_names += ['cascade_zenith', 'cascade_azimuth']
 
-        all_dim_names = dim_names + derived_dim_names
+        if len(aux_values) > 0:
+            # from pegleg PID 4 points
+            aux_names = ['zero_llh', 'lower_llh', 'upper_llh']
+        else:
+            aux_names = []
+
+        all_dim_names = dim_names + derived_dim_names + aux_names
 
         llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + all_dim_names])
 
@@ -979,6 +1010,9 @@ class Reco(object):
         llhp = np.zeros(shape=len(param_values), dtype=llhp_t)
         llhp['llh'] = log_likelihoods
         llhp[dim_names] = param_values
+
+        if len(aux_values) > 0:
+            llhp[aux_names] = aux_values
 
         # create derived dimensions
         if 'energy' in derived_dim_names:
