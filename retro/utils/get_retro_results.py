@@ -27,7 +27,7 @@ import pickle
 import sys
 import time
 
-from dask.distributed import Client, LocalCluster, as_completed
+#from dask.distributed import Client, LocalCluster, as_completed
 import numpy as np
 import pandas as pd
 
@@ -42,33 +42,34 @@ from retro.utils.stats import estimate_from_llhp
 
 KEEP_TRUTH_KEYS = (
     'pdg',
-     'x',
-     'y',
-     'z',
-     'time',
-     'energy',
-     'coszen',
-     'azimuth',
-     'unique_id',
-     'highest_energy_daughter_pdg',
-     'highest_energy_daughter_energy',
-     'highest_energy_daughter_length',
-     'highest_energy_daughter_coszen',
-     'highest_energy_daughter_azimuth',
-     'longest_daughter_pdg',
-     'longest_daughter_energy',
-     'longest_daughter_length',
-     'longest_daughter_coszen',
-     'longest_daughter_azimuth',
-     'cascade_pdg',
-     'cascade_energy',
-     'cascade_coszen',
-     'cascade_azimuth',
-     'InteractionType',
-     'LengthInVolume',
-     'OneWeight',
-     'TargetPDGCode',
-     'TotalInteractionProbabilityWeight',
+    'x',
+    'y',
+    'z',
+    'time',
+    'energy',
+    'coszen',
+    'azimuth',
+    'unique_id',
+    'highest_energy_daughter_pdg',
+    'highest_energy_daughter_energy',
+    'highest_energy_daughter_length',
+    'highest_energy_daughter_coszen',
+    'highest_energy_daughter_azimuth',
+    'longest_daughter_pdg',
+    'longest_daughter_energy',
+    'longest_daughter_length',
+    'longest_daughter_coszen',
+    'longest_daughter_azimuth',
+    #'cascade_pdg',
+    #'cascade_energy',
+    #'cascade_coszen',
+    #'cascade_azimuth',
+    'InteractionType',
+    'LengthInVolume',
+    'OneWeight',
+    'TargetPDGCode',
+    'TotalInteractionProbabilityWeight',
+    'weight',
 )
 
 # apply to both "estimate_prefit" and "estimate"
@@ -111,10 +112,10 @@ SIMPLE_ERR_PARAMS = (
     'track_coszen',
     'track_zenith',
     'track_azimuth',
-    'cascade_energy',
-    'cascade_coszen',
-    'cascade_zenith',
-    'cascade_azimuth',
+    #'cascade_energy',
+    #'cascade_coszen',
+    #'cascade_zenith',
+    #'cascade_azimuth',
 )
 
 
@@ -158,8 +159,11 @@ def extract_from_leaf_dir(
         pl_recos[pl_reco_name] = np.load(fname)
 
     for est_fpath in glob(join(recodir, '*.crs_prefit_mn.estimate*.pkl')):
-        with file(est_fpath, 'rb') as f:
-            estimates = pickle.load(f)
+        with open(est_fpath, 'rb') as f:
+            try:
+                estimates = pickle.load(f)
+            except EOFError:
+                continue
 
         kinds = estimates['kind'].values
         params = estimates['param'].values
@@ -220,6 +224,7 @@ def extract_from_leaf_dir(
 
                     truth = truths[event_idx]
                     for k in KEEP_TRUTH_KEYS:
+                        #if k in truth:
                         info[k] = truth[k]
 
                     # -- Get Pegleg recos into info dict -- #
@@ -302,7 +307,7 @@ def augment_info(info):
         info['track_pdg'] = info['highest_energy_daughter_pdg']
 
     # Define coszen or zenith depending on which is already defined
-    for pfx in ('', 'track_', 'cascade_'):
+    for pfx in ('', 'track_'): #, 'cascade_'):
         cz_col = pfx + 'coszen'
         zen_col = pfx + 'zenith'
         if cz_col not in info:
@@ -312,8 +317,8 @@ def augment_info(info):
 
     # -- Derived from the above -- #
 
-    info['visible_energy'] = info['cascade_energy'] + info['track_energy']
-    info['bjorken_y'] = info['cascade_energy'] / info['energy']
+    #info['visible_energy'] = info['cascade_energy'] + info['track_energy']
+    #info['bjorken_y'] = info['cascade_energy'] / info['energy']
     info['rho'] = np.hypot(info['x'] - 50, info['y'] + 50)
     info['position_phi'] = np.arctan2(info['y'] + 50, info['x'] - 50)
 
@@ -354,7 +359,7 @@ def augment_info(info):
             info['{}_{}_error'.format(reco, param)] = err
 
         # Angle error
-        for pfx in ('', 'track_', 'cascade_'):
+        for pfx in ('', 'track_'): #, 'cascade_'):
             true_zen_col = '{}zenith'.format(pfx)
             true_az_col = '{}azimuth'.format(pfx)
             reco_zen_col = '{}_{}zenith'.format(reco, pfx)
@@ -416,11 +421,14 @@ def get_retro_results(
     if not overwrite and isfile(outfile_path):
         raise IOError('Output file path already exists at "{}"'.format(outfile_path))
 
-    cluster = LocalCluster(threads_per_worker=1, diagnostics_port=None)
-    client = Client(cluster)
+    #if parallel:
+    #    cluster = LocalCluster(threads_per_worker=1, diagnostics_port=None)
+    #    client = Client(cluster)
+
+    results = []
     try:
         # Walk directory hierarchy
-        futures = []
+        #futures = []
         for reco_dirpath, _, files in walk(recos_basedir, followlinks=True):
             is_leafdir = False
             for f in files:
@@ -440,26 +448,30 @@ def get_retro_results(
             filenum = basename(abs_reco_dirpath)
             flavdir = basename(dirname(abs_reco_dirpath))
 
-            futures.append(
-                client.submit(
-                    extract_from_leaf_dir,
-                    recodir=reco_dirpath,
-                    eventdir=event_dirpath,
-                    flavdir=flavdir,
-                    filenum=filenum,
-                    recompute_estimate=recompute_estimate,
-                )
+            kwargs = dict(
+                recodir=reco_dirpath,
+                eventdir=event_dirpath,
+                flavdir=flavdir,
+                filenum=filenum,
+                recompute_estimate=recompute_estimate,
             )
+            #print(kwargs)
+            #futures.append(client.submit(extract_from_leaf_dir, **kwargs))
+            results.append(extract_from_leaf_dir(**kwargs))
 
-        results = [f.result() for f in as_completed(futures)]
+        #results = [f.result() for f in as_completed(futures)]
 
     finally:
-        cluster.close()
-        client.close()
-        del client
-        del cluster
+        pass
+    #    cluster.close()
+    #    client.close()
+    #    del client
+    #    del cluster
 
     # Convert to a single list containing all events
+    #for r in results:
+    #    print(type(r))
+    #    print(r)
     all_events = reduce(add, results, [])
 
     # Convert to pandas DataFrame
