@@ -1300,9 +1300,9 @@ def generate_pexp_and_llh_functions(
                 llhs[pegleg_max_llh_step],
                 pegleg_max_llh_step * pegleg_stepsize,
                 scalefactors[pegleg_max_llh_step],
-                llhs[0], 
-                llhs[lower_idx],
-                llhs[upper_idx], 
+                llhs[pegleg_max_llh_step] - llhs[0], 
+                llhs[pegleg_max_llh_step] - llhs[lower_idx],
+                llhs[pegleg_max_llh_step] - llhs[upper_idx], 
             )
 
         else:
