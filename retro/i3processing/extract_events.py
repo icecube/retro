@@ -23,9 +23,24 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+__all__ = [
+    'FILENAME_INFO_RE',
+    'GENERIC_I3_FNAME_RE',
+    'extract_file_metadata',
+    'extract_reco',
+    'extract_trigger_hierarchy',
+    'extract_pulses',
+    'extract_photons',
+    'extract_truth',
+    'extract_metadata_from_frame',
+    'extract_events',
+    'parse_args',
+]
+
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
+from hashlib import sha256
 from os.path import abspath, basename, dirname, join
 import cPickle as pickle
 import re
@@ -37,7 +52,10 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.retro_types import PHOTON_T, PULSE_T, TRIGGER_T
+from retro.retro_types import (
+    PHOTON_T, PULSE_T, TRIGGER_T, ParticleType, ParticleShape, LocationType,
+    FitStatus
+)
 from retro.utils.misc import expand, mkdir
 
 
@@ -53,8 +71,37 @@ FILENAME_INFO_RE = re.compile(
     ''', (re.VERBOSE | re.IGNORECASE)
 )
 
+GENERIC_I3_FNAME_RE = re.compile(
+    r'''
+    ^                              # Anchor to beginning of string
+    (?P<base>.*)                   # Any number of any character
+    (?P<i3ext>\.i3)                # Must have ".i3" as extension
+    (?P<compext>\.gz|bz2|zst|zstd) # Optional extension indicating compression
+    $                              # End of string
+    ''', (re.VERBOSE | re.IGNORECASE)
+)
 
-def extract_metadata_from_filename(fname):
+I3PARTICLE_ATTRS = OrderedDict([
+    ('major_id', dict(dtype=np.uint64, default=0)),
+    ('minor_id', dict(dtype=np.int32, default=0)),
+    ('zenith', dict(path='dir.zenith', dtype=np.float32, default=np.nan)),
+    ('azimuth', dict(path='dir.zenith', dtype=np.float32, default=np.nan)),
+    ('x', dict(path='pos.x', dtype=np.float32, default=np.nan)),
+    ('y', dict(path='pos.y', dtype=np.float32, default=np.nan)),
+    ('z', dict(path='pos.z', dtype=np.float32, default=np.nan)),
+    ('time', dict(dtype=np.float32, default=np.nan)),
+    ('energy', dict(dtype=np.float32, default=np.nan)),
+    ('speed', dict(dtype=np.float32, default=np.nan)),
+    ('length', dict(dtype=np.float32, default=np.nan)),
+    ('type', dict(enum=ParticleType, dtype=np.int32, default=ParticleType.unknown)),
+    ('pdg_encoding', dict(enum=ParticleType, dtype=np.int32, default=ParticleType.unknown)),
+    ('shape', dict(enum=ParticleShape, dtype=np.uint8, default=ParticleShape.Null)),
+    ('fit_status', dict(enum=FitStatus, dtype=np.int8, default=FitStatus.NotSet)),
+    ('location_type', dict(enum=LocationType, dtype=np.uint8, default=LocationType.Anywhere)),
+])
+
+
+def extract_file_metadata(fname):
     """Get info contained in an i3 filename or filepath.
 
     Parameters
@@ -122,6 +169,8 @@ def extract_reco(frame, reco):
             reco_dict['track_azimuth'] = np.nan
             reco_dict['cascade_energy'] = np.nan
 
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
+
     # -- HybridReco, as seen in DRAGON 1{2,4,6}60 Monte Carlo -- #
 
     # MultiNest7D is a cascade-only fit to the event
@@ -137,6 +186,8 @@ def extract_reco(frame, reco):
         reco_dict['zenith'] = neutrino.dir.zenith
         reco_dict['azimuth'] = neutrino.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
+
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
 
     # MultiNest8D fits a cascade & track, with casscade in the track direction
     elif reco.endswith('MultiNest8D'):
@@ -155,6 +206,8 @@ def extract_reco(frame, reco):
         reco_dict['track_zenith'] = track.dir.zenith
         reco_dict['track_azimuth'] = track.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
+
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
 
     # MultiNest8D fits a cascade & track with their directions independnent
     elif reco.endswith('MultiNest10D'):
@@ -176,22 +229,26 @@ def extract_reco(frame, reco):
         reco_dict['cascade_zenith'] = track.dir.zenith
         reco_dict['cascade_azimuth'] = track.dir.azimuth
 
+        dt_spec = [(k, np.float32) for k in reco_dict.keys()]
+
     # -- Anything else -- #
 
     else:
-        i3particle = frame[reco]
-        reco_dict['x'] = i3particle.pos.x
-        reco_dict['y'] = i3particle.pos.y
-        reco_dict['z'] = i3particle.pos.z
-        reco_dict['time'] = i3particle.time
-        reco_dict['energy'] = i3particle.energy
-        reco_dict['zenith'] = i3particle.dir.zenith
-        reco_dict['azimuth'] = i3particle.dir.azimuth
+        dt_spec = [(attr, info['dtype']) for attr, info in I3PARTICLE_ATTRS.items()]
+        if reco in frame:
+            i3particle = frame[reco]
+            for attr, info in I3PARTICLE_ATTRS.items():
+                # If "path" key present in `info`, get its value; otherwise,
+                # path is just attr's name
+                path = info.get('path', attr)
 
-    reco = np.array(
-        tuple(reco_dict.values()),
-        dtype=np.dtype(list(zip(reco_dict.keys(), [np.float32]*len(reco_dict))))
-    )
+                # Recursively apply getattr on the i3particle for each path
+                reco_dict[attr] = reduce(getattr, path.split('.'), i3particle)
+        else:
+            for attr, info in I3PARTICLE_ATTRS.items():
+                reco_dict[attr] = info['default']
+
+    reco = np.array(tuple(reco_dict.values()), dtype=dt_spec)
 
     return reco
 
@@ -252,7 +309,8 @@ def extract_pulses(frame, pulse_series_name):
         dtype retro_types.PULSE_T with length the number of pulses recorded in
         that DOM.
 
-    time_range : tuple of two floats
+    time_range : tuple of two floats or None
+        None is returned if the <pulses>TimeRange field is missing
 
     """
     from icecube import dataclasses, recclasses, simclasses # pylint: disable=unused-variable
@@ -262,7 +320,7 @@ def extract_pulses(frame, pulse_series_name):
         i3_time_range = frame[time_range_name]
         time_range = i3_time_range.start, i3_time_range.stop
     else:
-        time_range = np.nan, np.nan
+        time_range = None
 
     if isinstance(pulse_series, dataclasses.I3RecoPulseSeriesMapMask): # pylint: disable=no-member
         pulse_series = pulse_series.apply(frame)
@@ -380,6 +438,12 @@ def extract_truth(frame, run_id, event_id):
     unique_id = (
         int(1e13) * abs_pdg + int(1e7) * run_id + event_id
     )
+    #et['run_id'] = run_id
+    #et['sub_run_id'] = sub_run_id
+    #et['event_id'] = event_id
+    #et['sub_event_id'] = sub_event_id
+    #et['sub_event_stream'] = sub_event_stream  # string, unhandled as of now
+    #et['state'] = state
     et['unique_id'] = unique_id
 
     # If neutrino, get charged lepton daughter particles
@@ -476,6 +540,7 @@ def extract_truth(frame, run_id, event_id):
         OneWeight
         TargetPDGCode
         TotalInteractionProbabilityWeight
+        weight
     '''.split()
     mcwd = frame['I3MCWeightDict']
     for key in mcwd_copy_keys:
@@ -484,14 +549,22 @@ def extract_truth(frame, run_id, event_id):
         except KeyError:
             print('Could not get "{}" from I3MCWeightDict'.format(key))
 
-    dt_spec = []
-    for key in et.keys():
-        if 'pdg' in key:
-            dt_spec.append((key, np.int64))
-        else:
-            dt_spec.append((key, np.float64))
+	# Anything not listed defaults to float64
+    truth_dtypes = dict(
+        pdg=np.int32,
+        unique_id=np.uint64,
+        highest_energy_daughter_pdg=np.int32,
+        longest_daughter_pdg=np.int32,
+        InteractionType=np.int8,
+        TargetPDGCode=np.int32,
+    )
 
-    event_truth = np.array(tuple(et.values()), dtype=np.dtype(dt_spec))
+    struct_dtype_spec = []
+    for key in et.keys():
+        struct_dtype_spec.append((key, truth_dtypes.get(key, np.float64)))
+
+    event_truth = np.array(tuple(et.values()), dtype=struct_dtype_spec)
+
     return event_truth
 
 
@@ -510,7 +583,7 @@ def extract_metadata_from_frame(frame):
     """
     event_meta = OrderedDict()
     event_header = frame['I3EventHeader']
-    event_meta['run'] = event_header.run_id
+    event_meta['run_id'] = event_header.run_id
     event_meta['event_id'] = event_header.event_id
     return event_meta
 
@@ -584,14 +657,20 @@ def extract_events(
     """
     from icecube import dataclasses, dataio, icetray # pylint: disable=unused-variable
 
-    fpath = expand(fpath)
-    # TODO: record file_info?
-    file_info = None
-    try:
-        file_info = extract_metadata_from_filename(fpath)
-    except (StopIteration, KeyError, ValueError):
-        pass
+	# Anything not listed defaults to float64
+    event_dtypes = dict(
+        run_id=np.uint32,
+        sub_run_id=np.uint32,
+        event_id=np.uint32,
+        sub_event_id=np.uint32,
+        unique_id=np.uint64,
+        state=np.uint32,
+        start_time=np.uint64,
+        stop_time=np.uint64,
+    )
 
+    fpath = expand(fpath)
+    sha256_sum = sha256(open(fpath, 'rb').read()).hexdigest()
     i3file = dataio.I3File(fpath, 'r') # pylint: disable=no-member
 
     events = []
@@ -604,7 +683,6 @@ def extract_events(
     pulses_d = OrderedDict()
     for name in pulses:
         pulses_d[name] = []
-        pulses_d[name + 'TimeRange'] = []
 
     recos_d = OrderedDict()
     for name in recos:
@@ -614,9 +692,15 @@ def extract_events(
     for name in triggers:
         trigger_hierarchies[name] = []
 
+    # Default to dir same path as I3 file but with ".i3<compr ext>" removed
     if outdir is None:
-        outdir = fpath.rstrip('.bz2').rstrip('.gz').rstrip('.i3')
+        fname_parts = GENERIC_I3_FNAME_RE.match(fpath).groupdict()
+        outdir = fname_parts['base']
     mkdir(outdir)
+
+    # Write SHA-256 in format compatible with `sha256` Linux utility
+    with open(join(outdir, "source_i3_file_sha256sum.txt"), "w") as sha_file:
+        sha_file.write("{}  {}\n".format(sha256_sum, fpath))
 
     frame_buffer = []
     finished = False
@@ -649,7 +733,15 @@ def extract_events(
 
         event = OrderedDict()
         event['run_id'] = run_id = i3header.run_id
+        event['sub_run_id'] = i3header.sub_run_id
         event['event_id'] = event_id = i3header.event_id
+        event['sub_event_id'] = i3header.sub_event_id
+        # TODO: map "state" string to uint enum value if defined in I3
+        # software? np dtypes don't handle ragged data like strings but I don't
+        # want to invent an encoding of our own if at all possible
+        #event['sub_event_stream'] = sub_event_stream
+        event['state'] = i3header.state
+
         event['start_time'] = i3header.start_time.utc_daq_time
         event['end_time'] = i3header.end_time.utc_daq_time
 
@@ -676,7 +768,11 @@ def extract_events(
         for pulse_series_name in pulses:
             pulses_list, time_range = extract_pulses(frame, pulse_series_name)
             pulses_d[pulse_series_name].append(pulses_list)
-            pulses_d[pulse_series_name + 'TimeRange'].append(time_range)
+            tr_key = pulse_series_name + 'TimeRange'
+            if time_range is not None:
+                if tr_key not in pulses_d:
+                    pulses_d[tr_key] = []
+                pulses_d[tr_key].append(time_range)
 
         for reco_name in recos:
             recos_d[reco_name].append(extract_reco(frame, reco_name))
@@ -688,6 +784,20 @@ def extract_events(
 
         # Clear frame buffer and start a new "chain" with the next frame
         frame_buffer = [next_frame]
+
+    # Sanity check that a pulse series that has corresponding TimeRange field
+    # exists in all frames, since this is populated by appending to a list (so
+    # a single frame missing this will cause all others to be misaligned in the
+    # resulting array)
+    for pulse_series_name in pulses:
+        tr_key = pulse_series_name + 'TimeRange'
+        if tr_key not in pulses_d:
+            continue
+        if len(pulses_d[pulse_series_name]) != len(pulses_d[tr_key]):
+            raise ValueError(
+                "{} present in some frames but not present in other frames"
+                .format(tr_key)
+            )
 
     photon_series_dir = join(outdir, 'photons')
     pulse_series_dir = join(outdir, 'pulses')
@@ -703,16 +813,11 @@ def extract_events(
     if triggers:
         mkdir(trigger_hierarchy_dir)
 
-    dt_spec = []
+    struct_dtype_spec = []
     for key in event.keys():
-        if '_time' in key:
-            dt_spec.append((key, np.uint64))
-        elif '_id' in key:
-            dt_spec.append((key, np.int64))
-        else:
-            dt_spec.append((key, np.float64))
+        struct_dtype_spec.append((key, event_dtypes.get(key, np.float64)))
 
-    events = np.array([tuple(ev.values()) for ev in events], dtype=dt_spec)
+    events = np.array([tuple(ev.values()) for ev in events], dtype=struct_dtype_spec)
     np.save(join(outdir, 'events.npy'), events)
 
     if truth:
@@ -724,11 +829,17 @@ def extract_events(
                     protocol=pickle.HIGHEST_PROTOCOL)
 
     for name in pulses:
-        pickle.dump(pulses_d[name],
-                    open(join(pulse_series_dir, name + '.pkl'), 'wb'),
-                    protocol=pickle.HIGHEST_PROTOCOL)
-        np.save(join(pulse_series_dir, name + 'TimeRange' + '.npy'),
-                np.array(pulses_d[name + 'TimeRange'], dtype=np.float32))
+        pickle.dump(
+            pulses_d[name],
+            open(join(pulse_series_dir, name + '.pkl'), 'wb'),
+            protocol=pickle.HIGHEST_PROTOCOL
+        )
+        key = name + 'TimeRange'
+        if key in pulses_d and pulses_d[key]:
+            np.save(
+                join(pulse_series_dir, key + '.npy'),
+                np.array(pulses_d[key], dtype=np.float32)
+            )
 
     for name in recos:
         np.save(join(recos_dir, name + '.npy'), np.array(recos_d[name]))

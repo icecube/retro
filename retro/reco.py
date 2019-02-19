@@ -51,7 +51,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import init_obj
+from retro import GarbageInputError, init_obj
 from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T
 from retro.utils.geom import (
     rotate_points, add_vectors, fill_from_spher, fill_from_cart, reflect
@@ -163,6 +163,7 @@ class Reco(object):
         self.current_event = None
         self.current_event_idx = -1
         self.event_counter = -1
+        self.successful_reco_counter = 0
         self.hypo_handler = None
         self.prior = None
         self.priors_used = None
@@ -218,458 +219,468 @@ class Reco(object):
         t00 = time.time()
 
         for _ in self.events:
-            if method in (
-                'multinest',
-                'test',
-                'truth',
-                'crs',
-                'scipy',
-                'nlopt',
-                'skopt',
-            ):
-                t0 = time.time()
-                self.setup_hypo(
-                    cascade_kernel='scaling_aligned_one_dim',
-                    track_kernel='pegleg',
-                    track_time_step=1.,
-                )
+            try:
+                if method in (
+                    'multinest',
+                    'test',
+                    'truth',
+                    'crs',
+                    'scipy',
+                    'nlopt',
+                    'skopt',
+                ):
+                    t0 = time.time()
+                    self.setup_hypo(
+                        cascade_kernel='scaling_aligned_one_dim',
+                        track_kernel='pegleg',
+                        track_time_step=1.,
+                    )
 
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(kind='SPEFit2', extent='tight')),
-                        ('y', dict(kind='SPEFit2', extent='tight')),
-                        ('z', dict(kind='SPEFit2', extent='tight')),
-                        ('time', dict(kind='SPEFit2', extent='tight')),
-                    ])
-                )
+                    self.generate_prior_method(
+                        prior_defs=OrderedDict([
+                            ('x', dict(kind='SPEFit2', extent='tight')),
+                            ('y', dict(kind='SPEFit2', extent='tight')),
+                            ('z', dict(kind='SPEFit2', extent='tight')),
+                            ('time', dict(kind='SPEFit2', extent='tight')),
+                        ])
+                    )
 
-                param_values = []
-                log_likelihoods = []
-                t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=t_start,
-                )
+                    param_values = []
+                    log_likelihoods = []
+                    t_start = []
+                    self.generate_loglike_method(
+                        param_values=param_values,
+                        log_likelihoods=log_likelihoods,
+                        t_start=t_start,
+                    )
 
-                if method == 'test':
-                    run_info = self.run_test(seed=0)
-                if method == 'truth':
-                    run_info = self.run_with_truth()
-                elif method == 'crs':
+                    if method == 'test':
+                        run_info = self.run_test(seed=0)
+                    if method == 'truth':
+                        run_info = self.run_with_truth()
+                    elif method == 'crs':
+                        run_info = self.run_crs(
+                            n_live=250,
+                            max_iter=20000,
+                            max_noimprovement=5000,
+                            min_fn_std=0.1,
+                            min_vertex_std=(1, 1, 1, 3),
+                            use_priors=False,
+                            use_sobol=True,
+                            seed=0,
+                        )
+                    elif method == 'multinest':
+                        run_info = self.run_multinest(
+                            importance_sampling=True,
+                            max_modes=1,
+                            const_eff=True,
+                            n_live=160,
+                            evidence_tol=0.5,
+                            sampling_eff=0.3,
+                            max_iter=10000,
+                            seed=0,
+                        )
+                    elif method == 'scipy':
+                        run_info = self.run_scipy(
+                            method='differential_evolution',
+                            eps=0.02
+                        )
+                    elif method == 'nlopt':
+                        run_info = self.run_nlopt()
+                    elif method == 'skopt':
+                        run_info = self.run_skopt()
+
+                    t1 = time.time()
+                    run_info['run_time'] = t1 - t0
+
+                    if self.save_llhp:
+                        llhp_fname = '{}.llhp'.format(method)
+                    else:
+                        llhp_fname = None
+                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    self.make_estimate(
+                        llhp=llhp,
+                        remove_priors=True,
+                        run_info=run_info,
+                        fname='{}.estimate'.format(method),
+                    )
+
+                elif method == 'fast':
+                    t0 = time.time()
+                    self.setup_hypo(
+                         cascade_kernel='scaling_aligned_point_ckv',
+                         track_kernel='pegleg',
+                         track_time_step=3.,
+                     )
+
+                    self.generate_prior_method(
+                        prior_defs=OrderedDict([
+                            ('x', dict(kind='SPEFit2', extent='tight')),
+                            ('y', dict(kind='SPEFit2', extent='tight')),
+                            ('z', dict(kind='SPEFit2', extent='tight')),
+                            ('time', dict(kind='SPEFit2', extent='tight')),
+                        ])
+                    )
+
+                    param_values = []
+                    log_likelihoods = []
+                    t_start = []
+                    self.generate_loglike_method(
+                        param_values=param_values,
+                        log_likelihoods=log_likelihoods,
+                        t_start=t_start,
+                    )
+
                     run_info = self.run_crs(
-                        n_live=250,
-                        max_iter=20000,
-                        max_noimprovement=5000,
-                        min_fn_std=0.1,
-                        min_vertex_std=(1, 1, 1, 3),
+                        n_live=160,
+                        max_iter=10000,
+                        max_noimprovement=1000,
+                        min_fn_std=0.5,
+                        min_vertex_std=(5, 5, 5, 15),
                         use_priors=False,
                         use_sobol=True,
                         seed=0,
                     )
-                elif method == 'multinest':
+
+                    t1 = time.time()
+                    run_info['run_time'] = t1 - t0
+
+                    if self.save_llhp:
+                        llhp_fname = '{}.llhp'.format(method)
+                    else:
+                        llhp_fname = None
+                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    self.make_estimate(
+                        llhp=llhp,
+                        remove_priors=False,
+                        run_info=run_info,
+                        fname='{}.estimate'.format(method),
+                    )
+
+                elif method == 'crs_prefit_mn':
+                    t0 = time.time()
+
+                    print('--- Track-only CRS prefit ---')
+
+                    self.setup_hypo(
+                        cascade_kernel='scaling_aligned_point_ckv',
+                        track_kernel='pegleg',
+                        track_time_step=3.,
+                    )
+
+                    self.generate_prior_method(
+                        prior_defs=OrderedDict([
+                            ('x', dict(kind='SPEFit2', extent='tight')),
+                            ('y', dict(kind='SPEFit2', extent='tight')),
+                            ('z', dict(kind='SPEFit2', extent='tight')),
+                            ('time', dict(kind='SPEFit2', extent='tight')),
+                        ])
+                    )
+
+                    param_values = []
+                    log_likelihoods = []
+                    prefit_t_start = []
+                    self.generate_loglike_method(
+                        param_values=param_values,
+                        log_likelihoods=log_likelihoods,
+                        t_start=prefit_t_start,
+                    )
+
+                    prefit_run_info = self.run_crs(
+                        n_live=160,
+                        max_iter=10000,
+                        max_noimprovement=1000,
+                        min_fn_std=0.5,
+                        min_vertex_std=(5, 5, 5, 15),
+                        use_priors=False,
+                        use_sobol=True,
+                        seed=0,
+                    )
+
+                    t1 = time.time()
+                    prefit_run_info['run_time'] = t1 - t0
+
+                    if self.save_llhp:
+                        llhp_fname = '{}.llhp_prefit'.format(method)
+                    else:
+                        llhp_fname = None
+                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    prefit_estimate = self.make_estimate(
+                        llhp=llhp,
+                        remove_priors=False,
+                        run_info=prefit_run_info,
+                        fname='{}.estimate_prefit'.format(method),
+                    )
+
+                    print('--- MultiNest fit including aligned 1D cascade ---')
+
+                    self.setup_hypo(
+                        cascade_kernel='scaling_aligned_one_dim',
+                        track_kernel='pegleg',
+                        track_time_step=1.,
+                    )
+
+                    # Setup prior
+
+                    pft_est = prefit_estimate.sel(kind='mean')
+                    pft_x = float(pft_est.sel(param='x'))
+                    pft_y = float(pft_est.sel(param='y'))
+                    pft_z = float(pft_est.sel(param='z'))
+                    pft_time = float(pft_est.sel(param='time'))
+
+                    self.generate_prior_method(
+                        prior_defs=OrderedDict([
+                            ('x', dict(
+                                kind='cauchy',
+                                loc=pft_x,
+                                scale=15,
+                                low=pft_x - 300,
+                                high=pft_x + 300,
+                            )),
+                            ('y', dict(
+                                kind='cauchy',
+                                loc=pft_y,
+                                scale=15,
+                                low=pft_y - 300,
+                                high=pft_y + 300,
+                            )),
+                            ('z', dict(
+                                kind='cauchy',
+                                loc=pft_z,
+                                scale=10,
+                                low=pft_z - 200,
+                                high=pft_z + 200,
+                            )),
+                            ('time', dict(
+                                kind='cauchy',
+                                loc=pft_time,
+                                scale=40,
+                                low=pft_time - 800,
+                                high=pft_time + 800,
+                            )),
+                        ])
+                    )
+
+                    param_values = []
+                    log_likelihoods = []
+                    t_start = []
+                    self.generate_loglike_method(
+                        param_values=param_values,
+                        log_likelihoods=log_likelihoods,
+                        t_start=t_start,
+                    )
+
                     run_info = self.run_multinest(
                         importance_sampling=True,
                         max_modes=1,
                         const_eff=True,
-                        n_live=160,
-                        evidence_tol=0.5,
-                        sampling_eff=0.3,
+                        n_live=250,
+                        evidence_tol=0.02,
+                        sampling_eff=0.5,
                         max_iter=10000,
                         seed=0,
                     )
-                elif method == 'scipy':
-                    run_info = self.run_scipy(
-                        method='differential_evolution',
-                        eps=0.02
+
+                    t2 = time.time()
+                    run_info['run_time'] = t2 - t1
+
+                    if self.save_llhp:
+                        llhp_fname = '{}.llhp'.format(method)
+                    else:
+                        llhp_fname = None
+                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    self.make_estimate(
+                        llhp=llhp,
+                        remove_priors=True,
+                        run_info=run_info,
+                        fname='{}.estimate'.format(method),
                     )
-                elif method == 'nlopt':
-                    run_info = self.run_nlopt()
-                elif method == 'skopt':
-                    run_info = self.run_skopt()
 
-                t1 = time.time()
-                run_info['run_time'] = t1 - t0
+                    #print('--- MN 10d fit ---')
 
-                if self.save_llhp:
-                    llhp_fname = '{}.llhp'.format(method)
-                else:
-                    llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                self.make_estimate(
-                    llhp=llhp,
-                    remove_priors=True,
-                    run_info=run_info,
-                    fname='{}.estimate'.format(method),
-                )
+                    #self.setup_hypo(
+                    #    cascade_kernel='scaling_one_dim',
+                    #    track_kernel='pegleg',
+                    #    track_time_step=1.,
+                    #)
 
-            elif method == 'fast':
-                t0 = time.time()
-                self.setup_hypo(
-                     cascade_kernel='scaling_aligned_point_ckv',
-                     track_kernel='pegleg',
-                     track_time_step=3.,
-                 )
+                    #self.hypo_handler.fixed_params = OrderedDict()
+                    #self.hypo_handler.fixed_params['x'] = estimate['mean']['x']
+                    #self.hypo_handler.fixed_params['y'] = estimate['mean']['y']
+                    #self.hypo_handler.fixed_params['z'] = estimate['mean']['z']
+                    #self.hypo_handler.fixed_params['time'] = estimate['mean']['time']
 
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(kind='SPEFit2', extent='tight')),
-                        ('y', dict(kind='SPEFit2', extent='tight')),
-                        ('z', dict(kind='SPEFit2', extent='tight')),
-                        ('time', dict(kind='SPEFit2', extent='tight')),
+                    #param_values = []
+                    #log_likelihoods = []
+
+                    ## Setup prior (none)
+                    #prior_defs = OrderedDict()
+                    #self.generate_prior_method(prior_defs)
+
+                    #self.generate_loglike_method(
+                    #    param_values=param_values,
+                    #    log_likelihoods=log_likelihoods,
+                    #    t_start=t_start,
+                    #)
+
+                    #run_info_10d = self.run_multinest(
+                    #    importance_sampling=True,
+                    #    max_modes=1,
+                    #    const_eff=True,
+                    #    n_live=160,
+                    #    evidence_tol=0.5,
+                    #    sampling_eff=0.3,
+                    #    max_iter=10000,
+                    #    seed=0,
+                    #)
+
+                    #t3 = time.time()
+                    #run_info_10d['run_time'] = t3 - t2
+
+                    #if self.save_llhp:
+                    #    llhp_fname = '{}.llhp_10d'.format(method)
+                    #else:
+                    #    llhp_fname = None
+                    #llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    #self.make_estimate(
+                    #    llhp=llhp,
+                    #    remove_priors=True,
+                    #    run_info=run_info_10d,
+                    #    fname='{}.estimate_10d'.format(method),
+                    #)
+
+                elif method == 'experimental_trackfit':
+                    print('--- track-only prefit ---')
+
+                    t0 = time.time()
+                    self.setup_hypo(track_kernel='pegleg', track_time_step=1.)
+
+                    self.generate_prior_method(
+                        prior_defs=OrderedDict([
+                            ('x', dict(kind='SPEFit2', extent='tight')),
+                            ('y', dict(kind='SPEFit2', extent='tight')),
+                            ('z', dict(kind='SPEFit2', extent='tight')),
+                            ('time', dict(kind='SPEFit2', extent='tight')),
+                        ])
+                    )
+
+                    param_values = []
+                    log_likelihoods = []
+                    prefit_t_start = []
+                    self.generate_loglike_method(
+                        param_values=param_values,
+                        log_likelihoods=log_likelihoods,
+                        t_start=t_start,
+                    )
+
+                    prefit_run_info = self.run_crs(
+                        n_live=160,
+                        max_iter=20000,
+                        max_noimprovement=2000,
+                        min_fn_std=0.1,
+                        min_vertex_std=(5, 5, 5, 15),
+                        use_priors=False,
+                        use_sobol=True,
+                        seed=0,
+                    )
+
+                    t1 = time.time()
+                    prefit_run_info['run_time'] = t1 - t0
+
+                    if self.save_llhp:
+                        llhp_fname = '{}.llhp_prefit'.format(method)
+                    else:
+                        llhp_fname = None
+                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    prefit_estimate = self.make_estimate(
+                        llhp=llhp,
+                        remove_priors=False,
+                        run_info=prefit_run_info,
+                        fname='{}.estimate_prefit'.format(method),
+                    )
+
+                    print('--- hybrid fit ---')
+
+                    t2 = time.time()
+                    # track AND cascade to hypo
+                    self.setup_hypo(
+                        cascade_kernel='scaling_aligned_one_dim',
+                        #track_kernel='pegleg',
+                        track_kernel='table_energy_loss',
+                        track_time_step=1.,
+                    )
+
+                    pft_est = prefit_estimate.sel(kind='median')
+                    pft_x = float(pft_est.sel(param='x'))
+                    pft_y = float(pft_est.sel(param='y'))
+                    pft_z = float(pft_est.sel(param='z'))
+                    pft_time = float(pft_est.sel(param='time'))
+                    pft_track_energy = float(pft_est.sel(param='track_energy'))
+
+                    self.hypo_handler.fixed_params = OrderedDict([
+                        ('track_energy', pft_track_energy)
                     ])
-                )
 
-                param_values = []
-                log_likelihoods = []
-                t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=t_start,
-                )
+                    self.generate_prior_method(
+                        prior_defs=OrderedDict([
+                            ('x', dict(kind='cauchy', loc=pft_x, scale=12)),
+                            ('y', dict(kind='cauchy', loc=pft_y, scale=13)),
+                            ('z', dict(kind='cauchy', loc=pft_z, scale=7.5)),
+                            ('time', dict(
+                                kind='cauchy',
+                                loc=pft_time,
+                                scale=40,
+                                low=pft_time - 2000,
+                                high=pft_time + 2000,
+                            )),
+                        ])
+                    )
 
-                run_info = self.run_crs(
-                    n_live=160,
-                    max_iter=10000,
-                    max_noimprovement=1000,
-                    min_fn_std=0.5,
-                    min_vertex_std=(5, 5, 5, 15),
-                    use_priors=False,
-                    use_sobol=True,
-                    seed=0,
-                )
+                    param_values = []
+                    log_likelihoods = []
+                    t_start = []
+                    self.generate_loglike_method(
+                        param_values=param_values,
+                        log_likelihoods=log_likelihoods,
+                        t_start=t_start,
+                    )
 
-                t1 = time.time()
-                run_info['run_time'] = t1 - t0
+                    run_info = self.run_crs(
+                        n_live=160,
+                        max_iter=20000,
+                        max_noimprovement=2000,
+                        min_fn_std=0.1,
+                        min_vertex_std=(5, 5, 5, 15),
+                        use_priors=False,
+                        use_sobol=True,
+                        seed=0,
+                    )
 
-                if self.save_llhp:
-                    llhp_fname = '{}.llhp'.format(method)
+                    t3 = time.time()
+                    run_info['run_time'] = t3 - t2
+
+                    if self.save_llhp:
+                        llhp_fname = '{}.llhp'.format(method)
+                    else:
+                        llhp_fname = None
+                    llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
+                    self.make_estimate(
+                        llhp=llhp,
+                        remove_priors=False,
+                        run_info=run_info,
+                        fname='{}.estimate'.format(method),
+                    )
                 else:
-                    llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                self.make_estimate(
-                    llhp=llhp,
-                    remove_priors=False,
-                    run_info=run_info,
-                    fname='{}.estimate'.format(method),
+                    raise ValueError('Unknown `Method` {}'.format(method))
+
+            except GarbageInputError as error:
+                print(
+                    'ERROR: event idx {}: "{}"; ignoring and moving to next event'
+                    .format(self.current_event_idx, error.message)
                 )
 
-            elif method == 'crs_prefit_mn':
-                t0 = time.time()
-
-                print('--- Track-only CRS prefit ---')
-
-                self.setup_hypo(
-                    cascade_kernel='scaling_aligned_point_ckv',
-                    track_kernel='pegleg',
-                    track_time_step=3.,
-                )
-
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(kind='SPEFit2', extent='tight')),
-                        ('y', dict(kind='SPEFit2', extent='tight')),
-                        ('z', dict(kind='SPEFit2', extent='tight')),
-                        ('time', dict(kind='SPEFit2', extent='tight')),
-                    ])
-                )
-
-                param_values = []
-                log_likelihoods = []
-                prefit_t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=prefit_t_start,
-                )
-
-                prefit_run_info = self.run_crs(
-                    n_live=160,
-                    max_iter=10000,
-                    max_noimprovement=1000,
-                    min_fn_std=0.5,
-                    min_vertex_std=(5, 5, 5, 15),
-                    use_priors=False,
-                    use_sobol=True,
-                    seed=0,
-                )
-
-                t1 = time.time()
-                prefit_run_info['run_time'] = t1 - t0
-
-                if self.save_llhp:
-                    llhp_fname = '{}.llhp_prefit'.format(method)
-                else:
-                    llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                prefit_estimate = self.make_estimate(
-                    llhp=llhp,
-                    remove_priors=False,
-                    run_info=prefit_run_info,
-                    fname='{}.estimate_prefit'.format(method),
-                )
-
-                print('--- MultiNest fit including aligned 1D cascade ---')
-
-                self.setup_hypo(
-                    cascade_kernel='scaling_aligned_one_dim',
-                    track_kernel='pegleg',
-                    track_time_step=1.,
-                )
-
-                # Setup prior
-
-                pft_est = prefit_estimate.sel(kind='mean')
-                pft_x = float(pft_est.sel(param='x'))
-                pft_y = float(pft_est.sel(param='y'))
-                pft_z = float(pft_est.sel(param='z'))
-                pft_time = float(pft_est.sel(param='time'))
-
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(
-                            kind='cauchy',
-                            loc=pft_x,
-                            scale=15,
-                            low=pft_x - 300,
-                            high=pft_x + 300,
-                        )),
-                        ('y', dict(
-                            kind='cauchy',
-                            loc=pft_y,
-                            scale=15,
-                            low=pft_y - 300,
-                            high=pft_y + 300,
-                        )),
-                        ('z', dict(
-                            kind='cauchy',
-                            loc=pft_z,
-                            scale=10,
-                            low=pft_z - 200,
-                            high=pft_z + 200,
-                        )),
-                        ('time', dict(
-                            kind='cauchy',
-                            loc=pft_time,
-                            scale=40,
-                            low=pft_time - 800,
-                            high=pft_time + 800,
-                        )),
-                    ])
-                )
-
-                param_values = []
-                log_likelihoods = []
-                t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=t_start,
-                )
-
-                run_info = self.run_multinest(
-                    importance_sampling=True,
-                    max_modes=1,
-                    const_eff=True,
-                    n_live=250,
-                    evidence_tol=0.02,
-                    sampling_eff=0.5,
-                    max_iter=10000,
-                    seed=0,
-                )
-
-                t2 = time.time()
-                run_info['run_time'] = t2 - t1
-
-                if self.save_llhp:
-                    llhp_fname = '{}.llhp'.format(method)
-                else:
-                    llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                self.make_estimate(
-                    llhp=llhp,
-                    remove_priors=True,
-                    run_info=run_info,
-                    fname='{}.estimate'.format(method),
-                )
-
-                #print('--- MN 10d fit ---')
-
-                #self.setup_hypo(
-                #    cascade_kernel='scaling_one_dim',
-                #    track_kernel='pegleg',
-                #    track_time_step=1.,
-                #)
-
-                #self.hypo_handler.fixed_params = OrderedDict()
-                #self.hypo_handler.fixed_params['x'] = estimate['mean']['x']
-                #self.hypo_handler.fixed_params['y'] = estimate['mean']['y']
-                #self.hypo_handler.fixed_params['z'] = estimate['mean']['z']
-                #self.hypo_handler.fixed_params['time'] = estimate['mean']['time']
-
-                #param_values = []
-                #log_likelihoods = []
-
-                ## Setup prior (none)
-                #prior_defs = OrderedDict()
-                #self.generate_prior_method(prior_defs)
-
-                #self.generate_loglike_method(
-                #    param_values=param_values,
-                #    log_likelihoods=log_likelihoods,
-                #    t_start=t_start,
-                #)
-
-                #run_info_10d = self.run_multinest(
-                #    importance_sampling=True,
-                #    max_modes=1,
-                #    const_eff=True,
-                #    n_live=160,
-                #    evidence_tol=0.5,
-                #    sampling_eff=0.3,
-                #    max_iter=10000,
-                #    seed=0,
-                #)
-
-                #t3 = time.time()
-                #run_info_10d['run_time'] = t3 - t2
-
-                #if self.save_llhp:
-                #    llhp_fname = '{}.llhp_10d'.format(method)
-                #else:
-                #    llhp_fname = None
-                #llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                #self.make_estimate(
-                #    llhp=llhp,
-                #    remove_priors=True,
-                #    run_info=run_info_10d,
-                #    fname='{}.estimate_10d'.format(method),
-                #)
-
-            elif method == 'experimental_trackfit':
-                print('--- track-only prefit ---')
-
-                t0 = time.time()
-                self.setup_hypo(track_kernel='pegleg', track_time_step=1.)
-
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(kind='SPEFit2', extent='tight')),
-                        ('y', dict(kind='SPEFit2', extent='tight')),
-                        ('z', dict(kind='SPEFit2', extent='tight')),
-                        ('time', dict(kind='SPEFit2', extent='tight')),
-                    ])
-                )
-
-                param_values = []
-                log_likelihoods = []
-                prefit_t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=t_start,
-                )
-
-                prefit_run_info = self.run_crs(
-                    n_live=160,
-                    max_iter=20000,
-                    max_noimprovement=2000,
-                    min_fn_std=0.1,
-                    min_vertex_std=(5, 5, 5, 15),
-                    use_priors=False,
-                    use_sobol=True,
-                    seed=0,
-                )
-
-                t1 = time.time()
-                prefit_run_info['run_time'] = t1 - t0
-
-                if self.save_llhp:
-                    llhp_fname = '{}.llhp_prefit'.format(method)
-                else:
-                    llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                prefit_estimate = self.make_estimate(
-                    llhp=llhp,
-                    remove_priors=False,
-                    run_info=prefit_run_info,
-                    fname='{}.estimate_prefit'.format(method),
-                )
-
-                print('--- hybrid fit ---')
-
-                t2 = time.time()
-                # track AND cascade to hypo
-                self.setup_hypo(
-                    cascade_kernel='scaling_aligned_one_dim',
-                    #track_kernel='pegleg',
-                    track_kernel='table_energy_loss',
-                    track_time_step=1.,
-                )
-
-                pft_est = prefit_estimate.sel(kind='median')
-                pft_x = float(pft_est.sel(param='x'))
-                pft_y = float(pft_est.sel(param='y'))
-                pft_z = float(pft_est.sel(param='z'))
-                pft_time = float(pft_est.sel(param='time'))
-                pft_track_energy = float(pft_est.sel(param='track_energy'))
-
-                self.hypo_handler.fixed_params = OrderedDict([
-                    ('track_energy', pft_track_energy)
-                ])
-
-                self.generate_prior_method(
-                    prior_defs=OrderedDict([
-                        ('x', dict(kind='cauchy', loc=pft_x, scale=12)),
-                        ('y', dict(kind='cauchy', loc=pft_y, scale=13)),
-                        ('z', dict(kind='cauchy', loc=pft_z, scale=7.5)),
-                        ('time', dict(
-                            kind='cauchy',
-                            loc=pft_time,
-                            scale=40,
-                            low=pft_time - 2000,
-                            high=pft_time + 2000,
-                        )),
-                    ])
-                )
-
-                param_values = []
-                log_likelihoods = []
-                t_start = []
-                self.generate_loglike_method(
-                    param_values=param_values,
-                    log_likelihoods=log_likelihoods,
-                    t_start=t_start,
-                )
-
-                run_info = self.run_crs(
-                    n_live=160,
-                    max_iter=20000,
-                    max_noimprovement=2000,
-                    min_fn_std=0.1,
-                    min_vertex_std=(5, 5, 5, 15),
-                    use_priors=False,
-                    use_sobol=True,
-                    seed=0,
-                )
-
-                t3 = time.time()
-                run_info['run_time'] = t3 - t2
-
-                if self.save_llhp:
-                    llhp_fname = '{}.llhp'.format(method)
-                else:
-                    llhp_fname = None
-                llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                self.make_estimate(
-                    llhp=llhp,
-                    remove_priors=False,
-                    run_info=run_info,
-                    fname='{}.estimate'.format(method),
-                )
             else:
-                raise ValueError('Unknown `Method` {}'.format(method))
+                self.successful_reco_counter += 1
 
         print('Total script run time is {:.3f} s'.format(time.time() - t00))
 
@@ -713,8 +724,13 @@ class Reco(object):
             nparams
 
             """
-            for prior_func in prior_funcs:
+            for n, prior_func in enumerate(prior_funcs):
                 prior_func(cube)
+                #if not np.all(np.isfinite(cube)):
+                #    raise ValueError(
+                #        'application of prior "{}" resulted in non-finite params in `cube`: {}'
+                #        .format(n, cube)
+                #    )
 
         self.prior = prior
 
@@ -745,21 +761,25 @@ class Reco(object):
         pegleg_muon_const_e_loss = False
         dom_info = self.dom_tables.dom_info
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
-        truth_info = OrderedDict([
-            ('x', event['truth']['x']),
-            ('y', event['truth']['y']),
-            ('z', event['truth']['z']),
-            ('time', event['truth']['time']),
-            ('zenith', np.arccos(event['truth']['coszen'])),
-            ('azimuth', event['truth']['azimuth']),
-            ('track_azimuth', event['truth']['longest_daughter_azimuth']),
-            ('track_zenith', np.arccos(event['truth']['longest_daughter_coszen'])),
-            ('track_energy', event['truth']['longest_daughter_energy']),
-            ('cascade_azimuth', event['truth']['cascade_azimuth']),
-            ('cascade_zenith', np.arccos(event['truth']['cascade_coszen'])),
-            ('cascade_energy', event['truth']['cascade_energy']),
-            ('neutrino_energy', event['truth']['energy']),
-        ])
+        if 'truth' in event:
+            truth_info = OrderedDict([
+                ('x', event['truth']['x']),
+                ('y', event['truth']['y']),
+                ('z', event['truth']['z']),
+                ('time', event['truth']['time']),
+                ('zenith', np.arccos(event['truth']['coszen'])),
+                ('azimuth', event['truth']['azimuth']),
+                ('track_azimuth', event['truth']['longest_daughter_azimuth']),
+                ('track_zenith', np.arccos(event['truth']['longest_daughter_coszen'])),
+                ('track_energy', event['truth']['longest_daughter_energy']),
+                ('cascade_azimuth', event['truth']['cascade_azimuth']),
+                ('cascade_zenith', np.arccos(event['truth']['cascade_coszen'])),
+                ('cascade_energy', event['truth']['cascade_energy']),
+                ('neutrino_energy', event['truth']['energy']),
+            ])
+        else:
+            truth_info = None
+
         num_operational_doms = np.sum(dom_info['operational'])
 
         # Array containing only DOMs operational during the event & info
@@ -775,8 +795,12 @@ class Reco(object):
 
         copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
 
-        print('all noise rate %.5f' % np.sum(dom_info['noise_rate_per_ns']))
-        print('DOMs with zero noise %i' % np.sum(dom_info['noise_rate_per_ns'] == 0))
+        print('all noise rate %.5f' % np.nansum(dom_info['noise_rate_per_ns']))
+        print(
+            'DOMs with zero or NaN noise %i' % np.count_nonzero(
+                np.isnan(dom_info['noise_rate_per_ns']) | (dom_info['noise_rate_per_ns'] == 0)
+            )
+        )
 
         # Fill `event_{hit,dom}_info` arrays only for operational DOMs
         for dom_idx, this_dom_info in enumerate(dom_info[dom_info['operational']]):
@@ -816,7 +840,7 @@ class Reco(object):
 
         assert np.sum(event_dom_info['quantum_efficiency'] <= 0) == 0, 'negative QE'
         assert np.sum(event_dom_info['total_observed_charge']) > 0, 'no charge'
-        assert np.isfinite(np.sum(event_dom_info['total_observed_charge'])), 'inf charge'
+        assert np.isfinite(np.sum(event_dom_info['total_observed_charge'])), 'non-finite charge'
 
         def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Get log likelihood values.
@@ -888,13 +912,14 @@ class Reco(object):
 
             if n_calls % REPORT_AFTER == 0:
                 print('')
-                msg = 'truth:                '
-                for key, val in zip(all_param_names, result):
-                    try:
-                        msg += ' %s=%.1f'%(key, truth_info[key])
-                    except KeyError:
-                        pass
-                print(msg)
+                if truth_info:
+                    msg = 'truth:                '
+                    for key, val in zip(all_param_names, result):
+                        try:
+                            msg += ' %s=%.1f'%(key, truth_info[key])
+                        except KeyError:
+                            pass
+                    print(msg)
                 t_now = time.time()
                 best_idx = np.argmax(log_likelihoods)
                 best_llh = log_likelihoods[best_idx]
@@ -1072,7 +1097,7 @@ class Reco(object):
                 self.outdir, '{}{}.pkl'.format(self.slice_prefix, fname)
             )
             file_exists = os.path.isfile(estimate_outf)
-            if self.event_counter == 0:
+            if self.successful_reco_counter == 0:
                 if file_exists:
                     raise IOError('File already exists at "{}"'.format(estimate_outf))
                 # create new Dataset
@@ -1263,6 +1288,10 @@ class Reco(object):
             else:
                 param_vals = x
             llh = self.loglike(param_vals)
+            if np.isnan(llh):
+                raise ValueError("llh is nan; params are {}".format(param_vals))
+            if np.any(np.isnan(param_vals)):
+                raise ValueError("params are nan: {}".format(param_vals))
             return -llh
 
         def create_x(x_cart, x_spher):

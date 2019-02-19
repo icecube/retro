@@ -4,9 +4,11 @@
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    'GarbageInputError',
+    'NUMBA_AVAIL',
+    'numba_jit',
     'RETRO_DIR',
     'DATA_DIR',
-    'NUMBA_AVAIL',
     'FTYPE',
     'UITYPE',
     'DEBUG',
@@ -49,14 +51,19 @@ from six import PY2, PY3
 from six.moves import cPickle as pickle
 import numpy as np
 
+
+class GarbageInputError(ValueError):
+    pass
+
+
 NUMBA_AVAIL = False
-def dummy_func(x):
+def _dummy_func(x):
     """Decorate to to see if Numba actually works"""
     x += 1
 try:
     from numba import jit as numba_jit
     from numba import vectorize as numba_vectorize
-    numba_jit(dummy_func)
+    numba_jit(_dummy_func)
 except Exception:
     #logging.debug('Failed to import or use numba', exc_info=True)
     def numba_jit(*args, **kwargs): # pylint: disable=unused-argument
