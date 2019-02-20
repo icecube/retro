@@ -1,5 +1,4 @@
 #!/bin/bash
-export PATH=~/anaconda2/bin:$PATH
 
 timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
@@ -14,6 +13,7 @@ mkdir -p "$outdir"
 # -- Tables -- #
 
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
+    export PATH=~/anaconda2/bin:$PATH
     tdi0=""
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_on"
@@ -72,8 +72,10 @@ if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unt
     proto="/home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
     tmpl_lib="--template-library /home/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/ckv_dir_templates.npy"
     tblkind="ckv_templ_compr"
+    gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.pkl"
 
 else
+    export PATH=~/miniconda2/bin:$PATH
     tdi0=""
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_on"
@@ -96,6 +98,7 @@ else
     proto="/gpfs/group/dfc13/default/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
     tmpl_lib="--template-library /gpfs/group/dfc13/default/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/ckv_dir_templates.npy"
     tblkind="ckv_templ_compr"
+    gcd="/gpfs/group/dfc13/default/gcd/mc/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.pkl"
 
 fi
 
@@ -122,7 +125,7 @@ $retro_dir/retro/reco.py \
     --outdir "$outdir" \
     --method "crs_prefit_mn" \
     \
-    --gcd "/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.pkl" \
+    --gcd $gcd \
     --dom-tables-kind "$tblkind" \
     --dom-tables-fname-proto "$proto" \
     --use-doms "all" \
@@ -132,7 +135,7 @@ $retro_dir/retro/reco.py \
     \
     --events-base "$events_base" \
     --start "$start_idx" \
-    --step 1000 \
+    --step 100 \
     \
     --pulses "SplitInIcePulses" \
     --recos "SPEFit2" \
