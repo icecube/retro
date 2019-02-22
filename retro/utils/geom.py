@@ -30,6 +30,7 @@ __all__ = [
     'pol2cart',
     'cart2pol',
     'cart2sph',
+    'cart2sph_np',
     'rotsph2cart',
     'rotate_point',
     'rotate_points',
@@ -854,6 +855,22 @@ def cart2sph(x, y, z, r, theta, phi):
         r_flat[idx] = rfi
         phi_flat[idx] = math.atan2(yfi, xfi)
         theta_flat[idx] = math.acos(zfi / rfi)
+
+
+def cart2sph_np(x, y, z):
+    rho_sq = x**2 + y**2
+    rho_mask = rho_sq != 0
+
+    r = np.sqrt(rho_sq + z**2)
+    r_mask = r != 0
+
+    theta = np.zeros_like(x)
+    theta[r_mask] = math.acos(z[r_mask] / r[r_mask])
+
+    phi = np.zeros_like(x)
+    phi[rho_mask] = np.atan2(y[rho_mask], x[rho_mask])
+
+    return r, theta, phi
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)

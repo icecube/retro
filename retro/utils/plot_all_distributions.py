@@ -50,10 +50,11 @@ def plot_comparison(
         b = np.linspace(xlim[0], xlim[1], nbins)
 
     if truth is None and include_stats:
-        pl_label = (
-            '    {}\nmean  {:7.3f}\nmed   {:7.3f}\nIQ50% {:7.3f}'
-            .format(pl_label, np.mean(pegleg), np.median(pegleg), interquartile_range(pegleg))
-        )
+        if pegleg is not None:
+            pl_label = (
+                '    {}\nmean  {:7.3f}\nmed   {:7.3f}\nIQ50% {:7.3f}'
+                .format(pl_label, np.mean(pegleg), np.median(pegleg), interquartile_range(pegleg))
+            )
         retro_label = (
             '    {}\nmean  {:7.3f}\nmed   {:7.3f}\nIQ50% {:7.3f}'
             .format(retro_label, np.mean(retro), np.median(retro), interquartile_range(retro))
@@ -68,7 +69,8 @@ def plot_comparison(
             color=(0.7,)*3,
             label='Truth',
         )
-    _, b, _ = ax.hist(pegleg, bins=b, histtype='step', lw=2, color='C1', label=pl_label)
+    if pegleg is not None:
+        _, b, _ = ax.hist(pegleg, bins=b, histtype='step', lw=2, color='C1', label=pl_label)
     _, b, _ = ax.hist(retro, bins=b, histtype='step', lw=2, color='C0', label=retro_label)
 
     ylim = ax.get_ylim()
@@ -120,11 +122,17 @@ def plot_all_distributions(
             makedirs(outdir, mode=0o750)
 
     truth = evts.x
-    pegleg = evts['{}_x'.format(p_reco)]
+
+    pegleg = None
+    pl_err = None
+    if p_reco is not None:
+        pegleg = evts['{}_x'.format(p_reco)]
+        pl_err = pegleg - truth
+
     retro = evts['{}_x'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pl_err,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_xe,
@@ -148,11 +156,13 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.y
-    pegleg = evts['{}_y'.format(p_reco)]
+    if p_reco is not None:
+        pegleg = evts['{}_y'.format(p_reco)]
+        pl_err = pegleg - truth
     retro = evts['{}_y'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pl_err,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_ye,
@@ -176,11 +186,13 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.z
-    pegleg = evts['{}_z'.format(p_reco)]
+    if p_reco is not None:
+        pegleg = evts['{}_z'.format(p_reco)]
+        pl_err = pegleg - truth
     retro = evts['{}_z'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pl_err,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_ze,
@@ -204,11 +216,13 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.time
-    pegleg = evts['{}_time'.format(p_reco)]
+    if p_reco is not None:
+        pegleg = evts['{}_time'.format(p_reco)]
+        pl_err = pegleg - truth
     retro = evts['{}_time'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pl_err,
         retro=retro - truth,
         xlim=(-100, 200),
         nbins=n_te,
@@ -232,11 +246,13 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = np.arccos(evts.coszen)
-    pegleg = evts['{}_track_zenith'.format(p_reco)]
+    if p_reco is not None:
+        pegleg = evts['{}_track_zenith'.format(p_reco)]
+        pl_err = pegleg - truth
     retro = evts['{}_track_zenith'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pl_err,
         retro=retro - truth,
         xlim=(-.75, .75),
         nbins=n_zenerr,
@@ -252,23 +268,25 @@ def plot_all_distributions(
         truth=truth,
         xlim=(0, np.pi),
         nbins=n_zen,
-        xlab='track zenith (rad)',
+        xlab='zenith angle (rad)',
     )
     if outdir is not None:
         fbp = join(outdir, 'dist_zenith')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
-    truth = evts.track_azimuth
-    pegleg = evts['{}_track_azimuth'.format(p_reco)]
+    truth = evts.azimuth
+    if p_reco is not None:
+        pegleg = evts['{}_track_azimuth'.format(p_reco)]
+        pl_err = (pegleg - truth + np.pi) % (2*np.pi) - np.pi
     retro = evts['{}_track_azimuth'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=(pegleg - truth + np.pi) % (2*np.pi) - np.pi,
-        retro=(retro - truth + np.pi) % (2*np.pi) - np.pi,
+        pegleg=pl_err,
+        retro=((retro - truth + np.pi) % (2*np.pi)) - np.pi,
         xlim=(-np.pi/8, np.pi/8),
         nbins=n_azerr,
-        xlab='reco track azimuth - true track azimuth (rad)',
+        xlab='reco azimuth - true azimuth (rad)',
     )
     if outdir is not None:
         fbp = join(outdir, 'dist_track_azimuth_error')
@@ -280,7 +298,7 @@ def plot_all_distributions(
         truth=truth,
         xlim=(0, 2*np.pi),
         nbins=n_az,
-        xlab='track azimuth (rad)',
+        xlab='azimuth angle (rad)',
     )
     #y0, y1 = ax.get_ylim()
     #ax.set_ylim(y1*0.7, y1*.98)
@@ -290,11 +308,12 @@ def plot_all_distributions(
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
-    p_err = evts['{}_track_angle_error'.format(p_reco)]
+    if p_reco is not None:
+        pl_err = evts['{}_track_angle_error'.format(p_reco)]
     r_err = evts['{}_track_angle_error'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=p_err,
+        pegleg=pl_err,
         retro=r_err,
         xlim=(0, np.pi),
         nbins=n_ang,
@@ -305,41 +324,45 @@ def plot_all_distributions(
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
-    truth = evts.cascade_energy
-    pegleg = evts['{}_cascade_energy'.format(p_reco)]
-    retro = evts['{}_cascade_energy'.format(r_reco)]
+    #truth = evts.cascade_energy
+    #if p_reco is not None:
+    #    pegleg = evts['{}_cascade_energy'.format(p_reco)]
+    #    pl_err = pegleg - truth
+    #retro = evts['{}_cascade_energy'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
-        retro=retro - truth,
-        xlim=(-20, 20),
-        nbins=n_cscdenerr,
-        xlab='reco cascade energy - true cascade energy (GeV)',
-    )
-    if outdir is not None:
-        fbp = join(outdir, 'dist_cascade_energy_error')
-        fig.savefig(fbp + '.png', dpi=120)
-        fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
-        pegleg=pegleg,
-        retro=retro,
-        truth=truth,
-        xlim=(0.0, 20),
-        nbins=n_cscden,
-        logx=False,
-        xlab='cascade energy (GeV)',
-    )
-    if outdir is not None:
-        fbp = join(outdir, 'dist_cascade_energy')
-        fig.savefig(fbp + '.png', dpi=120)
-        fig.savefig(fbp + '.pdf')
+    #fig, ax = plot_comparison(
+    #    pegleg=pl_err,
+    #    retro=retro - truth,
+    #    xlim=(-20, 20),
+    #    nbins=n_cscdenerr,
+    #    xlab='reco cascade energy - true cascade energy (GeV)',
+    #)
+    #if outdir is not None:
+    #    fbp = join(outdir, 'dist_cascade_energy_error')
+    #    fig.savefig(fbp + '.png', dpi=120)
+    #    fig.savefig(fbp + '.pdf')
+    #fig, ax = plot_comparison(
+    #    pegleg=pegleg,
+    #    retro=retro,
+    #    truth=truth,
+    #    xlim=(0.0, 20),
+    #    nbins=n_cscden,
+    #    logx=False,
+    #    xlab='cascade energy (GeV)',
+    #)
+    #if outdir is not None:
+    #    fbp = join(outdir, 'dist_cascade_energy')
+    #    fig.savefig(fbp + '.png', dpi=120)
+    #    fig.savefig(fbp + '.pdf')
 
     truth = evts.track_energy
-    pegleg = evts['{}_track_energy'.format(p_reco)]
+    if p_reco is not None:
+        pegleg = evts['{}_track_energy'.format(p_reco)]
+        pl_err = pegleg - truth
     retro = evts['{}_track_energy'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pl_err,
         retro=retro - truth,
         xlim=(-30, 40),
         nbins=n_trckenerr,
@@ -364,11 +387,14 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.energy
-    pegleg = evts['{}_cascade_energy'.format(p_reco)] + evts['{}_track_energy'.format(p_reco)]
-    retro = evts['{}_cascade_energy'.format(r_reco)]*2 + evts['{}_track_energy'.format(r_reco)]
+    if p_reco is not None:
+        pegleg = evts['{}_cascade_energy'.format(p_reco)] + evts['{}_track_energy'.format(p_reco)]
+        pl_err = pegleg - truth
+    #retro = evts['{}_cascade_energy'.format(r_reco)]*2 + evts['{}_track_energy'.format(r_reco)]
+    retro = evts['{}_energy'.format(r_reco)]
 
     fig, ax = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pl_err,
         retro=retro - truth,
         xlim=(-40, 40),
         nbins=n_enerr,

@@ -168,6 +168,7 @@ def extract_from_leaf_dir(
         kinds = estimates['kind'].values
         params = estimates['param'].values
         mean_index = int(np.argwhere(kinds == 'mean'))
+        median_index = int(np.argwhere(kinds == 'median'))
         lower_index = int(np.argwhere(kinds == 'lower_bound'))
         upper_index = int(np.argwhere(kinds == 'upper_bound'))
 
@@ -256,7 +257,7 @@ def extract_from_leaf_dir(
                     info[pfx + key] = fit_meta[key]
 
                 for param_index, param in enumerate(params):
-                    info[pfx + param] = est[mean_index, param_index]
+                    info[pfx + param] = est[median_index, param_index]
                     lb = est[lower_index, param_index]
                     ub = est[upper_index, param_index]
                     width = ub - lb

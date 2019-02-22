@@ -40,6 +40,10 @@ __all__ = [
     'TriggerSubtypeID',
     'TRIGGER_T',
     'SRC_T',
+    'TRACK_T',
+    'INVALID_TRACK',
+    'CASCADE_T',
+    'INVALID_CASCADE',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -242,7 +246,8 @@ class ParticleType(enum.IntEnum):
 
     Only Requires int32 dtype for storage.
 
-    Scraped from dataclasses/public/dataclasses/physics/I3Particle.h, 2019-02-18
+    Scraped from dataclasses/public/dataclasses/physics/I3Particle.h, 2019-02-18;
+    K0, K0Bar added
     """
     # pylint: disable=invalid-name
 
@@ -257,8 +262,12 @@ class ParticleType(enum.IntEnum):
     PiPlus = 211
     PiMinus = -211
     K0_Long = 130
+    K0 = 311
+    K0Bar = -311
     KPlus = 321
     KMinus = -321
+    SigmaCPP = 4222 # charmed sigma ++
+    SigmaCP = 4212 # charmed sigma +
     Neutron = 2112
     PPlus = 2212
     PMinus = -2212
@@ -411,6 +420,10 @@ class ParticleType(enum.IntEnum):
 
 
 class ParticleShape(enum.IntEnum):
+    """`I3Particle` property `shape`.
+
+    Scraped from dataclasses/public/dataclasses/physics/I3Particle.h, 2019-02-18
+    """
     Null = 0
     Primary = 10
     TopShower = 20
@@ -425,6 +438,10 @@ class ParticleShape(enum.IntEnum):
 
 
 class FitStatus(enum.IntEnum):
+    """`I3Particle` property `fit_status`.
+
+    Scraped from dataclasses/public/dataclasses/physics/I3Particle.h, 2019-02-18
+    """
     # pylint: disable=invalid-name
     NotSet = -1
     OK = 0
@@ -436,6 +453,10 @@ class FitStatus(enum.IntEnum):
 
 
 class LocationType(enum.IntEnum):
+    """`I3Particle` property `location`.
+
+    Scraped from dataclasses/public/dataclasses/physics/I3Particle.h, 2019-02-18
+    """
     # pylint: disable=invalid-name
     Anywhere = 0
     IceTop = 10
@@ -579,3 +600,40 @@ SRC_T = np.dtype([
     ('ckv_sintheta', np.float32),
 ], align=True)
 """Each source point is described by (up to) these 9 fields"""
+
+
+TRACK_T = np.dtype([
+    ('time', np.float32),
+    ('x', np.float32),
+    ('y', np.float32),
+    ('z', np.float32),
+    ('zenith', np.float32),
+    ('azimuth', np.float32),
+    ('dectionality', np.float32),
+    ('energy', np.float32),
+    ('length', np.float32),
+    ('stoch_loss', np.float32),
+    ('vis_em_equiv_stoch_loss', np.float32),
+    ('pdg', np.int32),
+])
+
+INVALID_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
+INVALID_TRACK['pdg'] = ParticleType.unknown
+
+
+CASCADE_T = np.dtype([
+    ('time', np.float32),
+    ('x', np.float32),
+    ('y', np.float32),
+    ('z', np.float32),
+    ('zenith', np.float32),
+    ('azimuth', np.float32),
+    ('energy', np.float32),
+    ('em_equiv_energy', np.float32),
+    ('pdg', np.int32),
+    ('is_hadronic', np.bool8),
+])
+
+INVALID_CASCADE = np.full(shape=1, fill_value=np.nan, dtype=CASCADE_T)
+INVALID_CASCADE['pdg'] = ParticleType.unknown
+INVALID_CASCADE['is_hadronic'] = False

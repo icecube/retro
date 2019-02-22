@@ -24,6 +24,8 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 __all__ = [
+    'EM_CASCADE_PTYPES',
+    'HADRONIC_CASCADE_PTYPES',
     'FILENAME_INFO_RE',
     'GENERIC_I3_FNAME_RE',
     'extract_file_metadata',
@@ -54,9 +56,92 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import (
     PHOTON_T, PULSE_T, TRIGGER_T, ParticleType, ParticleShape, LocationType,
-    FitStatus
+    FitStatus, TRACK_T, INVALID_TRACK, CASCADE_T,
+    INVALID_CASCADE,
 )
 from retro.utils.misc import expand, mkdir
+from retro.utils.geom import cart2sph_np
+
+
+EM_CASCADE_PTYPES = (
+    ParticleType.EMinus,
+    ParticleType.EPlus,
+    ParticleType.Brems,
+    ParticleType.DeltaE,
+    ParticleType.PairProd,
+    ParticleType.Gamma,
+    ParticleType.Pi0,
+)
+"""Particle types parameterized as electromagnetic cascades,
+from clsim/python/GetHybridParameterizationList.py"""
+
+
+HADRONIC_CASCADE_PTYPES = (
+    ParticleType.Hadrons,
+    ParticleType.Neutron,
+    ParticleType.PiPlus,
+    ParticleType.PiMinus,
+    ParticleType.K0_Long,
+    ParticleType.KPlus,
+    ParticleType.KMinus,
+    ParticleType.PPlus,
+    ParticleType.PMinus,
+    ParticleType.K0_Short,
+    ParticleType.Eta,
+    ParticleType.Lambda,
+    ParticleType.SigmaPlus,
+    ParticleType.Sigma0,
+    ParticleType.SigmaMinus,
+    ParticleType.Xi0,
+    ParticleType.XiMinus,
+    ParticleType.OmegaMinus,
+    ParticleType.NeutronBar,
+    ParticleType.LambdaBar,
+    ParticleType.SigmaMinusBar,
+    ParticleType.Sigma0Bar,
+    ParticleType.SigmaPlusBar,
+    ParticleType.Xi0Bar,
+    ParticleType.XiPlusBar,
+    ParticleType.OmegaPlusBar,
+    ParticleType.DPlus,
+    ParticleType.DMinus,
+    ParticleType.D0,
+    ParticleType.D0Bar,
+    ParticleType.DsPlus,
+    ParticleType.DsMinusBar,
+    ParticleType.LambdacPlus,
+    ParticleType.WPlus,
+    ParticleType.WMinus,
+    ParticleType.Z0,
+    ParticleType.NuclInt,
+    ParticleType.TauPlus,
+    ParticleType.TauMinus,
+)
+"""Particle types parameterized as hadronic cascades,
+from clsim/CLSimLightSourceToStepConverterPPC.cxx with addition of TauPlus and
+TauMinus"""
+
+
+CASCADE_PTYPES = EM_CASCADE_PTYPES + HADRONIC_CASCADE_PTYPES
+"""Particle types classified as either EM or hadronic cascades"""
+
+
+TRACK_PTYPES = [ParticleType.MuPlus, ParticleType.MuMinus]
+"""Particle types classified as tracks"""
+
+
+INVISIBLE_PTYPES = [
+    ParticleType.Neutron, # long decay time exceeds trigger window
+    ParticleType.K0,
+    ParticleType.K0Bar,
+    ParticleType.NuE,
+    ParticleType.NuEBar,
+    ParticleType.NuMu,
+    ParticleType.NuMuBar,
+    ParticleType.NuTau,
+    ParticleType.NuTauBar,
+]
+"""Invisible particles (at least to low-energy IceCube triggers)"""
 
 
 FILENAME_INFO_RE = re.compile(
@@ -389,6 +474,265 @@ def extract_photons(frame, photon_key):
     return photons
 
 
+def convert_had_to_em_equiv_energy(hadronic_energy):
+    """
+
+    Parameters
+    ----------
+    hadronic_energy
+        Hadronic cascade energy in units of GeV
+
+    Returns
+    -------
+    em_equiv_energy
+        Energy in GeV of an electromagnetic cascade that would be approximately
+        as luminous as the hadronic cascade
+
+    References
+    ----------
+    [1] D. Chirkin for the IceCube Collaboration, "Study of South Pole ice
+    transparency with IceCube flashers"
+
+    """
+    if hadronic_energy == 0.:
+        return 0.
+    E0 = 0.399
+    f0 = 0.467
+    m = 0.130
+    factor = 1 - (hadronic_energy / E0)**(-m) * (1 - f0)
+    em_equiv_energy = factor * hadronic_energy
+    return em_equiv_energy
+
+
+def get_cascade_and_track_info(particles, mctree):
+    """Extract summary information about an event's "true" cascade(s) and
+    track(s), insofar as we can discern from the IceCube low-en MC.
+
+    Parameters
+    ----------
+    particles : icecube.dataclasses.I3Particle or iterable thereof
+        Particles in the passed `mctree` to be analyzed for their "cascade-"
+        and "track-ness."
+
+    mctree : icecube.dataclasses.I3MCTree
+
+    Returns
+    -------
+    cascade_and_track_info : OrderedDict
+        Values are numpy struct arrays, and keys are
+            "total_track"
+                Simple sum of all particles that self-report as `is_track`, exept taus
+                (see Notes); total track has length only as long as the longest
+                component (it doesn't make sense to report a sum of lengths since they
+                all start from the same point), but energy is summed over all
+                components and directionality is the length-weighted average of all
+                component particles
+
+            "longest_track"
+                Single longest particle classified as a track; filled with nan if no
+                tracks
+
+            "total_cascade"
+                Simple sum of all particles that self-report as `is_cascade` plus taus
+                which are grouped into cascades despite self-reporting as `is_track`
+                since they decay so quickly
+
+            "visible_em_equiv_cascade"
+                Simply apply the inverse of the `F` factor from ref. [1] to the
+                energies of the hadronic cascades and average all resulting cascading
+                particles, including taus but omitting neutrons
+
+    Notes
+    -----
+    Direction is reported by the energy-weighted average of all grouped
+    particles with `directionality` a normalized (0-1) measure of the resulting
+    direction vector.
+
+    Taus are simplistically grouped with hadronic cascades since these do not
+    (the majority of the time) produce a track detectable as such in the ice by
+    the IceCube detector. This ignores the details of the tau propagation and
+    decay products that will produce electromagnetic showers and possibly a
+    detectable track (a muon byproduct), but we have to make a simplistic
+    choice since we don't have further information about the tau's behavior in
+    our MC files.
+
+    The `visible_em_equiv_cascade` can be improved by applying separate factors
+    from ref. [2] for different hadrons (and potentially deriving new factors
+    from simulations of all cascading particles).
+
+    In the end, without detailed reporting of the among of Cerenkov light
+    produced in each event and detailed accounting of this for what we would
+    call "tracks" or "cascades," the best we might hope to achieve in reporting
+    "truth" here is to report expectation values for the last step reported in
+    the I3MCTree. For each event, truth will be incorrect, but looking at many
+    events, bias will average out (although the standard deviation between
+    actual-truth and average-truth introduced by our uncertainty of what
+    actually occurs in MC will still impact reconstruction errors).
+
+    References
+    ----------
+    [1] D. Chirkin for the IceCube Collaboration, "Study of South Pole ice
+    transparency with IceCube flashers"
+
+    [2] M. Kowalski, "On the Čerenkov light emission of hadronic and
+    electro-magnetic cascades," AMANDA-IR/20020803 August 12, 2002.
+
+    """
+    from icecube.dataclasses import I3Particle
+    ignore_ptypes = (
+        ParticleType.NuE,
+        ParticleType.NuEBar,
+        ParticleType.NuMu,
+        ParticleType.NuMuBar,
+        ParticleType.NuTau,
+        ParticleType.NuTauBar,
+        ParticleType.O16Nucleus,
+        ParticleType.K0,
+        ParticleType.K0Bar,
+    )
+    if isinstance(particles, I3Particle):
+        particles = [particles]
+
+    # Storage for particles we classify as each basic/simplistic topology
+    cascades = []
+    tracks = []
+
+    for particle in particles:
+        ptype = ParticleType(int(particle.pdg_encoding))
+        if ptype in EM_CASCADE_PTYPES:
+            assert particle.is_cascade, ptype
+            cascades.append((particle, False))
+        elif ptype in HADRONIC_CASCADE_PTYPES:
+            assert particle.is_cascade or ptype in (ParticleType.TauPlus, ParticleType.TauMinus), ptype
+            cascades.append((particle, True))
+        elif ptype in TRACK_PTYPES:
+            assert particle.is_track, ptype
+            tracks.append(particle)
+        elif ptype in ignore_ptypes:
+            pass
+        else:
+            #raise ValueError("{} is not track or cascade".format(ptype))
+            print("{} (code {}) is neither track nor cascade".format(ptype.name, ptype))
+
+    if tracks:
+        longest_track_particle = None
+        total_track = np.zeros(shape=1, dtype=TRACK_T)
+        wtd_dir = np.zeros(3) # direction cosines (x, y, & z)
+        sum_of_lengths = 0.
+        secondaries = []
+        for particle in tracks:
+            if particle.length >= total_track['length']:
+                total_track['length'] = particle.length
+                longest_track_particle = particle
+            total_track['energy'] += particle.energy
+            # Note negative sign is due to dir.x, dir.y, dir.z indicating
+            # direction _toward which particle points_, while icecube zenith
+            # and azimuth describe direction _from which particle came_.
+            wtd_dir -= particle.length * np.array((particle.dir.x, particle.dir.y, particle.dir.z))
+            sum_of_lengths += particle.length
+            secondaries.extend(mctree.get_daughters(particle))
+
+        info = get_cascade_and_track_info(particles=secondaries, mctree=mctree)
+
+        wtd_dir /= sum_of_lengths
+        directionality, zenith, azimuth = cart2sph_np(x=wtd_dir[0], y=wtd_dir[1], z=wtd_dir[2])
+
+        longest_track = populate_track_t(mctree=mctree, particle=longest_track_particle)
+
+        total_track['time'] = tracks[0]['time']
+        total_track['x'] = tracks[0]['x']
+        total_track['y'] = tracks[0]['y']
+        total_track['z'] = tracks[0]['z']
+        total_track['zenith'] = zenith
+        total_track['azimuth'] = azimuth
+        total_track['directionality'] = directionality
+        # (energy and length already set inside above loop)
+        total_track['stoch_loss'] = info['total_cascade']['energy']
+        total_track['vis_em_equiv_stoch_loss'] = info['visible_em_equiv_cascade']['energy']
+        if len(tracks) == 1:
+            total_track['pdg'] = tracks[0]['pdg_encoding']
+        else:
+            total_track['pdg'] = ParticleType.unknown
+
+    else:
+        total_track = deepcopy(INVALID_TRACK)
+        longest_track = deepcopy(INVALID_TRACK)
+
+    if cascades:
+        total_cascade = np.zeros(shape=1, dtype=CASCADE_T)
+        visible_em_equiv_cascade = np.zeros(shape=1, dtype=CASCADE_T)
+        visible_em_wtd_dir = np.zeros(3) # direction cosines (x, y, & z)
+        energy_wtd_dir = np.zeros(3) # direction cosines (x, y, & z)
+        for particle, is_hadronic in cascades:
+            total_cascade['energy'] += particle.energy
+            raw_dir = np.array((particle.dir.x, particle.dir.y, particle.dir.z))
+            energy_wtd_dir -= particle.energy * raw_dir
+
+            if particle in INVISIBLE_PTYPES:
+                continue
+
+            if is_hadronic:
+                try:
+                    visible_em_equiv_energy = convert_had_to_em_equiv_energy(particle.energy)
+                except:
+                    print(particle.pdg_encoding, particle.energy)
+                    raise
+            else:
+                visible_em_equiv_energy = particle.energy
+            visible_em_wtd_dir -= visible_em_equiv_energy * raw_dir
+            visible_em_equiv_cascade['energy'] += visible_em_equiv_energy
+    else:
+        total_cascade = deepcopy(INVALID_CASCADE)
+        visible_em_equiv_cascade = deepcopy(INVALID_CASCADE)
+
+    cascade_and_track_info = OrderedDict(
+        [
+            ('total_track', total_track),
+            ('longest_track', longest_track),
+            ('total_cascade', total_cascade),
+            ('visible_em_equiv_cascade', visible_em_equiv_cascade),
+        ]
+    )
+
+    return cascade_and_track_info
+
+
+def populate_track_t(mctree, particle):
+    """Populate a Retro TRACK_T from IceCube I3Particle
+
+    Parameters
+    ----------
+    mctree : icecube.dataclasses.I3MCTree
+    particle : icecube.dataclasses.I3Particle
+
+    Returns
+    -------
+    track : length-1 array of dtype retro.retro_types.TRACK_T
+
+    """
+    # Start with an invalid track, so fields not explicitly populated are
+    # explicitly invalid values
+    track = deepcopy(INVALID_TRACK) #np.zeros(shape=1, dtype=TRACK_T)
+
+    # Populate the basics
+    track['time'] = particle.time
+    track['x'] = particle.pos.x
+    track['y'] = particle.pos.y
+    track['z'] = particle.pos.z
+    track['zenith'] = particle.dir.zenith
+    track['azimuth'] = particle.dir.azimuth
+    track['energy'] = particle.energy
+    track['length'] = particle.length
+    track['pdg'] = particle.pdg_encoding
+
+    # Get info about stochastics recorded as daughters of the track particle
+    info = get_cascade_and_track_info(particles=particle, mctree=mctree)
+    track['stoch_loss'] = info['total_cascade']['energy']
+    track['vis_em_equiv_stoch_loss'] = info['visible_em_equiv_cascade']['energy']
+
+    return track
+
+
 def extract_truth(frame, run_id, event_id):
     """Get event truth information from a frame.
 
@@ -407,7 +751,18 @@ def extract_truth(frame, run_id, event_id):
     except ImportError:
         multinest_icetray = None
 
-    event_truth = et = OrderedDict()
+    # Anything not listed defaults to float32; note this is augmented when
+    # cascades and tracks are added
+    truth_dtypes = dict(
+        pdg=np.int32,
+        unique_id=np.uint64,
+        highest_energy_daughter_pdg=np.int32,
+        longest_daughter_pdg=np.int32,
+        InteractionType=np.int8,
+        TargetPDGCode=np.int32,
+    )
+
+    event_truth = OrderedDict()
 
     # Extract info from I3MCTree: ...
     mctree = frame['I3MCTree']
@@ -425,108 +780,37 @@ def extract_truth(frame, run_id, event_id):
     elif abs_pdg in [12, 14, 16]:
         is_nu = True
 
-    et['pdg'] = pdg
-    et['x'] = primary.pos.x
-    et['y'] = primary.pos.y
-    et['z'] = primary.pos.z
-    et['time'] = primary.time
-    et['energy'] = primary.energy
-    et['coszen'] = np.cos(primary.dir.zenith)
-    et['azimuth'] = primary.dir.azimuth
+    event_truth['pdg'] = pdg
+    event_truth['x'] = primary.pos.x
+    event_truth['y'] = primary.pos.y
+    event_truth['z'] = primary.pos.z
+    event_truth['time'] = primary.time
+    event_truth['energy'] = primary.energy
+    event_truth['coszen'] = np.cos(primary.dir.zenith)
+    event_truth['azimuth'] = primary.dir.azimuth
 
     # Get event number and generate a unique ID
     unique_id = (
         int(1e13) * abs_pdg + int(1e7) * run_id + event_id
     )
-    #et['run_id'] = run_id
-    #et['sub_run_id'] = sub_run_id
-    #et['event_id'] = event_id
-    #et['sub_event_id'] = sub_event_id
-    #et['sub_event_stream'] = sub_event_stream  # string, unhandled as of now
-    #et['state'] = state
-    et['unique_id'] = unique_id
+    event_truth['unique_id'] = unique_id
 
     # If neutrino, get charged lepton daughter particles
     if is_nu:
-        daughters = mctree.get_daughters(primary)
-        highest_e_daughter = None
-        longest_daughter = None
-        highest_energy = 0
-        longest_length = 0
-        for daughter in daughters:
-            d_pdg = daughter.pdg_encoding
-            d_energy = daughter.energy
-            d_length = daughter.length
-
-            # Look only at charged leptons
-            if np.abs(d_pdg) in [11, 13, 15]:
-                if d_energy > highest_energy:
-                    highest_e_daughter = daughter
-                    highest_energy = d_energy
-                if d_length > longest_length:
-                    longest_daughter = daughter
-                    longest_length = d_length
-
-        daughter_info_defaults = OrderedDict([
-            ('pdg', 0),
-            ('energy', np.nan),
-            ('length', np.nan),
-            ('coszen', np.nan),
-            ('azimuth', np.nan),
-        ])
-
-        highest_e_info = OrderedDict()
-        he_name = 'highest_energy_daughter'
-        if highest_e_daughter:
-            hei = highest_e_info
-            hei['%s_pdg' % he_name] = (
-                highest_e_daughter.pdg_encoding
-            )
-            hei['%s_energy' % he_name] = highest_e_daughter.energy
-            hei['%s_length' % he_name] = highest_e_daughter.length
-            hei['%s_coszen' % he_name] = (
-                np.cos(highest_e_daughter.dir.zenith)
-            )
-            hei['%s_azimuth' % he_name] = highest_e_daughter.dir.azimuth
-        else:
-            for key, default_value in daughter_info_defaults.items():
-                highest_e_info['%s_%s' % (he_name, key)] = default_value
-        et.update(highest_e_info)
-
-        longest_info = OrderedDict()
-        l_name = 'longest_daughter'
-        if longest_daughter is None:
-            if highest_e_daughter:
-                for subfield in daughter_info_defaults.keys():
-                    l_key = '%s_%s' % (l_name, subfield)
-                    he_key = '%s_%s' % (he_name, subfield)
-                    longest_info[l_key] = deepcopy(highest_e_info[he_key])
-            else:
-                for key, default_value in daughter_info_defaults.items():
-                    longest_info['%s_%s' % (l_name, key)] = default_value
-        else:
-            li = longest_info
-            li['%s_pdg' % l_name] = longest_daughter.pdg_encoding
-            li['%s_energy' % l_name] = longest_daughter.energy
-            li['%s_length' % l_name] = longest_daughter.length
-            li['%s_coszen' % l_name] = np.cos(longest_daughter.dir.zenith)
-            li['%s_azimuth' % l_name] = longest_daughter.dir.azimuth
-        et.update(longest_info)
-
-    # Extract info from {MC,true}Cascade
-    has_mc_true_cascade = True
-    if 'trueCascade' in frame:
-        true_cascade = frame['trueCascade']
-    elif 'MCCascade' in frame:
-        true_cascade = frame['MCCascade']
-    else:
-        has_mc_true_cascade = False
-
-    if has_mc_true_cascade:
-        et['cascade_pdg'] = true_cascade.pdg_encoding
-        et['cascade_energy'] = true_cascade.energy
-        et['cascade_coszen'] = np.cos(true_cascade.dir.zenith)
-        et['cascade_azimuth'] = true_cascade.dir.azimuth
+        primary_neutrino = mctree.get_primaries()[0]
+        secondaries = mctree.get_daughters(primary_neutrino)
+        cascade_and_track_info = get_cascade_and_track_info(
+            particles=secondaries,
+            mctree=mctree,
+        )
+        for info_name, particle in cascade_and_track_info.items():
+            dtype = particle.dtype
+            fields = dtype.fields
+            for field_name in dtype.names:
+                key = '{}_{}'.format(info_name, field_name)
+                event_truth[key] = particle[field_name]
+                # `fields` contains dtype and byte offset; just want dtype
+                truth_dtypes[key] = fields[field_name][0]
 
     # Extract per-event info from I3MCWeightDict
     mcwd_copy_keys = '''
@@ -545,25 +829,15 @@ def extract_truth(frame, run_id, event_id):
     mcwd = frame['I3MCWeightDict']
     for key in mcwd_copy_keys:
         try:
-            et[key] = mcwd[key]
+            event_truth[key] = mcwd[key]
         except KeyError:
             print('Could not get "{}" from I3MCWeightDict'.format(key))
 
-	# Anything not listed defaults to float64
-    truth_dtypes = dict(
-        pdg=np.int32,
-        unique_id=np.uint64,
-        highest_energy_daughter_pdg=np.int32,
-        longest_daughter_pdg=np.int32,
-        InteractionType=np.int8,
-        TargetPDGCode=np.int32,
-    )
-
     struct_dtype_spec = []
-    for key in et.keys():
-        struct_dtype_spec.append((key, truth_dtypes.get(key, np.float64)))
+    for key in event_truth.keys():
+        struct_dtype_spec.append((key, truth_dtypes.get(key, np.float32)))
 
-    event_truth = np.array(tuple(et.values()), dtype=struct_dtype_spec)
+    event_truth = np.array(tuple(event_truth.values()), dtype=struct_dtype_spec)
 
     return event_truth
 

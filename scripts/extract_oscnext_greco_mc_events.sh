@@ -13,15 +13,16 @@ do
 
     echo "$full_i3_filepath"
 
-    outdir=$( echo "$full_i3_filepath" | sed 's/\.i3.*//' )
+    outdir=$( echo "$full_i3_filepath" | sed 's/\.i3.*/test/' )
 
     "$mydir"/../retro/i3processing/extract_events.py \
         --triggers I3TriggerHierarchy \
         --truth \
-        --pulses SplitInIcePulses SRTTWOfflinePulsesDC \
-        --recos SPEFit2 SPEFit2_DC SPEFitSingle SPEFitSingle_DC L5_SPEFit11 MPEFit \
+        --pulses SplitInIcePulses \
+        --recos CascadeLast_DC DipoleFit_DC FiniteRecoFit L4_ToI L4_ToIEval2 L4_ToIEval3 L4_iLineFit L5_SPEFit11 LineFit LineFit_DC MM_DC_LineFitI_MM_DC_Pulses_1P_C05 MM_IC_LineFitI MPEFit MPEFitMuEX PoleMuonLinefit PoleMuonLlhFit SPEFit2 SPEFit2MuEX_FSS SPEFit2_DC SPEFitSingle SPEFitSingle_DC ToI_DC \
         --fpath "$full_i3_filepath" \
         --outdir "$outdir" &
+
 done
 
 wait
