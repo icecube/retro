@@ -14,6 +14,7 @@ __all__ = [
     'weighted_percentile',
     'test_weighted_percentile',
     'estimate_from_llhp',
+    'fit_cdf',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -31,14 +32,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from collections import OrderedDict
 from copy import copy, deepcopy
 import enum
 from os.path import abspath, dirname
 import sys
+import time
+import traceback
+import warnings
 
 import numpy as np
 from scipy.special import gammaln
-from scipy import stats
+from scipy import optimize, stats
 import xarray as xr
 
 if __name__ == '__main__' and __package__ is None:
@@ -450,6 +455,146 @@ def estimate_from_llhp(
             est[Est.mean, az_idx] = np.arctan2(cart_mean[1], cart_mean[0]) % (2 * np.pi)
 
     return estimate
+
+
+def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
+    """Fit a distribution to a supplied cumulative distribution function (cdf).
+    This allows fitting a distribution to weighted data.
+
+    Parameters
+    ----------
+    x : array of same len as `cdf`
+        `cdf` is sampled at `x` (sorted datapoints)
+
+    cdf : array of same len as `x`, values in [0, 1]
+        Values of the cdf at each `x`
+
+    distribution : scipy.stats.distributions
+        Continuous distribution with same interface as scipy's distributions
+
+    x_is_data : bool
+        If the `x` values are datapoint values, use these for getting a simple
+        first guess fit
+
+    Returns
+    -------
+    best_fit_params
+    first_guess_params
+    mse
+
+    """
+    if not x_is_data:
+        raise NotImplementedError()
+
+    if isinstance(distribution, basestring):
+        distribution = getattr(stats.distributions, distribution)
+
+    t0 = time.time()
+    if distribution.shapes:
+        shape_param_names = [d.strip() for d in distribution.shapes.split(',')]
+    else:
+        shape_param_names = []
+
+    all_param_names = shape_param_names + ['loc', 'scale']
+
+    failed_params = OrderedDict([(p, np.nan) for p in all_param_names])
+    retval = OrderedDict(
+        [
+            ('name', distribution.name),
+            ('success', False),
+            ('total_time', np.nan),
+
+            ('first_guess_params', failed_params),
+            ('first_guess_mse', np.nan),
+            ('first_guess_fit_time', np.nan),
+            ('first_guess_exception', None),
+
+            ('best_fit_params', failed_params),
+            ('best_fit_mse', np.nan),
+            ('best_fit_time', np.nan),
+            ('best_fit_exception', None),
+        ]
+    )
+
+    # Get first-guess param values by fitting unweighted data
+    t1 = time.time()
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            first_guess = distribution.fit(x)
+    except Exception:
+        exc_info = sys.exc_info()
+        try:
+            retval['first_guess_time'] = time.time() - t1
+            retval['first_guess_exception'] = traceback.format_exception(*exc_info)
+            retval['total_time'] = time.time() - t0
+        finally:
+            del exc_info
+        if verbosity > 0:
+            print(
+                'ERROR: Dist {} first fit failed.'
+                ' first fit time = {:.2f} s,'
+                ' total time = {:.2f} s'
+                .format(retval['name'], retval['first_guess_time'], retval['total_time'])
+            )
+        if verbosity > 1:
+            print(''.join(retval['first_guess_exception']))
+        return retval
+
+    first_guess_params = OrderedDict([(p, v) for p, v in zip(all_param_names, first_guess)])
+    first_guess_cdf = distribution.cdf(x, **first_guess_params)
+    first_guess_mse = np.mean(np.square(first_guess_cdf - cdf))
+    t2 = time.time()
+    retval['first_guess_params'] = first_guess_params
+    retval['first_guess_mse'] = first_guess_mse
+    retval['first_guess_fit_time'] = t2 - t1
+
+    # Use weighted average as first-guess for 'loc' param instead?
+    #weighted_average = np.average(a=data, weights=weights)
+
+    # -- Perform fit to weighted data via CDF -- #
+
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            best_fit, _ = optimize.curve_fit(distribution.cdf, x, cdf, p0=first_guess)
+    except Exception:
+        exc_info = sys.exc_info()
+        try:
+            retval['best_fit_time'] = time.time() - t2
+            retval['best_fit_exception'] = traceback.format_exception(*exc_info)
+            retval['total_time'] = time.time() - t0
+        finally:
+            del exc_info
+        if verbosity > 0:
+            print(
+                'ERROR: Dist {} best fit failed:'
+                ' first fit time = {:.2f},'
+                ' best fit time = {:.2f} s,'
+                ' total time = {:.2f} s'
+                .format(
+                    retval['name'],
+                    retval['first_guess_time'],
+                    retval['best_fit_time'],
+                    retval['total_time'],
+                )
+            )
+        if verbosity > 1:
+            print(''.join(retval['best_fit_exception']))
+        return retval
+
+    best_fit_params = OrderedDict([(p, v) for p, v in zip(all_param_names, best_fit)])
+    best_fit_cdf = distribution.cdf(x, **best_fit_params)
+    best_fit_mse = np.mean(np.square(best_fit_cdf - cdf))
+    t3 = time.time()
+    if np.all(np.isfinite(best_fit_params.values())) and np.isfinite(best_fit_mse):
+        retval['success'] = True
+    retval['best_fit_params'] = best_fit_params
+    retval['best_fit_mse'] = best_fit_mse
+    retval['best_fit_time'] = t2 - t1
+    retval['total_time'] = t3 - t0
+
+    return retval
 
 
 if __name__ == '__main__':
