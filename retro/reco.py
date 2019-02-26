@@ -994,7 +994,7 @@ class Reco(object):
         if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
             derived_dim_names += ['cascade_zenith', 'cascade_azimuth']
 
-        aux_names = ['zero_llh', 'lower_llh', 'upper_llh']
+        aux_names = ['zero_dllh', 'lower_dllh', 'upper_dllh']
 
         all_dim_names = dim_names + derived_dim_names + aux_names
 

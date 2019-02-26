@@ -1042,12 +1042,12 @@ def generate_pexp_and_llh_functions(
             :func:`retro.hypo.discrete_muon_kernels.pegleg_eval`
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
-        zero_llh : float
+        zero_dllh : float >=0
             delta LLH of best fit pegleg LLH to LLH of zero length track
-        lower_llh : float
-            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps before best LLH
-        upper_llh : float
-            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
+        lower_dllh : float >= 0
+            delta LLH of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps before best LLH
+        upper_dllh : float >= 0
+            delta LLH of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
         """
         num_pegleg_sources = len(pegleg_sources)
@@ -1296,12 +1296,12 @@ def generate_pexp_and_llh_functions(
                 pegleg_sources[:pegleg_stop_idx]
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
-        zero_llh : float
+        zero_dllh : float >=0
             delta LLH of best fit pegleg LLH to LLH of zero length track
-        lower_llh : float
-            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps before best LLH
-        upper_llh : float
-            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
+        lower_dllh : float >= 0
+            delta LLH of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps before best LLH
+        upper_dllh : float >= 0
+            delta LLH of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
         """
         return get_llh_(
