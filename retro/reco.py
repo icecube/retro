@@ -724,13 +724,8 @@ class Reco(object):
             nparams
 
             """
-            for n, prior_func in enumerate(prior_funcs):
+            for prior_func in prior_funcs:
                 prior_func(cube)
-                #if not np.all(np.isfinite(cube)):
-                #    raise ValueError(
-                #        'application of prior "{}" resulted in non-finite params in `cube`: {}'
-                #        .format(n, cube)
-                #    )
 
         self.prior = prior
 
