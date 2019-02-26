@@ -5,9 +5,14 @@
 #  1        x (only 100)
 #  2  x  x  x (only 100)
 #  3  x  x  x (stale file handles)
-#  4
+#  4  x  x  x
+#  5  x  x  x
+#  6  x  x  x
+#  7  x  x  x
+#  8  x  x  x
+#  9  x  x  x
 
-modulo=4
+modulo=9
 simdir=/gpfs/group/dfc13/default/sim/retro/level5p_merged
 outdir=/gpfs/scratch/pde3/retro/recos/level5pt_merged
 #queue=cyberlamp
