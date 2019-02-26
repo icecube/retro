@@ -900,9 +900,7 @@ class Reco(object):
             )
 
             llh, pegleg_idx, scalefactor = get_llh_retval[:3]
-
-            if len(get_llh_retval) > 3:
-                aux_values.append(get_llh_retval[3:])
+            aux_values.append(get_llh_retval[3:])
 
             
             assert np.isfinite(llh), 'LLH not finite'
@@ -996,11 +994,7 @@ class Reco(object):
         if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
             derived_dim_names += ['cascade_zenith', 'cascade_azimuth']
 
-        if len(aux_values) > 0:
-            # from pegleg PID 4 points
-            aux_names = ['zero_llh', 'lower_llh', 'upper_llh']
-        else:
-            aux_names = []
+        aux_names = ['zero_llh', 'lower_llh', 'upper_llh']
 
         all_dim_names = dim_names + derived_dim_names + aux_names
 
@@ -1011,8 +1005,7 @@ class Reco(object):
         llhp['llh'] = log_likelihoods
         llhp[dim_names] = param_values
 
-        if len(aux_values) > 0:
-            llhp[aux_names] = aux_values
+        llhp[aux_names] = aux_values
 
         # create derived dimensions
         if 'energy' in derived_dim_names:

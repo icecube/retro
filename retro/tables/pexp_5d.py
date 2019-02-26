@@ -16,7 +16,6 @@ __all__ = [
     'MAX_RAD_SQ',
     'SCALE_FACTOR_MINIMIZER',
     'PEGLEG_SPACING',
-    'PEGLEG_LLH_CHOICE',
     'PEGLEG_BEST_DELTA_LLH_THRESHOLD',
     'USE_JITTER',
     'generate_pexp_and_llh_functions',
@@ -68,15 +67,6 @@ class StepSpacing(enum.IntEnum):
     LINEAR = 0
     LOG = 1
 
-
-class LLHChoice(enum.IntEnum):
-    """How to choose the "best" LLH"""
-    MAX = 0
-    MEAN = 1
-    MEDIAN = 2
-    FOURPOINTS = 3 # storing additionalpoints at 0 track lnegth and a fixed number of steps before and after max
-
-
 MACHINE_EPS = 1e-10
 
 MAX_RAD_SQ = 500**2
@@ -88,9 +78,6 @@ SCALE_FACTOR_MINIMIZER = Minimizer.BINARY_SEARCH
 PEGLEG_SPACING = StepSpacing.LINEAR
 """Pegleg adds segments either linearly (same number of segments independent of energy)
 or logarithmically (more segments are added the longer the track"""
-
-PEGLEG_LLH_CHOICE = LLHChoice.FOURPOINTS
-"""How to choose best LLH from all Pegleg steps"""
 
 PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
 """For Pegleg `LLHChoice` that require a range of LLH and average (mean, median, etc.),
@@ -105,11 +92,6 @@ PEGLEG_BREAK_COUNTER = 100
 
 USE_JITTER = True
 """Whether to use a crude jitter implementation"""
-
-
-# Validation that module-level constants are consistent
-if PEGLEG_SPACING is StepSpacing.LOG:
-    assert PEGLEG_LLH_CHOICE is LLHChoice.MAX
 
 
 def generate_pexp_and_llh_functions(
@@ -1056,11 +1038,14 @@ def generate_pexp_and_llh_functions(
         pegleg_stop_idx : int or float
             Pegleg stop index for `pegleg_sources` to obtain `llh`. If integer, .. ::
                 pegleg_sources[:pegleg_stop_idx]
-            but float can also be returned if `PEGLEG_LLH_CHOICE` is not LLHChoice.MAX.
             `pegleg_stop_idx` is designed to be fed to
             :func:`retro.hypo.discrete_muon_kernels.pegleg_eval`
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
+        zero_llh : float
+            delta LLH of best fit pegleg LLH to LLH of zero length track
+        upper_llh : float
+            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
         """
         num_pegleg_sources = len(pegleg_sources)
@@ -1140,12 +1125,7 @@ def generate_pexp_and_llh_functions(
             )
 
         # -- Pegleg loop -- #
-
-        if PEGLEG_SPACING is StepSpacing.LINEAR:
-            pass
-            #pegleg_steps = np.arange(num_pegleg_sources)
-            #n_pegleg_steps = len(pegleg_steps)
-        elif PEGLEG_SPACING is StepSpacing.LOG:
+        if PEGLEG_SPACING is StepSpacing.LOG:
             raise NotImplementedError(
                 'Only ``PEGLEG_SPACING = StepSpacing.LINEAR`` is implemented'
             )
@@ -1158,8 +1138,6 @@ def generate_pexp_and_llh_functions(
             #pegleg_steps = np.unique(logspace)
             #assert pegleg_steps[0] == 0
             #n_pegleg_steps = len(pegleg_steps)
-        else:
-            raise ValueError('Unknown `PEGLEG_SPACING`')
 
         # -- Loop initialization -- #
 
@@ -1237,76 +1215,17 @@ def generate_pexp_and_llh_functions(
                 #print('break at step ',pegleg_idx)
                 break
 
-        if PEGLEG_LLH_CHOICE is LLHChoice.MAX:
-            return (
-                llhs[pegleg_max_llh_step],
-                pegleg_max_llh_step * pegleg_stepsize,
-                scalefactors[pegleg_max_llh_step],
-                0.,
-                0.,
-                0.,
-            )
+        lower_idx = max(0, pegleg_max_llh_step - PEGLEG_BREAK_COUNTER)
+        upper_idx = min(num_llhs, pegleg_max_llh_step + PEGLEG_BREAK_COUNTER)
+        return (
+            llhs[pegleg_max_llh_step],
+            pegleg_max_llh_step * pegleg_stepsize,
+            scalefactors[pegleg_max_llh_step],
+            llhs[pegleg_max_llh_step] - llhs[0], 
+            llhs[pegleg_max_llh_step] - llhs[lower_idx],
+            llhs[pegleg_max_llh_step] - llhs[upper_idx], 
+        )
 
-        elif PEGLEG_LLH_CHOICE is LLHChoice.MEAN:
-            max_llh = llhs[pegleg_max_llh_step]
-            total_llh_above_thresh = 0.
-            total_idx_above_thresh = 0.
-            total_scalefactor_above_thresh = 0.
-            counter = 0
-            for pegleg_step in range(num_llhs):
-                if llhs[pegleg_step] > max_llh - PEGLEG_BEST_DELTA_LLH_THRESHOLD:
-                    counter += 1
-                    total_llh_above_thresh += llhs[pegleg_step]
-                    total_idx_above_thresh += pegleg_step * pegleg_stepsize
-                    total_scalefactor_above_thresh += scalefactors[pegleg_step]
-
-            return (
-                total_llh_above_thresh / counter,
-                total_idx_above_thresh / counter,
-                total_scalefactor_above_thresh / counter,
-                0.,
-                0.,
-                0.,
-            )
-
-        elif PEGLEG_LLH_CHOICE is LLHChoice.MEDIAN:
-            raise NotImplementedError(
-                '``PEGLEG_LLH_CHOICE == LLHChoice.MEDIAN`` not implemented.'
-            )
-            # find the best pegleg idx:
-            #best_llh = np.max(llhs)
-            #n_good_indices = np.sum(llhs > best_llh - 0.1)
-            #median_good_idx = max(1,np.int(n_good_indices/2))
-
-            # search for that median pegleg index
-            #counter = 0
-            #for best_idx in range(n_pegleg_steps):
-            #    if llhs[best_idx] > best_llh - 0.1:
-            #        counter +=1
-            #    if counter == median_good_idx:
-            #        break
-
-            #good_indices = np.argwhere(llhs > best_llh - 0.1)
-            #best_idx = np.median(good_indices)
-
-            #print(llhs[:10])
-            #print(scalefactors[:10])
-            #print(pegleg_steps[:10])
-
-        elif PEGLEG_LLH_CHOICE is LLHChoice.FOURPOINTS:
-            lower_idx = max(0, pegleg_max_llh_step - PEGLEG_BREAK_COUNTER)
-            upper_idx = min(num_llhs, pegleg_max_llh_step + PEGLEG_BREAK_COUNTER)
-            return (
-                llhs[pegleg_max_llh_step],
-                pegleg_max_llh_step * pegleg_stepsize,
-                scalefactors[pegleg_max_llh_step],
-                llhs[pegleg_max_llh_step] - llhs[0], 
-                llhs[pegleg_max_llh_step] - llhs[lower_idx],
-                llhs[pegleg_max_llh_step] - llhs[upper_idx], 
-            )
-
-        else:
-            raise ValueError('Unknown `PEGLEG_LLH_CHOICE`')
 
     # -- Define pexp and get_llh closures, baking-in the tables -- #
 
@@ -1375,6 +1294,12 @@ def generate_pexp_and_llh_functions(
                 pegleg_sources[:pegleg_stop_idx]
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
+        scalefactor : float
+            Best scale factor for `scaling_sources` at best pegleg hypo
+        zero_llh : float
+            delta LLH of best fit pegleg LLH to LLH of zero length track
+        upper_llh : float
+            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
         """
         return get_llh_(
