@@ -1,6 +1,6 @@
-mc=129002 
+mc=149002 
 mkdir -p /gpfs/scratch/pde3/retro/log/
-for dir in {000002..000002}
+for dir in {000009..000011}
 do
     for sidx in {0..99}
     do
@@ -10,6 +10,7 @@ do
 -l walltime=24:00:00 \
 -N r$dir.$sidx \
 -o /gpfs/scratch/pde3/retro/log/r$mc:$dir.$sidx.log \
--e /gpfs/scratch/pde3/retro/log/r$mc:$dir.$sidx.err
+-e /gpfs/scratch/pde3/retro/log/r$mc:$dir.$sidx.err \
+-m n
     done
 done
