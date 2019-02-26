@@ -27,6 +27,7 @@ __all__ = [
     'RECO_PERF_FNAME',
     'DISTS_HASH_DIR',
     'ABS_FLAVS',
+    'TIMEOUT',
     'extract',
     'fit_distributions_to_data',
     'fit',
@@ -80,6 +81,8 @@ RECO_PERF_FNAME = 'reco_perf.pkl'
 DISTS_HASH_DIR = "distributions_sha256"
 
 ABS_FLAVS = (12, 14, 16)
+
+TIMEOUT = None
 
 
 def extract(
@@ -149,9 +152,9 @@ def extract(
             if reco_vals:
                 reco_vals = np.concatenate(reco_vals)
                 flav_recos[reco] = reco_vals
-            if not len(reco_vals) == len(flav_truth):
-                print(
-                    'abs_flav {} reco "{}" has len {} but truth has len {}'
+            if len(reco_vals) != len(flav_truth):
+                sys.stderr.write(
+                    'abs_flav {} reco "{}" has len {} but truth has len {}\n'
                     .format(abs_flav, reco, len(reco_vals), len(flav_truth))
                 )
         recos_by_flav[abs_flav] = flav_recos
@@ -190,7 +193,6 @@ def extract(
                 info = OrderedDict()
                 info['reco'] = reco
                 info['param'] = param
-                #info['n_valid'] = len(valid_err)
                 info['n_invalid'] = len(err) - len(valid_err)
                 info['err_mean'] = np.average(err[mask], weights=weights[mask])
                 info['err_median'] = median
@@ -199,7 +201,7 @@ def extract(
                 info['err_iq50'] = iq50
                 info['err_iq90'] = iq90
             except:
-                print('ERROR! ->', reco, param)
+                sys.stderr.write('ERROR! -> "{}" reco, param "{}"\n'.format(reco, param))
                 raise
             reco_perf.append(info)
     info = reco_perf[0]
@@ -235,6 +237,7 @@ def fit_distributions_to_data(
     distributions=DISTRIBUTIONS,
     outfile=None,
     n_procs=None,
+    timeout=None,
 ):
     """
     Parameters
@@ -263,7 +266,8 @@ def fit_distributions_to_data(
         tmp_distributions.append(distribution)
     distributions = tmp_distributions
 
-    print('distributions to fit:\n' + ' '.join(d.name for d in distributions))
+    sys.stdout.write('distributions to fit:\n' + ' '.join(d.name for d in distributions) + '\n')
+
     # Get CDF values at each data point
     sortind = np.argsort(data)
     sorted_data = data[sortind]
@@ -271,19 +275,34 @@ def fit_distributions_to_data(
     cumsum = np.cumsum(sorted_weights)
     cdf = cumsum / cumsum[-1]
 
-    kwds = [dict(x=sorted_data, cdf=cdf, distribution=d, x_is_data=True) for d in distributions]
+    kwds = [
+        dict(
+            x=sorted_data,
+            cdf=cdf,
+            distribution=d,
+            x_is_data=True,
+            verbosity=1,
+        )
+        for d in distributions
+    ]
 
     if n_procs is None:
         n_procs = mp.cpu_count()
     n_procs = min(n_procs, len(distributions))
 
-    if n_procs == 1:
-        results = [fit_cdf(**k) for k in kwds]
-    else:
-        pool = mp.Pool(processes=n_procs)
-        workers = [pool.apply_async(fit_cdf, kwds=k) for k in kwds]
-        results = [w.get() for w in workers]
+    pool = mp.Pool(processes=n_procs)
+    workers = [pool.apply_async(fit_cdf, kwds=k) for k in kwds]
+    results = []
+    for worker in workers:
+        try:
+            result = worker.get(timeout=timeout)
+        except mp.TimeoutError:
+            pass
+        else:
+            results.append(result)
 
+    if len(results) == 0:
+        raise ValueError("No fits succeeded before timeout of {} s".format(timeout))
     results_d = OrderedDict()
     for distribution in distributions:
         for result in results:
@@ -291,37 +310,6 @@ def fit_distributions_to_data(
                 results_d[distribution.name] = result
                 results.remove(result)
                 continue
-
-    #best = None
-    #best_mse = np.inf
-    #for result in results_d.values():
-    #    if result['best_fit_mse'] < best_mse:
-    #        best = result
-    #        best_mse = best['best_fit_mse']
-
-    #for distribution in distributions:
-    #    result = fit_cdf(
-    #        sorted_data=sorted_data,
-    #        cdf=cdf,
-    #        distribution=distribution,
-    #    )
-    #    if result['best_fit_mse'] < best_mse:
-    #        best = result
-    #        best_mse = best['best_fit_mse']
-
-    #    out[distribution.name] = result
-    #    key_valfmts = [
-    #        ('name', 's'),
-    #        ('total_time', '.3f'),
-    #    ]
-    #    if result['success']:
-    #        key_valfmts += [
-    #            ('best_fit_mse', '.3e'),
-    #            ('best_fit_params', ''),
-    #        ]
-    #    for key, valfmt in key_valfmts:
-    #        print(('{} : {:%s}' % valfmt).format(key.rjust(20), result[key]))
-    #    print('')
 
     if outfile is not None:
         pickle.dump(
@@ -333,7 +321,7 @@ def fit_distributions_to_data(
     return results_d
 
 
-def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS):
+def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEOUT):
     """
     Parameters
     ----------
@@ -341,6 +329,7 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS):
     reco : str
     params : str or iterable thereof
     distributions : str, scipy.stats.distributions, or iterable thereof
+    timeout : float >= 0, optional
 
     """
     datadir = expanduser(expandvars(datadir))
@@ -379,8 +368,8 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS):
     truth = pickle.load(open(join(datadir, TRUTH_FNAME), 'rb'))
     reco_vals = pickle.load(open(join(datadir, RECOS_FNAME), 'rb'))
 
-    print(
-        'fitting reco "{}"\nparams\n    {}\nwith distributions (sha256={})\n    {}'
+    sys.stdout.write(
+        'fitting reco "{}"\nparams\n    {}\nwith distributions (sha256={})\n    {}\n'
         .format(reco, ",".join(params), dists_hash, ",".join(distribution_names))
     )
 
@@ -390,8 +379,8 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS):
         mask = np.isfinite(err) & (reco_vals[reco]['fit_status'] == FitStatus.OK)
         valid_err = err[mask]
         valid_wts = truth['weight'][mask]
-        print('='*80)
-        print('Fitting reco "{}", param "{}"...'.format(reco, param))
+        sys.stdout.write('='*80 + '\n')
+        sys.stdout.write('Fitting reco "{}", param "{}"...\n'.format(reco, param))
         t0 = time.time()
         results_d = fit_distributions_to_data(
             data=valid_err,
@@ -399,11 +388,11 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS):
             distributions=distributions,
             outfile=None,
             n_procs=None,
+            timeout=timeout,
         )
         fits[param] = results_d
-        print(' ... fitting took {:.1f} s'.format(time.time() - t0))
-        print('='*80)
-        print('')
+        sys.stdout.write(' ... fitting took {:.1f} s\n'.format(time.time() - t0))
+        sys.stdout.write('='*80 + '\n\n')
 
     outfpath = join(
         datadir,
@@ -413,7 +402,7 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS):
         )
     )
     pickle.dump(fits, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
-    print('Wrote results to "{}"'.format(outfpath))
+    sys.stdout.write('Wrote results to "{}"\n'.format(outfpath))
 
 
 def main(descr=__doc__):
@@ -440,6 +429,7 @@ def main(descr=__doc__):
     fit_parser.add_argument('--reco', required=True)
     fit_parser.add_argument('--params', nargs='+', default=PARAMS)
     fit_parser.add_argument('--distributions', nargs='+', default=DISTRIBUTIONS)
+    fit_parser.add_argument('--timeout', type=float, default=TIMEOUT)
 
     kwargs = vars(parser.parse_args())
     func = kwargs.pop('func')

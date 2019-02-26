@@ -187,6 +187,7 @@ def test_weighted_percentile():
 
 
 class Est(enum.IntEnum):
+    """estimator kind"""
     max = 0
     mean = 1
     median = 2
@@ -515,6 +516,36 @@ def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
             ('best_fit_exception', None),
         ]
     )
+    key_valfmts = OrderedDict([
+        ('name', 's'),
+        ('success', ''),
+        ('total_time', '.3f'),
+
+        ('first_guess_params', ''),
+        ('first_guess_mse', '.3e'),
+        ('first_guess_fit_time', '.1f'),
+        ('first_guess_exception', 's'),
+
+        ('best_fit_params', ''),
+        ('best_fit_mse', '.3e'),
+        ('best_fit_time', '.1f'),
+        ('best_fit_exception', 's'),
+    ])
+    def print_info(retval, keys=None, stream=sys.stderr):
+        """print info about fits"""
+        if keys is None:
+            keys = retval.keys()
+        string = ''
+        for key in keys:
+            val = retval[key]
+            if key.endswith('_params'):
+                val = ', '.join('{} = {:.15e}'.format(*xx) for xx in val.items())
+            elif key.endswith('_exception') and val is not None:
+                val = '\n' + val
+            string += ('{} : {:%s}\n' % key_valfmts[key]).format(key.rjust(25), val)
+        string += '\n'
+        stream.write(string)
+        stream.flush()
 
     # Get first-guess param values by fitting unweighted data
     t1 = time.time()
@@ -526,19 +557,13 @@ def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
         exc_info = sys.exc_info()
         try:
             retval['first_guess_time'] = time.time() - t1
-            retval['first_guess_exception'] = traceback.format_exception(*exc_info)
+            retval['first_guess_exception'] = ''.join(traceback.format_exception(*exc_info))
             retval['total_time'] = time.time() - t0
         finally:
             del exc_info
+        sys.stderr.write('ERROR: Dist "{}" first guess fit failed.\n'.format(distribution.name))
         if verbosity > 0:
-            print(
-                'ERROR: Dist {} first fit failed.'
-                ' first fit time = {:.2f} s,'
-                ' total time = {:.2f} s'
-                .format(retval['name'], retval['first_guess_time'], retval['total_time'])
-            )
-        if verbosity > 1:
-            print(''.join(retval['first_guess_exception']))
+            print_info(retval)
         return retval
 
     first_guess_params = OrderedDict([(p, v) for p, v in zip(all_param_names, first_guess)])
@@ -548,6 +573,12 @@ def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
     retval['first_guess_params'] = first_guess_params
     retval['first_guess_mse'] = first_guess_mse
     retval['first_guess_fit_time'] = t2 - t1
+
+    if verbosity > 0:
+        print_info(
+            retval,
+            keys=['name', 'first_guess_params', 'first_guess_mse', 'first_guess_fit_time'],
+        )
 
     # Use weighted average as first-guess for 'loc' param instead?
     #weighted_average = np.average(a=data, weights=weights)
@@ -562,25 +593,13 @@ def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
         exc_info = sys.exc_info()
         try:
             retval['best_fit_time'] = time.time() - t2
-            retval['best_fit_exception'] = traceback.format_exception(*exc_info)
+            retval['best_fit_exception'] = ''.join(traceback.format_exception(*exc_info))
             retval['total_time'] = time.time() - t0
         finally:
             del exc_info
+        sys.stderr.write('ERROR: Dist "{}" best fit failed.\n'.format(distribution.name))
         if verbosity > 0:
-            print(
-                'ERROR: Dist {} best fit failed:'
-                ' first fit time = {:.2f},'
-                ' best fit time = {:.2f} s,'
-                ' total time = {:.2f} s'
-                .format(
-                    retval['name'],
-                    retval['first_guess_time'],
-                    retval['best_fit_time'],
-                    retval['total_time'],
-                )
-            )
-        if verbosity > 1:
-            print(''.join(retval['best_fit_exception']))
+            print_info(retval)
         return retval
 
     best_fit_params = OrderedDict([(p, v) for p, v in zip(all_param_names, best_fit)])
@@ -591,8 +610,11 @@ def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
         retval['success'] = True
     retval['best_fit_params'] = best_fit_params
     retval['best_fit_mse'] = best_fit_mse
-    retval['best_fit_time'] = t2 - t1
+    retval['best_fit_time'] = t3 - t2
     retval['total_time'] = t3 - t0
+
+    if verbosity > 0:
+        print_info(retval)
 
     return retval
 
