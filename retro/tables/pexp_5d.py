@@ -1294,8 +1294,8 @@ def generate_pexp_and_llh_functions(
             #print(pegleg_steps[:10])
 
         elif PEGLEG_LLH_CHOICE is LLHChoice.FOURPOINTS:
-            lower_idx = max(0, pegleg_max_llh_step - 10)
-            upper_idx = pegleg_max_llh_step + 10
+            lower_idx = max(0, pegleg_max_llh_step - PEGLEG_BREAK_COUNTER)
+            upper_idx = min(num_llhs, pegleg_max_llh_step + PEGLEG_BREAK_COUNTER)
             return (
                 llhs[pegleg_max_llh_step],
                 pegleg_max_llh_step * pegleg_stepsize,
