@@ -1044,6 +1044,8 @@ def generate_pexp_and_llh_functions(
             Best scale factor for `scaling_sources` at best pegleg hypo
         zero_llh : float
             delta LLH of best fit pegleg LLH to LLH of zero length track
+        lower_llh : float
+            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps before best LLH
         upper_llh : float
             delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
@@ -1294,10 +1296,10 @@ def generate_pexp_and_llh_functions(
                 pegleg_sources[:pegleg_stop_idx]
         scalefactor : float
             Best scale factor for `scaling_sources` at best pegleg hypo
-        scalefactor : float
-            Best scale factor for `scaling_sources` at best pegleg hypo
         zero_llh : float
             delta LLH of best fit pegleg LLH to LLH of zero length track
+        lower_llh : float
+            delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps before best LLH
         upper_llh : float
             delta LLH  of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
