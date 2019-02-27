@@ -291,13 +291,16 @@ def fit_distributions_to_data(
     n_procs = min(n_procs, len(distributions))
 
     pool = mp.Pool(processes=n_procs)
-    workers = [pool.apply_async(fit_cdf, kwds=k) for k in kwds]
+    workers = [(k['distribution'].name, pool.apply_async(fit_cdf, kwds=k)) for k in kwds]
     results = []
-    for worker in workers:
+    for dist_name, worker in workers:
         try:
             result = worker.get(timeout=timeout)
         except mp.TimeoutError:
-            pass
+            sys.stderr.write(
+                'ERROR: fitting "{}" distribution to data exceeded timeout; moving on\n'
+                .format(dist_name)
+            )
         else:
             results.append(result)
 
@@ -429,7 +432,11 @@ def main(descr=__doc__):
     fit_parser.add_argument('--reco', required=True)
     fit_parser.add_argument('--params', nargs='+', default=PARAMS)
     fit_parser.add_argument('--distributions', nargs='+', default=DISTRIBUTIONS)
-    fit_parser.add_argument('--timeout', type=float, default=TIMEOUT)
+    fit_parser.add_argument(
+        '--timeout', type=float, default=TIMEOUT,
+        help='''each distribution fit to each parameter is allowed up to this
+        many seconds to perform its entire fitting process'''
+    )
 
     kwargs = vars(parser.parse_args())
     func = kwargs.pop('func')

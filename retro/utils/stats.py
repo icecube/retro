@@ -556,7 +556,7 @@ def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
     except Exception:
         exc_info = sys.exc_info()
         try:
-            retval['first_guess_time'] = time.time() - t1
+            retval['first_guess_fit_time'] = time.time() - t1
             retval['first_guess_exception'] = ''.join(traceback.format_exception(*exc_info))
             retval['total_time'] = time.time() - t0
         finally:
