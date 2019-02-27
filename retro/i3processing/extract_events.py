@@ -1057,7 +1057,7 @@ def extract_events(
     """
     from icecube import dataclasses, dataio, icetray # pylint: disable=unused-variable
 
-	# Anything not listed defaults to float64
+	# Anything not listed defaults to float32
     event_dtypes = dict(
         run_id=np.uint32,
         sub_run_id=np.uint32,
@@ -1215,7 +1215,7 @@ def extract_events(
 
     struct_dtype_spec = []
     for key in event.keys():
-        struct_dtype_spec.append((key, event_dtypes.get(key, np.float64)))
+        struct_dtype_spec.append((key, event_dtypes.get(key, np.float32)))
 
     events = np.array([tuple(ev.values()) for ev in events], dtype=struct_dtype_spec)
     np.save(join(outdir, 'events.npy'), events)
