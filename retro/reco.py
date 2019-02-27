@@ -58,7 +58,7 @@ from retro.utils.geom import (
 )
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
-from retro.priors import get_prior_fun
+from retro.priors import PRI_OSCNEXT_L5_V1, get_prior_fun
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
@@ -238,10 +238,10 @@ class Reco(object):
 
                     self.generate_prior_method(
                         prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
+                            ('x', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 
@@ -315,10 +315,10 @@ class Reco(object):
 
                     self.generate_prior_method(
                         prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
+                            ('x', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 
@@ -370,10 +370,10 @@ class Reco(object):
 
                     self.generate_prior_method(
                         prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
+                            ('x', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 
@@ -557,10 +557,10 @@ class Reco(object):
 
                     self.generate_prior_method(
                         prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
+                            ('x', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 

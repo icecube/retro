@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, too-many-return-statements
+# pylint: disable=wrong-import-position
 
 """
 Prior definition generator and prior funcion generator to use for multinest
@@ -58,9 +58,40 @@ PRI_LOG_UNIFORM = 'log_uniform'
 PRI_LOG_NORMAL = 'log_normal'
 PRI_COSINE = 'cosine'
 PRI_GAUSSIAN = 'gaussian'
+
 PRI_SPEFIT2 = 'spefit2'
+"""From fits to DRAGON (GRECO?) i.e. pre-oscNext MC"""
+
 PRI_SPEFIT2TIGHT = 'spefit2tight'
+"""From fits to DRAGON (GRECO?) i.e. pre-oscNext MC"""
+
 PRI_OSCNEXT_L5_V1 = 'oscnext_l5_v1'
+"""Priors from best-fits to oscNext level 5 (first version of processing, or
+v1) events.
+
+Priority is to use L5_SPEFit11 fit as prior, but this fails on some events, so
+fall back to using LineFit_DC for these (LineFit_DC did not fail in any MC
+events).
+
+L5_SPEFit11 priors are derived for each parameter from:
+    * time : t distribution
+    * x : t distribution
+    * y : t distribution
+    * z : johnsonsu
+
+LineFit_DC priors are derived for each parameter from:
+    * time : cauchy distribution
+    * x : t distribution
+    * y : t distribution
+    * z : johnsonsu distribution
+
+All distributions (names from scipy.stats.distributions) are fit to event with
+weights, where the weights are taken from the `weight` field in each event's
+I3MCWeightDict.
+
+See retro/notebooks/plot_prior_reco_candidates.ipynb for the fitting process.
+
+"""
 
 
 def define_generic_prior(kind, kwargs, low, high):
@@ -96,6 +127,8 @@ def define_generic_prior(kind, kwargs, low, high):
         for shape_param in dist.shapes:
             args.append(kwargs[shape_param])
         args = tuple(args)
+    else:
+        args = tuple()
     prior_def = (kind, args + (loc, scale, low, high))
     return prior_def
 
@@ -168,8 +201,8 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={:d} ({:s})'
-                    .format(dim_name, fit_status, fit_status.name)
+                    'dim "{}" SPEFit2 fit status={!r}'
+                    .format(dim_name, fit_status)
                 )
             fit_val = event['recos']['SPEFit2'][dim_name]
             loc = -0.19687812829978152 + fit_val
@@ -227,8 +260,8 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={:d} ({:s})'
-                    .format(dim_name, fit_status, fit_status.name)
+                    'dim "{}" SPEFit2 fit status={!r}'
+                    .format(dim_name, fit_status)
                 )
             fit_val = event['recos']['SPEFit2'][dim_name]
             loc = -0.2393645701205161 + fit_val
@@ -290,8 +323,8 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={:d} ({:s})'
-                    .format(dim_name, fit_status, fit_status.name)
+                    'dim "{}" SPEFit2 fit status={!r}'
+                    .format(dim_name, fit_status)
                 )
             fit_val = event['recos']['SPEFit2'][dim_name]
             loc = -5.9170661027492546 + fit_val
@@ -350,8 +383,8 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={:d} ({:s})'
-                    .format(dim_name, fit_status, fit_status.name)
+                    'dim "{}" SPEFit2 fit status={!r}'
+                    .format(dim_name, fit_status)
                 )
             fit_val = event['recos']['SPEFit2'][dim_name]
             loc = -82.631395081663754 + fit_val
