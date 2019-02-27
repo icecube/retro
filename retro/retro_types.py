@@ -42,8 +42,10 @@ __all__ = [
     'SRC_T',
     'TRACK_T',
     'INVALID_TRACK',
+    'NO_TRACK',
     'CASCADE_T',
     'INVALID_CASCADE',
+    'NO_CASCADE',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -241,13 +243,25 @@ SPHER_T = np.dtype([
 ])
 
 
+class InteractionType(enum.IntEnum):
+    """Neutrino interactions are either charged current (cc) or neutral current
+    (nc); integer encodings are copied from the dominant IceCube software
+    convention.
+    """
+    # pylint: disable=invalid-name
+    CC = 1
+    NC = 2
+
+
 class ParticleType(enum.IntEnum):
     """Particle types as found in an `I3Particle`.
 
     Only Requires int32 dtype for storage.
 
     Scraped from dataclasses/public/dataclasses/physics/I3Particle.h, 2019-02-18;
-    K0, K0Bar added
+    added (and so names might not be "standard"):
+        K0, K0Bar, SigmaaCPP, SigmaCP
+
     """
     # pylint: disable=invalid-name
 
@@ -266,8 +280,8 @@ class ParticleType(enum.IntEnum):
     K0Bar = -311
     KPlus = 321
     KMinus = -321
-    SigmaCPP = 4222 # charmed sigma ++
-    SigmaCP = 4212 # charmed sigma +
+    SigmaCPP = 4222 # charmed Sigma ++
+    SigmaCP = 4212 # charmed Sigma +
     Neutron = 2112
     PPlus = 2212
     PMinus = -2212
@@ -609,16 +623,21 @@ TRACK_T = np.dtype([
     ('z', np.float32),
     ('zenith', np.float32),
     ('azimuth', np.float32),
-    ('dectionality', np.float32),
+    ('directionality', np.float32),
     ('energy', np.float32),
     ('length', np.float32),
-    ('stoch_loss', np.float32),
-    ('vis_em_equiv_stoch_loss', np.float32),
+    ('stochastic_loss', np.float32),
+    ('em_equiv_stochastic_loss', np.float32),
     ('pdg', np.int32),
 ])
 
 INVALID_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
 INVALID_TRACK['pdg'] = ParticleType.unknown
+
+NO_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
+NO_TRACK['pdg'] = ParticleType.unknown
+NO_TRACK['energy'] = 0
+NO_TRACK['em_equiv_stochastic_loss'] = 0
 
 
 CASCADE_T = np.dtype([
@@ -628,6 +647,7 @@ CASCADE_T = np.dtype([
     ('z', np.float32),
     ('zenith', np.float32),
     ('azimuth', np.float32),
+    ('directionality', np.float32),
     ('energy', np.float32),
     ('em_equiv_energy', np.float32),
     ('pdg', np.int32),
@@ -637,3 +657,9 @@ CASCADE_T = np.dtype([
 INVALID_CASCADE = np.full(shape=1, fill_value=np.nan, dtype=CASCADE_T)
 INVALID_CASCADE['pdg'] = ParticleType.unknown
 INVALID_CASCADE['is_hadronic'] = False
+
+NO_CASCADE = np.full(shape=1, fill_value=np.nan, dtype=CASCADE_T)
+NO_CASCADE['pdg'] = ParticleType.unknown
+NO_CASCADE['is_hadronic'] = False
+NO_CASCADE['energy'] = 0
+NO_CASCADE['em_equiv_energy'] = 0

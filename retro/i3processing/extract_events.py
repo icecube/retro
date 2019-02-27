@@ -55,9 +55,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import (
-    PHOTON_T, PULSE_T, TRIGGER_T, ParticleType, ParticleShape, LocationType,
-    FitStatus, TRACK_T, INVALID_TRACK, CASCADE_T,
-    INVALID_CASCADE,
+    PHOTON_T, PULSE_T, TRIGGER_T, ParticleType, ParticleShape, InteractionType,
+    LocationType, FitStatus, TRACK_T, NO_TRACK, CASCADE_T, NO_CASCADE,
 )
 from retro.utils.misc import expand, mkdir
 from retro.utils.geom import cart2sph_np
@@ -475,7 +474,9 @@ def extract_photons(frame, photon_key):
 
 
 def convert_had_to_em_equiv_energy(hadronic_energy):
-    """
+    """Rough conversion from the energy of a hadronic cascade to the energy of
+    an electromagnetic cascade that would produce the same amount of Cherenkov
+    light.
 
     Parameters
     ----------
@@ -494,14 +495,15 @@ def convert_had_to_em_equiv_energy(hadronic_energy):
     transparency with IceCube flashers"
 
     """
-    if hadronic_energy == 0.:
+    if hadronic_energy == 0:
         return 0.
     E0 = 0.399
     f0 = 0.467
     m = 0.130
-    factor = 1 - (hadronic_energy / E0)**(-m) * (1 - f0)
-    em_equiv_energy = factor * hadronic_energy
-    return em_equiv_energy
+    return (
+        (1 - (hadronic_energy / E0)**(-m) * (1 - f0))
+        * hadronic_energy
+    )
 
 
 def get_cascade_and_track_info(particles, mctree):
@@ -560,7 +562,7 @@ def get_cascade_and_track_info(particles, mctree):
     from ref. [2] for different hadrons (and potentially deriving new factors
     from simulations of all cascading particles).
 
-    In the end, without detailed reporting of the among of Cerenkov light
+    In the end, without detailed reporting of the among of Cherenkov light
     produced in each event and detailed accounting of this for what we would
     call "tracks" or "cascades," the best we might hope to achieve in reporting
     "truth" here is to report expectation values for the last step reported in
@@ -579,6 +581,7 @@ def get_cascade_and_track_info(particles, mctree):
 
     """
     from icecube.dataclasses import I3Particle
+
     ignore_ptypes = (
         ParticleType.NuE,
         ParticleType.NuEBar,
@@ -600,19 +603,19 @@ def get_cascade_and_track_info(particles, mctree):
     for particle in particles:
         ptype = ParticleType(int(particle.pdg_encoding))
         if ptype in EM_CASCADE_PTYPES:
-            assert particle.is_cascade, ptype
+            assert particle.is_cascade, repr(ptype)
             cascades.append((particle, False))
         elif ptype in HADRONIC_CASCADE_PTYPES:
-            assert particle.is_cascade or ptype in (ParticleType.TauPlus, ParticleType.TauMinus), ptype
+            assert particle.is_cascade or ptype in (ParticleType.TauPlus, ParticleType.TauMinus), repr(ptype)
             cascades.append((particle, True))
         elif ptype in TRACK_PTYPES:
-            assert particle.is_track, ptype
+            assert particle.is_track, repr(ptype)
             tracks.append(particle)
         elif ptype in ignore_ptypes:
             pass
         else:
             #raise ValueError("{} is not track or cascade".format(ptype))
-            print("{} (code {}) is neither track nor cascade".format(ptype.name, ptype))
+            print("{!r} is neither track nor cascade".format(ptype))
 
     if tracks:
         longest_track_particle = None
@@ -632,7 +635,10 @@ def get_cascade_and_track_info(particles, mctree):
             sum_of_lengths += particle.length
             secondaries.extend(mctree.get_daughters(particle))
 
-        info = get_cascade_and_track_info(particles=secondaries, mctree=mctree)
+        info = get_cascade_and_track_info(
+            particles=secondaries,
+            mctree=mctree,
+        )
 
         wtd_dir /= sum_of_lengths
         directionality, zenith, azimuth = cart2sph_np(x=wtd_dir[0], y=wtd_dir[1], z=wtd_dir[2])
@@ -647,16 +653,16 @@ def get_cascade_and_track_info(particles, mctree):
         total_track['azimuth'] = azimuth
         total_track['directionality'] = directionality
         # (energy and length already set inside above loop)
-        total_track['stoch_loss'] = info['total_cascade']['energy']
-        total_track['vis_em_equiv_stoch_loss'] = info['visible_em_equiv_cascade']['energy']
+        total_track['stochastic_loss'] = info['total_cascade']['energy']
+        total_track['vis_em_equiv_stochastic_loss'] = info['visible_em_equiv_cascade']['energy']
         if len(tracks) == 1:
             total_track['pdg'] = tracks[0]['pdg_encoding']
         else:
             total_track['pdg'] = ParticleType.unknown
 
     else:
-        total_track = deepcopy(INVALID_TRACK)
-        longest_track = deepcopy(INVALID_TRACK)
+        total_track = deepcopy(NO_TRACK)
+        longest_track = deepcopy(NO_TRACK)
 
     if cascades:
         total_cascade = np.zeros(shape=1, dtype=CASCADE_T)
@@ -682,8 +688,8 @@ def get_cascade_and_track_info(particles, mctree):
             visible_em_wtd_dir -= visible_em_equiv_energy * raw_dir
             visible_em_equiv_cascade['energy'] += visible_em_equiv_energy
     else:
-        total_cascade = deepcopy(INVALID_CASCADE)
-        visible_em_equiv_cascade = deepcopy(INVALID_CASCADE)
+        total_cascade = deepcopy(NO_CASCADE)
+        visible_em_equiv_cascade = deepcopy(NO_CASCADE)
 
     cascade_and_track_info = OrderedDict(
         [
@@ -698,7 +704,7 @@ def get_cascade_and_track_info(particles, mctree):
 
 
 def populate_track_t(mctree, particle):
-    """Populate a Retro TRACK_T from IceCube I3Particle
+    """Populate a Retro TRACK_T from a track-like IceCube I3Particle
 
     Parameters
     ----------
@@ -711,8 +717,8 @@ def populate_track_t(mctree, particle):
 
     """
     # Start with an invalid track, so fields not explicitly populated are
-    # explicitly invalid values
-    track = deepcopy(INVALID_TRACK) #np.zeros(shape=1, dtype=TRACK_T)
+    # explicitly invalid values (as much as we can define such values)
+    track = deepcopy(NO_TRACK)
 
     # Populate the basics
     track['time'] = particle.time
@@ -721,14 +727,15 @@ def populate_track_t(mctree, particle):
     track['z'] = particle.pos.z
     track['zenith'] = particle.dir.zenith
     track['azimuth'] = particle.dir.azimuth
+    track['directionality'] = 1.0
     track['energy'] = particle.energy
     track['length'] = particle.length
     track['pdg'] = particle.pdg_encoding
 
     # Get info about stochastics recorded as daughters of the track particle
-    info = get_cascade_and_track_info(particles=particle, mctree=mctree)
-    track['stoch_loss'] = info['total_cascade']['energy']
-    track['vis_em_equiv_stoch_loss'] = info['visible_em_equiv_cascade']['energy']
+    info = get_cascade_and_track_info(particles=mctree.get_daughters(particle), mctree=mctree)
+    track['stochastic_loss'] = info['total_cascade']['energy']
+    track['vis_em_equiv_stochastic_loss'] = info['visible_em_equiv_cascade']['energy']
 
     return track
 
@@ -775,6 +782,7 @@ def extract_truth(frame, run_id, event_id):
     # TODO: deal with charged leptons e.g. for CORSIKA/MuonGun
 
     is_nu = False
+    is_charged_lepton = False
     if abs_pdg in [11, 13, 15]:
         is_charged_lepton = True
     elif abs_pdg in [12, 14, 16]:
@@ -794,23 +802,6 @@ def extract_truth(frame, run_id, event_id):
         int(1e13) * abs_pdg + int(1e7) * run_id + event_id
     )
     event_truth['unique_id'] = unique_id
-
-    # If neutrino, get charged lepton daughter particles
-    if is_nu:
-        primary_neutrino = mctree.get_primaries()[0]
-        secondaries = mctree.get_daughters(primary_neutrino)
-        cascade_and_track_info = get_cascade_and_track_info(
-            particles=secondaries,
-            mctree=mctree,
-        )
-        for info_name, particle in cascade_and_track_info.items():
-            dtype = particle.dtype
-            fields = dtype.fields
-            for field_name in dtype.names:
-                key = '{}_{}'.format(info_name, field_name)
-                event_truth[key] = particle[field_name]
-                # `fields` contains dtype and byte offset; just want dtype
-                truth_dtypes[key] = fields[field_name][0]
 
     # Extract per-event info from I3MCWeightDict
     mcwd_copy_keys = '''
@@ -833,8 +824,143 @@ def extract_truth(frame, run_id, event_id):
         except KeyError:
             print('Could not get "{}" from I3MCWeightDict'.format(key))
 
+    # If neutrino, get charged lepton daughter particles
+    if is_nu:
+        # By default, no track or cascade
+        track = deepcopy(NO_TRACK)
+        cascade = deepcopy(NO_CASCADE)
+
+        primary_nu = mctree.get_primaries()[0]
+        secondaries = mctree.get_daughters(primary_nu)
+        interaction_type = InteractionType(int(event_truth['InteractionType']))
+
+        # neutrino 4-momentum
+        primary_nu_p4 = (
+            primary_nu.energy * np.array([1, primary_nu.dir.x, primary_nu.dir.y, primary_nu.dir.z])
+        )
+
+        if interaction_type is InteractionType.CC:
+            # Find the charged lepton generated in the interaction
+            charged_lepton = None
+            for secondary in secondaries:
+                # charged lepton PDG one less than corresponding neutrino's PDG
+                if (
+                    abs(int(secondary.pdg_encoding)) == abs(pdg) - 1
+                    and secondary.time == primary.time
+                    and secondary.pos.x == primary.pos.x
+                    and secondary.pos.y == primary.pos.y
+                    and secondary.pos.z == primary.pos.z
+                ):
+                    charged_lepton = secondary
+                    break
+            if charged_lepton is None:
+                raise ValueError("Couldn't find charged lepton daughter in CC MCTree")
+            charged_lepton_pdg = ParticleType(int(charged_lepton.pdg_encoding))
+
+            # All these fields are the same for all CC events
+            cascade['time'] = charged_lepton.time
+            cascade['x'] = charged_lepton.pos.x
+            cascade['y'] = charged_lepton.pos.y
+            cascade['z'] = charged_lepton.pos.z
+
+            if charged_lepton_pdg in (ParticleType.EPlus, ParticleType.EMinus):
+                cascade['pdg'] = charged_lepton_pdg
+                cascade['zenith'] = charged_lepton.dir.zenith
+                cascade['azimuth'] = charged_lepton.dir.azimuth
+                cascade['directionality'] = 1.0
+                cascade['energy'] = charged_lepton.energy
+                cascade['em_equiv_energy'] = charged_lepton.energy
+                cascade['is_hadronic'] = False
+
+            elif charged_lepton_pdg in (ParticleType.MuPlus, ParticleType.MuMinus):
+                track = populate_track_t(mctree=mctree, particle=charged_lepton)
+
+                # 4-momentum; note I3Particle.energy is particle's kinetic energy
+                charged_lepton_p4 = (
+                    (charged_lepton.energy + charged_lepton.mass)
+                    * np.array([
+                        1,
+                        charged_lepton.dir.x,
+                        charged_lepton.dir.y,
+                        charged_lepton.dir.z,
+                    ])
+                )
+                remaining_p4 = primary_nu_p4 - charged_lepton_p4
+                remaining_energy = remaining_p4[0]
+                remaining_dir = dataclasses.I3Direction(*remaining_p4[1:])
+
+                cascade['pdg'] = ParticleType.unknown
+                cascade['zenith'] = remaining_dir.zenith
+                cascade['azimuth'] = remaining_dir.azimuth
+                cascade['directionality'] = np.nan
+                cascade['energy'] = remaining_energy
+                cascade['em_equiv_energy'] = convert_had_to_em_equiv_energy(remaining_energy)
+                cascade['is_hadronic'] = True
+
+            else: # charged_lepton_pdg in (ParticleType.TauPlus, ParticleType.TauMinus)
+                # Until we can see which taus have muon decay product, this is
+                # as good as we can do (i.e. keep track as NO_TRACK, assume all
+                # energy in hadronic cascade)
+                cascade['pdg'] = charged_lepton_pdg
+                cascade['zenith'] = charged_lepton.dir.zenith
+                cascade['azimuth'] = charged_lepton.dir.azimuth
+                cascade['directionality'] = 1.0
+                cascade['energy'] = charged_lepton.energy
+                cascade['em_equiv_energy'] = convert_had_to_em_equiv_energy(charged_lepton.energy)
+                cascade['is_hadronic'] = True
+
+        else:  # interaction_type is InteractionType.NC
+            outgoing_nu = None
+            for secondary in secondaries:
+                if (
+                    int(secondary.pdg_encoding) == pdg
+                    and secondary.time == primary.time
+                    and secondary.pos.x == primary.pos.x
+                    and secondary.pos.y == primary.pos.y
+                    and secondary.pos.z == primary.pos.z
+                ):
+                    outgoing_nu = secondary
+                    break
+            if outgoing_nu is None:
+                raise ValueError("Couldn't find outgoing neutrino in NC MCTree")
+
+            # 4-momentum
+            outgoing_nu_p4 = (
+                outgoing_nu.energy
+                * np.array([1, outgoing_nu.dir.x, outgoing_nu.dir.y, outgoing_nu.dir.z])
+            )
+            remaining_p4 = primary_nu_p4 - outgoing_nu_p4
+            remaining_energy = remaining_p4[0]
+            remaining_dir = dataclasses.I3Direction(*remaining_p4[1:])
+
+            cascade['pdg'] = ParticleType.unknown
+            cascade['time'] = outgoing_nu.time
+            cascade['x'] = outgoing_nu.pos.x
+            cascade['y'] = outgoing_nu.pos.y
+            cascade['z'] = outgoing_nu.pos.z
+            cascade['zenith'] = remaining_dir.zenith
+            cascade['azimuth'] = remaining_dir.azimuth
+            cascade['directionality'] = np.nan
+            cascade['energy'] = remaining_energy
+            cascade['em_equiv_energy'] = convert_had_to_em_equiv_energy(remaining_energy)
+            cascade['is_hadronic'] = True
+
+        for info_name, particle in (('track', track), ('cascade', cascade)):
+            dtype = particle.dtype
+            # note `fields` attr is un-ordered, while `names` IS ordered
+            fields = dtype.fields
+            for field_name in dtype.names:
+                key = '{}_{}'.format(info_name, field_name)
+                event_truth[key] = particle[field_name]
+                # `fields` contains dtype and byte offset; just want dtype
+                truth_dtypes[key] = fields[field_name][0]
+
+    else:  # is not neutrino:
+        raise NotImplementedError("Only neutrino primaries are implemented")
+
     struct_dtype_spec = []
     for key in event_truth.keys():
+        # default to float32 if dtype not explicitly defined
         struct_dtype_spec.append((key, truth_dtypes.get(key, np.float32)))
 
     event_truth = np.array(tuple(event_truth.values()), dtype=struct_dtype_spec)
