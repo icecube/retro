@@ -38,6 +38,7 @@ __all__ = [
     'TriggerTypeID',
     'TriggerSourceID',
     'TriggerSubtypeID',
+    'ExtractionError',
     'TRIGGER_T',
     'SRC_T',
     'TRACK_T',
@@ -585,6 +586,13 @@ class TriggerSubtypeID(enum.IntEnum):
     T0 = 150
     LASER = 200
     UNKNOWN_SUBTYPE = 250
+
+
+class ExtractionError(enum.IntEnum):
+    """Error codes that can be set by retro/i3processing/extract_events.py"""
+    NO_ERROR = 0
+    NU_CC_LEPTON_SECONDARY_MISSING = 1
+    NU_NC_OUTOING_NU_MISSING = 2
 
 
 TRIGGER_T = np.dtype([

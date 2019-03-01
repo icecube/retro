@@ -32,6 +32,9 @@ __all__ = [
     'ELECTRONS',
     'MUONS',
     'TAUS',
+    'NUES',
+    'NUMUS',
+    'NUTAUS',
     'FILENAME_INFO_RE',
     'GENERIC_I3_FNAME_RE',
     'I3PARTICLE_ATTRS',
@@ -65,7 +68,8 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import (
     PHOTON_T, PULSE_T, TRIGGER_T, ParticleType, ParticleShape, InteractionType,
-    LocationType, FitStatus, TRACK_T, NO_TRACK, CASCADE_T, NO_CASCADE,
+    LocationType, FitStatus, ExtractionError, TRACK_T, NO_TRACK, INVALID_TRACK,
+    CASCADE_T, NO_CASCADE, INVALID_CASCADE,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
 from retro.utils.misc import expand, mkdir
@@ -155,6 +159,9 @@ INVISIBLE_PTYPES = (
 ELECTRONS = (ParticleType.EPlus, ParticleType.EMinus)
 MUONS = (ParticleType.MuPlus, ParticleType.MuMinus)
 TAUS = (ParticleType.TauPlus, ParticleType.TauMinus)
+NUES = (ParticleType.NuE, ParticleType.NuEBar)
+NUMUS = (ParticleType.NuMu, ParticleType.NuMuBar)
+NUTAUS = (ParticleType.NuTau, ParticleType.NuTauBar)
 
 FILENAME_INFO_RE = re.compile(
     r'''
@@ -753,6 +760,7 @@ def extract_truth(frame, run_id, event_id):
         longest_daughter_pdg=np.int32,
         InteractionType=np.int8,
         TargetPDGCode=np.int32,
+        extraction_error=np.uint8,
     )
 
     event_truth = OrderedDict()
@@ -781,6 +789,7 @@ def extract_truth(frame, run_id, event_id):
     event_truth['energy'] = primary.energy
     event_truth['coszen'] = np.cos(primary.dir.zenith)
     event_truth['azimuth'] = primary.dir.azimuth
+    event_truth['extraction_error'] = ExtractionError.NO_ERROR
 
     # Get event number and generate a unique ID
     unique_id = (
@@ -841,90 +850,99 @@ def extract_truth(frame, run_id, event_id):
                         charged_lepton = secondary
                     elif secondary.energy > charged_lepton.energy:
                         charged_lepton = secondary
+
             if charged_lepton is None:
-                raise ValueError("Couldn't find charged lepton daughter in CC MCTree")
-            charged_lepton_pdg = ParticleType(int(charged_lepton.pdg_encoding))
-
-            # 4-momentum; note I3Particle.energy is particle's kinetic energy
-            # and I3Particle.dir.{x, y, z} point in direction of particle's
-            # travel while I3Particle.dir.{zenith, azimuth} point oppositely
-            # to particle's direction of travel
-            charged_lepton_p4 = (
-                (charged_lepton.energy + charged_lepton.mass)
-                * np.array([
-                    1,
-                    charged_lepton.dir.x,
-                    charged_lepton.dir.y,
-                    charged_lepton.dir.z,
-                ])
-            )
-            remaining_p4 = primary_p4 - charged_lepton_p4
-            remaining_energy = remaining_p4[0]
-            remaining_dir = I3Direction(*remaining_p4[1:])
-
-            # All these fields are the same for all CC events
-            for cascade in (cascade0, cascade1, total_cascade):
-                cascade['time'] = charged_lepton.time
-                cascade['x'] = charged_lepton.pos.x
-                cascade['y'] = charged_lepton.pos.y
-                cascade['z'] = charged_lepton.pos.z
-
-            if charged_lepton_pdg in ELECTRONS:
-                cascade0['pdg'] = charged_lepton_pdg
-                cascade0['zenith'] = charged_lepton.dir.zenith
-                cascade0['azimuth'] = charged_lepton.dir.azimuth
-                cascade0['directionality'] = 1
-                cascade0['energy'] = charged_lepton.energy
-                cascade0['hadr_fraction'] = 0
-                cascade0['em_equiv_energy'] = charged_lepton.energy
-                cascade0['hadr_equiv_energy'] = em2hadr(charged_lepton.energy)
-
-                cascade1['pdg'] = ParticleType.unknown
-                cascade1['zenith'] = remaining_dir.zenith
-                cascade1['azimuth'] = remaining_dir.azimuth
-                cascade1['directionality'] = 1
-                cascade1['energy'] = remaining_energy
-                cascade1['hadr_fraction'] = 1
-                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-                cascade1['hadr_equiv_energy'] = remaining_energy
-
-            elif charged_lepton_pdg in MUONS:
-                track = populate_track_t(mctree=mctree, particle=charged_lepton)
-
-                cascade1['pdg'] = ParticleType.unknown
-                cascade1['zenith'] = remaining_dir.zenith
-                cascade1['azimuth'] = remaining_dir.azimuth
-                cascade1['directionality'] = np.nan
-                cascade1['energy'] = remaining_energy
-                cascade1['hadr_fraction'] = 1
-                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-                cascade1['hadr_equiv_energy'] = remaining_energy
-
-            elif charged_lepton_pdg in TAUS:
-                # Until we can see which taus have muon decay product, this is
-                # as good as we can do (i.e. keep track as NO_TRACK, assume all
-                # tau's energy in tau-based hadronic cascade and remaining
-                # energy in a separate hadronic cascade)
-                cascade0['pdg'] = charged_lepton_pdg
-                cascade0['zenith'] = charged_lepton.dir.zenith
-                cascade0['azimuth'] = charged_lepton.dir.azimuth
-                cascade0['directionality'] = 1
-                cascade0['energy'] = charged_lepton.mass + charged_lepton.energy
-                cascade0['hadr_fraction'] = 1
-                cascade0['em_equiv_energy'] = hadr2em(charged_lepton.energy)
-                cascade0['hadr_equiv_energy'] = charged_lepton.energy
-
-                cascade1['pdg'] = ParticleType.unknown
-                cascade1['zenith'] = remaining_dir.zenith
-                cascade1['azimuth'] = remaining_dir.azimuth
-                cascade1['directionality'] = None
-                cascade1['energy'] = remaining_energy
-                cascade1['hadr_fraction'] = 1
-                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-                cascade1['hadr_equiv_energy'] = remaining_energy
+                msg = "ERROR: Couldn't find charged lepton daughter in CC MCTree"
+                event_truth['extraction_error'] = ExtractionError.NU_CC_LEPTON_SECONDARY_MISSING
+                sys.stderr.write(msg + "\n")
+                #raise ValueError(msg)
+                if primary_pdg in NUES + NUTAUS:
+                    cascade0 = INVALID_CASCADE
+                elif primary_pdg in NUMUS:
+                    track = INVALID_TRACK
+                else:
+                    raise ValueError()
 
             else:
-                raise ValueError("unrecognized PDG code : {}".format(charged_lepton_pdg))
+                charged_lepton_pdg = ParticleType(int(charged_lepton.pdg_encoding))
+
+                # 4-momentum; note I3Particle.energy is particle's kinetic energy
+                # and I3Particle.dir.{x, y, z} point in direction of particle's
+                # travel while I3Particle.dir.{zenith, azimuth} point oppositely
+                # to particle's direction of travel
+                charged_lepton_p4 = np.array([
+                    charged_lepton.energy + charged_lepton.mass,
+                    charged_lepton.dir.x * charged_lepton.energy,
+                    charged_lepton.dir.y * charged_lepton.energy,
+                    charged_lepton.dir.z * charged_lepton.energy,
+                ])
+                remaining_p4 = primary_p4 - charged_lepton_p4
+                remaining_energy = remaining_p4[0]
+                remaining_dir = I3Direction(*remaining_p4[1:])
+
+                # All these fields are the same for all CC events
+                for cascade in (cascade0, cascade1, total_cascade):
+                    cascade['time'] = charged_lepton.time
+                    cascade['x'] = charged_lepton.pos.x
+                    cascade['y'] = charged_lepton.pos.y
+                    cascade['z'] = charged_lepton.pos.z
+
+                if charged_lepton_pdg in ELECTRONS:
+                    cascade0['pdg'] = charged_lepton_pdg
+                    cascade0['zenith'] = charged_lepton.dir.zenith
+                    cascade0['azimuth'] = charged_lepton.dir.azimuth
+                    cascade0['directionality'] = 1
+                    cascade0['energy'] = charged_lepton.energy
+                    cascade0['hadr_fraction'] = 0
+                    cascade0['em_equiv_energy'] = charged_lepton.energy
+                    cascade0['hadr_equiv_energy'] = em2hadr(charged_lepton.energy)
+
+                    cascade1['pdg'] = ParticleType.unknown
+                    cascade1['zenith'] = remaining_dir.zenith
+                    cascade1['azimuth'] = remaining_dir.azimuth
+                    cascade1['directionality'] = 1
+                    cascade1['energy'] = remaining_energy
+                    cascade1['hadr_fraction'] = 1
+                    cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+                    cascade1['hadr_equiv_energy'] = remaining_energy
+
+                elif charged_lepton_pdg in MUONS:
+                    track = populate_track_t(mctree=mctree, particle=charged_lepton)
+
+                    cascade1['pdg'] = ParticleType.unknown
+                    cascade1['zenith'] = remaining_dir.zenith
+                    cascade1['azimuth'] = remaining_dir.azimuth
+                    cascade1['directionality'] = np.nan
+                    cascade1['energy'] = remaining_energy
+                    cascade1['hadr_fraction'] = 1
+                    cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+                    cascade1['hadr_equiv_energy'] = remaining_energy
+
+                elif charged_lepton_pdg in TAUS:
+                    # Until we can see which taus have muon decay product, this is
+                    # as good as we can do (i.e. keep track as NO_TRACK, assume all
+                    # tau's energy in tau-based hadronic cascade and remaining
+                    # energy in a separate hadronic cascade)
+                    cascade0['pdg'] = charged_lepton_pdg
+                    cascade0['zenith'] = charged_lepton.dir.zenith
+                    cascade0['azimuth'] = charged_lepton.dir.azimuth
+                    cascade0['directionality'] = 1
+                    cascade0['energy'] = charged_lepton.mass + charged_lepton.energy
+                    cascade0['hadr_fraction'] = 1
+                    cascade0['em_equiv_energy'] = hadr2em(charged_lepton.energy)
+                    cascade0['hadr_equiv_energy'] = charged_lepton.energy
+
+                    cascade1['pdg'] = ParticleType.unknown
+                    cascade1['zenith'] = remaining_dir.zenith
+                    cascade1['azimuth'] = remaining_dir.azimuth
+                    cascade1['directionality'] = None
+                    cascade1['energy'] = remaining_energy
+                    cascade1['hadr_fraction'] = 1
+                    cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+                    cascade1['hadr_equiv_energy'] = remaining_energy
+
+                else:
+                    raise ValueError("unrecognized PDG code : {}".format(charged_lepton_pdg))
 
         elif interaction_type is InteractionType.NC:
             outgoing_nu = None
@@ -939,33 +957,38 @@ def extract_truth(frame, run_id, event_id):
                     elif secondary.energy > outgoing_nu.energy:
                         outgoing_nu = secondary
             if outgoing_nu is None:
-                raise ValueError("Couldn't find outgoing neutrino in NC MCTree")
+                msg = "ERROR: Couldn't find outgoing neutrino in NC MCTree"
+                event_truth['extraction_error'] = ExtractionError.NU_NC_OUTOING_NU_MISSING
+                sys.stderr.write(msg + "\n")
+                cascade1 = INVALID_CASCADE
+                #raise ValueError(msg)
 
-            # No track and no cascade from lepton (escaping neutrino is
-            # invisible); energy not carried off by neutrino is dumped into a
-            # hadronic cascade
+            else:
+                # No track and no cascade from lepton (escaping neutrino is
+                # invisible); energy not carried off by neutrino is dumped into a
+                # hadronic cascade
 
-            # 4-momentum
-            outgoing_nu_p4 = (
-                outgoing_nu.energy
-                * np.array([1, outgoing_nu.dir.x, outgoing_nu.dir.y, outgoing_nu.dir.z])
-            )
-            remaining_p4 = primary_p4 - outgoing_nu_p4
-            remaining_energy = remaining_p4[0]
-            remaining_dir = I3Direction(*remaining_p4[1:])
+                # 4-momentum
+                outgoing_nu_p4 = (
+                    outgoing_nu.energy
+                    * np.array([1, outgoing_nu.dir.x, outgoing_nu.dir.y, outgoing_nu.dir.z])
+                )
+                remaining_p4 = primary_p4 - outgoing_nu_p4
+                remaining_energy = remaining_p4[0]
+                remaining_dir = I3Direction(*remaining_p4[1:])
 
-            cascade1['pdg'] = ParticleType.unknown
-            cascade1['time'] = outgoing_nu.time
-            cascade1['x'] = outgoing_nu.pos.x
-            cascade1['y'] = outgoing_nu.pos.y
-            cascade1['z'] = outgoing_nu.pos.z
-            cascade1['zenith'] = remaining_dir.zenith
-            cascade1['azimuth'] = remaining_dir.azimuth
-            cascade1['directionality'] = 1
-            cascade1['energy'] = remaining_energy
-            cascade1['hadr_fraction'] = 1
-            cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-            cascade1['hadr_equiv_energy'] = remaining_energy
+                cascade1['pdg'] = ParticleType.unknown
+                cascade1['time'] = outgoing_nu.time
+                cascade1['x'] = outgoing_nu.pos.x
+                cascade1['y'] = outgoing_nu.pos.y
+                cascade1['z'] = outgoing_nu.pos.z
+                cascade1['zenith'] = remaining_dir.zenith
+                cascade1['azimuth'] = remaining_dir.azimuth
+                cascade1['directionality'] = 1
+                cascade1['energy'] = remaining_energy
+                cascade1['hadr_fraction'] = 1
+                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+                cascade1['hadr_equiv_energy'] = remaining_energy
 
         else: # interaction_type is InteractionType.undefined
             import icecube.genie_icetray
