@@ -434,6 +434,13 @@ def extract_truth(frame, run_id, event_id):
     et['coszen'] = np.cos(primary.dir.zenith)
     et['azimuth'] = primary.dir.azimuth
 
+    # need to offset vertext by length if not NaN
+    if np.isfinite(primary.length):
+        et['x'] += primary.dir.x * primary.length
+        et['y'] += primary.dir.y * primary.length
+        et['z'] += primary.dir.z * primary.length
+        et['time'] += primary.length / primary.speed
+
     # Get event number and generate a unique ID
     unique_id = (
         int(1e13) * abs_pdg + int(1e7) * run_id + event_id
