@@ -86,8 +86,8 @@ take all LLH that are within this threshold of the maximum LLH"""
 PEGLEG_BREAK_COUNTER = 100
 """After how many steps without improving the llh to exit the pegleg loop adding more track segments"""
 
-MAX_CASCADE_ENEGRY = 10000000.
-"""Maximum cascade energy"""
+MAX_CASCADE_ENERGY = 1000.
+"""Maximum cascade energy (for LowEn events 1000. is a good value, for HESE 10000000.)"""
 
 # TODO: a "proper" jitter (and transit time spread) implementation should treat each DOM
 # independently and pick the time offset for each DOM that maximizes LLH (_not_ expected
@@ -914,7 +914,7 @@ def generate_pexp_and_llh_functions(
                 print('exceeded gradient descent iteration limit!')
                 print('arrived at ', scalefactor)
             #print('\n')
-            scalefactor = max(0., min(MAX_CASCADE_ENEGRY/SCALING_CASCADE_ENERGY, scalefactor))
+            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
             scalefactor = initial_scalefactor
@@ -940,7 +940,7 @@ def generate_pexp_and_llh_functions(
             #    print('exceeded gradient descent iteration limit!')
             #    print('arrived at ',scalefactor)
             #print('\n')
-            scalefactor = max(0., min(MAX_CASCADE_ENEGRY/SCALING_CASCADE_ENERGY, scalefactor))
+            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
             epsilon = 1e-2
@@ -952,7 +952,7 @@ def generate_pexp_and_llh_functions(
                 done = True
                 #print('trivial 0')
             if not done:
-                last = MAX_CASCADE_ENEGRY/SCALING_CASCADE_ENERGY
+                last = MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY
                 last_grad = get_grad_neg_llh_wrt_scalefactor(last)
                 if last_grad < 0 or abs(last_grad) < epsilon:
                     scalefactor = last

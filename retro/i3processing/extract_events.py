@@ -435,7 +435,7 @@ def extract_truth(frame, run_id, event_id):
     et['azimuth'] = primary.dir.azimuth
 
     # need to offset vertext by length if not NaN
-    if not np.isnan(primary.length):
+    if np.isfinite(primary.length):
         et['x'] += primary.dir.x * primary.length
         et['y'] += primary.dir.y * primary.length
         et['z'] += primary.dir.z * primary.length
