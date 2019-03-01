@@ -118,6 +118,7 @@ class Reco(object):
         tdi_tables_kw,
         outdir,
         save_llhp=False,
+        overwrite=False,
     ):
         self.events_kw = events_kw
         self.dom_tables_kw = dom_tables_kw
@@ -130,6 +131,7 @@ class Reco(object):
         self._get_events = init_obj.get_events(**events_kw)
         self.outdir = outdir
         self.save_llhp = save_llhp
+        self.overwrite = overwrite
 
         # Replace None values for `start` and `step` for fewer branches in
         # subsequent logic (i.e., these will always be integers)
@@ -782,16 +784,16 @@ class Reco(object):
                 ('time', event['truth']['time']),
                 ('zenith', np.arccos(event['truth']['coszen'])),
                 ('azimuth', event['truth']['azimuth']),
-                ('track_azimuth', event['truth']['longest_daughter_azimuth']),
-                ('track_zenith', np.arccos(event['truth']['longest_daughter_coszen'])),
-                ('track_energy', event['truth']['longest_daughter_energy']),
+                ('track_azimuth', event['truth']['track_azimuth']),
+                ('track_zenith', event['truth']['track_zenith']),
+                ('track_energy', event['truth']['track_energy']),
             ])
             try:
-                truth_info['cascade_azimuth'] = event['truth']['cascade_azimuth']
-                truth_info['cascade_zenith'] = np.arccos(event['truth']['cascade_coszen'])
-                truth_info['cascade_energy'] = event['truth']['cascade_energy']
+                truth_info['cascade_azimuth'] = event['truth']['total_cascade_azimuth']
+                truth_info['cascade_zenith'] = np.arccos(event['truth']['total_cascade_coszen'])
+                truth_info['cascade_energy'] = event['truth']['total_cascade_energy']
             except ValueError:
-                truth_info['cascade_energy'] = event['truth']['energy'] - event['truth']['longest_daughter_energy']
+                truth_info['cascade_energy'] = event['truth']['energy'] - event['truth']['track_energy']
             truth_info['neutrino_energy'] = event['truth']['energy']
 
         else:
@@ -937,7 +939,7 @@ class Reco(object):
                     msg = 'truth:                '
                     for key, val in zip(all_param_names, result):
                         try:
-                            msg += ' %s=%.1f'%(key, truth_info[key])
+                            msg += ' %s=%.2f'%(key, truth_info[key])
                         except KeyError:
                             pass
                     print(msg)
@@ -947,11 +949,11 @@ class Reco(object):
                 best_p = param_values[best_idx]
                 msg = 'best llh = {:.3f} @ '.format(best_llh)
                 for key, val in zip(all_param_names, best_p):
-                    msg += ' %s=%.1f'%(key, val)
+                    msg += ' %s=%.2f'%(key, val)
                 print(msg)
                 msg = 'this llh = {:.3f} @ '.format(llh)
                 for key, val in zip(all_param_names, result):
-                    msg += ' %s=%.1f'%(key, val)
+                    msg += ' %s=%.2f'%(key, val)
                 print(msg)
                 print('{} LLH computed'.format(n_calls))
                 print('avg time per llh: {:.3f} ms'.format(
@@ -1126,7 +1128,10 @@ class Reco(object):
             file_exists = os.path.isfile(estimate_outf)
             if self.successful_reco_counter == 0:
                 if file_exists:
-                    raise IOError('File already exists at "{}"'.format(estimate_outf))
+                    if self.overwrite:
+                        os.remove(estimate_outf)
+                    else:
+                        raise IOError('File already exists at "{}"'.format(estimate_outf))
                 # create new Dataset
                 dataset = xr.Dataset()
                 dataset.attrs = self.attrs
@@ -1872,7 +1877,10 @@ def parse_args(description=__doc__):
         '--save-llhp', action='store_true',
         help='Whether to save LLHP within 30 LLH of max-LLH to disk'
     )
-
+    parser.add_argument(
+        '--overwrite', action='store_true',
+        help='Whether to overwrite existing file'
+    )
     split_kwargs = init_obj.parse_args(
         dom_tables=True, tdi_tables=True, events=True, parser=parser
     )
