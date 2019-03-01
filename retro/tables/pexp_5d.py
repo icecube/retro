@@ -60,6 +60,7 @@ class Minimizer(enum.IntEnum):
     GRADIENT_DESCENT = 0
     NEWTON = 1
     BINARY_SEARCH = 2
+    CONJ_GRAD = 3
 
 
 class StepSpacing(enum.IntEnum):
@@ -72,7 +73,8 @@ MACHINE_EPS = 1e-10
 MAX_RAD_SQ = 500**2
 """Maximum radius to consider, squared (units of m^2)"""
 
-SCALE_FACTOR_MINIMIZER = Minimizer.BINARY_SEARCH
+#SCALE_FACTOR_MINIMIZER = Minimizer.BINARY_SEARCH
+SCALE_FACTOR_MINIMIZER = Minimizer.CONJ_GRAD
 """Choice of which minimizer to use for computing scaling factor for scaling sources"""
 
 PEGLEG_SPACING = StepSpacing.LINEAR
@@ -494,10 +496,6 @@ def generate_pexp_and_llh_functions(
 
                 for op_dom_idx in range(num_operational_doms):
                     dom_info = event_dom_info[op_dom_idx]
-                    dom_tbl_idx = dom_info['table_idx']
-                    dom_qe = dom_info['quantum_efficiency']
-                    dom_hits_start_idx = dom_info['hits_start_idx']
-                    dom_hits_stop_idx = dom_info['hits_stop_idx']
 
                     dx = src['x'] - dom_info['x']
                     dy = src['y'] - dom_info['y']
@@ -506,8 +504,14 @@ def generate_pexp_and_llh_functions(
                     rhosquared = max(MACHINE_EPS, dx**2 + dy**2)
                     rsquared = rhosquared + dz**2
 
+                    # first thing to check if this DOM is out of range and we can skip it
                     if rsquared > rsquared_max:
                         continue
+
+                    dom_tbl_idx = dom_info['table_idx']
+                    dom_qe = dom_info['quantum_efficiency']
+                    dom_hits_start_idx = dom_info['hits_start_idx']
+                    dom_hits_stop_idx = dom_info['hits_stop_idx']
 
                     r = max(MACHINE_EPS, math.sqrt(rsquared))
                     r_bin_idx = digitize_r(r)
@@ -806,76 +810,200 @@ def generate_pexp_and_llh_functions(
 
         """
         # Note: defining as closure is faster than as external function
-        def get_grad_neg_llh_wrt_scalefactor(scalefactor):
-            """Compute the gradient of -LLH with respect to `scalefactor`.
+        if SCALE_FACTOR_MINIMIZER is Minimizer.GRADIENT_DESCENT or SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
+            def get_grad_neg_llh_wrt_scalefactor(scalefactor):
+                """Compute the gradient of -LLH with respect to `scalefactor`.
 
-            Typically we use `scalefactor` with cascade energy, .. ::
+                Typically we use `scalefactor` with cascade energy, .. ::
 
-                cascade_energy = scalefactor * nominal_cascade_energy
+                    cascade_energy = scalefactor * nominal_cascade_energy
 
-            so the gradient is proportional to cascade energy by a factor of
-            `nominal_cascade_energy`.
+                so the gradient is proportional to cascade energy by a factor of
+                `nominal_cascade_energy`.
 
-            Parameters
-            ----------
-            scalefactor : float
+                Parameters
+                ----------
+                scalefactor : float
 
-            Returns
-            -------
-            grad_neg_llh : float
+                Returns
+                -------
+                grad_neg_llh : float
 
-            """
+                """
 
-            # Time- and DOM-independent part of grad(-LLH)
-            grad_neg_llh = nominal_scaling_t_indep_exp
+                # Time- and DOM-independent part of grad(-LLH)
+                grad_neg_llh = nominal_scaling_t_indep_exp
 
-            # Time-dependent part of grad(-LLH) (i.e., at hit times)
-            for hit_idx, hit_info in enumerate(event_hit_info):
-                grad_neg_llh -= (
-                    hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
-                    / (
+                # Time-dependent part of grad(-LLH) (i.e., at hit times)
+                for hit_idx, hit_info in enumerate(event_hit_info):
+                    grad_neg_llh -= (
+                        hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                        / (
+                            event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                            + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                            + nonscaling_hit_exp[hit_idx]
+                        )
+                    )
+
+                return grad_neg_llh
+
+
+        if SCALE_FACTOR_MINIMIZER is Minimizer.CONJ_GRAD:
+
+            def grad(scalefactor):
+                """same as get_grad_neg_llh_wrt_scalefactor, just otput as array"""
+                g = np.zeros_like(scalefactor)
+                #g = np.zeros(1)
+                # Time- and DOM-independent part of grad(-LLH)
+                g[0] = nominal_scaling_t_indep_exp
+
+                # Time-dependent part of grad(-LLH) (i.e., at hit times)
+                for hit_idx, hit_info in enumerate(event_hit_info):
+                    g[0] -= (
+                        hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                        / (
+                            event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                            + scalefactor[0] * nominal_scaling_hit_exp[hit_idx]
+                            + nonscaling_hit_exp[hit_idx]
+                        )
+                    )
+                return g
+
+            def fun(scalefactor):
+                """llh function"""
+                # Time- and DOM-independent part of LLH
+                llh = -scalefactor[0] * nominal_scaling_t_indep_exp - nonscaling_t_indep_exp
+
+                # Time-dependent part of LLH (i.e., at hit times)
+                for hit_idx, hit_info in enumerate(event_hit_info):
+                    llh += hit_info['charge'] * math.log(
                         event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
-                        + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                        + scalefactor[0] * nominal_scaling_hit_exp[hit_idx]
                         + nonscaling_hit_exp[hit_idx]
                     )
-                )
+                return -llh
 
-            return grad_neg_llh
+	    def line_search_interpolation(g, h, a0, p0):
+		"""perform line search using interpolation strategy
 
-        def get_newton_step(scalefactor):
-            """Compute the step for the newton method for the `scalefactor`
+		Parameters:
+		-----------
+		g : array
+		    gradient vector
+		h : array
+		    search vector
+		a0 : float
+		    starting distance
+		p : array
+		    starting position
 
-            the step is defined as -f'/f'' where f is the LLH(scalefactor)
+		Returns:
+		--------
+		float, optimal a value
+		"""
+		deriv = np.dot(g,h)
 
-            Parameters
-            ----------
-            scalefactor : float
+		e0 = fun(p0)
 
-            Returns
-            -------
-            step : float
+		e1 = fun(p0 + a0 * h)
+		p1 = p0 + a0 * h
 
-            """
+		if e1 < e0 + 1e-4 * a0 * deriv:
+		    return a0
 
-            # Time- and DOM-independent part of grad(-LLH)
-            numerator = nominal_scaling_t_indep_exp
-            denominator = 0
+		a1 = -deriv * a0 * a0 / (2.0 * (e1 - e0 - deriv * a0))
+		e2 = fun(p0 + a1 * h)
+		p2 = p0 + a1 * h
 
-            # Time-dependent part of grad(-LLH) (i.e., at hit times)
-            for hit_idx, hit_info in enumerate(event_hit_info):
-                s = (hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
-                    / (
-                        event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
-                        + scalefactor * nominal_scaling_hit_exp[hit_idx]
-                        + nonscaling_hit_exp[hit_idx]
-                      )
-                )
-                numerator -= s
-                denominator += s**2
+		if e2 < e0 + 1e-4 * a1 * deriv:
+		    return a1
 
-            if denominator == 0:
-                return -1
-            return numerator/denominator
+		aa = 1.0 / (a0 * a0 * a1 * a1 * (a1 - a0)) * (a0 * a0 * (e2 - e0 - deriv * a1) - a1 * a1 * (e1 - e0 - deriv * a0))
+		bb = 1.0 / (a0 * a0 * a1 * a1 * (a1 - a0)) * (-a0 * a0 * a0 * (e2 - e0 - deriv * a1) + a1 * a1 * a1 * (e1 - e0 - deriv * a0))
+		a2 = -bb + math.sqrt(bb * bb - 3.0 * aa * deriv) / (3.0 * aa);
+		if a2 < 0:
+		    a2 = a1 / 2.0
+		e3 = fun(p0 + a2 * h)
+		p3 = p0 + a2 * h
+
+		if e3 < e0 + 1e-4 * a2 * deriv:
+		    return a2
+
+		return 0.0    
+
+	    """conjugate gradient optimization
+
+	    License:
+	    -------
+	    MIT License
+
+	    Copyright (c) 2018 Ivo Filot
+
+	    Permission is hereby granted, free of charge, to any person obtaining a copy
+	    of this software and associated documentation files (the "Software"), to deal
+	    in the Software without restriction, including without limitation the rights
+	    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	    copies of the Software, and to permit persons to whom the Software is
+	    furnished to do so, subject to the following conditions:
+
+	    The above copyright notice and this permission notice shall be included in all
+	    copies or substantial portions of the Software.
+
+	    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+	    SOFTWARE.
+	    
+	    """
+            p = np.zeros(1)
+	    p[0] = initial_scalefactor
+	    iter = 0
+	    g = grad(p)
+	    h = -g / np.linalg.norm(g)
+	    eold = fun(p)
+	    pold = np.copy(p)
+	    maxlinesearch = 2.0
+
+	    while(iter < 100):
+		A = line_search_interpolation(g, h, maxlinesearch, p)
+		mp = p + maxlinesearch * h
+
+		# check angle between two vectors
+		g1 = grad(p + A * h)
+		angle = np.arccos(np.dot(-g1,h) / (np.linalg.norm(g1) * np.linalg.norm(h)))
+		p += A * h
+                    
+                if p[0] < 0:
+                    p[0] = 0.
+                #for j in range(len(p)):
+                #    if p[j] < 0.:
+                #        p[j] *= 0.
+
+		enew = fun(p)
+		diff = np.fabs(enew - eold)
+		if diff < 0.1:
+		    break
+
+		eold = enew
+
+		if angle > (math.pi / 4):
+		    oldg = np.copy(g)
+		    g = grad(p)
+		    beta = np.dot(g,g - oldg) / np.dot(oldg,oldg);
+		    h = -g + beta * h
+
+		    pold = np.copy(p)
+		iter +=1 
+                #print(iter)
+                #print(p[0])
+                #print(enew)
+
+
+	    return p[0], -enew
+
 
         if SCALE_FACTOR_MINIMIZER is Minimizer.GRADIENT_DESCENT:
             # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
@@ -917,6 +1045,42 @@ def generate_pexp_and_llh_functions(
             scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
+
+            def get_newton_step(scalefactor):
+                """Compute the step for the newton method for the `scalefactor`
+
+                the step is defined as -f'/f'' where f is the LLH(scalefactor)
+
+                Parameters
+                ----------
+                scalefactor : float
+
+                Returns
+                -------
+                step : float
+
+                """
+
+                # Time- and DOM-independent part of grad(-LLH)
+                numerator = nominal_scaling_t_indep_exp
+                denominator = 0
+
+                # Time-dependent part of grad(-LLH) (i.e., at hit times)
+                for hit_idx, hit_info in enumerate(event_hit_info):
+                    s = (hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                        / (
+                            event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                            + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                            + nonscaling_hit_exp[hit_idx]
+                          )
+                    )
+                    numerator -= s
+                    denominator += s**2
+
+                if denominator == 0:
+                    return -1
+                return numerator/denominator
+
             scalefactor = initial_scalefactor
             iters = 0 # iteration counter
             epsilon = 1e-2
@@ -945,15 +1109,22 @@ def generate_pexp_and_llh_functions(
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
             epsilon = 1e-2
             done = False
-            first = 0.
-            first_grad = get_grad_neg_llh_wrt_scalefactor(first)
+            
+            first_e = 0.1/SCALING_CASCADE_ENERGY
+            last_e = MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY
+
+            first = np.log(first_e)
+            last = np.log(last_e)
+
+            #first = 0.
+            first_grad = get_grad_neg_llh_wrt_scalefactor(np.exp(first))
             if first_grad > 0 or abs(first_grad) < epsilon:
                 scalefactor = first
                 done = True
                 #print('trivial 0')
             if not done:
-                last = MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY
-                last_grad = get_grad_neg_llh_wrt_scalefactor(last)
+                #last = MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY
+                last_grad = get_grad_neg_llh_wrt_scalefactor(np.exp(last))
                 if last_grad < 0 or abs(last_grad) < epsilon:
                     scalefactor = last
                     done = True
@@ -963,7 +1134,7 @@ def generate_pexp_and_llh_functions(
                     iters += 1
                     test = (first + last)/2.
                     scalefactor = test
-                    test_grad = get_grad_neg_llh_wrt_scalefactor(test)
+                    test_grad = get_grad_neg_llh_wrt_scalefactor(np.exp(test))
                     #print('test :', test)
                     #print('test_grad :',test_grad)
                     if abs(test_grad) < epsilon:
@@ -974,6 +1145,8 @@ def generate_pexp_and_llh_functions(
                         last = test
             #print('found :',scalefactor)
             #print('\n')
+
+            scalefactor = np.exp(scalefactor)
 
         # -- Calculate llh at the optimal `scalefactor` found -- #
 
