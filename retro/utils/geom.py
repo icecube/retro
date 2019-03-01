@@ -31,6 +31,7 @@ __all__ = [
     'cart2pol',
     'cart2sph',
     'cart2sph_np',
+    'sph2cart_np',
     'rotsph2cart',
     'rotate_point',
     'rotate_points',
@@ -605,7 +606,7 @@ def generate_digitizer(bin_edges, clip=True):
         Returns
         -------
         idx : int
-			Bin index; `idx < 0` or `idx >= num_bins` indicates `val` is
+            Bin index; `idx < 0` or `idx >= num_bins` indicates `val` is
             outside binning.
 
         """.format(bindescr)
@@ -857,20 +858,44 @@ def cart2sph(x, y, z, r, theta, phi):
         theta_flat[idx] = math.acos(zfi / rfi)
 
 
+#def cart2sph_np(x, y, z):
+#    rho_sq = x**2 + y**2
+#    rho_mask = rho_sq != 0
+#
+#    r = np.sqrt(rho_sq + z**2)
+#    r_mask = r != 0
+#
+#    theta = np.zeros_like(x)
+#    theta[r_mask] = math.acos(z[r_mask] / r[r_mask])
+#
+#    phi = np.zeros_like(x)
+#    phi[rho_mask] = np.atan2(y[rho_mask], x[rho_mask])
+#
+#    return r, theta, phi
+
+
 def cart2sph_np(x, y, z):
-    rho_sq = x**2 + y**2
-    rho_mask = rho_sq != 0
-
-    r = np.sqrt(rho_sq + z**2)
-    r_mask = r != 0
-
-    theta = np.zeros_like(x)
-    theta[r_mask] = math.acos(z[r_mask] / r[r_mask])
-
-    phi = np.zeros_like(x)
-    phi[rho_mask] = np.atan2(y[rho_mask], x[rho_mask])
-
+    is_scalar = np.isscalar(x) and np.isscalar(y) and np.isscalar(z)
+    r = np.sqrt(x**2 + y**2 + z**2)
+    if is_scalar:
+        if r == 0:
+            theta = 0.
+        else:
+            theta = np.arccos(z / r)
+    else:
+        mask = r > 0
+        theta = np.zeros_like(r)
+        theta[mask] = np.arccos(z[mask] / r[mask])
+    phi = np.arctan2(y, x)
     return r, theta, phi
+
+
+def sph2cart_np(r, theta, phi):
+    z = r * np.cos(theta)
+    rho = r * np.sin(theta)
+    x = rho * np.cos(phi)
+    y = rho * np.sin(phi)
+    return x, y, z
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -995,7 +1020,7 @@ def rotate_points(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
         phi coordinate of rotated points
 
     """
-    for i in range(len(p_theta)):
+    for i in range(len(p_theta)):  # pylint: disable=consider-using-enumerate
         sin_rot_theta = math.sin(rot_theta[i])
         cos_rot_theta = math.cos(rot_theta[i])
 
@@ -1045,7 +1070,7 @@ def fill_from_cart(s_vector):
     """
     for s in s_vector:
         radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
-        if not radius == 0:
+        if radius != 0:
             # make sure they're length 1
             s['x'] /= radius
             s['y'] /= radius
@@ -1095,7 +1120,7 @@ def reflect(old, centroid, new):
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
 def add_vectors(r1, theta1, phi1, r2, theta2, phi2, r3, theta3, phi3):
     """Add two vectors v1 + v2 = v3 in spherical coordinates."""
-    for i in range(len(r1)):
+    for i in range(len(r1)):  # pylint: disable=consider-using-enumerate
         x1 = r1[i] * math.sin(theta1[i]) * math.cos(phi1[i])
         y1 = r1[i] * math.sin(theta1[i]) * math.sin(phi1[i])
         z1 = r1[i] * math.cos(theta1[i])

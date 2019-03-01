@@ -249,6 +249,7 @@ class InteractionType(enum.IntEnum):
     convention.
     """
     # pylint: disable=invalid-name
+    undefined = 0
     CC = 1
     NC = 2
 
@@ -617,6 +618,7 @@ SRC_T = np.dtype([
 
 
 TRACK_T = np.dtype([
+    ('pdg', np.int32),
     ('time', np.float32),
     ('x', np.float32),
     ('y', np.float32),
@@ -627,8 +629,7 @@ TRACK_T = np.dtype([
     ('energy', np.float32),
     ('length', np.float32),
     ('stochastic_loss', np.float32),
-    ('em_equiv_stochastic_loss', np.float32),
-    ('pdg', np.int32),
+    ('vis_em_equiv_stochastic_loss', np.float32),
 ])
 
 INVALID_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
@@ -637,10 +638,11 @@ INVALID_TRACK['pdg'] = ParticleType.unknown
 NO_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
 NO_TRACK['pdg'] = ParticleType.unknown
 NO_TRACK['energy'] = 0
-NO_TRACK['em_equiv_stochastic_loss'] = 0
+NO_TRACK['vis_em_equiv_stochastic_loss'] = 0
 
 
 CASCADE_T = np.dtype([
+    ('pdg', np.int32),
     ('time', np.float32),
     ('x', np.float32),
     ('y', np.float32),
@@ -649,17 +651,17 @@ CASCADE_T = np.dtype([
     ('azimuth', np.float32),
     ('directionality', np.float32),
     ('energy', np.float32),
+    ('hadr_fraction', np.float32),
     ('em_equiv_energy', np.float32),
-    ('pdg', np.int32),
-    ('is_hadronic', np.bool8),
+    ('hadr_equiv_energy', np.float32),
 ])
 
 INVALID_CASCADE = np.full(shape=1, fill_value=np.nan, dtype=CASCADE_T)
 INVALID_CASCADE['pdg'] = ParticleType.unknown
-INVALID_CASCADE['is_hadronic'] = False
 
 NO_CASCADE = np.full(shape=1, fill_value=np.nan, dtype=CASCADE_T)
 NO_CASCADE['pdg'] = ParticleType.unknown
-NO_CASCADE['is_hadronic'] = False
 NO_CASCADE['energy'] = 0
 NO_CASCADE['em_equiv_energy'] = 0
+NO_CASCADE['hadr_equiv_energy'] = 0
+NO_CASCADE['hadr_fraction'] = np.nan
