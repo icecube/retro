@@ -189,7 +189,7 @@ I3PARTICLE_ATTRS = OrderedDict([
     ('major_id', dict(dtype=np.uint64, default=0)),
     ('minor_id', dict(dtype=np.int32, default=0)),
     ('zenith', dict(path='dir.zenith', dtype=np.float32, default=np.nan)),
-    ('azimuth', dict(path='dir.zenith', dtype=np.float32, default=np.nan)),
+    ('azimuth', dict(path='dir.azimuth', dtype=np.float32, default=np.nan)),
     ('x', dict(path='pos.x', dtype=np.float32, default=np.nan)),
     ('y', dict(path='pos.y', dtype=np.float32, default=np.nan)),
     ('z', dict(path='pos.z', dtype=np.float32, default=np.nan)),
