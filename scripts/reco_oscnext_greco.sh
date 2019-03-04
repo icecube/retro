@@ -123,7 +123,7 @@ fi
 #kernprof -l -v \
 $retro_dir/retro/reco.py \
     --outdir "$outdir" \
-    --method "crs_prefit_mn" \
+    --method "experimental_trackfit" \
     \
     --gcd $gcd \
     --dom-tables-kind "$tblkind" \
@@ -142,6 +142,7 @@ $retro_dir/retro/reco.py \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SplitInIcePulses" \
     --truth \
-    --angsens-model "9"
+    --angsens-model "9" \
+    --overwrite
 
 wait
