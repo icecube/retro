@@ -83,7 +83,7 @@ PEGLEG_SPACING = StepSpacing.LINEAR
 """Pegleg adds segments either linearly (same number of segments independent of energy)
 or logarithmically (more segments are added the longer the track"""
 
-TRACK_TYPE = TrackType.CONST
+TRACK_TYPE = TrackType.STOCHASTIC
 """`CONST` is the standard treatement, `STOCHASTIC` performs conjugate gradient minimization"""
 
 PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
@@ -1009,15 +1009,58 @@ def generate_pexp_and_llh_functions(
             )
 
         return scalefactor, llh
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def grad(
+            sfs,
+            event_dom_info,
+            event_hit_info,
+            nominal_scaling_hit_exps,
+            nominal_scaling_t_indep_exps,
+            ):
+
+        """same as get_grad_neg_llh_wrt_scalefactor, just otput as array"""
+        g = np.zeros_like(sfs)
+        #g = np.zeros(1)
+        # Time- and DOM-independent part of grad(-LLH)
+        g += nominal_scaling_t_indep_exps
+
+        # Time-dependent part of grad(-LLH) (i.e., at hit times)
+        for hit_idx, hit_info in enumerate(event_hit_info):
+            norm = event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']                                                                                                                                                         + np.sum(sfs * nominal_scaling_hit_exps[:,hit_idx])
+            g -= (hit_info['charge'] * nominal_scaling_hit_exps[:,hit_idx]
+                  / norm)
+        return g
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def fun(
+            sfs,
+            event_dom_info,
+            event_hit_info,
+            nominal_scaling_hit_exps,
+            nominal_scaling_t_indep_exps,
+            ):
+        """llh function"""
+        # Time- and DOM-independent part of LLH
+        llh = - np.sum(sfs * nominal_scaling_t_indep_exps)
+
+        # Time-dependent part of LLH (i.e., at hit times)
+        for hit_idx, hit_info in enumerate(event_hit_info):
+            llh += hit_info['charge'] * math.log(
+                event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                + np.sum(sfs * nominal_scaling_hit_exps[:,hit_idx])
+            )
+        return -llh
+
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_optimal_scalefactors(
         event_dom_info,
         event_hit_info,
         nominal_scaling_hit_exps,
         nominal_scaling_t_indep_exps,
-        scalefactors,
+        scalefacots,
     ):
-        """Find optimal (highest-likelihood) `scalefactors` for n scaling sources.
+        """Find optimal (highest-likelihood) `scalefacots` for n scaling sources.
 
         Parameters:
         -----------
@@ -1031,7 +1074,7 @@ def generate_pexp_and_llh_functions(
         nominal_scaling_t_indep_exps : shape (n_sources, )
             Total charge expected across the detector due to nominal scaling sources
             (Lambda^s in `likelihood_function_derivation.ipynb`)
-        scalefactors : shape (n_sources)
+        scalefacots : shape (n_sources)
             Starting point for minimizer
 
         Returns
@@ -1040,32 +1083,6 @@ def generate_pexp_and_llh_functions(
 
         """
 
-        def grad(scalefactors):
-            """same as get_grad_neg_llh_wrt_scalefactor, just otput as array"""
-            g = np.zeros_like(scalefactors)
-            #g = np.zeros(1)
-            # Time- and DOM-independent part of grad(-LLH)
-            g += nominal_scaling_t_indep_exp
-
-            # Time-dependent part of grad(-LLH) (i.e., at hit times)
-            for hit_idx, hit_info in enumerate(event_hit_info):
-                norm = event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']                                                                                                                                                         + np.sum(scalefactors * nominal_scaling_hit_exp[hit_idx])
-                g -= (hit_info['charge'] * nominal_scaling_hit_exps[:,hit_idx]
-                      / norm)
-            return g
-
-        def fun(scalefactors):
-            """llh function"""
-            # Time- and DOM-independent part of LLH
-            llh = - np.sum(scalefactors * nominal_scaling_t_indep_exp)
-
-            # Time-dependent part of LLH (i.e., at hit times)
-            for hit_idx, hit_info in enumerate(event_hit_info):
-                llh += hit_info['charge'] * math.log(
-                    event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
-                    + np.sum(scalefactors * nominal_scaling_hit_exp[:,hit_idx])
-                )
-            return -llh
 
         def line_search_interpolation(g, h, a0, p0):
             """perform line search using interpolation strategy
@@ -1084,16 +1101,49 @@ def generate_pexp_and_llh_functions(
             Returns:
             --------
             float, optimal a value
+
+            License:
+            -------
+            MIT License
+
+            Copyright (c) 2018 Ivo Filot
+
+            Permission is hereby granted, free of charge, to any person obtaining a copy
+            of this software and associated documentation files (the "Software"), to deal
+            in the Software without restriction, including without limitation the rights
+            to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+            copies of the Software, and to permit persons to whom the Software is
+            furnished to do so, subject to the following conditions:
+
+            The above copyright notice and this permission notice shall be included in all
+            copies or substantial portions of the Software.
+
+            THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+            IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+            FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+            AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+            LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+            OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+            SOFTWARE.
+            
             """
             delta = 1e-4
             deriv = np.dot(g,h)
 
             p0[p0<0] = 0.
-            e0 = fun(p0)
+            e0 = fun(p0,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps)
 
             p1 = p0 + a0 * h
             p1[p1<0] = 0.
-            e1 = fun(p1)
+            e1 = fun(p1,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps)
 
             if e1 < e0 + delta * a0 * deriv:
                 return a0
@@ -1101,7 +1151,11 @@ def generate_pexp_and_llh_functions(
             a1 = -deriv * a0**2 / (2. * (e1 - e0 - deriv * a0))
             p2 = p0 + a1 * h
             p2[p2<0] = 0.
-            e2 = fun(p2)
+            e2 = fun(p2,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps)
 
             if e2 < e0 + delta * a1 * deriv:
                 return a1
@@ -1113,54 +1167,53 @@ def generate_pexp_and_llh_functions(
                 a2 = a1 / 2.
             p3 = p0 + a2 * h
             p3[p3<0] = 0.
-            e3 = fun(p3)
+            e3 = fun(p3,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps)
 
             if e3 < e0 + delta * a2 * deriv:
                 return a2
 
             return 0.    
 
-        """conjugate gradient optimization
+        """conjugate gradient optimization"""
 
-        License:
-        -------
-        MIT License
-
-        Copyright (c) 2018 Ivo Filot
-
-        Permission is hereby granted, free of charge, to any person obtaining a copy
-        of this software and associated documentation files (the "Software"), to deal
-        in the Software without restriction, including without limitation the rights
-        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-        copies of the Software, and to permit persons to whom the Software is
-        furnished to do so, subject to the following conditions:
-
-        The above copyright notice and this permission notice shall be included in all
-        copies or substantial portions of the Software.
-
-        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-        SOFTWARE.
-        
-        """
         iter = 0
-        g = grad(scalefactors)
+        g = grad(scalefacots,
+            event_dom_info,
+            event_hit_info,
+            nominal_scaling_hit_exps,
+            nominal_scaling_t_indep_exps)
         h = -g / np.linalg.norm(g)
-        llh_old = fun(scalefactors)
+        llh_old = fun(scalefacots,
+            event_dom_info,
+            event_hit_info,
+            nominal_scaling_hit_exps,
+            nominal_scaling_t_indep_exps)
         maxlinesearch = 2.0
 
-        while(iter < 100):
-            A = line_search_interpolation(g, h, maxlinesearch, scalefactors)
+        while(iter < 300):
+            p0 = np.copy(scalefacots)
+            A = line_search_interpolation(g, h, maxlinesearch, p0)
 
-            scalefactors += A * h
-            scalefactors[scalefactors < 0] = 0.
+            #for s in range(len(scalefacots)):
+            #    scalefacots[s] += A * h[s]
+            scalefacots[:] += A * h[:]
+            scalefacots[scalefacots < 0] = 0.
 
-            g1 = grad(scalefactors)
-            llh_new = fun(scalefactors)
+            g1 = grad(scalefacots,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps)
+            llh_new = fun(
+                scalefacots,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps)
 
             if np.fabs(llh_new - llh_old) < 1e-3:
                 break
@@ -1178,7 +1231,8 @@ def generate_pexp_and_llh_functions(
 
             iter +=1 
 
-        #print(iter)
+        print(scalefacots)
+        print(iter)
         return -llh_new
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -1342,8 +1396,8 @@ def generate_pexp_and_llh_functions(
             llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
             llhs[0] = llh
 
-            scalefactors = np.zeros(shape=num_llhs, dtype=np.float64)
-            scalefactors[0] = scalefactor
+            all_scalefactors = np.zeros(shape=num_llhs, dtype=np.float64)
+            all_scalefactors[0] = scalefactor
 
             best_llh = llh
             previous_llh = best_llh - 100
@@ -1392,7 +1446,7 @@ def generate_pexp_and_llh_functions(
 
                 # Store this pegleg step's llh and best scalefactor
                 llhs[pegleg_step] = llh
-                scalefactors[pegleg_step] = scalefactor
+                all_scalefactors[pegleg_step] = scalefactor
 
                 #print(pegleg_step, llh, scalefactor)
 
@@ -1419,15 +1473,54 @@ def generate_pexp_and_llh_functions(
             return (
                 llhs[pegleg_max_llh_step],
                 pegleg_max_llh_step * pegleg_stepsize,
-                scalefactors[pegleg_max_llh_step],
+                all_scalefactors[pegleg_max_llh_step],
                 llhs[pegleg_max_llh_step] - llhs[0], 
                 llhs[pegleg_max_llh_step] - llhs[lower_idx],
                 llhs[pegleg_max_llh_step] - llhs[upper_idx], 
             )
 
         else:
-            # let's to CGD
-            pass
+            # let's do CGD
+            num_hits = len(event_hit_info)
+
+            n_opt_segments = 100
+
+            nominal_scaling_t_indep_exps = np.zeros(n_opt_segments, dtype=np.float64)
+            nominal_scaling_hit_exps = np.zeros(shape=(n_opt_segments, num_hits), dtype=np.float64)
+
+            for n in range(n_opt_segments):
+                # fill up exps
+                nominal_scaling_t_indep_exps[n] = pexp_(
+                    sources=pegleg_sources,
+                    sources_start=n,
+                    sources_stop=n+1,
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    hit_exp=nominal_scaling_hit_exps[n],
+                    dom_tables=dom_tables,
+                    dom_table_norms=dom_table_norms,
+                    t_indep_dom_tables=t_indep_dom_tables,
+                    t_indep_dom_table_norms=t_indep_dom_table_norms,
+                    tdi_tables=tdi_tables,
+                )
+
+            scalefacots = np.zeros(shape=(n_opt_segments,))
+
+            llh = get_optimal_scalefactors(
+                event_dom_info=event_dom_info,
+                event_hit_info=event_hit_info,
+                nominal_scaling_hit_exps=nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps=nominal_scaling_t_indep_exps,
+                scalefacots=scalefacots,
+                )
+
+            return (
+                llh,
+                0,
+                np.sum(scalefacots),
+                0.,
+                0.,
+                0.,)
 
 
     # -- Define pexp and get_llh closures, baking-in the tables -- #
