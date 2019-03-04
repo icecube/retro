@@ -1017,18 +1017,19 @@ def generate_pexp_and_llh_functions(
             event_hit_info,
             nominal_scaling_hit_exps,
             nominal_scaling_t_indep_exps,
+            idx,
             ):
 
         """same as get_grad_neg_llh_wrt_scalefactor, just otput as array"""
-        g = np.zeros_like(sfs)
+        g = np.zeros(shape=(idx,))
         #g = np.zeros(1)
         # Time- and DOM-independent part of grad(-LLH)
-        g += nominal_scaling_t_indep_exps
+        g += nominal_scaling_t_indep_exps[:idx]
 
         # Time-dependent part of grad(-LLH) (i.e., at hit times)
         for hit_idx, hit_info in enumerate(event_hit_info):
-            norm = event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']                                                                                                                                                         + np.sum(sfs * nominal_scaling_hit_exps[:,hit_idx])
-            g -= (hit_info['charge'] * nominal_scaling_hit_exps[:,hit_idx]
+            norm = event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns'] + np.sum(sfs[:idx] * nominal_scaling_hit_exps[:idx,hit_idx])
+            g -= (hit_info['charge'] * nominal_scaling_hit_exps[:idx,hit_idx]
                   / norm)
         return g
 
@@ -1039,16 +1040,17 @@ def generate_pexp_and_llh_functions(
             event_hit_info,
             nominal_scaling_hit_exps,
             nominal_scaling_t_indep_exps,
+            idx,
             ):
         """llh function"""
         # Time- and DOM-independent part of LLH
-        llh = - np.sum(sfs * nominal_scaling_t_indep_exps)
+        llh = - np.sum(sfs[:idx] * nominal_scaling_t_indep_exps[:idx])
 
         # Time-dependent part of LLH (i.e., at hit times)
         for hit_idx, hit_info in enumerate(event_hit_info):
             llh += hit_info['charge'] * math.log(
                 event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
-                + np.sum(sfs * nominal_scaling_hit_exps[:,hit_idx])
+                + np.sum(sfs[:idx] * nominal_scaling_hit_exps[:idx,hit_idx])
             )
         return -llh
 
@@ -1059,6 +1061,7 @@ def generate_pexp_and_llh_functions(
         nominal_scaling_hit_exps,
         nominal_scaling_t_indep_exps,
         scalefacots,
+        idx,
     ):
         """Find optimal (highest-likelihood) `scalefacots` for n scaling sources.
 
@@ -1076,6 +1079,8 @@ def generate_pexp_and_llh_functions(
             (Lambda^s in `likelihood_function_derivation.ipynb`)
         scalefacots : shape (n_sources)
             Starting point for minimizer
+        idx : int
+            up to which index to consider sources and scalefacors
 
         Returns
         -------
@@ -1130,32 +1135,35 @@ def generate_pexp_and_llh_functions(
             delta = 1e-4
             deriv = np.dot(g,h)
 
-            p0[p0<0] = 0.
+            p0[p0<1] = 1.
             e0 = fun(p0,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
-                nominal_scaling_t_indep_exps)
+                nominal_scaling_t_indep_exps,
+                idx)
 
             p1 = p0 + a0 * h
-            p1[p1<0] = 0.
+            p1[p1<1] = 1.
             e1 = fun(p1,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
-                nominal_scaling_t_indep_exps)
+                nominal_scaling_t_indep_exps,
+                idx)
 
             if e1 < e0 + delta * a0 * deriv:
                 return a0
 
             a1 = -deriv * a0**2 / (2. * (e1 - e0 - deriv * a0))
             p2 = p0 + a1 * h
-            p2[p2<0] = 0.
+            p2[p2<1] = 1.
             e2 = fun(p2,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
-                nominal_scaling_t_indep_exps)
+                nominal_scaling_t_indep_exps,
+                idx)
 
             if e2 < e0 + delta * a1 * deriv:
                 return a1
@@ -1166,12 +1174,13 @@ def generate_pexp_and_llh_functions(
             if a2 < 0:
                 a2 = a1 / 2.
             p3 = p0 + a2 * h
-            p3[p3<0] = 0.
+            p3[p3<1] = 1.
             e3 = fun(p3,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
-                nominal_scaling_t_indep_exps)
+                nominal_scaling_t_indep_exps,
+                idx)
 
             if e3 < e0 + delta * a2 * deriv:
                 return a2
@@ -1185,35 +1194,39 @@ def generate_pexp_and_llh_functions(
             event_dom_info,
             event_hit_info,
             nominal_scaling_hit_exps,
-            nominal_scaling_t_indep_exps)
+            nominal_scaling_t_indep_exps,
+            idx)
         h = -g / np.linalg.norm(g)
         llh_old = fun(scalefacots,
             event_dom_info,
             event_hit_info,
             nominal_scaling_hit_exps,
-            nominal_scaling_t_indep_exps)
+            nominal_scaling_t_indep_exps,
+            idx)
         maxlinesearch = 2.0
 
         while(iter < 300):
-            p0 = np.copy(scalefacots)
+            p0 = np.copy(scalefacots[:idx])
             A = line_search_interpolation(g, h, maxlinesearch, p0)
 
             #for s in range(len(scalefacots)):
             #    scalefacots[s] += A * h[s]
-            scalefacots[:] += A * h[:]
-            scalefacots[scalefacots < 0] = 0.
+            scalefacots[:idx] += A * h[:idx]
+            scalefacots[scalefacots < 1] = 1.
 
             g1 = grad(scalefacots,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
-                nominal_scaling_t_indep_exps)
+                nominal_scaling_t_indep_exps,
+                idx)
             llh_new = fun(
                 scalefacots,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
-                nominal_scaling_t_indep_exps)
+                nominal_scaling_t_indep_exps,
+                idx)
 
             if np.fabs(llh_new - llh_old) < 1e-3:
                 break
@@ -1231,8 +1244,8 @@ def generate_pexp_and_llh_functions(
 
             iter +=1 
 
-        print(scalefacots)
-        print(iter)
+        #print(scalefacots)
+        #print(iter)
         return -llh_new
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -1488,6 +1501,10 @@ def generate_pexp_and_llh_functions(
             nominal_scaling_t_indep_exps = np.zeros(n_opt_segments, dtype=np.float64)
             nominal_scaling_hit_exps = np.zeros(shape=(n_opt_segments, num_hits), dtype=np.float64)
 
+            scalefacots = np.zeros(shape=(n_opt_segments,))
+
+            best_llh = -np.inf
+
             for n in range(n_opt_segments):
                 # fill up exps
                 nominal_scaling_t_indep_exps[n] = pexp_(
@@ -1504,20 +1521,29 @@ def generate_pexp_and_llh_functions(
                     tdi_tables=tdi_tables,
                 )
 
-            scalefacots = np.zeros(shape=(n_opt_segments,))
 
-            llh = get_optimal_scalefactors(
-                event_dom_info=event_dom_info,
-                event_hit_info=event_hit_info,
-                nominal_scaling_hit_exps=nominal_scaling_hit_exps,
-                nominal_scaling_t_indep_exps=nominal_scaling_t_indep_exps,
-                scalefacots=scalefacots,
-                )
+                llh = get_optimal_scalefactors(
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    nominal_scaling_hit_exps=nominal_scaling_hit_exps,
+                    nominal_scaling_t_indep_exps=nominal_scaling_t_indep_exps,
+                    scalefacots=scalefacots,
+                    idx=n+1,
+                    )
+
+                if llh > best_llh:
+                    best_llh = llh
+                else:
+                    break
+                
+                #print(n, llh, scalefacots[:n+1])
+
+            #print(n, np.sum(scalefacots[:n+1])/n)
 
             return (
                 llh,
-                0,
-                np.sum(scalefacots),
+                n,
+                np.sum(scalefacots[:n+1])/n,
                 0.,
                 0.,
                 0.,)
