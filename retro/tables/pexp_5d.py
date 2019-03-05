@@ -1107,7 +1107,7 @@ def generate_pexp_and_llh_functions(
             --------
             float, optimal a value
 
-            License:
+            Original License:
             -------
             MIT License
 
@@ -1196,13 +1196,16 @@ def generate_pexp_and_llh_functions(
             nominal_scaling_hit_exps,
             nominal_scaling_t_indep_exps,
             idx)
-        h = -g / np.linalg.norm(g)
         llh_old = fun(scalefacots,
             event_dom_info,
             event_hit_info,
             nominal_scaling_hit_exps,
             nominal_scaling_t_indep_exps,
             idx)
+        norm_g = np.linalg.norm(g)
+        if norm_g == 0:
+            return -llh_old
+        h = -g / norm_g
         maxlinesearch = 2.0
 
         while(iter < 300):
@@ -1234,13 +1237,15 @@ def generate_pexp_and_llh_functions(
             llh_old = llh_new
 
             # check angle between two vectors
-            angle = np.arccos(np.dot(-g1,h) / (np.linalg.norm(g1) * np.linalg.norm(h)))
+            norm = np.linalg.norm(g1) * np.linalg.norm(h)
+            if norm > 0:
+                angle = np.arccos(np.dot(-g1,h) / norm)
 
-            if angle > (math.pi / 4):
-                oldg = np.copy(g)
-                g = np.copy(g1)
-                beta = np.dot(g,g - oldg) / np.dot(oldg,oldg)
-                h = -g + beta * h
+                if angle > (math.pi / 4.):
+                    oldg = np.copy(g)
+                    g = np.copy(g1)
+                    beta = np.dot(g,g - oldg) / np.dot(oldg,oldg)
+                    h = -g + beta * h
 
             iter +=1 
 
@@ -1503,14 +1508,22 @@ def generate_pexp_and_llh_functions(
 
             scalefacots = np.zeros(shape=(n_opt_segments,))
 
+            llhs = np.full(shape=n_opt_segments, fill_value=-np.inf, dtype=np.float64)
+            mean_scalefactor = np.zeros(shape=n_opt_segments)
+
+
             best_llh = -np.inf
+            getting_worse_counter = 0
+            sources_per_segment = 3
 
             for n in range(n_opt_segments):
                 # fill up exps
+                start = sources_per_segment*n
+                stop = sources_per_segment*(n+1)
                 nominal_scaling_t_indep_exps[n] = pexp_(
                     sources=pegleg_sources,
-                    sources_start=n,
-                    sources_stop=n+1,
+                    sources_start=start,
+                    sources_stop=stop,
                     event_dom_info=event_dom_info,
                     event_hit_info=event_hit_info,
                     hit_exp=nominal_scaling_hit_exps[n],
@@ -1531,19 +1544,29 @@ def generate_pexp_and_llh_functions(
                     idx=n+1,
                     )
 
+                llhs[n] = llh
+                mean_scalefactor[n] = np.sum(scalefacots[:n+1])/(n+1)
+
                 if llh > best_llh:
                     best_llh = llh
+                    getting_worse_counter = 0
                 else:
+                    getting_worse_counter +=1
+                if getting_worse_counter == 3:
                     break
                 
                 #print(n, llh, scalefacots[:n+1])
 
             #print(n, np.sum(scalefacots[:n+1])/n)
 
+            best_idx = n - getting_worse_counter
+
+
+
             return (
-                llh,
-                n,
-                np.sum(scalefacots[:n+1])/n,
+                llhs[best_idx],
+                sources_per_segment*best_idx,
+                mean_scalefactor[best_idx],
                 0.,
                 0.,
                 0.,)
