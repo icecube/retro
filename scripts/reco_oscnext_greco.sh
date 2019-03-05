@@ -141,8 +141,8 @@ $retro_dir/retro/reco.py \
     --recos "SPEFit2" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SplitInIcePulses" \
-    --truth \
-    --angsens-model "9" \
-    --overwrite
+    --angsens-model "9"
+#    --truth \
+#    --overwrite
 
 wait
