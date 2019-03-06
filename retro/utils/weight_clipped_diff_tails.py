@@ -157,6 +157,7 @@ def test_weight_diff_tails():
             uniform_hval = 1 / (bin_width * n_hist_bins)
             relmaxabsdiff = np.max(np.abs((hvals/uniform_hval - 1)))
             assert relmaxabsdiff < 0.05, str(relmaxabsdiff)
+    print("<< PASS : test_weight_diff_tails >>")
 
 
 if __name__ == "__main__":
