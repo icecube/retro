@@ -295,8 +295,18 @@ def extract_reco(frame, reco):
 
     # MultiNest8D fits a cascade & track, with casscade in the track direction
     elif reco.endswith('MultiNest8D'):
-        neutrino = frame[reco + '_Neutrino']
-        casc = frame[reco + '_Cascade']
+        if reco + '_Neutrino' in frame:
+            neutrino = frame[reco + '_Neutrino']
+        elif reco + '_NumuCC' in frame:
+            neutrino = frame[reco + '_NumuCC']
+
+        if reco + '_Cascade' in frame:
+            casc = frame[reco + '_Cascade']
+        elif reco + '_HDCasc' in frame:
+            casc = frame[reco + '_HDCasc']
+        else:
+            raise ValueError('Cannot find cascade in frame')
+
         track = frame[reco + '_Track']
 
         reco_dict['x'] = neutrino.pos.x
@@ -313,7 +323,7 @@ def extract_reco(frame, reco):
 
         dt_spec = [(k, np.float32) for k in reco_dict.keys()]
 
-    # MultiNest8D fits a cascade & track with their directions independnent
+    # MultiNest10D fits a cascade & track with their directions independnent
     elif reco.endswith('MultiNest10D'):
         neutrino = frame[reco + '_Neutrino']
         casc = frame[reco + '_Cascade']
@@ -351,6 +361,16 @@ def extract_reco(frame, reco):
         else:
             for attr, info in I3PARTICLE_ATTRS.items():
                 reco_dict[attr] = info['default']
+
+    # -- (subset of) PID and cut vars -- #
+
+    if reco.startswith('IC86_Dunkman_L6') and 'IC86_Dunkman_L6' in frame:
+        cutvars = frame['IC86_Dunkman_L6']
+        for var in ['delta_LLH', 'mn_start_contained', 'mn_stop_contained']:
+            try:
+                reco_dict[var] = getattr(cutvars, var)
+            except AttributeError:
+                pass
 
     reco = np.array(tuple(reco_dict.values()), dtype=dt_spec)
 
@@ -422,8 +442,15 @@ def extract_pulses(frame, pulse_series_name):
     from icecube.dataclasses import I3RecoPulseSeriesMap, I3RecoPulseSeriesMapMask  # pylint: disable=no-name-in-module
 
     pulse_series = frame[pulse_series_name]
-    time_range_name = pulse_series_name + 'TimeRange'
-    if time_range_name in frame:
+
+     time_range_name = None
+    if pulse_series_name + 'TimeRange' in frame:
+        time_range_name = pulse_series_name + 'TimeRange'
+    elif 'UncleanedInIcePulsesTimeRange' in frame:
+        # TODO: use WaveformRange instead?
+        time_range_name = 'UncleanedInIcePulsesTimeRange'
+
+    if time_range_name is not None:
         i3_time_range = frame[time_range_name]
         time_range = i3_time_range.start, i3_time_range.stop
     else:
@@ -1263,89 +1290,91 @@ def extract_events(
     frame_counter = 0
     finished = False
     while not finished:
-        if i3file.more():
-            try:
-                next_frame = i3file.pop_frame()
-                frame_counter += 1
-            except:
-                sys.stderr.write(
-                    'Failed to pop frame #{}, source file "{}"\n'.format(frame_counter + 1, fpath)
+        try:
+            if i3file.more():
+                try:
+                    next_frame = i3file.pop_frame()
+                    frame_counter += 1
+                except:
+                    sys.stderr.write('Failed to pop frame #{}\n'.format(frame_counter + 1))
+                    raise
+            else:
+                finished = True
+
+            if len(frame_buffer) == 0 or next_frame.Stop != I3Frame.DAQ:
+                if next_frame.Stop in [I3Frame.DAQ, I3Frame.Physics]:
+                    frame_buffer.append(next_frame)
+                if not finished:
+                    continue
+
+            if not frame_buffer:
+                raise ValueError(
+                    'Empty frame buffer; possibly no Q frames in file "{}"'
+                    .format(fpath)
                 )
-                raise
-        else:
-            finished = True
 
-        if len(frame_buffer) == 0 or next_frame.Stop != I3Frame.DAQ:
-            if next_frame.Stop in [I3Frame.DAQ, I3Frame.Physics]:
-                frame_buffer.append(next_frame)
-            if not finished:
-                continue
+            frame = frame_buffer[-1]
 
-        if not frame_buffer:
-            raise ValueError(
-                'Empty frame buffer; possibly no Q fraomes in file "{}"'
-                .format(fpath)
-            )
+            i3header = frame['I3EventHeader']
 
-        frame = frame_buffer[-1]
+            event = OrderedDict()
+            event['run_id'] = run_id = i3header.run_id
+            event['sub_run_id'] = i3header.sub_run_id
+            event['event_id'] = event_id = i3header.event_id
+            event['sub_event_id'] = i3header.sub_event_id
+            # TODO: map "state" string to uint enum value if defined in I3
+            # software? np dtypes don't handle ragged data like strings but I don't
+            # want to invent an encoding of our own if at all possible
+            #event['sub_event_stream'] = sub_event_stream
+            event['state'] = i3header.state
 
-        i3header = frame['I3EventHeader']
+            event['start_time'] = i3header.start_time.utc_daq_time
+            event['end_time'] = i3header.end_time.utc_daq_time
 
-        event = OrderedDict()
-        event['run_id'] = run_id = i3header.run_id
-        event['sub_run_id'] = i3header.sub_run_id
-        event['event_id'] = event_id = i3header.event_id
-        event['sub_event_id'] = i3header.sub_event_id
-        # TODO: map "state" string to uint enum value if defined in I3
-        # software? np dtypes don't handle ragged data like strings but I don't
-        # want to invent an encoding of our own if at all possible
-        #event['sub_event_stream'] = sub_event_stream
-        event['state'] = i3header.state
+            if 'TimeShift' in frame:
+                event['TimeShift'] = frame['TimeShift'].value
 
-        event['start_time'] = i3header.start_time.utc_daq_time
-        event['end_time'] = i3header.end_time.utc_daq_time
+            if truth:
+                try:
+                    event_truth = extract_truth(
+                        frame, run_id=run_id, event_id=event_id
+                    )
+                except:
+                    sys.stderr.write(
+                        'Failed to get truth from "{}" event_id {} (frame {})\n'
+                        .format(fpath, event_id, frame_counter)
+                    )
+                    raise
+                truths.append(event_truth)
+                event['unique_id'] = truths[-1]['unique_id']
 
-        if 'TimeShift' in frame:
-            event['TimeShift'] = frame['TimeShift'].value
+            events.append(event)
 
-        if truth:
-            try:
-                event_truth = extract_truth(
-                    frame, run_id=run_id, event_id=event_id
+            for photon_name in photons:
+                photons_d[photon_name].append(extract_photons(frame, photon_name))
+
+            for pulse_series_name in pulses:
+                pulses_list, time_range = extract_pulses(frame, pulse_series_name)
+                pulses_d[pulse_series_name].append(pulses_list)
+                tr_key = pulse_series_name + 'TimeRange'
+                if time_range is not None:
+                    if tr_key not in pulses_d:
+                        pulses_d[tr_key] = []
+                    pulses_d[tr_key].append(time_range)
+
+            for reco_name in recos:
+                recos_d[reco_name].append(extract_reco(frame, reco_name))
+
+            for trigger_hierarchy_name in triggers:
+                trigger_hierarchies[trigger_hierarchy_name].append(
+                    extract_trigger_hierarchy(frame, trigger_hierarchy_name)
                 )
-            except:
-                sys.stderr.write(
-                    'Failed to get truth from "{}" event_id {} (frame {})\n'
-                    .format(fpath, event_id, frame_counter)
-                )
-                raise
-            truths.append(event_truth)
-            event['unique_id'] = truths[-1]['unique_id']
 
-        events.append(event)
-
-        for photon_name in photons:
-            photons_d[photon_name].append(extract_photons(frame, photon_name))
-
-        for pulse_series_name in pulses:
-            pulses_list, time_range = extract_pulses(frame, pulse_series_name)
-            pulses_d[pulse_series_name].append(pulses_list)
-            tr_key = pulse_series_name + 'TimeRange'
-            if time_range is not None:
-                if tr_key not in pulses_d:
-                    pulses_d[tr_key] = []
-                pulses_d[tr_key].append(time_range)
-
-        for reco_name in recos:
-            recos_d[reco_name].append(extract_reco(frame, reco_name))
-
-        for trigger_hierarchy_name in triggers:
-            trigger_hierarchies[trigger_hierarchy_name].append(
-                extract_trigger_hierarchy(frame, trigger_hierarchy_name)
-            )
-
-        # Clear frame buffer and start a new "chain" with the next frame
-        frame_buffer = [next_frame]
+            # Clear frame buffer and start a new "chain" with the next frame
+            frame_buffer = [next_frame]
+        except:
+            sys.stderr.write('ERROR! file "{}", frame #{}\n'.format(fpath, frame_counter + 1))
+            raise
 
     # Sanity check that a pulse series that has corresponding TimeRange field
     # exists in all frames, since this is populated by appending to a list (so
