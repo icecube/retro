@@ -41,7 +41,15 @@ from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def weight_diff_tails(diff, weights, inbin_lower, inbin_upper, range_lower, range_upper):
+def weight_diff_tails(
+    diff,
+    weights,
+    inbin_lower,
+    inbin_upper,
+    range_lower,
+    range_upper,
+    max_weight=np.inf,
+):
     """Calculate weights that compensate for fewer points in the inherent tails
     of the difference between two values drawn from a limited range (e.g.
     coszen- or zenith-error).
@@ -58,7 +66,9 @@ def weight_diff_tails(diff, weights, inbin_lower, inbin_upper, range_lower, rang
 
     inbin_lower, inbin_upper : floats
 
-    lim_lower, lim_upper : floats
+    range_lower, range_upper : floats
+
+    max_weight : float, optional
 
     Returns
     -------
@@ -83,25 +93,31 @@ def weight_diff_tails(diff, weights, inbin_lower, inbin_upper, range_lower, rang
     lower_tail_width = lower_tail_upper_lim - diff_lower_lim
     upper_tail_width = diff_upper_lim - upper_tail_lower_lim
 
+    max_nonweight = min(1.0, max_weight)
+
     total = 0.0
     if len(weights) > 0:
         for n, orig_weight in enumerate(weights):
             if diff[n] > upper_tail_lower_lim:
-                new_weight = orig_weight * upper_tail_width / (diff_upper_lim - diff[n])
+                new_weight = (
+                    orig_weight * min(max_weight, upper_tail_width / (diff_upper_lim - diff[n]))
+                )
             elif diff[n] < lower_tail_upper_lim:
-                new_weight = orig_weight * lower_tail_width / (diff[n] - diff_lower_lim)
+                new_weight = (
+                    orig_weight * min(max_weight, lower_tail_width / (diff[n] - diff_lower_lim))
+                )
             else:
-                new_weight = orig_weight
+                new_weight = orig_weight * max_nonweight
             total += new_weight
             new_weights[n] = new_weight
     else:
         for n, diff[n] in enumerate(diff):
             if diff[n] > upper_tail_lower_lim:
-                new_weight = upper_tail_width / (diff_upper_lim - diff[n])
+                new_weight = min(max_weight, upper_tail_width / (diff_upper_lim - diff[n]))
             elif diff[n] < lower_tail_upper_lim:
-                new_weight = lower_tail_width / (diff[n] - diff_lower_lim)
+                new_weight = min(max_weight, lower_tail_width / (diff[n] - diff_lower_lim))
             else:
-                new_weight = 1.0
+                new_weight = max_nonweight
             total += new_weight
             new_weights[n] = new_weight
 
