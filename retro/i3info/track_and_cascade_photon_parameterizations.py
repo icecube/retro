@@ -21,6 +21,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import NOMINAL_ICE_DENSITY
+from retro.utils.cascade_energy_conversion import hadr2em
 
 
 def main():
@@ -59,7 +60,6 @@ def main():
     #densities = np.array(densities)
     #print(np.min(densities), np.mean(densities), np.median(densities), np.max(densities))
 
-
     # PPC parametrerization
     #
     # Following adapted slightly from C++ source at
@@ -77,8 +77,9 @@ def main():
     # therefore, assume it's 1)
     photons_per_gev_em_cscd = 5.21 * 0.924 / NOMINAL_ICE_DENSITY * photons_per_m_trck
 
-    # TODO: what factor to use here?
-    #photons_per_gev_had_cscd = photons_per_gev_em_cscd * ???
+    em_equiv_energy_for_1gev_hadr = hadr2em(1.0)
+    photons_per_gev_had_cscd = em_equiv_energy_for_1gev_hadr * photons_per_gev_em_cscd
+
     m_per_gev_trck = 15 / 3.33
     photons_per_gev_trck = photons_per_m_trck * m_per_gev_trck
 
@@ -92,15 +93,10 @@ def main():
     print('Electromagnetic cascade:')
     print('  %10.3f photons per GeV' % photons_per_gev_em_cscd)
     print('')
-    #print('Hadronic cascade:')
-    #print('  %10.3f photons per GeV' % photons_per_gev_had_cscd)
-    #print('')
-    print('10 GeV EM cascade      : %10.3f photons'
-          % (10*photons_per_gev_em_cscd))
-    #print('10 GeV hadronic cascade: %10.3f photons'
-    #      % (10*photons_per_gev_had_cscd))
-    print('10 GeV muon track      : %10.3f photons'
-          % (10*photons_per_m_trck))
+    print('Hadronic cascade:')
+    print('  %10.3f photons AT 1 GeV (luminisoty is NOT linear wrt hadronic energy!)'
+          % photons_per_gev_had_cscd)
+    print('')
 
 
 if __name__ == '__main__':
