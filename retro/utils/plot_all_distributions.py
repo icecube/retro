@@ -6,9 +6,11 @@ Plot distributions and error distributions comparing Retro to Pegleg (and truth)
 
 from __future__ import absolute_import, division, print_function
 
+from collections import OrderedDict
 from os.path import expanduser, expandvars, isdir, join
 from os import makedirs
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -40,25 +42,69 @@ def plot_comparison(
     xlab=None,
     pl_label='Pegleg',
     retro_label='Retro',
-    include_stats=True,
+    truth_label='Truth',
+    stats=('iq50', 'median'),
+    n_decimals=3,
+    leg_loc='best',
+    ax=None,
 ):
     """Plot comparison between pegleg, retro, and possibly truth distributions."""
-    fig, ax = plt.subplots(figsize=(8, 3), dpi=120)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 3), dpi=120)
+        newfig = True
+    else:
+        fig = ax.get_figure()
+        newfig = False
+
     if logx:
         b = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), nbins)
     else:
         b = np.linspace(xlim[0], xlim[1], nbins)
 
-    if truth is None and include_stats:
-        if pegleg is not None:
-            pl_label = (
-                '    {}\nmean  {:7.3f}\nmed   {:7.3f}\nIQ50% {:7.3f}'
-                .format(pl_label, np.mean(pegleg), np.median(pegleg), interquartile_range(pegleg))
+    if stats:
+        stats = tuple(s.lower() for s in stats)
+        stats_labels = {
+            k: v for k, v in dict(iq50='IQ 50%', mean='mean', median='median').items()
+            if k in stats
+        }
+        label_chars = 1 + int(np.max([len(l) for l in stats_labels.values()]))
+        number_chars = 2 + n_decimals + int(n_decimals > 0)
+        fmt_str = '{:%d.%df}' % (number_chars, n_decimals)
+        total_chars = label_chars + number_chars
+
+        stats = tuple(s.lower() for s in stats)
+        pl_label_ = pl_label
+        retro_label_ = retro_label
+        truth_label_ = truth_label
+        pl_sublabs = []
+        retro_sublabs = []
+        truth_sublabs = []
+        for stat in stats:
+            label = stats_labels[stat].ljust(label_chars) + fmt_str
+            if stat == 'iq50':
+                pl_sublabs.append(label.format(interquartile_range(pegleg)))
+                retro_sublabs.append(label.format(interquartile_range(retro)))
+                if truth is not None:
+                    truth_sublabs.append(label.format(interquartile_range(truth)))
+
+            elif stat == 'median':
+                pl_sublabs.append(label.format(np.median(pegleg)))
+                retro_sublabs.append(label.format(np.median(retro)))
+                if truth is not None:
+                    truth_sublabs.append(label.format(np.median(truth)))
+
+            elif stat == 'mean':
+                pl_sublabs.append(label.format(np.mean(pegleg)))
+                retro_sublabs.append(label.format(np.mean(retro)))
+                if truth is not None:
+                    truth_sublabs.append(label.format(np.mean(truth)))
+
+        pl_label = '    {}\n{}'.format(pl_label_, '\n'.join(pl_sublabs))
+        retro_label = '    {}\n{}'.format(retro_label_, '\n'.join(retro_sublabs))
+        if truth is not None:
+            truth_label = '    {}\n{}'.format(
+                truth_label_, '\n'.join(retro_sublabs)
             )
-        retro_label = (
-            '    {}\nmean  {:7.3f}\nmed   {:7.3f}\nIQ50% {:7.3f}'
-            .format(retro_label, np.mean(retro), np.median(retro), interquartile_range(retro))
-        )
 
     if truth is not None:
         _, b, _ = ax.hist(
@@ -67,15 +113,15 @@ def plot_comparison(
             histtype='stepfilled',
             lw=2,
             color=(0.7,)*3,
-            label='Truth',
+            label=truth_label,
         )
-    if pegleg is not None:
-        _, b, _ = ax.hist(pegleg, bins=b, histtype='step', lw=2, color='C1', label=pl_label)
     _, b, _ = ax.hist(retro, bins=b, histtype='step', lw=2, color='C0', label=retro_label)
+    _, b, _ = ax.hist(pegleg, bins=b, histtype='step', lw=2, color='C1', label=pl_label,
+                     zorder=-1)
 
     ylim = ax.get_ylim()
     if truth is None:
-        ax.plot([0, 0], ylim, 'k-', lw=0.5)
+        ax.plot([0, 0], ylim, 'k-', lw=0.5, zorder=-10)
 
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
@@ -83,11 +129,39 @@ def plot_comparison(
         ax.set_xscale('log')
     if logy:
         ax.set_yscale('log')
-    ax.legend(loc='best', prop={'family': 'monospace'})
+    leg = ax.legend(loc=leg_loc, prop={'family': 'monospace'}, frameon=False)
+
+    def get_children(obj):
+        ch = [obj]
+        try:
+            children = obj.get_children()
+        except:
+            return ch
+        for child in children:
+            ch.extend(get_children(child))
+        return ch
+
+    children = get_children(leg)
+    das = [c for c in children if isinstance(c, mpl.offsetbox.DrawingArea)]
+    rs = [c for c in children if isinstance(c, mpl.patches.Rectangle)]
+    for da in das:
+        da.set_height(0)
+        da.set_width(0)
+        #da.xdescent = 200
+        #da.ydescent = 200
+        offset = da.get_offset()
+        offset = (offset[0] + 200, offset[1] + 200)
+        da.set_offset(offset)
+    for r in rs:
+        r.set_width(15)
+        r.set_height(6.5)
+        r.set_xy((10, 10))
+
     if xlab is not None:
         ax.set_xlabel(xlab)
-    fig.tight_layout()
-    return fig, ax
+    if newfig:
+        fig.tight_layout()
+    return fig, ax, leg
 
 
 def plot_all_distributions(
@@ -115,34 +189,37 @@ def plot_all_distributions(
     n_en=50,
     n_ang=50,
 ):
-    """Plot all distributions comparing Pegleg, Retro, and, where appropriate, truth."""
+    """Plot all distributions comparing Pegleg, Retro, and, where appropriate, truth.
+
+    Returns
+    -------
+    axes : OrderedDict
+
+    """
     if outdir is not None:
         outdir = expanduser(expandvars(outdir))
         if not isdir(outdir):
             makedirs(outdir, mode=0o750)
 
+    axes = OrderedDict()
+
     truth = evts.x
-
-    pegleg = None
-    pl_err = None
-    if p_reco is not None:
-        pegleg = evts['{}_x'.format(p_reco)]
-        pl_err = pegleg - truth
-
+    pegleg = evts['{}_x'.format(p_reco)]
     retro = evts['{}_x'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_xe,
         xlab='reco x - true x (m)',
     )
+    axes['x_err'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_x_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
@@ -150,29 +227,29 @@ def plot_all_distributions(
         nbins=n_x,
         xlab='x (m)',
     )
+    axes['x'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_x')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
     truth = evts.y
-    if p_reco is not None:
-        pegleg = evts['{}_y'.format(p_reco)]
-        pl_err = pegleg - truth
+    pegleg = evts['{}_y'.format(p_reco)]
     retro = evts['{}_y'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_ye,
         xlab='reco y - true y (m)',
     )
+    axes['y_err'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_y_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
@@ -180,29 +257,29 @@ def plot_all_distributions(
         nbins=n_y,
         xlab='y (m)',
     )
+    axes['y'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_y')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
     truth = evts.z
-    if p_reco is not None:
-        pegleg = evts['{}_z'.format(p_reco)]
-        pl_err = pegleg - truth
+    pegleg = evts['{}_z'.format(p_reco)]
     retro = evts['{}_z'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_ze,
         xlab='reco z - true z (m)',
     )
+    axes['z_err'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_z_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
@@ -210,29 +287,29 @@ def plot_all_distributions(
         nbins=n_z,
         xlab='z (m)',
     )
+    axes['z'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_z')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
     truth = evts.time
-    if p_reco is not None:
-        pegleg = evts['{}_time'.format(p_reco)]
-        pl_err = pegleg - truth
+    pegleg = evts['{}_time'.format(p_reco)]
     retro = evts['{}_time'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
         retro=retro - truth,
         xlim=(-100, 200),
         nbins=n_te,
         xlab='reco time - true time (ns)',
     )
+    axes['time_err'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_time_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
@@ -240,139 +317,137 @@ def plot_all_distributions(
         nbins=n_t,
         xlab='time (ns)',
     )
+    axes['time'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_time')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
     truth = np.arccos(evts.coszen)
-    if p_reco is not None:
-        pegleg = evts['{}_track_zenith'.format(p_reco)]
-        pl_err = pegleg - truth
+    pegleg = evts['{}_track_zenith'.format(p_reco)]
     retro = evts['{}_track_zenith'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
         retro=retro - truth,
         xlim=(-.75, .75),
         nbins=n_zenerr,
-        xlab='reco zenith - true zenith (rad)',
+        xlab=r'reco $\nu$ zenith - true $\nu$ zenith (rad)',
     )
+    axes['zenith_err'] = ax
     if outdir is not None:
-        fbp = join(outdir, 'dist_track_zenith_error')
+        fbp = join(outdir, 'dist_neutrino_zenith_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
         xlim=(0, np.pi),
         nbins=n_zen,
-        xlab='zenith angle (rad)',
+        xlab=r'$\nu$ zenith (rad)',
     )
+    axes['zenith'] = ax
     if outdir is not None:
-        fbp = join(outdir, 'dist_zenith')
+        fbp = join(outdir, 'dist_neutrino_zenith')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
     truth = evts.azimuth
-    if p_reco is not None:
-        pegleg = evts['{}_track_azimuth'.format(p_reco)]
-        pl_err = (pegleg - truth + np.pi) % (2*np.pi) - np.pi
+    pegleg = evts['{}_track_azimuth'.format(p_reco)]
     retro = evts['{}_track_azimuth'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
-        retro=((retro - truth + np.pi) % (2*np.pi)) - np.pi,
+    fig, ax, leg = plot_comparison(
+        pegleg=(pegleg - truth + np.pi) % (2*np.pi) - np.pi,
+        retro=(retro - truth + np.pi) % (2*np.pi) - np.pi,
         xlim=(-np.pi/8, np.pi/8),
         nbins=n_azerr,
-        xlab='reco azimuth - true azimuth (rad)',
+        xlab=r'reco $\nu$ azimuth - true $\nu$ azimuth (rad)',
     )
+    axes['azimuth_err'] = ax
     if outdir is not None:
-        fbp = join(outdir, 'dist_track_azimuth_error')
+        fbp = join(outdir, 'dist_neutrino_azimuth_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
         xlim=(0, 2*np.pi),
         nbins=n_az,
-        xlab='azimuth angle (rad)',
+        xlab=r'$\nu$ azimuth (rad)',
     )
-    #y0, y1 = ax.get_ylim()
-    #ax.set_ylim(y1*0.7, y1*.98)
+    axes['azimuth'] = ax
     ax.legend(loc='lower right')
     if outdir is not None:
-        fbp = join(outdir, 'dist_track_azimuth')
+        fbp = join(outdir, 'dist_neutrino_azimuth')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
-    if p_reco is not None:
-        pl_err = evts['{}_track_angle_error'.format(p_reco)]
+    p_err = evts['{}_track_angle_error'.format(p_reco)]
     r_err = evts['{}_track_angle_error'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=p_err,
         retro=r_err,
         xlim=(0, np.pi),
         nbins=n_ang,
-        xlab=r'track angle error (rad)',
+        xlab=r'$\nu$ angle error (rad)',
     )
+    axes['angle_err'] = ax
     if outdir is not None:
-        fbp = join(outdir, 'dist_track_angle_error')
+        fbp = join(outdir, 'dist_neutrino_angle_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
-    #truth = evts.cascade_energy
-    #if p_reco is not None:
-    #    pegleg = evts['{}_cascade_energy'.format(p_reco)]
-    #    pl_err = pegleg - truth
-    #retro = evts['{}_cascade_energy'.format(r_reco)]
+    truth = evts.cascade_energy
+    pegleg = evts['{}_cascade_energy'.format(p_reco)]
+    retro = evts['{}_cascade_energy'.format(r_reco)]
 
-    #fig, ax = plot_comparison(
-    #    pegleg=pl_err,
-    #    retro=retro - truth,
-    #    xlim=(-20, 20),
-    #    nbins=n_cscdenerr,
-    #    xlab='reco cascade energy - true cascade energy (GeV)',
-    #)
-    #if outdir is not None:
-    #    fbp = join(outdir, 'dist_cascade_energy_error')
-    #    fig.savefig(fbp + '.png', dpi=120)
-    #    fig.savefig(fbp + '.pdf')
-    #fig, ax = plot_comparison(
-    #    pegleg=pegleg,
-    #    retro=retro,
-    #    truth=truth,
-    #    xlim=(0.0, 20),
-    #    nbins=n_cscden,
-    #    logx=False,
-    #    xlab='cascade energy (GeV)',
-    #)
-    #if outdir is not None:
-    #    fbp = join(outdir, 'dist_cascade_energy')
-    #    fig.savefig(fbp + '.png', dpi=120)
-    #    fig.savefig(fbp + '.pdf')
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
+        retro=retro - truth,
+        xlim=(-20, 20),
+        nbins=n_cscdenerr,
+        xlab='reco cascade energy - true cascade energy (GeV)',
+    )
+    axes['cascade_energy_err'] = ax
+    if outdir is not None:
+        fbp = join(outdir, 'dist_cascade_energy_error')
+        fig.savefig(fbp + '.png', dpi=120)
+        fig.savefig(fbp + '.pdf')
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg,
+        retro=retro,
+        truth=truth,
+        xlim=(0.0, 20),
+        nbins=n_cscden,
+        logx=False,
+        xlab='cascade energy (GeV)',
+    )
+    axes['cascade_energy'] = ax
+    if outdir is not None:
+        fbp = join(outdir, 'dist_cascade_energy')
+        fig.savefig(fbp + '.png', dpi=120)
+        fig.savefig(fbp + '.pdf')
 
     truth = evts.track_energy
-    if p_reco is not None:
-        pegleg = evts['{}_track_energy'.format(p_reco)]
-        pl_err = pegleg - truth
+    pegleg = evts['{}_track_energy'.format(p_reco)]
     retro = evts['{}_track_energy'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
         retro=retro - truth,
         xlim=(-30, 40),
         nbins=n_trckenerr,
         xlab='reco track energy - true track energy (GeV)',
     )
+    axes['track_energy_err'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_track_energy_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
@@ -381,30 +456,29 @@ def plot_all_distributions(
         logx=True,
         xlab='track energy (GeV)',
     )
+    axes['track_energy'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_track_energy')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
     truth = evts.energy
-    if p_reco is not None:
-        pegleg = evts['{}_cascade_energy'.format(p_reco)] + evts['{}_track_energy'.format(p_reco)]
-        pl_err = pegleg - truth
-    #retro = evts['{}_cascade_energy'.format(r_reco)]*2 + evts['{}_track_energy'.format(r_reco)]
-    retro = evts['{}_energy'.format(r_reco)]
+    pegleg = evts['{}_cascade_energy'.format(p_reco)] + evts['{}_track_energy'.format(p_reco)]
+    retro = evts['{}_cascade_energy'.format(r_reco)]*2 + evts['{}_track_energy'.format(r_reco)]
 
-    fig, ax = plot_comparison(
-        pegleg=pl_err,
+    fig, ax, leg = plot_comparison(
+        pegleg=pegleg - truth,
         retro=retro - truth,
         xlim=(-40, 40),
         nbins=n_enerr,
         xlab=r'reco $\nu$ energy - true $\nu$ energy (GeV)',
     )
+    axes['neutrino_energy_err'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_neutrino_energy_error')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
-    fig, ax = plot_comparison(
+    fig, ax, leg = plot_comparison(
         pegleg=pegleg,
         retro=retro,
         truth=truth,
@@ -413,7 +487,10 @@ def plot_all_distributions(
         logx=True,
         xlab=r'$\nu$ energy (GeV)',
     )
+    axes['neutrino_energy'] = ax
     if outdir is not None:
         fbp = join(outdir, 'dist_neutrino_energy')
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
+
+    return axes

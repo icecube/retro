@@ -119,9 +119,8 @@ def _linbin_numba(val, start, stop, num):
     val : np.ndarray
     start : float
     stop : float
-    num : int
+    num : int <= 2**31
         Number of bin _edges_ (number of bins is one less than `num`)
-    out_type
 
     Returns
     -------
@@ -129,11 +128,11 @@ def _linbin_numba(val, start, stop, num):
 
     """
     num_bins = num - 1
+    assert num_bins < 2**31
     width = (stop - start) / num_bins
-    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
-    bin_num_flat = bin_num.flat
-    for i, v in enumerate(val.flat):
-        bin_num_flat[i] = (v - start) // width
+    bin_num = np.empty(shape=val.shape, dtype=np.int32)
+    for i in range(val.size):
+        bin_num.flat[i] = (val.flat[i] - start) // width
     return bin_num
 
 
@@ -142,91 +141,118 @@ def _linbin_numpy(val, start, stop, num):
 
     Parameters
     ----------
-    val : np.ndarray
+    val : scalar or array
     start : float
     stop : float
-    num : int
+    num : int <= 2**31
         Number of bin _edges_ (number of bins is one less than `num`)
 
     Returns
     -------
-    bin_num : np.ndarray of dtype `out_type`
+    bin_num : scalar or ndarray of dtype np.int32
 
     """
     num_bins = num - 1
+    assert num_bins < 2**31
     width = (stop - start) / num_bins
     bin_num = (val - start) // width
-    #if np.isscalar(bin_num):
-    #    bin_num = int(bin_num)
-    #else:
-    #    bin_num =
+    if np.isscalar(bin_num):
+        bin_num = np.int32(bin_num)
+    else:
+        bin_num = bin_num.astype(np.int32)
     return bin_num
 
 
+# Pick the fastest implementation
 linbin = _linbin_numba # pylint: disable=invalid-name
 
 
 def test_linbin():
     """Unit tests for function `linbin`."""
     kw = dict(start=0, stop=100, num=200)
-    bin_edges = np.linspace(**kw)
 
-    rand = np.random.RandomState(seed=0)
-    x = rand.uniform(0, 100, int(1e6))
+    for ftype in [np.float64]:
+        print("ftype:", ftype)
+        bin_edges = np.linspace(**kw).astype(ftype)
+        rand = np.random.RandomState(seed=0)
+        x = rand.uniform(0, 100, int(1e6)).astype(ftype)
 
-    test_args = (np.array([0.0]), np.float64(kw['start']),
-                 np.float64(kw['stop']), np.uint32(kw['num']))
-    _linbin_numba(*test_args)
+        test_args = (
+            np.array([0.0], dtype=ftype),
+            ftype(kw['start']),
+            ftype(kw['stop']),
+            np.int32(kw['num']),
+        )
+        _linbin_numba(*test_args)
 
-    test_args = (x, np.float64(kw['start']), np.float64(kw['stop']),
-                 np.uint32(kw['num']))
-    t0 = time()
-    bins_ref = np.digitize(x, bin_edges) - 1
-    t1 = time()
-    bins_test_numba = _linbin_numba(*test_args)
-    t2 = time()
-    bins_test_numpy = _linbin_numpy(*test_args)
-    t3 = time()
+        test_args = (
+            x,
+            ftype(kw['start']),
+            ftype(kw['stop']),
+            np.int32(kw['num']),
+        )
+        t0 = time()
+        bins_ref = np.digitize(x, bin_edges) - 1
+        t1 = time()
+        bins_test_numba = _linbin_numba(*test_args)
+        t2 = time()
+        bins_test_numpy = _linbin_numpy(*test_args)
+        t3 = time()
 
-    print('np.digitize:   {} s'.format(t1 - t0))
-    print('_linbin_numba: {} s'.format(t2 - t1))
-    print('_linbin_numpy: {} s'.format(t3 - t2))
+        print('np.digitize:   {} s'.format(t1 - t0))
+        print('_linbin_numba: {} s'.format(t2 - t1))
+        print('_linbin_numpy: {} s'.format(t3 - t2))
 
-    assert np.all(bins_test_numba == bins_ref)
-    assert np.all(bins_test_numpy == bins_ref)
-    #assert isinstance(_linbin_numpy(1, **kw), int)
+        assert np.all(bins_test_numba == bins_ref), (
+            "\n{}\n{}\n{}".format(
+                x[bins_test_numba != bins_ref],
+                bins_test_numba[bins_test_numba != bins_ref],
+                bins_ref[bins_test_numba != bins_ref]
+            )
+        )
+        assert np.all(bins_test_numpy == bins_ref), (
+            "\n{}\n{}\n{}".format(
+                x[bins_test_numpy != bins_ref],
+                bins_test_numpy[bins_test_numpy != bins_ref],
+                bins_ref[bins_test_numpy != bins_ref]
+            )
+        )
+        scalar_result = _linbin_numpy(1, **kw)
+        assert isinstance(scalar_result, np.int32), type(scalar_result)
+        scalar_result = _linbin_numpy(np.array([1]), **kw)[0]
+        assert isinstance(scalar_result, np.int32), type(scalar_result)
+        print("")
 
     print('<< PASS : test_linbin >>')
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
-def _powerbin_numba(val, start, stop, num, power): #, out_type=np.uint64):
+def _powerbin_numba(val, start, stop, num, power):
     """Determine the bin number(s) in a powerspace binning of value(s).
 
     Parameters
     ----------
-    val : np.ndarray
+    val : array
     start : float
     stop : float
-    num : int
+    num : int <= 2**31
         Number of bin _edges_ (number of bins is one less than `num`)
     power : float
-    out_type
 
     Returns
     -------
-    bin_num : np.ndarray of dtype `out_type`
+    bin_num : ndarray of dtype np.int32
 
     """
     num_bins = num - 1
+    assert num_bins < 2**31
     inv_power = 1.0 / power
     inv_power_start = start**inv_power
     inv_power_stop = stop**inv_power
     inv_power_width = (inv_power_stop - inv_power_start) / num_bins
-    bin_num = np.empty(shape=val.shape, dtype=np.uint32)
-    bin_num_flat = bin_num.flat
-    for i, v in enumerate(val.flat):
-        bin_num_flat[i] = (v**inv_power - inv_power_start) // inv_power_width
+    bin_num = np.empty(shape=val.shape, dtype=np.int32)
+    for i in range(val.size):
+        bin_num.flat[i] = (val.flat[i]**inv_power - inv_power_start) // inv_power_width
     return bin_num
 
 
@@ -238,93 +264,84 @@ def _powerbin_numpy(val, start, stop, num, power):
     val : scalar or array
     start : float
     stop : float
-    num : int
+    num : int <= 2**31
         Number of bin _edges_ (number of bins is one less than `num`)
     power : float
 
     Returns
     -------
-    bin_num : int or np.ndarray of dtype int
-        If `val` is scalar, returns int; if `val` is a sequence or array-like,
-        returns `np.darray` of dtype int.
+    bin_num : scalar or ndarray of dtype np.int32
 
     """
     num_bins = num - 1
+    assert num_bins < 2**31
     inv_power = 1 / power
     inv_power_start = start**inv_power
     inv_power_stop = stop**inv_power
     inv_power_width = (inv_power_stop - inv_power_start) / num_bins
     bin_num = (val**inv_power - inv_power_start) // inv_power_width
     if np.isscalar(bin_num):
-        bin_num = int(bin_num)
+        bin_num = np.int32(bin_num)
     else:
-        bin_num = bin_num.astype(int)
+        bin_num = bin_num.astype(np.int32)
     return bin_num
 
 
-powerbin = _powerbin_numpy # pylint: disable=invalid-name
-
-
-#def powerbin(val, start, stop, num, power):
-#    """Determine the bin number(s) in a powerspace binning of value(s).
-#
-#    Parameters
-#    ----------
-#    val : scalar or array
-#    start : float
-#    stop : float
-#    num : int
-#        Number of bin _edges_ (number of bins is one less than `num`)
-#    power : float
-#
-#    Returns
-#    -------
-#    bin_num : int or np.ndarray of dtype int
-#        If `val` is scalar, returns int; if `val` is a sequence or array-like,
-#        returns `np.darray` of dtype int.
-#
-#    """
-#    if np.isscalar(val):
-#        val = np.array(val)
-#    else:
-#        val = np.asarray(val)
-#
-#    if num < 1000:
-#        pass
+# Pick the fastest implementation
+powerbin = _powerbin_numba # pylint: disable=invalid-name
 
 
 def test_powerbin():
     """Unit tests for function `powerbin`."""
     kw = dict(start=0, stop=100, num=100, power=2)
-    bin_edges = powerspace(**kw)
 
     rand = np.random.RandomState(seed=0)
-    x = rand.uniform(0, 100, int(1e6))
 
-    ftype = np.float32
-    utype = np.uint32
-    test_args = (ftype(kw['start']), ftype(kw['stop']),
-                 utype(kw['num']), utype(kw['power']))
+    for ftype in [np.float64]:
+        bin_edges = powerspace(**kw).astype(ftype)
+        print(ftype)
+        utype = np.int32
+        x = rand.uniform(0, 100, int(1e6)).astype(ftype)
+        test_args = (
+            ftype(kw['start']),
+            ftype(kw['stop']),
+            utype(kw['num']),
+            utype(kw['power']),
+        )
 
-    # Run once to force compilation
-    _powerbin_numba(np.array([0.0], dtype=ftype), *test_args)
+        # Run once to force compilation
+        _powerbin_numba(np.array([0.0], dtype=ftype), *test_args)
 
-    # Run actual tests / take timings
-    t0 = time()
-    bins_ref = np.digitize(x, bin_edges) - 1
-    t1 = time()
-    bins_test_numba = _powerbin_numba(x, *test_args)
-    t2 = time()
-    bins_test_numpy = _powerbin_numpy(x, *test_args)
-    t3 = time()
+        # Run actual tests / take timings
+        t0 = time()
+        bins_ref = np.digitize(x, bin_edges) - 1
+        t1 = time()
+        bins_test_numba = _powerbin_numba(x, *test_args)
+        t2 = time()
+        bins_test_numpy = _powerbin_numpy(x, *test_args)
+        t3 = time()
 
-    print('np.digitize:     {:e} s'.format(t1 - t0))
-    print('_powerbin_numba: {:e} s'.format(t2 - t1))
-    print('_powerbin_numpy: {:e} s'.format(t3 - t2))
+        print('np.digitize:     {:e} s'.format(t1 - t0))
+        print('_powerbin_numba: {:e} s'.format(t2 - t1))
+        print('_powerbin_numpy: {:e} s'.format(t3 - t2))
 
-    assert np.all(bins_test_numba == bins_ref), str(bins_test_numba) + '\n' + str(bins_ref)
-    assert np.all(bins_test_numpy == bins_ref), str(bins_test_numpy) + '\n' + str(bins_ref)
-    #assert isinstance(_powerbin_numpy(1, **kw), int)
+        assert np.all(bins_test_numba == bins_ref), (
+            "{}\n{}".format(
+                bins_test_numba[bins_test_numba != bins_ref],
+                bins_ref[bins_test_numba != bins_ref]
+            )
+        )
+        assert np.all(bins_test_numpy == bins_ref), (
+            "{}\n{}".format(
+                bins_test_numpy[bins_test_numpy != bins_ref],
+                bins_ref[bins_test_numpy != bins_ref]
+            )
+        )
+        scalar_result = _powerbin_numpy(1, **kw)
+        assert isinstance(scalar_result, np.int32), type(scalar_result)
+        scalar_result = _powerbin_numba(np.array([1]), **kw)[0]
+        assert isinstance(scalar_result, np.int32), type(scalar_result)
+        print('')
 
     print('<< PASS : test_powerbin >>')
 
@@ -370,10 +387,25 @@ def inv_power_2nd_diff(power, edges):
     return np.diff(edges**(1/power), n=2)
 
 
-def infer_power(edges, dtype=np.float64):
-    """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``."""
-    first_three_edges = edges[:3]
+def infer_power(edges, dtype=None):
+    """Infer the power used for bin edges evenly spaced w.r.t. ``x**power``.
+
+    Parameters
+    ----------
+    edges : array
+    dtype : numpy floating dtype, optional
+        Sets the precision for the solver (to 4*dtype.eps). Defaults to
+        `edges.dtype`.
+
+    Returns
+    -------
+    power : float
+
+    """
     atol = 1e-15
+    if dtype is None:
+        dtype = edges.dtype
+    first_three_edges = edges[:3]
     rtol = 4*np.finfo(dtype).eps
     power = None
     try:
@@ -449,7 +481,7 @@ def sample_powerlaw_binning(edges, samples_per_bin):
 
 def generate_digitizer(bin_edges, clip=True):
     """Factory to generate a specialized Numba function for "digitizing" data
-    (i.e., returning which bin a value fall within).
+    (i.e., returning which bin a value falls within).
 
     Parameters
     ----------
@@ -611,7 +643,7 @@ def generate_digitizer(bin_edges, clip=True):
 
         """.format(bindescr)
     )
-    digitize = numba_jit(fastmath=True, nogil=True, cache=True)(digitize)
+    digitize = numba_jit(**DFLT_NUMBA_JIT_KWARGS)(digitize)
 
     if DEBUG:
         print(bindescr)
@@ -622,7 +654,10 @@ def generate_digitizer(bin_edges, clip=True):
 def test_generate_digitizer():
     """Test the functions that `generate_digitizer` produces."""
     # TODO: use local file for this test
-    meta = load_pickle('/home/icecube/retro/tables/large_5d_notilt_combined/stacked/stacked_ckv_template_map_meta.pkl')
+    meta = load_pickle(
+        '/home/icecube/retro/tables/'
+        'large_5d_notilt_combined/stacked/stacked_ckv_template_map_meta.pkl'
+    )
     binning = meta['binning']
 
     for dim, edges in binning.items():
@@ -858,23 +893,21 @@ def cart2sph(x, y, z, r, theta, phi):
         theta_flat[idx] = math.acos(zfi / rfi)
 
 
-#def cart2sph_np(x, y, z):
-#    rho_sq = x**2 + y**2
-#    rho_mask = rho_sq != 0
-#
-#    r = np.sqrt(rho_sq + z**2)
-#    r_mask = r != 0
-#
-#    theta = np.zeros_like(x)
-#    theta[r_mask] = math.acos(z[r_mask] / r[r_mask])
-#
-#    phi = np.zeros_like(x)
-#    phi[rho_mask] = np.atan2(y[rho_mask], x[rho_mask])
-#
-#    return r, theta, phi
-
-
 def cart2sph_np(x, y, z):
+    """Convert Cartesian (x, y, z) coordinates into spherical (r, theta, phi)
+    coordinates, where the latter follows the convention that theta is the
+    zenith angle from the z-axis towards the xy-plane (in [0, pi]) and phi is
+    the azimuthal angle from the x-axis towards the y-axis (in [0, 2pi)).
+
+    Parameters
+    ----------
+    x, y, z : scalars or arrays of same shape
+
+    Returns
+    -------
+    r, theta, phi : scalars or arrays of same shape as {x, y, z}
+
+    """
     is_scalar = np.isscalar(x) and np.isscalar(y) and np.isscalar(z)
     r = np.sqrt(x**2 + y**2 + z**2)
     if is_scalar:
@@ -891,6 +924,20 @@ def cart2sph_np(x, y, z):
 
 
 def sph2cart_np(r, theta, phi):
+    """Convert spherical (r, theta, phi) coordinates into Cartesian (x, y, z)
+    coordinates, where the former follows the convention that theta is the
+    zenith angle from the z-axis towards the xy-plane (in [0, pi]) and phi is
+    the azimuthal angle from the x-axis towards the y-axis (in [0, 2pi)).
+
+    Parameters
+    ----------
+    r, theta, phi : scalars or arrays of same shape
+
+    Returns
+    -------
+    x, y, z : scalars or arrays of same shape as {r, theta, phi}
+
+    """
     z = r * np.cos(theta)
     rho = r * np.sin(theta)
     x = rho * np.cos(phi)
@@ -988,8 +1035,13 @@ def rotate_point(p_theta, p_phi, rot_theta, rot_phi):
 
     q_theta = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
     q_phi = math.atan2(
-        (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
-        (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+        (sin_p_phi * sin_p_theta * cos_rot_phi)
+        + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta)
+        + (sin_rot_phi * sin_rot_theta * cos_p_theta),
+
+        (-sin_p_phi * sin_p_theta * sin_rot_phi)
+        + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta)
+        + (sin_rot_theta * cos_p_theta * cos_rot_phi)
     )
 
     return q_theta, q_phi
@@ -1033,10 +1085,18 @@ def rotate_points(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
         sin_p_phi = math.sin(p_phi[i])
         cos_p_phi = math.cos(p_phi[i])
 
-        q_theta[i] = math.acos(-sin_p_theta * sin_rot_theta * cos_p_phi + cos_p_theta * cos_rot_theta)
+        q_theta[i] = math.acos(
+            -sin_p_theta * sin_rot_theta * cos_p_phi
+            + cos_p_theta * cos_rot_theta
+        )
         q_phi[i] = math.atan2(
-            (sin_p_phi * sin_p_theta * cos_rot_phi) + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta) + (sin_rot_phi * sin_rot_theta * cos_p_theta),
-            (-sin_p_phi * sin_p_theta * sin_rot_phi) + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta) + (sin_rot_theta * cos_p_theta * cos_rot_phi)
+            (sin_p_phi * sin_p_theta * cos_rot_phi)
+            + (sin_p_theta * sin_rot_phi * cos_p_phi * cos_rot_theta)
+            + (sin_rot_phi * sin_rot_theta * cos_p_theta),
+
+            (-sin_p_phi * sin_p_theta * sin_rot_phi)
+            + (sin_p_theta * cos_p_phi * cos_rot_phi * cos_rot_theta)
+            + (sin_rot_theta * cos_p_theta * cos_rot_phi)
         )
 
         q_phi[i] = q_phi[i] % (2 * math.pi)
@@ -1058,6 +1118,7 @@ def fill_from_spher(s):
     s['x'] = s['sinzen'] * s['cosaz']
     s['y'] = s['sinzen'] * s['sinaz']
     s['z'] = s['coszen']
+
 
 def fill_from_cart(s_vector):
     """Fill in the remaining values in SPHER_T type giving the cart, coords. `x`, `y`
@@ -1110,8 +1171,16 @@ def reflect(old, centroid, new):
     cz = centroid['coszen']
     sz = centroid['sinzen']
 
-    new['x'] = 2*ca*cz*sz*z + x*(ca*(-ca*cz**2 + ca*sz**2) - sa**2) + y*(ca*sa + sa*(-ca*cz**2 + ca*sz**2))
-    new['y'] = 2*cz*sa*sz*z + x*(ca*sa + ca*(-cz**2*sa + sa*sz**2)) + y*(-ca**2 + sa*(-cz**2*sa + sa*sz**2))
+    new['x'] = (
+        2*ca*cz*sz*z
+        + x*(ca*(-ca*cz**2 + ca*sz**2) - sa**2)
+        + y*(ca*sa + sa*(-ca*cz**2 + ca*sz**2))
+    )
+    new['y'] = (
+        2*cz*sa*sz*z
+        + x*(ca*sa + ca*(-cz**2*sa + sa*sz**2))
+        + y*(-ca**2 + sa*(-cz**2*sa + sa*sz**2))
+    )
     new['z'] = 2*ca*cz*sz*x + 2*cz*sa*sz*y + z*(cz**2 - sz**2)
 
     fill_from_cart(new)

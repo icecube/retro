@@ -34,13 +34,13 @@ limitations under the License.'''
 
 from collections import OrderedDict
 from copy import copy, deepcopy
-import enum
 from os.path import abspath, dirname
 import sys
 import time
 import traceback
 import warnings
 
+import enum
 import numpy as np
 from scipy.special import gammaln
 from scipy import optimize, stats
@@ -184,17 +184,18 @@ def test_weighted_percentile():
         2.759355114021582,
     ])
     assert np.allclose(vals, ref_vals, atol=0, rtol=1e-12)
+    print("<< PASS : test_weighted_percentile >>")
 
 
 class Est(enum.IntEnum):
-    """estimator kind"""
+    """Methods of estimating a value"""
     max = 0
     mean = 1
     median = 2
     lower_bound = 3
     upper_bound = 4
 
-EST_KINDS = [k.name for k in Est]
+EST_KINDS = [k.name for k in list(Est)]
 NUM_EST_KINDS = len(Est)
 
 

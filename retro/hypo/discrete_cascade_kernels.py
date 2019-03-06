@@ -55,7 +55,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
-    PI, COS_CKV, SIN_CKV, THETA_CKV, CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES,
+    PI, COS_CKV, SIN_CKV, THETA_CKV, EM_CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES,
     SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 )
 from retro.retro_types import SRC_T
@@ -92,7 +92,7 @@ def point_cascade(time, x, y, z, cascade_energy):
     sources[0]['x'] = x
     sources[0]['y'] = y
     sources[0]['z'] = z
-    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * cascade_energy
+    sources[0]['photons'] = EM_CASCADE_PHOTONS_PER_GEV * cascade_energy
 
     return sources
 
@@ -129,7 +129,7 @@ def point_ckv_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_ze
     sources[0]['x'] = x
     sources[0]['y'] = y
     sources[0]['z'] = z
-    sources[0]['photons'] = CASCADE_PHOTONS_PER_GEV * cascade_energy
+    sources[0]['photons'] = EM_CASCADE_PHOTONS_PER_GEV * cascade_energy
 
     sources[0]['dir_costheta'] = dir_costheta
     sources[0]['dir_sintheta'] = dir_sintheta
@@ -310,7 +310,7 @@ def one_dim_cascade(
     final_theta_dist = np.arccos(final_ang_dist[2])
 
     # Define photons per sample
-    photons_per_sample = CASCADE_PHOTONS_PER_GEV * cascade_energy / num_samples
+    photons_per_sample = EM_CASCADE_PHOTONS_PER_GEV * cascade_energy / num_samples
 
     # Create photon array
     sources = np.empty(shape=num_samples, dtype=SRC_T)

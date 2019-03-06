@@ -230,7 +230,6 @@ EVT_HIT_INFO_T = np.dtype([
     ('event_dom_idx', np.uint32),
 ])
 
-# type to store spherical coordinates and handy quantities
 SPHER_T = np.dtype([
     ('zen', np.float32),
     ('az', np.float32),
@@ -242,6 +241,7 @@ SPHER_T = np.dtype([
     ('sinaz', np.float32),
     ('cosaz', np.float32),
 ])
+"""type to store spherical coordinates and handy quantities"""
 
 
 class InteractionType(enum.IntEnum):
@@ -618,11 +618,9 @@ SRC_T = np.dtype([
     ('dir_phi', np.float32),
     ('dir_cosphi', np.float32),
     ('dir_sinphi', np.float32),
-    ('ckv_theta', np.float32),
-    ('ckv_costheta', np.float32),
-    ('ckv_sintheta', np.float32),
 ], align=True)
-"""Each source point is described by (up to) these 9 fields"""
+"""Each source point is described by (up to) these fields (e.g., SRC_OMNI
+doesn't care what dir_* fields are)"""
 
 
 TRACK_T = np.dtype([

@@ -991,7 +991,7 @@ def extract_truth(frame, run_id, event_id):
                 cascade1['hadr_equiv_energy'] = remaining_energy
 
         else: # interaction_type is InteractionType.undefined
-            import icecube.genie_icetray
+            from icecube import genie_icetray  # pylint: disable=unused-variable
             grd = frame['I3GENIEResultDict']
             if not grd['nuel']: # nuel=True means elastic collision, apparently
                 grd_s = '{{{}}}'.format(

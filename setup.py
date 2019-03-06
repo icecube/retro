@@ -47,6 +47,7 @@ setup(
         'scipy>=0.17',
         'sobol',
         'xarray',
+        'funcsigs',
     ],
     packages=find_packages(),
     include_dirs=[np.get_include()],
