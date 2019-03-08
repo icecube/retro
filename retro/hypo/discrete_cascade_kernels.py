@@ -55,8 +55,8 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import numba_jit, DFLT_NUMBA_JIT_KWARGS
 from retro.const import (
-    PI, COS_CKV, SIN_CKV, THETA_CKV, EM_CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES,
-    SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
+    PI, EM_CASCADE_PHOTONS_PER_GEV, EMPTY_SOURCES, SPEED_OF_LIGHT_M_PER_NS,
+    SRC_OMNI, SRC_CKV_BETA1
 )
 from retro.retro_types import SRC_T
 from retro.utils.geom import rotate_point
@@ -137,10 +137,6 @@ def point_ckv_cascade(time, x, y, z, cascade_energy, cascade_azimuth, cascade_ze
     sources[0]['dir_phi'] = opposite_azimuth
     sources[0]['dir_cosphi'] = dir_cosphi
     sources[0]['dir_sinphi'] = dir_sinphi
-
-    sources[0]['ckv_theta'] = THETA_CKV
-    sources[0]['ckv_costheta'] = COS_CKV
-    sources[0]['ckv_sintheta'] = SIN_CKV
 
     return sources
 
@@ -330,10 +326,6 @@ def one_dim_cascade(
     sources['dir_phi'] = final_phi_dist
     sources['dir_cosphi'] = np.cos(final_phi_dist)
     sources['dir_sinphi'] = np.sin(final_phi_dist)
-
-    sources['ckv_theta'] = THETA_CKV
-    sources['ckv_costheta'] = COS_CKV
-    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
 

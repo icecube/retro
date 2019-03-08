@@ -135,7 +135,8 @@ $retro_dir/retro/reco.py \
     --step 1000 \
     \
     --pulses "SplitInIcePulses" \
-    --recos "SPEFit2" \
+    --recos L5_SPEFit11 \
+    --recos LineFit_DC \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SplitInIcePulses" \
     --angsens-model "9"

@@ -47,7 +47,8 @@ import time
 
 import numpy as np
 import pandas as pd
-from scipy import stats
+from scipy.stats import distributions as stats_distributions
+from scipy.stats._continuous_distns import _distn_names  # pylint: disable=protected-access
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -65,9 +66,9 @@ RECOS = tuple(sorted(
     .split()
 ))
 
-PARAMS = ('x', 'y', 'z', 'time')
+PARAMS = ('x', 'y', 'z', 'time', 'coszen', 'azimuth')
 
-DISTRIBUTIONS = tuple(sorted(stats._continuous_distns._distn_names)) #  pylint: disable=protected-access
+DISTRIBUTIONS = tuple(sorted(_distn_names))
 
 #PATH_PROTO = '~/oscNext/pass2/genie/level5/{abs_flav:d}9002/oscNext_genie_level5_pass2.{abs_flav:d}9002.{i:06d}'
 PATH_PROTO = '/data/icecube/sim/ic86/i3/oscNext/pass2/genie/level5/{abs_flav:d}9002/oscNext_genie_level5_pass2.{abs_flav:d}9002.{i:06d}'
@@ -115,6 +116,7 @@ def extract(
     truth_by_flav = OrderedDict()
 
     for abs_flav in ABS_FLAVS:
+        sys.stderr.write('{}\n'.format(abs_flav))
         flav_truth = []
 
         # TODO: use globbing rather than specifying path_proto as such (also
@@ -130,6 +132,7 @@ def extract(
             except IOError:
                 break
             flav_truth.append(vals)
+            sys.stderr.write('{}\n'.format(fpath))
         if flav_truth:
             flav_truth = np.concatenate(flav_truth)
         truth_by_flav[abs_flav] = flav_truth
@@ -149,6 +152,7 @@ def extract(
                 except IOError:
                     break
                 reco_vals.append(vals)
+                sys.stderr.write('{}\n'.format(fpath))
             if reco_vals:
                 reco_vals = np.concatenate(reco_vals)
                 flav_recos[reco] = reco_vals
@@ -183,6 +187,12 @@ def extract(
                 valid_err = err[mask]
                 if len(valid_err) == 0:
                     raise ValueError("{} {}".format(reco, param))
+                if param == 'coszen':
+                    cw, dlims = weight_coszen_tails(
+                        cz_diff=-err,
+                        cz_bin_edges=np.array([range_min, range_max]),
+                        input_weights=np.array([]),
+                    )
                 minval, q5, q25, median, q75, q95, maxval = weighted_percentile(
                     a=err[mask],
                     q=(0, 5, 25, 50, 75, 95, 100),
@@ -216,17 +226,19 @@ def extract(
         outdir = expanduser(expandvars(outdir))
         if not isdir(outdir):
             makedirs(outdir, mode=0o750)
-        reco_perf.to_pickle(join(outdir, RECO_PERF_FNAME))
-        pickle.dump(
-            truth,
-            open(join(outdir, TRUTH_FNAME), 'wb'),
-            protocol=pickle.HIGHEST_PROTOCOL,
-        )
-        pickle.dump(
-            reco_vals,
-            open(join(outdir, RECOS_FNAME), 'wb'),
-            protocol=pickle.HIGHEST_PROTOCOL,
-        )
+            sys.stderr.write('created dir "{}"\n'.format(outdir))
+
+        outfpath = join(outdir, RECO_PERF_FNAME)
+        reco_perf.to_pickle(outfpath)
+        sys.stderr.write('wrote reco performance summary to "{}"\n'.format(outfpath))
+
+        outfpath = join(outdir, TRUTH_FNAME)
+        pickle.dump(truth, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        sys.stderr.write('wrote all truth info to "{}"\n'.format(outfpath))
+
+        outfpath = join(outdir, RECOS_FNAME)
+        pickle.dump(reco_vals, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        sys.stderr.write('wrote all reco info to "{}"\n'.format(outfpath))
 
     return reco_perf, reco_vals, truth
 
@@ -238,6 +250,7 @@ def fit_distributions_to_data(
     outfile=None,
     n_procs=None,
     timeout=None,
+    verbosity=0,
 ):
     """
     Parameters
@@ -254,7 +267,10 @@ def fit_distributions_to_data(
 
     """
     if outfile is not None:
-        assert outfile.endsiwth('.pkl')
+        assert outfile.endswith('.pkl')
+
+    if distributions is None:
+        distributions = DISTRIBUTIONS
 
     if isinstance(distributions, basestring) or not isinstance(distributions, Iterable):
         distributions = [distributions]
@@ -262,11 +278,14 @@ def fit_distributions_to_data(
     tmp_distributions = []
     for distribution in distributions:
         if isinstance(distribution, basestring):
-            distribution = getattr(stats.distributions, distribution)
+            distribution = getattr(stats_distributions, distribution)
         tmp_distributions.append(distribution)
     distributions = tmp_distributions
 
-    sys.stdout.write('distributions to fit:\n' + ' '.join(d.name for d in distributions) + '\n')
+    if verbosity > 0:
+        sys.stdout.write(
+            'distributions to fit:\n{}\n'.format(' '.join(d.name for d in distributions))
+        )
 
     # Get CDF values at each data point
     sortind = np.argsort(data)
@@ -281,7 +300,7 @@ def fit_distributions_to_data(
             cdf=cdf,
             distribution=d,
             x_is_data=True,
-            verbosity=1,
+            verbosity=verbosity,
         )
         for d in distributions
     ]
@@ -324,7 +343,7 @@ def fit_distributions_to_data(
     return results_d
 
 
-def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEOUT):
+def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEOUT, verbosity=0):
     """
     Parameters
     ----------
@@ -347,7 +366,7 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEO
     tmp_distributions = []
     for distribution in distributions:
         if isinstance(distribution, basestring):
-            distribution = getattr(stats.distributions, distribution)
+            distribution = getattr(stats_distributions, distribution)
         tmp_distributions.append(distribution)
     distributions = tmp_distributions
 
@@ -371,10 +390,11 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEO
     truth = pickle.load(open(join(datadir, TRUTH_FNAME), 'rb'))
     reco_vals = pickle.load(open(join(datadir, RECOS_FNAME), 'rb'))
 
-    sys.stdout.write(
-        'fitting reco "{}"\nparams\n    {}\nwith distributions (sha256={})\n    {}\n'
-        .format(reco, ",".join(params), dists_hash, ",".join(distribution_names))
-    )
+    if verbosity > 0:
+        sys.stdout.write(
+            'fitting reco "{}"\nparams\n    {}\nwith distributions (sha256={})\n    {}\n'
+            .format(reco, ",".join(params), dists_hash, ",".join(distribution_names))
+        )
 
     fits = OrderedDict()
     for param in params:
@@ -382,8 +402,9 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEO
         mask = np.isfinite(err) & (reco_vals[reco]['fit_status'] == FitStatus.OK)
         valid_err = err[mask]
         valid_wts = truth['weight'][mask]
-        sys.stdout.write('='*80 + '\n')
-        sys.stdout.write('Fitting reco "{}", param "{}"...\n'.format(reco, param))
+        if verbosity > 0:
+            sys.stdout.write('='*80 + '\n')
+            sys.stdout.write('Fitting reco "{}", param "{}"...\n'.format(reco, param))
         t0 = time.time()
         results_d = fit_distributions_to_data(
             data=valid_err,
@@ -392,10 +413,12 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEO
             outfile=None,
             n_procs=None,
             timeout=timeout,
+            verbosity=verbosity,
         )
         fits[param] = results_d
-        sys.stdout.write(' ... fitting took {:.1f} s\n'.format(time.time() - t0))
-        sys.stdout.write('='*80 + '\n\n')
+        if verbosity > 0:
+            sys.stdout.write(' ... fitting took {:.1f} s\n'.format(time.time() - t0))
+            sys.stdout.write('='*80 + '\n\n')
 
     outfpath = join(
         datadir,
@@ -405,7 +428,8 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEO
         )
     )
     pickle.dump(fits, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
-    sys.stdout.write('Wrote results to "{}"\n'.format(outfpath))
+    if verbosity > 0:
+        sys.stdout.write('Wrote results to "{}"\n'.format(outfpath))
 
 
 def main(descr=__doc__):

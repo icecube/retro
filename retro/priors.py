@@ -48,8 +48,8 @@ import sys
 import numpy as np
 from scipy import interpolate, stats
 
+RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
-    RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import GarbageInputError

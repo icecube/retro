@@ -52,8 +52,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
-    COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-    TRACK_PHOTONS_PER_M, SRC_CKV_BETA1, EMPTY_SOURCES
+    SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M,
+    SRC_CKV_BETA1, EMPTY_SOURCES
 )
 from retro.retro_types import SRC_T
 
@@ -126,10 +126,6 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000)
     sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
-
-    sources['ckv_theta'] = THETA_CKV
-    sources['ckv_costheta'] = COS_CKV
-    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
 
@@ -212,10 +208,6 @@ def const_energy_loss_muon(
     sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
-
-    sources['ckv_theta'] = THETA_CKV
-    sources['ckv_costheta'] = COS_CKV
-    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
 
@@ -335,10 +327,6 @@ def table_energy_loss_muon(
     sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
-
-    sources['ckv_theta'] = THETA_CKV
-    sources['ckv_costheta'] = COS_CKV
-    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
 

@@ -99,7 +99,8 @@ class LazyLoader(object):
     """
     def __init__(self, datasource):
         self.datasource = expanduser(expandvars(datasource))
-        assert isfile(self.datasource)
+        if not isfile(self.datasource):
+            raise IOError('path is not a file: "{}"'.format(self.datasource))
         self._data = None
         self._is_loaded = False
 

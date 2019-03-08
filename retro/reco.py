@@ -242,6 +242,8 @@ class Reco(object):
                             ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 
@@ -319,6 +321,8 @@ class Reco(object):
                             ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 
@@ -374,6 +378,8 @@ class Reco(object):
                             ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 
@@ -561,6 +567,8 @@ class Reco(object):
                             ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                         ])
                     )
 
