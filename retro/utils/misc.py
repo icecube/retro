@@ -10,6 +10,7 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     'ZSTD_EXTENSIONS',
     'COMPR_EXTENSIONS',
+    'LazyLoader',
     'expand',
     'mkdir',
     'get_decompressd_fobj',
@@ -84,6 +85,30 @@ ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
 
 COMPR_EXTENSIONS = ZSTD_EXTENSIONS
 """Extensions recognized as a compressed file"""
+
+
+class LazyLoader(object):
+    """Lazily load a pickled datasource only when its value is requested.
+
+    Parameters
+    ----------
+    datasource : str
+        Path to the pickle file; must exist at time of instantiation (though
+        not guaranteed to exist at first access time)
+
+    """
+    def __init__(self, datasource):
+        self.datasource = expanduser(expandvars(datasource))
+        assert isfile(self.datasource)
+        self._data = None
+        self._is_loaded = False
+
+    @property
+    def data(self):
+        """Retrieve the data, loading on first access from `self.datasource`"""
+        if not self._is_loaded:
+            self._data = pickle.load(open(self.datasource))
+        return self._data
 
 
 def expand(p):

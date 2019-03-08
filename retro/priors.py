@@ -14,9 +14,13 @@ __all__ = [
     'PRI_LOG_NORMAL',
     'PRI_COSINE',
     'PRI_GAUSSIAN',
+    'PRI_INTERP',
     'PRI_SPEFIT2',
     'PRI_SPEFIT2TIGHT',
     'PRI_OSCNEXT_L5_V1',
+    'OSCNEXT_L5_V1_AZ_PRIORS',
+    'OSCNEXT_L5_V1_CZ_PRIORS',
+    'OSCNEXT_L5_V1_ZEN_PRIORS',
     'define_generic_prior',
     'get_prior_fun',
 ]
@@ -38,11 +42,11 @@ limitations under the License.'''
 
 from math import acos, exp
 
-from os.path import abspath, dirname
+from os.path import abspath, dirname, join
 import sys
 
 import numpy as np
-from scipy import stats
+from scipy import interpolate, stats
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -51,6 +55,8 @@ if __name__ == '__main__' and __package__ is None:
 from retro import GarbageInputError
 from retro.const import TWO_PI
 from retro.retro_types import FitStatus
+from retro.utils.lerp import generate_lerp
+from retro.utils.misc import LazyLoader
 
 
 PRI_UNIFORM = 'uniform'
@@ -58,6 +64,7 @@ PRI_LOG_UNIFORM = 'log_uniform'
 PRI_LOG_NORMAL = 'log_normal'
 PRI_COSINE = 'cosine'
 PRI_GAUSSIAN = 'gaussian'
+PRI_INTERP = 'interp'
 
 PRI_SPEFIT2 = 'spefit2'
 """From fits to DRAGON (GRECO?) i.e. pre-oscNext MC"""
@@ -78,12 +85,18 @@ L5_SPEFit11 priors are derived for each parameter from:
     * x : t distribution
     * y : t distribution
     * z : johnsonsu
+    * azimuth : splined-sampled VBWKDE fit to error dists divided by coszen
+    * coszen : splined-sampled VBWKDE fit to error dists divided by coszen
+    * zenith : splined-sampled VBWKDE fit to error dists divided by coszen
 
 LineFit_DC priors are derived for each parameter from:
     * time : cauchy distribution
     * x : t distribution
     * y : t distribution
     * z : johnsonsu distribution
+    * azimuth : splined-sampled VBWKDE fit to error dists divided by coszen
+    * coszen : splined-sampled VBWKDE fit to error dists divided by coszen
+    * zenith : splined-sampled VBWKDE fit to error dists divided by coszen
 
 All distributions (names from scipy.stats.distributions) are fit to event with
 weights, where the weights are taken from the `weight` field in each event's
@@ -93,6 +106,17 @@ See retro/notebooks/plot_prior_reco_candidates.ipynb for the fitting process.
 
 """
 
+OSCNEXT_L5_V1_AZ_PRIORS = LazyLoader(
+    datasource=join(RETRO_DIR, 'data', 'reco_azimuth_err_dists_divby_reco_coszen.pkl')
+)
+
+OSCNEXT_L5_V1_CZ_PRIORS = LazyLoader(
+    datasource=join(RETRO_DIR, 'data', 'reco_coszen_err_dists_divby_reco_coszen.pkl')
+)
+
+OSCNEXT_L5_V1_ZEN_PRIORS = LazyLoader(
+    datasource=join(RETRO_DIR, 'data', 'reco_zenith_err_dists_divby_reco_coszen.pkl')
+)
 
 def define_generic_prior(kind, kwargs, low, high):
     """Create prior definition for a `kind` that exists in `scipy.stats.distributions`.
@@ -167,6 +191,26 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             loc = -0.1072667784813348
             scale = 0.6337073562137334
             prior_def = ('lognorm', (shape, loc, scale, low, high))
+        elif kind == PRI_OSCNEXT_L5_V1:
+            reco = 'L5_SPEFit11'
+            if event['recos'][reco]['fit_status'] != FitStatus.OK:
+                reco = 'LineFit_DC'
+                assert event['recos'][reco]['fit_status'] == FitStatus.OK
+            fit_val = event['recos'][reco][dim_name]
+            cz_val = event['recos'][reco]['coszen']
+            if not (np.isfinite(fit_val) and np.isfinite(cz_val)):
+                raise GarbageInputError(
+                    '{} dim "{}" val = {}'.format(dim_name, kind, fit_val)
+                )
+            pri = None
+            for (le, ue), pri_ in OSCNEXT_L5_V1_ZEN_PRIORS.data.items():
+                if le <= cz_val <= ue:
+                    pri = pri_
+                    break
+            if pri is None:
+                raise ValueError("Out of range?")
+            dist_name = PRI_INTERP
+            dist_args = (pri['x'] - fit_val, pri['pdf'], low, high)
         else:
             prior_def = (kind, (low, high))
 
@@ -174,13 +218,58 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         kind = kwargs.get('kind', PRI_UNIFORM).lower()
         low = kwargs.get('low', 0)
         high = kwargs.get('high', 2 * np.pi)
-        prior_def = (kind, (low, high))
+        if kind == PRI_UNIFORM:
+            prior_def = (kind, (low, high))
+        elif kind == PRI_OSCNEXT_L5_V1:
+            reco = 'L5_SPEFit11'
+            if event['recos'][reco]['fit_status'] != FitStatus.OK:
+                reco = 'LineFit_DC'
+                assert event['recos'][reco]['fit_status'] == FitStatus.OK
+            fit_val = event['recos'][reco][dim_name]
+            cz_val = event['recos'][reco]['coszen']
+
+            if not (np.isfinite(fit_val) and np.isfinite(cz_val)):
+                raise GarbageInputError(
+                    '{} dim "{}" val = {}'.format(dim_name, kind, fit_val)
+                )
+
+            pri = None
+            for (le, ue), pri_ in OSCNEXT_L5_V1_AZ_PRIORS.data.items():
+                if le <= cz_val <= ue:
+                    pri = pri_
+                    break
+            if pri is None:
+                raise ValueError("Out of range?")
+            dist_name = PRI_INTERP
+            dist_args = (pri['x'] - fit_val, pri['pdf'], low, high)
 
     elif 'coszen' in dim_name:
         kind = kwargs.get('kind', PRI_UNIFORM).lower()
         low = kwargs.get('low', -1)
         high = kwargs.get('high', 1)
-        prior_def = (kind, (low, high))
+        if kind == PRI_UNIFORM:
+            prior_def = (kind, (low, high))
+        elif kind == PRI_OSCNEXT_L5_V1:
+            reco = 'L5_SPEFit11'
+            if event['recos'][reco]['fit_status'] != FitStatus.OK:
+                reco = 'LineFit_DC'
+                assert event['recos'][reco]['fit_status'] == FitStatus.OK
+            fit_val = cz_val = event['recos'][reco][dim_name]
+
+            if not (np.isfinite(fit_val) and np.isfinite(cz_val)):
+                raise GarbageInputError(
+                    '{} dim "{}" val = {}'.format(dim_name, kind, fit_val)
+                )
+
+            pri = None
+            for (le, ue), pri_ in OSCNEXT_L5_V1_CZ_PRIORS.data.items():
+                if le <= cz_val <= ue:
+                    pri = pri_
+                    break
+            if pri is None:
+                raise ValueError("Out of range?")
+            dist_name = PRI_INTERP
+            dist_args = (pri['x'] - fit_val, pri['pdf'], low, high)
 
     elif dim_name == 'x':
         kind = kwargs.get('kind', PRI_UNIFORM).lower()
@@ -485,12 +574,67 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         def prior_fun(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev): # pylint: disable=missing-docstring
             cube[n] = norm * exp(-((cube[n] - mean) / stddev)**2)
 
+    elif kind == PRI_INTERP:
+        x, pdf, low, high = dist_args
+
+        if x.min() > low or x.max() < high:
+            raise ValueError(
+                "PRI_INTERP `x` range = [{}, {}] does not cover"
+                " [low, high] range = [{}, {}]"
+                .format(x.min(), x.max(), low, high)
+            )
+
+        # If x covers _more_ than the allowed [low, high] range, resample the
+        # pdf in the allowed range
+        if x.min() < low or x.max() > high:
+            pdf_lerp, _ = generate_lerp(
+                x=x,
+                y=pdf,
+                low_behavior='error',
+                high_behavior='error',
+            )
+            x = np.linspace(low, high, len(x))
+            pdf = pdf_lerp(x)
+            pdf /= np.trapz(x=x, y=pdf)
+
+        # Compute cumulative distribution function (cdf) via trapezoidal-rule
+        # integration
+        cdf = np.array([np.trapz(x=x[:n], y=pdf[:n]) for n in range(1, len(x) + 1)])
+        # Ensure first value in cdf is exactly 0
+        cdf -= cdf[0]
+        # Ensure last value in cdf is exactly 1
+        cdf /= cdf[-1]
+
+        ## Create linear interpolator for isf (inverse of cdf)
+        #isf_interp, _ = generate_lerp(
+        #    x=cdf,
+        #    y=x,
+        #    low_behavior='error',
+        #    high_behavior='error',
+        #)
+
+        # Create smooth spline interpolator for isf (inverse of cdf)
+        isf_interp = interpolate.UnivariateSpline(x=cdf, y=x, ext='raise', s=0)
+
+        def prior_fun(cube, n=dim_num, isf_interp=isf_interp): # pylint: disable=missing-docstring
+            cube[n] = isf_interp(cube[n])
+
     elif hasattr(stats.distributions, kind):
         dist_args = args[:-2]
         low, high = args[-2:]
         frozen_dist_isf = getattr(stats.distributions, kind)(*dist_args).isf
-        def prior_fun(cube, frozen_dist_isf=frozen_dist_isf, dim_num=dim_num, low=low, high=high): # pylint: disable=missing-docstring
-            cube[dim_num] = np.clip(frozen_dist_isf(cube[dim_num]), a_min=low, a_max=high)
+        def prior_fun(
+            cube,
+            frozen_dist_isf=frozen_dist_isf,
+            dim_num=dim_num,
+            low=low,
+            high=high,
+        ): # pylint: disable=missing-docstring
+            cube[dim_num] = np.clip(
+                frozen_dist_isf(cube[dim_num]),
+                a_min=low,
+                a_max=high,
+            )
 
     else:
         raise NotImplementedError('Prior "{}" not implemented.'.format(kind))
