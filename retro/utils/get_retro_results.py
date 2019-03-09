@@ -50,16 +50,20 @@ KEEP_TRUTH_KEYS = (
     'coszen',
     'azimuth',
     'unique_id',
-    'highest_energy_daughter_pdg',
-    'highest_energy_daughter_energy',
-    'highest_energy_daughter_length',
-    'highest_energy_daughter_coszen',
-    'highest_energy_daughter_azimuth',
-    'longest_daughter_pdg',
-    'longest_daughter_energy',
-    'longest_daughter_length',
-    'longest_daughter_coszen',
-    'longest_daughter_azimuth',
+    'track_energy',
+    'total_cascade_energy',
+    'total_cascade_hadr_equiv_energy',
+    'total_cascade_em_equiv_energy',
+    #'highest_energy_daughter_pdg',
+    #'highest_energy_daughter_energy',
+    #'highest_energy_daughter_length',
+    #'highest_energy_daughter_coszen',
+    #'highest_energy_daughter_azimuth',
+    #'longest_daughter_pdg',
+    #'longest_daughter_energy',
+    #'longest_daughter_length',
+    #'longest_daughter_coszen',
+    #'longest_daughter_azimuth',
     #'cascade_pdg',
     #'cascade_energy',
     #'cascade_coszen',
@@ -158,7 +162,7 @@ def extract_from_leaf_dir(
             continue
         pl_recos[pl_reco_name] = np.load(fname)
 
-    for est_fpath in glob(join(recodir, '*.crs_prefit_mn.estimate*.pkl')):
+    for est_fpath in glob(join(recodir, '*.experimental_trackfit.estimate*.pkl')):
         with open(est_fpath, 'rb') as f:
             try:
                 estimates = pickle.load(f)
@@ -426,43 +430,43 @@ def get_retro_results(
     #    client = Client(cluster)
 
     results = []
-    try:
-        # Walk directory hierarchy
-        #futures = []
-        for reco_dirpath, _, files in walk(recos_basedir, followlinks=True):
-            is_leafdir = False
-            for f in files:
-                if f[-3:] == 'pkl' and f[:3] in ('slc', 'evt'):
-                    is_leafdir = True
-                    break
-            if not is_leafdir:
-                continue
-            rel_dirpath = relpath(path=reco_dirpath, start=recos_basedir)
-            if events_basedir is not None:
-                event_dirpath = join(events_basedir, rel_dirpath)
-                if not isdir(event_dirpath):
-                    raise IOError('Event directory does not exist: "{}"'
-                                  .format(event_dirpath))
+    #try:
+    # Walk directory hierarchy
+    #futures = []
+    for reco_dirpath, _, files in walk(recos_basedir, followlinks=True):
+        is_leafdir = False
+        for f in files:
+            if f[-3:] == 'pkl' and f[:3] in ('slc', 'evt'):
+                is_leafdir = True
+                break
+        if not is_leafdir:
+            continue
+        rel_dirpath = relpath(path=reco_dirpath, start=recos_basedir)
+        if events_basedir is not None:
+            event_dirpath = join(events_basedir, rel_dirpath)
+            if not isdir(event_dirpath):
+                raise IOError('Event directory does not exist: "{}"'
+                              .format(event_dirpath))
 
-            abs_reco_dirpath = abspath(reco_dirpath)
-            filenum = basename(abs_reco_dirpath)
-            flavdir = basename(dirname(abs_reco_dirpath))
+        abs_reco_dirpath = abspath(reco_dirpath)
+        filenum = basename(abs_reco_dirpath)
+        flavdir = basename(dirname(abs_reco_dirpath))
 
-            kwargs = dict(
-                recodir=reco_dirpath,
-                eventdir=event_dirpath,
-                flavdir=flavdir,
-                filenum=filenum,
-                recompute_estimate=recompute_estimate,
-            )
-            #print(kwargs)
-            #futures.append(client.submit(extract_from_leaf_dir, **kwargs))
-            results.append(extract_from_leaf_dir(**kwargs))
+        kwargs = dict(
+            recodir=reco_dirpath,
+            eventdir=event_dirpath,
+            flavdir=flavdir,
+            filenum=filenum,
+            recompute_estimate=recompute_estimate,
+        )
+        #print(kwargs)
+        #futures.append(client.submit(extract_from_leaf_dir, **kwargs))
+        results.append(extract_from_leaf_dir(**kwargs))
 
-        #results = [f.result() for f in as_completed(futures)]
+    #results = [f.result() for f in as_completed(futures)]
 
-    finally:
-        pass
+    #finally:
+    #    pass
     #    cluster.close()
     #    client.close()
     #    del client
@@ -478,6 +482,7 @@ def get_retro_results(
     all_events = pd.DataFrame(all_events)
 
     # Save to disk
+    #print(all_events)
     all_events.to_feather(outfile_path)
     print('\nAll_events saved to "{}"\n'.format(outfile_path))
 
