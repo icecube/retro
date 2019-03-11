@@ -6,8 +6,9 @@ timestamp="$( date +%Y-%m-%dT%H%M%z )"
 scripts_dir="$( dirname $0 )"
 retro_dir="$( dirname $scripts_dir )"
 events_base="$1"
-start_idx="$2"
-outdir="$3"
+START="$2"
+STEP="$3"
+outdir="$4"
 
 mkdir -p "$outdir"
 
@@ -120,7 +121,7 @@ fi
 #kernprof -l -v \
 $retro_dir/retro/reco.py \
     --outdir "$outdir" \
-    --method "crs_prefit_mn" \
+    --method "crs_prefit" \
     \
     --gcd "GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise" \
     --dom-tables-kind "$tblkind" \
@@ -131,8 +132,8 @@ $retro_dir/retro/reco.py \
     $tdi1 \
     \
     --events-base "$events_base" \
-    --start "$start_idx" \
-    --step 1000 \
+    --start "$START" \
+    --step $STEP \
     \
     --pulses "SplitInIcePulses" \
     --recos L5_SPEFit11 \

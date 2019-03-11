@@ -15,12 +15,12 @@ __all__ = [
     'PRI_COSINE',
     'PRI_GAUSSIAN',
     'PRI_INTERP',
+    'PRI_AZ_INTERP',
     'PRI_SPEFIT2',
     'PRI_SPEFIT2TIGHT',
     'PRI_OSCNEXT_L5_V1',
-    'OSCNEXT_L5_V1_AZ_PRIORS',
-    'OSCNEXT_L5_V1_CZ_PRIORS',
-    'OSCNEXT_L5_V1_ZEN_PRIORS',
+    'OSCNEXT_L5_V1_PRIORS',
+    'define_oscnext_l5_v1_prior',
     'define_generic_prior',
     'get_prior_fun',
 ]
@@ -40,8 +40,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from math import acos, exp
-
+from collections import OrderedDict
+from copy import deepcopy
 from os.path import abspath, dirname, join
 import sys
 
@@ -55,7 +55,7 @@ if __name__ == '__main__' and __package__ is None:
 from retro import GarbageInputError
 from retro.const import TWO_PI
 from retro.retro_types import FitStatus
-from retro.utils.lerp import generate_lerp
+#from retro.utils.lerp import generate_lerp
 from retro.utils.misc import LazyLoader
 
 
@@ -65,6 +65,7 @@ PRI_LOG_NORMAL = 'log_normal'
 PRI_COSINE = 'cosine'
 PRI_GAUSSIAN = 'gaussian'
 PRI_INTERP = 'interp'
+PRI_AZ_INTERP = 'az_interp'
 
 PRI_SPEFIT2 = 'spefit2'
 """From fits to DRAGON (GRECO?) i.e. pre-oscNext MC"""
@@ -80,45 +81,242 @@ Priority is to use L5_SPEFit11 fit as prior, but this fails on some events, so
 fall back to using LineFit_DC for these (LineFit_DC did not fail in any MC
 events).
 
-L5_SPEFit11 priors are derived for each parameter from:
-    * time : t distribution
-    * x : t distribution
-    * y : t distribution
-    * z : johnsonsu
-    * azimuth : splined-sampled VBWKDE fit to error dists divided by coszen
-    * coszen : splined-sampled VBWKDE fit to error dists divided by coszen
-    * zenith : splined-sampled VBWKDE fit to error dists divided by coszen
+L5_SPEFit11 priors are derived for each dimension from:
+    * time : splined-sampled VBWKDE fit to (negative) error dists
+    * x : splined-sampled VBWKDE fit to (negative) error dists
+    * y : splined-sampled VBWKDE fit to (negative) error dists
+    * z : splined-sampled VBWKDE fit to (negative) error dists
+    * azimuth : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
+    * coszen : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
+    * zenith : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
 
-LineFit_DC priors are derived for each parameter from:
-    * time : cauchy distribution
-    * x : t distribution
-    * y : t distribution
-    * z : johnsonsu distribution
-    * azimuth : splined-sampled VBWKDE fit to error dists divided by coszen
-    * coszen : splined-sampled VBWKDE fit to error dists divided by coszen
-    * zenith : splined-sampled VBWKDE fit to error dists divided by coszen
+LineFit_DC priors are derived for each dimension from:
+    * time : splined-sampled VBWKDE fit to (negative) error dists
+    * x : splined-sampled VBWKDE fit to (negative) error dists
+    * y : splined-sampled VBWKDE fit to (negative) error dists
+    * z : splined-sampled VBWKDE fit to (negative) error dists
+    * azimuth : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
+    * coszen : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
+    * zenith : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
 
 All distributions (names from scipy.stats.distributions) are fit to event with
 weights, where the weights are taken from the `weight` field in each event's
 I3MCWeightDict.
 
 See retro/notebooks/plot_prior_reco_candidates.ipynb for the fitting process.
-
 """
 
-OSCNEXT_L5_V1_AZ_PRIORS = LazyLoader(
-    datasource=join(RETRO_DIR, 'data', 'reco_azimuth_err_dists_divby_reco_coszen.pkl')
+OSCNEXT_L5_V1_PRIORS = dict(
+    time=dict(
+        L5_SPEFit11=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'L5_SPEFit11_time_neg_error.pkl',
+            ),
+        ),
+        LineFit_DC=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'LineFit_DC_time_neg_error.pkl',
+            ),
+        ),
+    ),
+    x=dict(
+        L5_SPEFit11=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'L5_SPEFit11_x_neg_error.pkl',
+            ),
+        ),
+        LineFit_DC=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'LineFit_DC_x_neg_error.pkl',
+            ),
+        ),
+    ),
+    y=dict(
+        L5_SPEFit11=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'L5_SPEFit11_y_neg_error.pkl',
+            ),
+        ),
+        LineFit_DC=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'LineFit_DC_y_neg_error.pkl',
+            ),
+        ),
+    ),
+    z=dict(
+        L5_SPEFit11=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'L5_SPEFit11_z_neg_error.pkl',
+            ),
+        ),
+        LineFit_DC=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'LineFit_DC_z_neg_error.pkl',
+            ),
+        ),
+    ),
+    azimuth=dict(
+        L5_SPEFit11=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'L5_SPEFit11_azimuth_neg_error_splitby_reco_coszen_12.pkl',
+            ),
+        ),
+        LineFit_DC=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'LineFit_DC_azimuth_neg_error_splitby_reco_coszen_12.pkl',
+            ),
+        ),
+    ),
+    coszen=dict(
+        L5_SPEFit11=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'L5_SPEFit11_coszen_neg_error_splitby_reco_coszen_16.pkl',
+            ),
+        ),
+        LineFit_DC=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'LineFit_DC_coszen_neg_error_splitby_reco_coszen_16.pkl',
+            ),
+        ),
+    ),
+    zenith=dict(
+        L5_SPEFit11=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'L5_SPEFit11_zenith_neg_error_splitby_reco_coszen_16.pkl',
+            ),
+        ),
+        LineFit_DC=LazyLoader(
+            datasource=join(
+                RETRO_DIR,
+                'data',
+                'priors',
+                'LineFit_DC_zenith_neg_error_splitby_reco_coszen_16.pkl',
+            ),
+        ),
+    ),
 )
 
-OSCNEXT_L5_V1_CZ_PRIORS = LazyLoader(
-    datasource=join(RETRO_DIR, 'data', 'reco_coszen_err_dists_divby_reco_coszen.pkl')
-)
 
-OSCNEXT_L5_V1_ZEN_PRIORS = LazyLoader(
-    datasource=join(RETRO_DIR, 'data', 'reco_zenith_err_dists_divby_reco_coszen.pkl')
-)
+def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
+    """Construct (first-stage) prior def for OSCNEXT_L5_V1_PRIORS"""
+    reco = 'L5_SPEFit11'
+    if event['recos'][reco]['fit_status'] != FitStatus.OK:
+        reco = 'LineFit_DC'
+        assert event['recos'][reco]['fit_status'] == FitStatus.OK
 
-def define_generic_prior(kind, kwargs, low, high):
+    # Remove "track_*", etc prefixes
+    for prefix in ('track', 'cascade'):
+        if dim_name.startswith(prefix):
+            dim_name = dim_name[len(prefix):].lstrip('_')
+            break
+
+    if dim_name == 'coszen':
+        reco_val = np.cos(event['recos'][reco]['zenith'])
+    else:
+
+        reco_val = event['recos'][reco][dim_name]
+
+    if not np.isfinite(reco_val):
+        raise GarbageInputError(
+            'dim_name "{}", reco "{}": reco val = {}'
+            .format(dim_name, reco, reco_val)
+        )
+
+    prior_info = OSCNEXT_L5_V1_PRIORS[dim_name][reco].data
+
+    split_by_reco_param = prior_info['metadata']['split_by_reco_param']
+    if split_by_reco_param is None:
+        split_val = None
+    else:
+        if split_by_reco_param == 'coszen':
+            split_val = np.cos(event['recos'][reco]['zenith'])
+        else:
+            split_val = event['recos'][reco][split_by_reco_param]
+
+        if not np.isfinite(split_val):
+            raise GarbageInputError(
+                'Reco "{}", split val "{}" = {}'
+                .format(reco, split_by_reco_param, split_val)
+            )
+
+    pri = None
+    for edges, pri_ in prior_info['dists'].items():
+        if split_by_reco_param is None:
+            pri = pri_
+            break
+
+        if edges[0] <= split_val <= edges[1]:
+            pri = pri_
+            break
+
+    if pri is None:
+        raise ValueError(
+            '`split_by_reco_param` "{}" value={} outside binned ranges?: {}'
+            .format(split_by_reco_param, split_val, prior_info['dists'].keys())
+        )
+
+    if dim_name == 'azimuth':
+        pri_kind = PRI_AZ_INTERP
+    else:
+        pri_kind = PRI_INTERP
+
+    # 'tight' (low, high) extents are relative to the fit value
+    if extent is not None and extent.lower() == 'tight':
+        low += reco_val
+        high += reco_val
+        if reco == 'LineFit_DC' and dim_name == 'z':
+            low -= 15
+            high -= 15
+
+    prior_def = (pri_kind, (pri['x'] + reco_val, pri['pdf'], low, high))
+
+    misc = deepcopy(prior_info['metadata'])
+    misc['reco_val'] = reco_val
+    misc['split_val'] = split_val
+
+    return prior_def, misc
+
+
+def define_generic_prior(kind, kwargs, low, high, extent=None):
     """Create prior definition for a `kind` that exists in `scipy.stats.distributions`.
 
     Parameters
@@ -133,6 +331,7 @@ def define_generic_prior(kind, kwargs, low, high):
         Range of values after prior is applied is clipped from below at `low`
     high : finite scalar
         Range of values after prior is applied is clipped from above at `high`
+    extent : str or None
 
     Returns
     -------
@@ -153,6 +352,8 @@ def define_generic_prior(kind, kwargs, low, high):
         args = tuple(args)
     else:
         args = tuple()
+    #if extent is not None and extent.lower() == 'tight':
+    #    low -= fit
     prior_def = (kind, args + (loc, scale, low, high))
     return prior_def
 
@@ -179,97 +380,60 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
 
     # -- setup default values and prior defintions -- #
 
+    misc = OrderedDict()
+    prior_def = None
+
+    # Note in the following, invalid or unhandled cases are treated by
+    # checking after if/else nested branches here, `prior_def` is still `None`.
+
     if 'zenith' in  dim_name:
-        kind = kwargs.get('kind', PRI_COSINE)
-        kind = kind.lower()
+        kind = kwargs.get('kind', PRI_COSINE).lower()
         low = kwargs.get('low', 0)
         high = kwargs.get('high', np.pi)
 
-        if kind == PRI_LOG_NORMAL and dim_name == 'cascade_d_zenith':
+        if kind == "PRI_COSINE":
+            prior_def = (kind, (low, high))
+
+        elif kind == PRI_LOG_NORMAL and dim_name == 'cascade_d_zenith':
             # scipy.stats.lognorm 3 dim_nameters (from fit to data)
             shape = 0.6486628230670546
             loc = -0.1072667784813348
             scale = 0.6337073562137334
             prior_def = ('lognorm', (shape, loc, scale, low, high))
+
         elif kind == PRI_OSCNEXT_L5_V1:
-            reco = 'L5_SPEFit11'
-            if event['recos'][reco]['fit_status'] != FitStatus.OK:
-                reco = 'LineFit_DC'
-                assert event['recos'][reco]['fit_status'] == FitStatus.OK
-            fit_val = event['recos'][reco][dim_name]
-            cz_val = event['recos'][reco]['coszen']
-            if not (np.isfinite(fit_val) and np.isfinite(cz_val)):
-                raise GarbageInputError(
-                    '{} dim "{}" val = {}'.format(dim_name, kind, fit_val)
-                )
-            pri = None
-            for (le, ue), pri_ in OSCNEXT_L5_V1_ZEN_PRIORS.data.items():
-                if le <= cz_val <= ue:
-                    pri = pri_
-                    break
-            if pri is None:
-                raise ValueError("Out of range?")
-            dist_name = PRI_INTERP
-            dist_args = (pri['x'] - fit_val, pri['pdf'], low, high)
-        else:
-            prior_def = (kind, (low, high))
+            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high)
 
-    elif 'azimuth' in dim_name:
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        low = kwargs.get('low', 0)
-        high = kwargs.get('high', 2 * np.pi)
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-        elif kind == PRI_OSCNEXT_L5_V1:
-            reco = 'L5_SPEFit11'
-            if event['recos'][reco]['fit_status'] != FitStatus.OK:
-                reco = 'LineFit_DC'
-                assert event['recos'][reco]['fit_status'] == FitStatus.OK
-            fit_val = event['recos'][reco][dim_name]
-            cz_val = event['recos'][reco]['coszen']
-
-            if not (np.isfinite(fit_val) and np.isfinite(cz_val)):
-                raise GarbageInputError(
-                    '{} dim "{}" val = {}'.format(dim_name, kind, fit_val)
-                )
-
-            pri = None
-            for (le, ue), pri_ in OSCNEXT_L5_V1_AZ_PRIORS.data.items():
-                if le <= cz_val <= ue:
-                    pri = pri_
-                    break
-            if pri is None:
-                raise ValueError("Out of range?")
-            dist_name = PRI_INTERP
-            dist_args = (pri['x'] - fit_val, pri['pdf'], low, high)
+        elif hasattr(stats.distributions, kind):
+            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
 
     elif 'coszen' in dim_name:
         kind = kwargs.get('kind', PRI_UNIFORM).lower()
         low = kwargs.get('low', -1)
         high = kwargs.get('high', 1)
+
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
+
         elif kind == PRI_OSCNEXT_L5_V1:
-            reco = 'L5_SPEFit11'
-            if event['recos'][reco]['fit_status'] != FitStatus.OK:
-                reco = 'LineFit_DC'
-                assert event['recos'][reco]['fit_status'] == FitStatus.OK
-            fit_val = cz_val = event['recos'][reco][dim_name]
+            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high)
 
-            if not (np.isfinite(fit_val) and np.isfinite(cz_val)):
-                raise GarbageInputError(
-                    '{} dim "{}" val = {}'.format(dim_name, kind, fit_val)
-                )
+        elif hasattr(stats.distributions, kind):
+            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
 
-            pri = None
-            for (le, ue), pri_ in OSCNEXT_L5_V1_CZ_PRIORS.data.items():
-                if le <= cz_val <= ue:
-                    pri = pri_
-                    break
-            if pri is None:
-                raise ValueError("Out of range?")
-            dist_name = PRI_INTERP
-            dist_args = (pri['x'] - fit_val, pri['pdf'], low, high)
+    elif 'azimuth' in dim_name:
+        kind = kwargs.get('kind', PRI_UNIFORM).lower()
+        low = kwargs.get('low', 0)
+        high = kwargs.get('high', 2 * np.pi)
+
+        if kind == PRI_UNIFORM:
+            prior_def = (kind, (low, high))
+
+        elif kind == PRI_OSCNEXT_L5_V1:
+            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high)
+
+        elif hasattr(stats.distributions, kind):
+            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
 
     elif dim_name == 'x':
         kind = kwargs.get('kind', PRI_UNIFORM).lower()
@@ -283,55 +447,37 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         elif extent == 'tight':
             low = -200
             high = 200
+        else:
+            raise ValueError('invalid extent "{}"'.format(extent))
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
+
         elif kind == PRI_SPEFIT2:
-            fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
+            reco = 'SPEFit2'
+            fit_status = FitStatus(event['recos'][reco]['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={!r}'
-                    .format(dim_name, fit_status)
+                    'dim_name "{}", reco "{}": fit status = {!r}'
+                    .format(dim_name, reco, fit_status)
                 )
-            fit_val = event['recos']['SPEFit2'][dim_name]
+            fit_val = event['recos'][reco][dim_name]
             loc = -0.19687812829978152 + fit_val
             scale = 14.282171566308806
             if extent == 'tight':
                 low += loc
                 high += loc
             prior_def = ('cauchy', (loc, scale, low, high))
+            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
+
         elif kind == PRI_OSCNEXT_L5_V1:
-            if event['recos']['L5_SPEFit11']['fit_status'] == FitStatus.OK:
-                fit_val = event['recos']['L5_SPEFit11'][dim_name]
-                dist_name = 't'
-                dist_args = (
-                    1.6867177062057637,  # df
-                    0.14572812956903736,  # loc
-                    23.08818410937512,  # scale
-                )
-            else:
-                assert event['recos']['LineFit_DC']['fit_status'] == FitStatus.OK
-                fit_val = event['recos']['LineFit_DC'][dim_name]
-                dist_name = 't'
-                dist_args = (
-                    2.2190042841052935,  # df
-                    0.29762236741186276,  # loc
-                    29.41702014032123,  # scale
-                )
-            if not np.isfinite(fit_val):
-                raise GarbageInputError('{} dim "{}" val = {}'.format(dim_name, kind, fit_val))
-            if extent == 'tight':
-                low += dist_args[-2]
-                high += dist_args[-2]
-            prior_def = (dist_name, dist_args + (low, high))
+            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
+
         elif hasattr(stats.distributions, kind):
             prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-        else:
-            raise ValueError('dim "{}", prior kind "{}"'.format(dim_name, kind))
 
     elif dim_name == 'y':
-        kind = kwargs.get('kind', PRI_UNIFORM)
-        kind = kind.lower()
+        kind = kwargs.get('kind', PRI_UNIFORM).lower()
         extent = kwargs.get('extent', 'ic').lower()
         if extent == 'ic':
             low = kwargs.get('low', -780)
@@ -342,55 +488,37 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         elif extent == 'tight':
             low = -200
             high = 200
+        else:
+            raise ValueError('invalid extent "{}"'.format(extent))
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
+
         elif kind == PRI_SPEFIT2:
-            fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
+            reco = 'SPEFit2'
+            fit_status = FitStatus(event['recos'][reco]['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={!r}'
-                    .format(dim_name, fit_status)
+                    'dim_name "{}", reco "{}": fit val = {}'
+                    .format(dim_name, reco, fit_val)
                 )
-            fit_val = event['recos']['SPEFit2'][dim_name]
+            fit_val = event['recos'][reco][dim_name]
             loc = -0.2393645701205161 + fit_val
             scale = 15.049528023495354
             if extent == 'tight':
                 low += loc
                 high += loc
             prior_def = ('cauchy', (loc, scale, low, high))
+            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
+
         elif kind == PRI_OSCNEXT_L5_V1:
-            if event['recos']['L5_SPEFit11']['fit_status'] == FitStatus.OK:
-                fit_val = event['recos']['L5_SPEFit11'][dim_name]
-                dist_name = 't'
-                dist_args = (
-                    1.789131128595108,  # df
-                    0.15629563873773936,  # loc
-                    24.36539086049123,  # scale
-                )
-            else:
-                assert event['recos']['LineFit_DC']['fit_status'] == FitStatus.OK
-                fit_val = event['recos']['LineFit_DC'][dim_name]
-                dist_name = 't'
-                dist_args = (
-                    2.2072136793550525,  # df
-                    -0.7624014993241222,  # loc
-                    29.541536688919628,  # scale
-                )
-            if not np.isfinite(fit_val):
-                raise GarbageInputError('{} dim "{}" val = {}'.format(kind, dim_name, fit_val))
-            if extent == 'tight':
-                low += dist_args[-2]
-                high += dist_args[-2]
-            prior_def = (dist_name, dist_args + (low, high))
+            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
+
         elif hasattr(stats.distributions, kind):
             prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-        else:
-            raise ValueError('dim "{}", prior kind "{}"'.format(dim_name, kind))
 
     elif dim_name == 'z':
-        kind = kwargs.get('kind', PRI_UNIFORM)
-        kind = kind.lower()
+        kind = kwargs.get('kind', PRI_UNIFORM).lower()
         extent = kwargs.get('extent', 'ic').lower()
         if extent is None or extent.lower() == 'ic':
             low = kwargs.get('low', -780)
@@ -405,57 +533,37 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         elif extent.lower() == 'tight':
             low = -100
             high = 100
+        else:
+            raise ValueError('invalid extent "{}"'.format(extent))
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
+
         elif kind == PRI_SPEFIT2:
-            fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
+            reco = 'SPEFit2'
+            fit_status = FitStatus(event['recos'][reco]['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={!r}'
-                    .format(dim_name, fit_status)
+                    'dim_name "{}", reco "{}": fit val = {}'
+                    .format(dim_name, reco, fit_val)
                 )
-            fit_val = event['recos']['SPEFit2'][dim_name]
+            fit_val = event['recos'][reco][dim_name]
             loc = -5.9170661027492546 + fit_val
             scale = 12.089399308036718
             if extent.lower() == 'tight':
                 low += loc
                 high += loc
             prior_def = ('cauchy', (loc, scale, low, high))
+            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
+
         elif kind == PRI_OSCNEXT_L5_V1:
-            if event['recos']['L5_SPEFit11']['fit_status'] == FitStatus.OK:
-                fit_val = event['recos']['L5_SPEFit11'][dim_name]
-                dist_name = 'johnsonsu'
-                dist_args = (
-                    -0.17359502368500432,  # a
-                    0.669853628005461,  # b
-                    -0.7080854707830284,  # loc
-                    11.44815037261141,  # scale
-                )
-            else:
-                assert event['recos']['LineFit_DC']['fit_status'] == FitStatus.OK
-                fit_val = event['recos']['LineFit_DC'][dim_name]
-                dist_name = 'johnsonsu'
-                dist_args = (
-                    -0.27708333289811304,  # a
-                    0.8677377365398546,  # b
-                    6.722685934950411,  # loc
-                    18.26826072947644,  # scale
-                )
-            if not np.isfinite(fit_val):
-                raise GarbageInputError('{} dim "{}" val = {}'.format(kind, dim_name, fit_val))
-            if extent == 'tight':
-                low += dist_args[-2]
-                high += dist_args[-2]
-            prior_def = ('johnsonsu', dist_args + (low, high))
+            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
+
         elif hasattr(stats.distributions, kind):
             prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-        else:
-            raise ValueError('dim "{}", prior kind "{}"'.format(dim_name, kind))
 
     elif dim_name == 'time':
-        kind = kwargs.get('kind', PRI_UNIFORM)
-        kind = kind.lower()
+        kind = kwargs.get('kind', PRI_UNIFORM).lower()
         low = kwargs.get('low', -4e3)
         high = kwargs.get('high', 0)
         extent = kwargs.get('extent', 'none')
@@ -465,81 +573,66 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         elif extent.lower() == 'tight':
             low = -1000
             high = 1000
+        else:
+            raise ValueError()
 
         if kind == PRI_UNIFORM:
             prior_def = (kind, (low, high))
+
         elif kind == PRI_SPEFIT2:
-            fit_status = FitStatus(event['recos']['SPEFit2']['fit_status'])
+            reco = 'SPEFit2'
+            fit_status = FitStatus(event['recos'][reco]['fit_status'])
             if fit_status is not FitStatus.OK:
                 raise GarbageInputError(
-                    'dim "{}" SPEFit2 fit status={!r}'
-                    .format(dim_name, fit_status)
+                    'dim_name "{}", reco "{}": fit val = {}'
+                    .format(dim_name, reco, fit_val)
                 )
-            fit_val = event['recos']['SPEFit2'][dim_name]
+            fit_val = event['recos'][reco][dim_name]
             loc = -82.631395081663754 + fit_val
             scale = 75.619895703067343
             if extent.lower() == 'tight':
                 low += loc
                 high += loc
             prior_def = ('cauchy', (loc, scale, low, high))
+            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
+
         elif kind == PRI_OSCNEXT_L5_V1:
-            if event['recos']['L5_SPEFit11']['fit_status'] == FitStatus.OK:
-                fit_val = event['recos']['L5_SPEFit11'][dim_name]
-                dist_name = 't'
-                dist_args = (
-                    1.5377646263557783,  # df
-                    79.0453249765558,  # loc
-                    114.79326906544053,  # scale
-                )
-            else:
-                assert event['recos']['LineFit_DC']['fit_status'] == FitStatus.OK
-                fit_val = event['recos']['LineFit_DC'][dim_name]
-                dist_name = 'cauchy'
-                dist_args = (
-                    407.91430665052576,  # loc
-                    118.87257079285429,  # scale
-                )
-            if not np.isfinite(fit_val):
-                raise GarbageInputError('{} dim "{}" val = {}'.format(kind, dim_name, fit_val))
-            if extent == 'tight':
-                low += dist_args[-2]
-                high += dist_args[-2]
-            prior_def = (dist_name, dist_args + (low, high))
+            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
+
         elif hasattr(stats.distributions, kind):
             prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-        else:
-            raise ValueError('dim "{}", prior kind "{}"'.format(dim_name, kind))
 
     elif 'energy' in dim_name:
-        kind = kwargs.get('kind', PRI_UNIFORM)
-        kind = kind.lower()
-        if kind == PRI_LOG_UNIFORM:
-            low = kwargs.get('low', 0.1)
-        else:
-            low = kwargs.get('low', 0)
-        high = kwargs.get('high', 1000)
+        kind = kwargs.get('kind', PRI_UNIFORM).lower()
+        low = kwargs.get('low', 0.1 if kind == PRI_LOG_UNIFORM else 0.0)
+        high = kwargs.get('high', 1e3)
 
-        if kind == PRI_LOG_NORMAL:
+        if kind == PRI_UNIFORM:
+            prior_def = (kind, (low, high))
+        elif kind == PRI_LOG_NORMAL:
             shape = 0.96251341305506233
             loc = 0.4175592980195757
             scale = 17.543915051586644
             prior_def = ('lognorm', (shape, loc, scale, low, high))
-        else:
-            prior_def = (kind, (low, high))
 
-    else:
+    if prior_def is None:
         kind = kwargs.get('kind', None)
-        raise ValueError('Unknown prior %s for dim %s'%(kind, dim_name))
+        raise ValueError(
+            'Unhandled or invalid prior "{}" for dim_name "{}"'.format(kind, dim_name)
+        )
 
     # create prior function
 
+    if not prior_def:
+        raise ValueError("no prior def?")
+
     kind, args = prior_def
 
-    if not np.all(np.isfinite(args)):
-        raise ValueError(
-            'Dimension "{}" got non-finite arg(s) for prior kind "{}"; args = {}'
-            .format(dim_name, kind, args)
-        )
+    #if not np.all(np.isfinite(args)):
+    #    raise ValueError(
+    #        'Dimension "{}" got non-finite arg(s) for prior kind "{}"; args = {}'
+    #        .format(dim_name, kind, args)
+    #    )
 
     if kind == PRI_UNIFORM:
         if args == (0, 1):
@@ -559,65 +652,91 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
         log_min = np.log(np.min(args))
         log_width = np.log(np.max(args) / np.min(args))
         def prior_fun(cube, n=dim_num, log_width=log_width, log_min=log_min): # pylint: disable=missing-docstring
-            cube[n] = exp(cube[n] * log_width + log_min)
+            cube[n] = np.exp(cube[n] * log_width + log_min)
 
     elif kind == PRI_COSINE:
-        assert args == (0, np.pi)
+        assert args[-2:] == (0, np.pi)
         def prior_fun(cube, n=dim_num): # pylint: disable=missing-docstring
             x = (2 * cube[n]) - 1
-            cube[n] = acos(x)
+            cube[n] = np.arccos(x)
 
     elif kind == PRI_GAUSSIAN:
         raise NotImplementedError('limits not correctly working') # TODO
         mean, stddev, low, high = args
         norm = 1 / (stddev * np.sqrt(TWO_PI))
         def prior_fun(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev): # pylint: disable=missing-docstring
-            cube[n] = norm * exp(-((cube[n] - mean) / stddev)**2)
+            cube[n] = norm * np.exp(-((cube[n] - mean) / stddev)**2)
 
-    elif kind == PRI_INTERP:
-        x, pdf, low, high = dist_args
+    elif kind in (PRI_INTERP, PRI_AZ_INTERP):
+        x, pdf, low, high = args
 
-        if x.min() > low or x.max() < high:
-            raise ValueError(
-                "PRI_INTERP `x` range = [{}, {}] does not cover"
+        if (
+            kind == PRI_AZ_INTERP and not np.isclose(x.max() - x.min(), high - low)
+            or kind == PRI_INTERP and (x.min() > low or x.max() < high)
+        ):
+            print(
+                'Dim "{}", prior kind "{}" `x` range = [{}, {}] does not cover'
                 " [low, high] range = [{}, {}]"
-                .format(x.min(), x.max(), low, high)
+                .format(dim_name, kind, x.min(), x.max(), low, high)
             )
 
-        # If x covers _more_ than the allowed [low, high] range, resample the
-        # pdf in the allowed range
-        if x.min() < low or x.max() > high:
-            pdf_lerp, _ = generate_lerp(
-                x=x,
-                y=pdf,
-                low_behavior='error',
-                high_behavior='error',
-            )
-            x = np.linspace(low, high, len(x))
-            pdf = pdf_lerp(x)
-            pdf /= np.trapz(x=x, y=pdf)
+        if kind == PRI_AZ_INTERP:
+            if not (np.isclose(low, 0) and np.isclose(high, 2*np.pi)):
+                raise ValueError("az range [low, high) must be [0, 2pi)")
 
-        # Compute cumulative distribution function (cdf) via trapezoidal-rule
-        # integration
-        cdf = np.array([np.trapz(x=x[:n], y=pdf[:n]) for n in range(1, len(x) + 1)])
-        # Ensure first value in cdf is exactly 0
-        cdf -= cdf[0]
-        # Ensure last value in cdf is exactly 1
-        cdf /= cdf[-1]
+            # Ensure x covers exactly the same distance as (low, high) defines
+            highlow_range = high - low
+            x = x.min() + (x - x.min()) * highlow_range/(x.max() - x.min())
 
-        ## Create linear interpolator for isf (inverse of cdf)
-        #isf_interp, _ = generate_lerp(
-        #    x=cdf,
-        #    y=x,
-        #    low_behavior='error',
-        #    high_behavior='error',
-        #)
+            # Compute cumulative distribution function (cdf) via trapezoidal-rule
+            # integration
+            cdf = np.array([np.trapz(x=x[:n], y=pdf[:n]) for n in range(1, len(x) + 1)])
+            # Ensure first value in cdf is exactly 0
+            cdf -= cdf[0]
+            # Ensure last value in cdf is exactly 1
+            cdf /= cdf[-1]
 
-        # Create smooth spline interpolator for isf (inverse of cdf)
-        isf_interp = interpolate.UnivariateSpline(x=cdf, y=x, ext='raise', s=0)
+            # Create smooth spline interpolator for isf (inverse of cdf)
+            isf_interp = interpolate.UnivariateSpline(x=cdf, y=x, ext='raise', s=0)
 
-        def prior_fun(cube, n=dim_num, isf_interp=isf_interp): # pylint: disable=missing-docstring
-            cube[n] = isf_interp(cube[n])
+            def prior_fun(  # pylint: disable=missing-docstring
+                cube,
+                n=dim_num,
+                isf_interp=isf_interp,
+            ):
+                cube[n] = isf_interp(cube[n]) % (2*np.pi)
+
+        else:
+            # If x covers _more_ than the allowed [low, high] range, resample the
+            # pdf in the allowed range (expected to occur for binned zenith and
+            # coszen error distributions)
+            if dim_name != 'time' and (x.min() < low or x.max() > high):
+                xp = x
+                x = np.linspace(low, high, len(x))
+                pdf = np.interp(x=x, xp=xp, fp=pdf)
+                pdf /= np.trapz(x=x, y=pdf)
+
+            # Compute cumulative distribution function (cdf) via trapezoidal-rule
+            # integration
+            cdf = np.array([np.trapz(x=x[:n], y=pdf[:n]) for n in range(1, len(x) + 1)])
+            # Ensure first value in cdf is exactly 0
+            cdf -= cdf[0]
+            # Ensure last value in cdf is exactly 1
+            cdf /= cdf[-1]
+
+            ## Create linear interpolator for isf (inverse of cdf)
+            #_, isf_interp = generate_lerp(
+            #    x=cdf,
+            #    y=x,
+            #    low_behavior='error',
+            #    high_behavior='error',
+            #)
+
+            # Create smooth spline interpolator for isf (inverse of cdf)
+            isf_interp = interpolate.UnivariateSpline(x=cdf, y=x, ext='raise', s=0)
+
+            def prior_fun(cube, n=dim_num, isf_interp=isf_interp): # pylint: disable=missing-docstring
+                cube[n] = isf_interp(cube[n])
 
     elif hasattr(stats.distributions, kind):
         dist_args = args[:-2]
@@ -639,4 +758,4 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
     else:
         raise NotImplementedError('Prior "{}" not implemented.'.format(kind))
 
-    return prior_fun, prior_def
+    return prior_fun, prior_def, misc

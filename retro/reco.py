@@ -58,7 +58,7 @@ from retro.utils.geom import (
 )
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
-from retro.priors import PRI_OSCNEXT_L5_V1, get_prior_fun
+from retro.priors import PRI_OSCNEXT_L5_V1, PRI_COSINE, PRI_UNIFORM, get_prior_fun
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
@@ -119,7 +119,10 @@ class Reco(object):
         tdi_tables_kw,
         outdir,
         save_llhp=False,
+        debug=False,
     ):
+        self.debug = bool(debug)
+
         self.events_kw = events_kw
         self.dom_tables_kw = dom_tables_kw
         self.tdi_tables_kw = tdi_tables_kw
@@ -177,11 +180,11 @@ class Reco(object):
         """Iterator over events which sets class variables `event_prefix`,
         `current_event`, `current_event_idx`, and `event_counter` for each
         event retrieved."""
-        for event_idx, event in self._get_events:
-            print('Operating on event: "{}"'.format(event_idx))
-            self.event_prefix = join(self.outdir, 'evt{}.'.format(event_idx))
+        for current_event_idx, event in self._get_events:
+            print('Operating on event: "{}"'.format(current_event_idx))
+            self.event_prefix = join(self.outdir, 'evt{}.'.format(current_event_idx))
             self.current_event = event
-            self.current_event_idx = event_idx
+            self.current_event_idx = current_event_idx
             self.event_counter += 1
             yield self.current_event
 
@@ -243,8 +246,8 @@ class Reco(object):
                             ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
-                            #('azimuth', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
-                            #('zenith', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1)),
+                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1)),
                         ])
                     )
 
@@ -322,8 +325,8 @@ class Reco(object):
                             ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
-                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
-                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1)),
+                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1)),
                         ])
                     )
 
@@ -362,7 +365,7 @@ class Reco(object):
                         fname='{}.estimate'.format(method),
                     )
 
-                elif method in ('crs_prefit', 'crs_prefit_mn'):
+                elif method in ('crs_prefit', 'crs_prefit_mn', 'crs_prefit_mn10d'):
                     t0 = time.time()
 
                     print('--- Track-only CRS prefit ---')
@@ -379,8 +382,10 @@ class Reco(object):
                             ('y', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('z', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
                             ('time', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
-                            ('azimuth', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
-                            ('zenith', dict(kind=PRI_OSCNEXT_L5_V1, extent='tight')),
+                            #('track_azimuth', dict(kind=PRI_UNIFORM)),
+                            #('track_zenith', dict(kind=PRI_COSINE, loc=np.pi/2, scale=0.5)),
+                            ('track_azimuth', dict(kind=PRI_OSCNEXT_L5_V1)),
+                            ('track_zenith', dict(kind=PRI_OSCNEXT_L5_V1)),
                         ])
                     )
 
@@ -497,7 +502,7 @@ class Reco(object):
                         else:
                             llhp_fname = None
                         llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                        self.make_estimate(
+                        estimate_8d = self.make_estimate(
                             llhp=llhp,
                             remove_priors=True,
                             run_info=run_info,
@@ -514,10 +519,10 @@ class Reco(object):
                         )
 
                         self.hypo_handler.fixed_params = OrderedDict()
-                        self.hypo_handler.fixed_params['x'] = estimate['mean']['x']
-                        self.hypo_handler.fixed_params['y'] = estimate['mean']['y']
-                        self.hypo_handler.fixed_params['z'] = estimate['mean']['z']
-                        self.hypo_handler.fixed_params['time'] = estimate['mean']['time']
+                        self.hypo_handler.fixed_params['x'] = prefit_estimate['mean']['x']
+                        self.hypo_handler.fixed_params['y'] = prefit_estimate['mean']['y']
+                        self.hypo_handler.fixed_params['z'] = prefit_estimate['mean']['z']
+                        self.hypo_handler.fixed_params['time'] = prefit_estimate['mean']['time']
 
                         param_values = []
                         log_likelihoods = []
@@ -707,13 +712,14 @@ class Reco(object):
         prior_funcs = []
         self.priors_used = OrderedDict()
 
+        miscs = []
         for dim_num, dim_name in enumerate(self.hypo_handler.opt_param_names):
             if prior_defs.has_key(dim_name):
                 kwargs = prior_defs[dim_name]
             else:
                 kwargs = {}
 
-            prior_fun, prior_def = get_prior_fun(
+            prior_fun, prior_def, misc = get_prior_fun(
                 dim_num=dim_num,
                 dim_name=dim_name,
                 event=self.current_event,
@@ -721,6 +727,7 @@ class Reco(object):
             )
             prior_funcs.append(prior_fun)
             self.priors_used[dim_name] = prior_def
+            miscs.append(misc)
 
         def prior(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
             """Apply `prior_funcs` to the hypercube to map values from the unit
@@ -739,6 +746,47 @@ class Reco(object):
                 prior_func(cube)
 
         self.prior = prior
+
+        if self.debug:
+            import matplotlib as mpl
+            mpl.use('agg', warn=False)
+            import matplotlib.pyplot as plt
+
+            n_opt_params = len(self.hypo_handler.opt_param_names)
+            rand = np.random.RandomState(0)
+            cube = rand.rand(n_opt_params, int(1e5))
+            self.prior(cube)
+
+            nx = int(np.ceil(np.sqrt(n_opt_params)))
+            ny = int(np.ceil(n_opt_params / nx))
+            fig, axes = plt.subplots(ny, nx, figsize=(6*nx, 4*ny))
+            axit = iter(axes.flat)
+            for dim_num, dim_name in enumerate(self.hypo_handler.opt_param_names):
+                ax = next(axit)
+                ax.hist(cube[dim_num], bins=100)
+                misc = miscs[dim_num]
+                if 'reco_val' in misc:
+                    ylim = ax.get_ylim()
+                    ax.plot([misc['reco_val']]*2, ylim, 'k--', lw=1)
+                    ax.set_ylim(ylim)
+
+                misc_strs = []
+                if 'reco' in misc:
+                    misc_strs.append(misc['reco'])
+                if 'reco_val' in misc:
+                    misc_strs.append('{:.2f}'.format(misc['reco_val']))
+                if 'split_by_reco_param' in misc and misc['split_by_reco_param'] is not None:
+                    misc_strs.append(
+                        'split by {} = {:.2f}'
+                        .format(misc['split_by_reco_param'], misc['split_val'])
+                    )
+                misc_str = ', '.join(misc_strs)
+                ax.set_title(
+                    '{}: {} {}'.format(dim_name, self.priors_used[dim_name][0], misc_str)
+                )
+            fig.tight_layout()
+            plt_fpath_base = self.event_prefix + 'priors'
+            fig.savefig(plt_fpath_base + '.png', dpi=120)
 
     def generate_loglike_method(self, param_values, log_likelihoods, t_start):
         """Generate the LLH callback method `self.loglike` for a given event.

@@ -50,20 +50,24 @@ KEEP_TRUTH_KEYS = (
     'coszen',
     'azimuth',
     'unique_id',
-    'highest_energy_daughter_pdg',
-    'highest_energy_daughter_energy',
-    'highest_energy_daughter_length',
-    'highest_energy_daughter_coszen',
-    'highest_energy_daughter_azimuth',
-    'longest_daughter_pdg',
-    'longest_daughter_energy',
-    'longest_daughter_length',
-    'longest_daughter_coszen',
-    'longest_daughter_azimuth',
-    #'cascade_pdg',
-    #'cascade_energy',
-    #'cascade_coszen',
-    #'cascade_azimuth',
+    'cascade0_energy',
+    'cascade0_em_equiv_energy',
+    'cascade0_hadr_equiv_energy',
+    'cascade0_hadr_fraction',
+    'cascade0_zenith',
+    'cascade0_azimuth',
+    'cascade1_energy',
+    'cascade1_em_equiv_energy',
+    'cascade1_hadr_equiv_energy',
+    'cascade1_hadr_fraction',
+    'cascade1_zenith',
+    'cascade1_azimuth',
+    'track_energy',
+    'track_zenith',
+    'track_azimuth',
+    'energy',
+    'coszen',
+    'azimuth',
     'InteractionType',
     'LengthInVolume',
     'OneWeight',
@@ -158,11 +162,12 @@ def extract_from_leaf_dir(
             continue
         pl_recos[pl_reco_name] = np.load(fname)
 
-    for est_fpath in glob(join(recodir, '*.crs_prefit_mn.estimate*.pkl')):
+    for est_fpath in glob(join(recodir, '*.crs_prefit.estimate*.pkl')):
         with open(est_fpath, 'rb') as f:
             try:
                 estimates = pickle.load(f)
             except EOFError:
+                print('EOFError')
                 continue
 
         kinds = estimates['kind'].values
@@ -224,7 +229,8 @@ def extract_from_leaf_dir(
                     # -- Get truth into info dict -- #
 
                     truth = truths[event_idx]
-                    for k in KEEP_TRUTH_KEYS:
+                    #for k in KEEP_TRUTH_KEYS:
+                    for k in truth.dtype.names:
                         #if k in truth:
                         info[k] = truth[k]
 
@@ -356,7 +362,7 @@ def augment_info(info):
                 continue
             err = info[reco_col] - info[param]
             if 'azimuth' in param:
-                err = (err + np.pi) % (2*np.pi) - np.pi
+                err = ((err + np.pi) % (2*np.pi)) - np.pi
             info['{}_{}_error'.format(reco, param)] = err
 
         # Angle error
@@ -418,7 +424,7 @@ def get_retro_results(
     outdir = abspath(expand(outdir))
     if not isdir(outdir):
         mkdir(outdir)
-    outfile_path = join(outdir, 'reconstructed_events.feather')
+    outfile_path = join(outdir, 'reconstructed_events.pkl')
     if not overwrite and isfile(outfile_path):
         raise IOError('Output file path already exists at "{}"'.format(outfile_path))
 
@@ -456,7 +462,6 @@ def get_retro_results(
                 filenum=filenum,
                 recompute_estimate=recompute_estimate,
             )
-            #print(kwargs)
             #futures.append(client.submit(extract_from_leaf_dir, **kwargs))
             results.append(extract_from_leaf_dir(**kwargs))
 
@@ -479,7 +484,7 @@ def get_retro_results(
     all_events = pd.DataFrame(all_events)
 
     # Save to disk
-    all_events.to_feather(outfile_path)
+    all_events.to_pickle(outfile_path)
     print('\nAll_events saved to "{}"\n'.format(outfile_path))
 
     nevents = len(all_events)
