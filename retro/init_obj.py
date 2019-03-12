@@ -2,9 +2,9 @@
 # pylint: disable=wrong-import-position
 
 """
-Convenience functions for intializing major objects needed for Retro likelihood
-processing (includes instantiating objects and loading the data needed for
-them).
+Convenience functions for initializing major objects needed for Retro
+likelihood processing (includes instantiating objects and loading the data
+needed for them).
 """
 
 from __future__ import absolute_import, division, print_function
@@ -392,7 +392,7 @@ def get_events(
         series.
 
     recos : sequence of strings, optional
-        Reeconstruction names to extract. Default is to not extract any
+        Reconstruction names to extract. Default is to not extract any
         reconstructions.
 
     triggers : sequence of strings
@@ -940,7 +940,7 @@ def parse_args(
         group.add_argument(
             '--events-base', type=str,
             required=True,
-            help='''i3 file or a directory contining Retro .npy/.pkl events
+            help='''i3 file or a directory containing Retro .npy/.pkl events
             files'''
         )
         group.add_argument(
@@ -1018,7 +1018,7 @@ def parse_args(
             use_sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
         else:
             raise ValueError(use_doms)
-        print('nubmer of doms = {}'.format(len(use_sd_indices)))
+        print('number of doms = {}'.format(len(use_sd_indices)))
         kwargs['use_sd_indices'] = use_sd_indices
         kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
 
