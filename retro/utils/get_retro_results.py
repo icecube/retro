@@ -14,12 +14,13 @@ __all__ = [
     'extract_from_leaf_dir',
     'augment_info',
     'get_retro_results',
-    'parse_args',
+    'main',
 ]
 
 from argparse import ArgumentParser
 from collections import OrderedDict
 from glob import glob
+from multiprocessing import cpu_count, Pool
 from operator import add
 from os import walk
 from os.path import abspath, basename, dirname, isdir, isfile, join, relpath
@@ -27,7 +28,6 @@ import pickle
 import sys
 import time
 
-#from dask.distributed import Client, LocalCluster, as_completed
 import numpy as np
 import pandas as pd
 
@@ -92,6 +92,11 @@ KEEP_EST_PRFT_FIT_META_KEYS = (
     'stopping_flag',
 )
 
+PREFIT_RECO_NAMES = (
+    'LineFit_DC',
+    'L5_SPEFit11',
+)
+
 PL_RECO_NAMES = (
     'Pegleg_Fit_MN',
     'Pegleg_Fit_SP_3Iter',
@@ -123,6 +128,18 @@ SIMPLE_ERR_PARAMS = (
 )
 
 
+def wstderr(s):
+    """Write string `s` to stderr and flush immediately"""
+    sys.stderr.write(s)
+    sys.stderr.flush()
+
+
+def wstdout(s):
+    """Write string `s` to stdout and flush immediately"""
+    sys.stdout.write(s)
+    sys.stdout.flush()
+
+
 def extract_from_leaf_dir(
     recodir,
     eventdir,
@@ -143,31 +160,42 @@ def extract_from_leaf_dir(
     infos : mapping, optional
     recompute_estimate : bool, optional
 
+    Returns
+    -------
+    infos.values() : list
+
     """
     if infos is None:
         infos = {}
-    sys.stdout.write('{} '.format(filenum))
+    wstdout('{} '.format(filenum))
 
     tru_npy_f = join(eventdir, 'truth.npy')
     if isfile(tru_npy_f):
         truths = np.load(tru_npy_f)
     else:
-        print('no truth info at path "{}"'.format(tru_npy_f))
-        return infos
+        wstderr('no truth info at path "{}"\n'.format(tru_npy_f))
+        return infos.values()
 
-    pl_recos = OrderedDict()
-    for pl_reco_name in PL_RECO_NAMES:
-        fname = join(eventdir, 'recos', pl_reco_name + '.npy')
+    evt_npy_f = join(eventdir, 'events.npy')
+    if isfile(evt_npy_f):
+        events = np.load(evt_npy_f)
+    else:
+        wstderr('no event info at path "{}"\n'.format(evt_npy_f))
+        return infos.values()
+
+    other_recos = OrderedDict()
+    for other_reco_name in PL_RECO_NAMES + PREFIT_RECO_NAMES:
+        fname = join(eventdir, 'recos', other_reco_name + '.npy')
         if not isfile(fname):
             continue
-        pl_recos[pl_reco_name] = np.load(fname)
+        other_recos[other_reco_name] = np.load(fname)
 
-    for est_fpath in glob(join(recodir, '*.crs_prefit.estimate*.pkl')):
+    for est_fpath in glob(join(recodir, '*.*.estimate*.pkl')):
         with open(est_fpath, 'rb') as f:
             try:
                 estimates = pickle.load(f)
-            except EOFError:
-                print('EOFError')
+            except (EOFError, KeyError):
+                wstderr('EOFError or KeyError\n')
                 continue
 
         kinds = estimates['kind'].values
@@ -219,6 +247,7 @@ def extract_from_leaf_dir(
             est = est.__array__()
 
             try:
+                # Do these things only once
                 if info_key not in infos:
                     info = infos[info_key] = dict(
                         flavdir=flavdir,
@@ -226,7 +255,11 @@ def extract_from_leaf_dir(
                         event_idx=event_idx,
                     )
 
-                    # -- Get truth into info dict -- #
+                    # -- Get event into info dict -- #
+
+                    event = events[event_idx]
+                    for k in event.dtype.names:
+                        info[k] = event[k]
 
                     truth = truths[event_idx]
                     #for k in KEEP_TRUTH_KEYS:
@@ -234,15 +267,17 @@ def extract_from_leaf_dir(
                         #if k in truth:
                         info[k] = truth[k]
 
-                    # -- Get Pegleg recos into info dict -- #
+                    # -- Get Pegleg & other recos into info dict -- #
 
-                    for pl_reco_name, pl_reco in pl_recos.items():
-                        for param_name in pl_reco.dtype.names:
-                            info['{}_{}'.format(pl_reco_name, param_name)] = (
-                                pl_reco[event_idx][param_name]
+                    for other_reco_name, other_reco in other_recos.items():
+                        for param_name in other_reco.dtype.names:
+                            info['{}_{}'.format(other_reco_name, param_name)] = (
+                                other_reco[event_idx][param_name]
                             )
                 else:
                     info = infos[info_key]
+
+                assert 'run_id' in info, str(info.keys())
 
                 # -- Get Retro recos & metadata into info dict -- #
 
@@ -274,7 +309,7 @@ def extract_from_leaf_dir(
                     info[pfx + param + '_width'] = width
 
             except Exception as e:
-                print(
+                wstderr(
                     'ERROR: event_idx {} in file "{}": {}'
                     .format(event_idx, est_fpath, e)
                 )
@@ -331,7 +366,7 @@ def augment_info(info):
 
     # -- Reco params -- #
 
-    for reco in PL_RECO_NAMES + RETRO_RECO_NAMES:
+    for reco in PREFIT_RECO_NAMES + PL_RECO_NAMES + RETRO_RECO_NAMES:
         for pfx in ('', 'track_', 'cascade_'):
             zen_col = '{}_{}zenith'.format(reco, pfx)
             cz_col = '{}_{}coszen'.format(reco, pfx)
@@ -406,6 +441,7 @@ def get_retro_results(
     events_basedir,
     recompute_estimate=False,
     overwrite=False,
+    procs=None,
 ):
     """Extract all rectro reco results from a reco directory tree, merging with original
     event information from correspoding source events directory tree. Results are
@@ -418,6 +454,12 @@ def get_retro_results(
     events_basedir : string
     recompute_estimate : bool, optional
     overwrite : bool, optional
+    procs : int > 0 or None
+        Passing None uses `multiprocessing.cpu_count()`;
+
+    Returns
+    -------
+    all_events : pandas.DataFrame
 
     """
     t0 = time.time()
@@ -428,56 +470,49 @@ def get_retro_results(
     if not overwrite and isfile(outfile_path):
         raise IOError('Output file path already exists at "{}"'.format(outfile_path))
 
-    #if parallel:
-    #    cluster = LocalCluster(threads_per_worker=1, diagnostics_port=None)
-    #    client = Client(cluster)
+    assert procs is None or procs >= 1
 
+    if procs is None or procs > 1:
+        pool = Pool(procs)
+
+    # Walk directory hierarchy
     results = []
-    try:
-        # Walk directory hierarchy
-        #futures = []
-        for reco_dirpath, _, files in walk(recos_basedir, followlinks=True):
-            is_leafdir = False
-            for f in files:
-                if f[-3:] == 'pkl' and f[:3] in ('slc', 'evt'):
-                    is_leafdir = True
-                    break
-            if not is_leafdir:
-                continue
-            rel_dirpath = relpath(path=reco_dirpath, start=recos_basedir)
-            if events_basedir is not None:
-                event_dirpath = join(events_basedir, rel_dirpath)
-                if not isdir(event_dirpath):
-                    raise IOError('Event directory does not exist: "{}"'
-                                  .format(event_dirpath))
+    for reco_dirpath, _, files in walk(recos_basedir, followlinks=True):
+        is_leafdir = False
+        for f in files:
+            if f[-3:] == 'pkl' and f[:3] in ('slc', 'evt'):
+                is_leafdir = True
+                break
+        if not is_leafdir:
+            continue
 
-            abs_reco_dirpath = abspath(reco_dirpath)
-            filenum = basename(abs_reco_dirpath)
-            flavdir = basename(dirname(abs_reco_dirpath))
+        rel_dirpath = relpath(path=reco_dirpath, start=recos_basedir)
+        if events_basedir is not None:
+            event_dirpath = join(events_basedir, rel_dirpath)
+            if not isdir(event_dirpath):
+                raise IOError('Event directory does not exist: "{}"'
+                              .format(event_dirpath))
 
-            kwargs = dict(
-                recodir=reco_dirpath,
-                eventdir=event_dirpath,
-                flavdir=flavdir,
-                filenum=filenum,
-                recompute_estimate=recompute_estimate,
-            )
-            #futures.append(client.submit(extract_from_leaf_dir, **kwargs))
+        abs_reco_dirpath = abspath(reco_dirpath)
+        filenum = basename(abs_reco_dirpath)
+        flavdir = basename(dirname(abs_reco_dirpath))
+
+        kwargs = dict(
+            recodir=reco_dirpath,
+            eventdir=event_dirpath,
+            flavdir=flavdir,
+            filenum=filenum,
+            recompute_estimate=recompute_estimate,
+        )
+        if procs > 1:
+            results.append(pool.apply_async(extract_from_leaf_dir, (), kwargs))
+        else:
             results.append(extract_from_leaf_dir(**kwargs))
 
-        #results = [f.result() for f in as_completed(futures)]
+    if procs > 1:
+        print(len(results))
+        results = [r.get() for r in results]
 
-    finally:
-        pass
-    #    cluster.close()
-    #    client.close()
-    #    del client
-    #    del cluster
-
-    # Convert to a single list containing all events
-    #for r in results:
-    #    print(type(r))
-    #    print(r)
     all_events = reduce(add, results, [])
 
     # Convert to pandas DataFrame
@@ -494,14 +529,9 @@ def get_retro_results(
     return all_events
 
 
-def parse_args():
-    """Parse command line arguments.
-
-    Returns
-    -------
-    kw : dict
-        Arguments to be passed to
-    """
+def main():
+    """Script interface to `get_retro_results`: Parse command line arguments,
+    call `get_retro_results`, and `augment_info`"""
     parser = ArgumentParser(
         description="""Extract reco and truth information and merge into a Pandas
         DataFrame. Results will be saved to "<outdir>/reconstructed_events.feather" in
@@ -509,30 +539,38 @@ def parse_args():
     )
 
     parser.add_argument(
-        '--outdir', required=True
+        '--outdir', required=True,
+        help='''Directory in which to save the `all_events` DataFrame'''
     )
     parser.add_argument(
         '--recos-basedir', required=True,
-        help='Path to base directory containing Retro reconstruction information'
+        help='''Path to base directory containing Retro reconstruction
+        information'''
     )
     parser.add_argument(
         '--events-basedir', required=True,
-        help='Path to base directory containing source events that were reconstructed'
+        help='''Path to base directory containing source events that were
+        reconstructed'''
     )
     parser.add_argument(
         '--recompute-estimate', action='store_true',
-        help='''Recompute estimate from raw LLHP (if these are stored to disk; otherwise
-        fail)'''
+        help='''Recompute estimate from raw LLHP (if these are stored to disk;
+        if not stored on disk, specifying this flag will throw an exception)'''
     )
     parser.add_argument(
         '--overwrite', action='store_true',
         help='Overwrite output file if it already exists',
     )
+    parser.add_argument(
+        '--procs', type=int, default=cpu_count(),
+        help='''Number of subprocesses to launch; default is the detected
+        number of cores: {}'''.format(cpu_count())
+    )
 
-    kw = vars(parser.parse_args())
-
-    return kw
+    namespace = parser.parse_args()
+    kwargs = vars(namespace)
+    get_retro_results(**kwargs)
 
 
 if __name__ == '__main__':
-    get_retro_results(**parse_args())
+    main()

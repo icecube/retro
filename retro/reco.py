@@ -58,7 +58,7 @@ from retro.utils.geom import (
 )
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
-from retro.priors import PRI_OSCNEXT_L5_V1, PRI_COSINE, PRI_UNIFORM, get_prior_fun
+from retro.priors import PRI_OSCNEXT_L5_V1, PRI_COSINE, PRI_UNIFORM, get_prior_fun  # pylint: disable=unused-import
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
@@ -69,6 +69,7 @@ METHODS = set([
     "crs",
     "crs_prefit",
     "crs_prefit_mn",
+    "crs_prefit_mn10d",
     "nlopt",
     "scipy",
     "skopt",
@@ -80,7 +81,7 @@ METHODS = set([
 
 CRS_STOP_FLAGS = {
     0: 'max iterations reached',
-    1: 'stddev below threshold',
+    1: 'stddev of llh below threshold',
     2: 'no improvement',
     3: 'vertex stddev below threshold'
 }
@@ -440,6 +441,8 @@ class Reco(object):
                         pft_y = float(pft_est.sel(param='y'))
                         pft_z = float(pft_est.sel(param='z'))
                         pft_time = float(pft_est.sel(param='time'))
+
+                        # TODO: include zenith and azimuth priors here?
 
                         self.generate_prior_method(
                             prior_defs=OrderedDict([
@@ -1273,9 +1276,13 @@ class Reco(object):
             Break condition on stddev of vertex
         use_priors : bool
             Use priors during minimization; if `False`, priors are only used
-            for sampling the initial distributions
+            for sampling the initial distributions. Even if set to `True`,
+            angles (azimuth and zenith) do not use priors while operating (only
+            for generating the initial distribution)
         use_sobol : bool
-            Use a Sobol sequence instead of numpy pseudo-random numbers
+            Use a Sobol sequence instead of numpy pseudo-random numbers. Seems
+            to do slightly better (but only small differences observed in tests
+            so far)
         seed : int
             Random seed
 
@@ -1330,7 +1337,7 @@ class Reco(object):
         # setup arrays to store points
         s_cart = np.zeros(shape=(n_live, n_cart))
         s_spher = np.zeros(shape=(n_live, n_spher_param_pairs), dtype=SPHER_T)
-        fx = np.zeros(shape=(n_live,))
+        llh = np.zeros(shape=(n_live,))
 
         def fun(x):
             """Callable for minimizer"""
@@ -1359,26 +1366,39 @@ class Reco(object):
 
         # generate initial population
         for i in range(n_live):
+            # Sobol seems to do slightly better than pseudo-random numbers
             if use_sobol:
-                # sobol seems to do slightly better
-                x, _ = i4_sobol(n_opt_params, i+1)
+                # Note we start at seed=1 since for n_live=1 this puts the
+                # first point in the middle of the range for all params (0.5),
+                # while seed=0 produces all zeros (the most extreme point
+                # possible, which will bias the distribution away from more
+                # likely values).
+                x, _ = i4_sobol(
+                    dim_num=n_opt_params,  # number of dimensions
+                    seed=i+1,  # Sobol sequence number
+                )
             else:
                 x = rand.uniform(0, 1, n_opt_params)
+
+            # Apply prior xforms to `param_vals` (contents are overwritten)
             param_vals = np.copy(x)
             self.prior(param_vals)
-            # always transform angles!
+
+            # Always use prior-xformed angles
             x[n_cart:] = param_vals[n_cart:]
+
+            # Only use xformed Cart params if NOT using priors during operation
             if not use_priors:
                 x[:n_cart] = param_vals[:n_cart]
 
-            # break up into cartesiand and spherical coordinates
+            # Break up into Cartesian and spherical coordinates
             s_cart[i] = x[:n_cart]
             s_spher[i]['zen'] = x[n_cart+1::2]
             s_spher[i]['az'] = x[n_cart::2]
             fill_from_spher(s_spher[i])
-            fx[i] = fun(x)
+            llh[i] = fun(x)
 
-        best_llh = np.min(fx)
+        best_llh = np.min(llh)
         no_improvement_counter = -1
 
         # optional bookkeeping
@@ -1388,7 +1408,6 @@ class Reco(object):
         stopping_flag = 0
 
         # minimizer loop
-        iter_num = 0
         for iter_num in range(max_iter):
             if iter_num % REPORT_AFTER == 0:
                 print(
@@ -1397,7 +1416,7 @@ class Reco(object):
                 )
 
             # break condition 1
-            if np.std(fx) < min_fn_std:
+            if np.std(llh) < min_fn_std:
                 stopping_flag = 1
                 break
 
@@ -1418,7 +1437,7 @@ class Reco(object):
                 stopping_flag = 3
                 break
 
-            new_best_llh = np.min(fx)
+            new_best_llh = np.min(llh)
 
             if new_best_llh < best_llh:
                 best_llh = new_best_llh
@@ -1426,8 +1445,8 @@ class Reco(object):
             else:
                 no_improvement_counter += 1
 
-            worst_idx = np.argmax(fx)
-            best_idx = np.argmin(fx)
+            worst_idx = np.argmax(llh)
+            best_idx = np.argmin(llh)
 
             # choose n_opt_params random points but not best
             choice = rand.choice(n_live - 1, n_opt_params, replace=False)
@@ -1464,13 +1483,13 @@ class Reco(object):
                 outside = False
 
             if not outside:
-                new_fx = fun(create_x(new_x_cart, new_x_spher))
+                new_llh = fun(create_x(new_x_cart, new_x_spher))
 
-                if new_fx < fx[worst_idx]:
+                if new_llh < llh[worst_idx]:
                     # found better point
                     s_cart[worst_idx] = new_x_cart
                     s_spher[worst_idx] = new_x_spher
-                    fx[worst_idx] = new_fx
+                    llh[worst_idx] = new_llh
                     num_simplex_successes += 1
                     continue
 
@@ -1499,13 +1518,13 @@ class Reco(object):
                 outside = False
 
             if not outside:
-                new_fx = fun(create_x(new_x_cart2, new_x_spher2))
+                new_llh = fun(create_x(new_x_cart2, new_x_spher2))
 
-                if new_fx < fx[worst_idx]:
+                if new_llh < llh[worst_idx]:
                     # found better point
                     s_cart[worst_idx] = new_x_cart2
                     s_spher[worst_idx] = new_x_spher2
-                    fx[worst_idx] = new_fx
+                    llh[worst_idx] = new_llh
                     num_mutation_successes += 1
                     continue
 
@@ -1806,7 +1825,7 @@ class Reco(object):
 
         print('Runing MultiNest...')
 
-        fit_meta = {}
+        fit_meta = OrderedDict()
         tmpdir = mkdtemp()
         outputfiles_basename = join(tmpdir, '')
         try:

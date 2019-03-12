@@ -49,6 +49,9 @@ def plot_comparison(
     ax=None,
 ):
     """Plot comparison between pegleg, retro, and possibly truth distributions."""
+    if pegleg is not None:
+        pegleg = pegleg[np.isfinite(pegleg)]
+
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 3), dpi=120)
         newfig = True
@@ -82,20 +85,23 @@ def plot_comparison(
         for stat in stats:
             label = stats_labels[stat].ljust(label_chars) + fmt_str
             if stat == 'iq50':
-                pl_sublabs.append(label.format(interquartile_range(pegleg)))
                 retro_sublabs.append(label.format(interquartile_range(retro)))
+                if pegleg is not None:
+                    pl_sublabs.append(label.format(interquartile_range(pegleg)))
                 if truth is not None:
                     truth_sublabs.append(label.format(interquartile_range(truth)))
 
             elif stat == 'median':
-                pl_sublabs.append(label.format(np.median(pegleg)))
                 retro_sublabs.append(label.format(np.median(retro)))
+                if pegleg is not None:
+                    pl_sublabs.append(label.format(np.median(pegleg)))
                 if truth is not None:
                     truth_sublabs.append(label.format(np.median(truth)))
 
             elif stat == 'mean':
-                pl_sublabs.append(label.format(np.mean(pegleg)))
                 retro_sublabs.append(label.format(np.mean(retro)))
+                if pegleg is not None:
+                    pl_sublabs.append(label.format(np.mean(pegleg)))
                 if truth is not None:
                     truth_sublabs.append(label.format(np.mean(truth)))
 
@@ -116,8 +122,16 @@ def plot_comparison(
             label=truth_label,
         )
     _, b, _ = ax.hist(retro, bins=b, histtype='step', lw=2, color='C0', label=retro_label)
-    _, b, _ = ax.hist(pegleg, bins=b, histtype='step', lw=2, color='C1', label=pl_label,
-                     zorder=-1)
+    if pegleg is not None:
+        _, b, _ = ax.hist(
+            pegleg,
+            bins=b,
+            histtype='step',
+            lw=2,
+            color='C1',
+            label=pl_label,
+            zorder=-1,
+        )
 
     ylim = ax.get_ylim()
     if truth is None:
@@ -204,11 +218,11 @@ def plot_all_distributions(
     axes = OrderedDict()
 
     truth = evts.x
-    pegleg = evts['{}_x'.format(p_reco)]
+    pegleg = evts['{}_x'.format(p_reco)] if p_reco else None
     retro = evts['{}_x'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pegleg - truth if p_reco else None,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_xe,
@@ -234,11 +248,11 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.y
-    pegleg = evts['{}_y'.format(p_reco)]
+    pegleg = evts['{}_y'.format(p_reco)] if p_reco else None
     retro = evts['{}_y'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pegleg - truth if p_reco else None,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_ye,
@@ -264,11 +278,11 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.z
-    pegleg = evts['{}_z'.format(p_reco)]
+    pegleg = evts['{}_z'.format(p_reco)] if p_reco else None
     retro = evts['{}_z'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pegleg - truth if p_reco else None,
         retro=retro - truth,
         xlim=(-20, 20),
         nbins=n_ze,
@@ -294,11 +308,11 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.time
-    pegleg = evts['{}_time'.format(p_reco)]
+    pegleg = evts['{}_time'.format(p_reco)] if p_reco else None
     retro = evts['{}_time'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pegleg - truth if p_reco else None,
         retro=retro - truth,
         xlim=(-100, 200),
         nbins=n_te,
@@ -324,11 +338,23 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = np.arccos(evts.coszen)
-    pegleg = evts['{}_track_zenith'.format(p_reco)]
+    if p_reco:
+        key0 = '{}_track_zenith'.format(p_reco)
+        key1 = '{}_zenith'.format(p_reco)
+        key2 = '{}_coszen'.format(p_reco)
+        if key0 in evts:
+            pegleg = evts[key0]
+        elif key1 in evts:
+            pegleg = evts[key1]
+        elif key2 in evts:
+            pegleg = np.arccos(evts[key2])
+    else:
+        pegleg = None
+
     retro = evts['{}_track_zenith'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pegleg - truth if p_reco else None,
         retro=retro - truth,
         xlim=(-.75, .75),
         nbins=n_zenerr,
@@ -354,11 +380,11 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.azimuth
-    pegleg = evts['{}_track_azimuth'.format(p_reco)]
-    retro = evts['{}_track_azimuth'.format(r_reco)]
+    pegleg = evts['{}_azimuth'.format(p_reco)] if p_reco else None
+    retro = evts['{}_azimuth'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=(pegleg - truth + np.pi) % (2*np.pi) - np.pi,
+        pegleg=(pegleg - truth + np.pi) % (2*np.pi) - np.pi if p_reco else None,
         retro=(retro - truth + np.pi) % (2*np.pi) - np.pi,
         xlim=(-np.pi/8, np.pi/8),
         nbins=n_azerr,
@@ -384,8 +410,14 @@ def plot_all_distributions(
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
-    p_err = evts['{}_track_angle_error'.format(p_reco)]
-    r_err = evts['{}_track_angle_error'.format(r_reco)]
+    if p_reco:
+        p_err = evts['{}_angle_error'.format(p_reco)]
+        p_err = p_err[np.isfinite(p_err)]
+    else:
+        p_err = None
+
+    r_err = evts['{}_angle_error'.format(r_reco)]
+    r_err = r_err[np.isfinite(r_err)]
 
     fig, ax, leg = plot_comparison(
         pegleg=p_err,
@@ -400,13 +432,15 @@ def plot_all_distributions(
         fig.savefig(fbp + '.png', dpi=120)
         fig.savefig(fbp + '.pdf')
 
-    truth = evts.cascade_energy
-    pegleg = evts['{}_cascade_energy'.format(p_reco)]
+    truth = evts.cascade0_em_equiv_energy + evts.cascade1_em_equiv_energy
+    pegleg = evts['{}_cascade_energy'.format(p_reco)] if p_reco else None
     retro = evts['{}_cascade_energy'.format(r_reco)]
+    mask = np.isfinite(retro) & np.isfinite(truth)
+    r_err = retro[mask] - truth[mask]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
-        retro=retro - truth,
+        pegleg=pegleg - truth if p_reco else None,
+        retro=r_err,
         xlim=(-20, 20),
         nbins=n_cscdenerr,
         xlab='reco cascade energy - true cascade energy (GeV)',
@@ -418,8 +452,8 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
     fig, ax, leg = plot_comparison(
         pegleg=pegleg,
-        retro=retro,
-        truth=truth,
+        retro=retro[mask],
+        truth=truth[mask],
         xlim=(0.0, 20),
         nbins=n_cscden,
         logx=False,
@@ -432,11 +466,11 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.track_energy
-    pegleg = evts['{}_track_energy'.format(p_reco)]
+    pegleg = evts['{}_track_energy'.format(p_reco)] if p_reco else None
     retro = evts['{}_track_energy'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pegleg - truth if p_reco else None,
         retro=retro - truth,
         xlim=(-30, 40),
         nbins=n_trckenerr,
@@ -463,11 +497,11 @@ def plot_all_distributions(
         fig.savefig(fbp + '.pdf')
 
     truth = evts.energy
-    pegleg = evts['{}_cascade_energy'.format(p_reco)] + evts['{}_track_energy'.format(p_reco)]
+    pegleg = evts['{}_cascade_energy'.format(p_reco)] + evts['{}_track_energy'.format(p_reco)] if p_reco else None
     retro = evts['{}_cascade_energy'.format(r_reco)]*2 + evts['{}_track_energy'.format(r_reco)]
 
     fig, ax, leg = plot_comparison(
-        pegleg=pegleg - truth,
+        pegleg=pegleg - truth if p_reco else None,
         retro=retro - truth,
         xlim=(-40, 40),
         nbins=n_enerr,
