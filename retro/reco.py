@@ -405,10 +405,10 @@ class Reco(object):
 
                     prefit_run_info = self.run_crs(
                         n_live=160,
-                        max_iter=10000,
-                        max_noimprovement=1000,
-                        min_llh_std=0.5,
-                        min_vertex_std=dict(x=5, y=5, z=5, time=15),
+                        max_iter=8000,
+                        max_noimprovement=500,
+                        min_llh_std=1.0,
+                        min_vertex_std=dict(x=10, y=10, z=7.5, time=35),
                         use_priors=False,
                         use_sobol=True,
                         seed=0,
@@ -1362,7 +1362,6 @@ class Reco(object):
         kwargs = OrderedDict()
         for arg_name in get_arg_names(self.run_crs)[1:]:
             kwargs[arg_name] = locals()[arg_name]
-        print('kwargs:', kwargs)  # DEBUG
 
         # setup arrays to store points
         s_cart = np.zeros(shape=(n_live, n_cart))
@@ -1571,17 +1570,17 @@ class Reco(object):
         print(CRS_STOP_FLAGS[stopping_flag])
 
         fit_meta = OrderedDict([
+            ('iterations', iter_num),
             ('stopping_flag', stopping_flag),
             ('stopping_message', CRS_STOP_FLAGS[stopping_flag]),
+            ('llh_std', llh_std),
+            ('no_improvement_counter', no_improvement_counter),
             ('vertex_std', vertex_std),
             ('vertex_std_met', vertex_std_met),
             ('vertex_std_met_at_iter', vertex_std_met_at_iter),
-            ('llh_std', llh_std),
-            ('no_improvement_counter', no_improvement_counter),
             ('num_simplex_successes', num_simplex_successes),
             ('num_mutation_successes', num_mutation_successes),
             ('num_failures', num_failures),
-            ('iterations', iter_num),
         ])
 
         run_info = OrderedDict([
