@@ -86,10 +86,13 @@ KEEP_EST_FIT_META_KEYS = ('ins_logZ', 'ins_logZ_err', 'logZ', 'logZ_err')
 # only for "estimate_prefit"
 KEEP_EST_PRFT_FIT_META_KEYS = (
     'iterations',
-    'num_failures',
-    'num_mutation_successes',
-    'num_simplex_successes',
     'stopping_flag',
+    'llh_std',
+    'vertex_std',
+    'vertex_std_met_at_iter',
+    'num_simplex_successes',
+    'num_mutation_successes',
+    'num_failures',
 )
 
 PREFIT_RECO_NAMES = (
@@ -295,6 +298,8 @@ def extract_from_leaf_dir(
                 else:
                     keep_fit_meta_keys = KEEP_EST_FIT_META_KEYS
                 for key in keep_fit_meta_keys:
+                    if key not in fit_meta:
+                        continue
                     info[pfx + key] = fit_meta[key]
 
                 for param_index, param in enumerate(params):
