@@ -13,6 +13,7 @@ __all__ = [
     'CRS_STOP_FLAGS',
     'REPORT_AFTER',
     'APPEND_FILE',
+    'CART_DIMS',
     'Reco',
     'get_multinest_meta',
     'parse_args',
@@ -52,16 +53,17 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import GarbageInputError, init_obj
+from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
+from retro.hypo.discrete_muon_kernels import pegleg_eval
+from retro.priors import PRI_OSCNEXT_L5_V1, PRI_COSINE, PRI_UNIFORM, get_prior_fun  # pylint: disable=unused-import
 from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T
+from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.utils.geom import (
     rotate_points, add_vectors, fill_from_spher, fill_from_cart, reflect
 )
+from retro.utils.get_arg_names import get_arg_names
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
-from retro.priors import PRI_OSCNEXT_L5_V1, PRI_COSINE, PRI_UNIFORM, get_prior_fun  # pylint: disable=unused-import
-from retro.hypo.discrete_muon_kernels import pegleg_eval
-from retro.tables.pexp_5d import generate_pexp_and_llh_functions
-from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 
 
 METHODS = set([
@@ -81,7 +83,7 @@ METHODS = set([
 
 CRS_STOP_FLAGS = {
     0: 'max iterations reached',
-    1: 'stddev of llh below threshold',
+    1: 'llh stddev below threshold',
     2: 'no improvement',
     3: 'vertex stddev below threshold'
 }
@@ -89,6 +91,8 @@ CRS_STOP_FLAGS = {
 # TODO: make following args to `__init__` or `run`
 REPORT_AFTER = 100
 APPEND_FILE = True
+
+CART_DIMS = ('x', 'y', 'z', 'time')
 
 
 class Reco(object):
@@ -270,8 +274,8 @@ class Reco(object):
                             n_live=250,
                             max_iter=20000,
                             max_noimprovement=5000,
-                            min_fn_std=0.1,
-                            min_vertex_std=(1, 1, 1, 3),
+                            min_llh_std=0.1,
+                            min_vertex_std=dict(x=1, y=1, z=1, time=3),
                             use_priors=False,
                             use_sobol=True,
                             seed=0,
@@ -344,8 +348,8 @@ class Reco(object):
                         n_live=160,
                         max_iter=10000,
                         max_noimprovement=1000,
-                        min_fn_std=0.5,
-                        min_vertex_std=(5, 5, 5, 15),
+                        min_llh_std=0.5,
+                        min_vertex_std=dict(x=5, y=5, z=5, time=15),
                         use_priors=False,
                         use_sobol=True,
                         seed=0,
@@ -403,8 +407,8 @@ class Reco(object):
                         n_live=160,
                         max_iter=10000,
                         max_noimprovement=1000,
-                        min_fn_std=0.5,
-                        min_vertex_std=(5, 5, 5, 15),
+                        min_llh_std=0.5,
+                        min_vertex_std=dict(x=5, y=5, z=5, time=15),
                         use_priors=False,
                         use_sobol=True,
                         seed=0,
@@ -596,8 +600,8 @@ class Reco(object):
                         n_live=160,
                         max_iter=20000,
                         max_noimprovement=2000,
-                        min_fn_std=0.1,
-                        min_vertex_std=(5, 5, 5, 15),
+                        min_llh_std=0.1,
+                        min_vertex_std=dict(x=5, y=5, z=5, time=15),
                         use_priors=False,
                         use_sobol=True,
                         seed=0,
@@ -668,8 +672,8 @@ class Reco(object):
                         n_live=160,
                         max_iter=20000,
                         max_noimprovement=2000,
-                        min_fn_std=0.1,
-                        min_vertex_std=(5, 5, 5, 15),
+                        min_llh_std=0.1,
+                        min_vertex_std=dict(x=5, y=5, z=5, time=15),
                         use_priors=False,
                         use_sobol=True,
                         seed=0,
@@ -1187,13 +1191,17 @@ class Reco(object):
     def run_test(self, seed):
         """Random sampling instead of an actual minimizer"""
         raise NotImplementedError('`run_test` not implemented') # TODO
-        kwargs = sort_dict(dict(seed=seed))
+
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_test)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
+
         rand = np.random.RandomState(seed=seed)
         for i in range(100):
             param_vals = rand.uniform(0, 1, self.n_opt_params)
             self.prior(param_vals)
             llh = self.loglike(param_vals)
-        run_info = sort_dict(dict(method='run_test', kwargs=kwargs))
+        run_info = OrderedDict([('method', 'run_test'), ('kwargs', kwargs)])
         return run_info
 
     def run_with_truth(self, rand_dims=None, n_samples=10000, seed=0):
@@ -1212,6 +1220,10 @@ class Reco(object):
         raise NotImplementedError('`run_with_truth` not implemented') # TODO
         if rand_dims is None:
             rand_dims = []
+
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_with_truth)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
 
         truth = self.current_event['truth']
         true_params = np.zeros(self.n_opt_params)
@@ -1238,7 +1250,7 @@ class Reco(object):
         else:
             llh = self.loglike(true_params)
 
-        run_info = sort_dict(dict(method='run_with_truth', kwargs=kwargs))
+        run_info = OrderedDict([('method', 'run_with_truth'), ('kwargs', kwargs)])
         return run_info
 
     def run_crs(
@@ -1246,7 +1258,7 @@ class Reco(object):
         n_live,
         max_iter,
         max_noimprovement,
-        min_fn_std,
+        min_llh_std,
         min_vertex_std,
         use_priors,
         use_sobol,
@@ -1269,11 +1281,14 @@ class Reco(object):
             Maximum iterations
         max_noimprovement : int
             Maximum iterations with no improvement of best point
-        min_fn_std : float
-            Break if stddev of function values across all livepoints drops
-            below this threshold
-        min_vertex_std : sequence
-            Break condition on stddev of vertex
+        min_llh_std : float
+            Break if stddev of llh values across all livepoints drops below
+            this threshold
+        min_vertex_std : mapping
+            Break condition on stddev of Cartesian dimension(s) (x, y, z, and
+            time). Keys are dimension names and values are the standard
+            deviations for each dimension. All specified dimensions must drop
+            below the specified stddevs for this break condition to be met.
         use_priors : bool
             Use priors during minimization; if `False`, priors are only used
             for sampling the initial distributions. Even if set to `True`,
@@ -1305,17 +1320,6 @@ class Reco(object):
         if use_sobol:
             from sobol import i4_sobol
 
-        kwargs = sort_dict(dict(
-            n_live=n_live,
-            max_iter=max_iter,
-            max_noimprovement=max_noimprovement,
-            min_fn_std=min_fn_std,
-            min_vertex_std=min_vertex_std,
-            use_priors=use_priors,
-            use_sobol=use_sobol,
-            seed=seed,
-        ))
-
         rand = np.random.RandomState(seed=seed)
 
         n_opt_params = self.n_opt_params
@@ -1324,7 +1328,7 @@ class Reco(object):
 
         # figure out which variables are Cartesian and which spherical
         opt_param_names = self.hypo_handler.opt_param_names
-        cart_param_names = set(opt_param_names) & set(['time', 'x', 'y', 'z'])
+        cart_param_names = set(opt_param_names) & set(CART_DIMS)
         n_cart = len(cart_param_names)
         assert set(opt_param_names[:n_cart]) == cart_param_names
         n_spher_param_pairs = int((n_opt_params - n_cart)/2)
@@ -1333,6 +1337,32 @@ class Reco(object):
             zen_param = opt_param_names[n_cart + sph_pair_idx*2 + 1]
             assert 'az' in az_param, '"{}" not azimuth param'.format(az_param)
             assert 'zen' in zen_param, '"{}" not zenith param'.format(zen_param)
+
+        for dim in min_vertex_std.keys():
+            if dim not in opt_param_names:
+                raise ValueError('dim "{}" not being optimized'.format(dim))
+            if dim not in cart_param_names:
+                raise NotImplementedError(
+                    'dim "{}" stddev not computed, as stddev currently only'
+                    ' computed for Cartesian parameters'.format(dim)
+                )
+
+        # set standard reordering so subsequent calls with different input
+        # ordering will have store identical metadata files
+        min_vertex_std = OrderedDict(
+            [(d, min_vertex_std[d]) for d in CART_DIMS if d in min_vertex_std]
+        )
+
+        # storage for info about stddev, whether met, and when met
+        vertex_std = OrderedDict([(d, np.nan) for d in min_vertex_std.keys()])
+        vertex_std_met = OrderedDict([(d, False) for d in min_vertex_std.keys()])
+        vertex_std_met_at_iter = OrderedDict([(d, -1) for d in min_vertex_std.keys()])
+
+        # Record kwargs user supplied (after translation & standardization)
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_crs)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
+        print('kwargs:', kwargs)  # DEBUG
 
         # setup arrays to store points
         s_cart = np.zeros(shape=(n_live, n_cart))
@@ -1415,8 +1445,21 @@ class Reco(object):
                     % (num_simplex_successes, num_mutation_successes, num_failures)
                 )
 
+            # compute value for break condition 1
+            llh_std = np.std(llh)
+
+            # compute value for break condition 3
+            for dim, cond in min_vertex_std.items():
+                vertex_std[dim] = std = np.std(s_cart[:, opt_param_names.index(dim)])
+                vertex_std_met[dim] = met = std < cond
+                if met:
+                    if vertex_std_met_at_iter[dim] == -1:
+                        vertex_std_met_at_iter[dim] = iter_num
+                else:
+                    vertex_std_met_at_iter[dim] = -1
+
             # break condition 1
-            if np.std(llh) < min_fn_std:
+            if llh_std < min_llh_std:
                 stopping_flag = 1
                 break
 
@@ -1426,14 +1469,7 @@ class Reco(object):
                 break
 
             # break condition 3
-            done = []
-            stds = []
-            for dim, cond in zip(('x', 'y', 'z', 'time'), min_vertex_std):
-                if dim in opt_param_names:
-                    std = np.std(s_cart[:, opt_param_names.index(dim)])
-                    stds.append(std)
-                    done.append(std < cond)
-            if len(done) > 0 and all(done):
+            if len(min_vertex_std) > 0 and all(vertex_std_met.values()):
                 stopping_flag = 3
                 break
 
@@ -1534,30 +1570,34 @@ class Reco(object):
 
         print(CRS_STOP_FLAGS[stopping_flag])
 
-        fit_meta = sort_dict(dict(
-            stopping_flag=stopping_flag,
-            stopping_message=CRS_STOP_FLAGS[stopping_flag],
-            num_simplex_successes=num_simplex_successes,
-            num_mutation_successes=num_mutation_successes,
-            num_failures=num_failures,
-            iterations=iter_num,
-        ))
+        fit_meta = OrderedDict([
+            ('stopping_flag', stopping_flag),
+            ('stopping_message', CRS_STOP_FLAGS[stopping_flag]),
+            ('vertex_std', vertex_std),
+            ('vertex_std_met', vertex_std_met),
+            ('vertex_std_met_at_iter', vertex_std_met_at_iter),
+            ('llh_std', llh_std),
+            ('no_improvement_counter', no_improvement_counter),
+            ('num_simplex_successes', num_simplex_successes),
+            ('num_mutation_successes', num_mutation_successes),
+            ('num_failures', num_failures),
+            ('iterations', iter_num),
+        ])
 
-        run_info = sort_dict(dict(
-            method='run_crs',
-            method_description='CRS2spherical+lm+sampling',
-            kwargs=kwargs,
-            fit_meta=fit_meta,
-        ))
+        run_info = OrderedDict([
+            ('method', 'run_crs'),
+            ('method_description', 'CRS2spherical+lm+sampling'),
+            ('kwargs', kwargs),
+            ('fit_meta', fit_meta),
+        ])
         return run_info
 
     def run_scipy(self, method, eps):
         from scipy import optimize
 
-        kwargs = sort_dict(dict(
-            method=method,
-            eps=eps,
-        ))
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_scipy)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
 
         # initial guess
         x0 = 0.5 * np.ones(shape=self.n_opt_params)
@@ -1578,7 +1618,7 @@ class Reco(object):
         else:
             optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
 
-        run_info = sort_dict(dict(method='run_scipy', kwargs=kwargs))
+        run_info = OrderedDict([('method', 'run_scipy'), ('kwargs', kwargs)])
         return run_info
 
     def run_skopt(self):
@@ -1608,7 +1648,7 @@ class Reco(object):
             **settings
         )
 
-        run_info = sort_dict(dict(method='run_skopt', settings=settings))
+        run_info = OrderedDict([('method', 'run_skopt'), ('settings', settings)])
         return run_info
 
     def run_nlopt(self):
@@ -1746,7 +1786,7 @@ class Reco(object):
             stopval=opt.get_stopval(),
         ))
 
-        run_info = sort_dict(dict(method='run_nlopt', settings=settings))
+        run_info = OrderedDict([('method', 'run_nlopt'), ('settings', settings)])
         return run_info
 
     def run_multinest(
@@ -1788,19 +1828,12 @@ class Reco(object):
 
         """
         # Import pymultinest here; it's a less common dependency, so other
-        # functions / constants in this module will still be import-able w/o it.
+        # functions/constants in this module will still be import-able w/o it.
         import pymultinest
 
-        kwargs = sort_dict(dict(
-            importance_sampling=importance_sampling,
-            max_modes=max_modes,
-            const_eff=const_eff,
-            n_live=n_live,
-            evidence_tol=evidence_tol,
-            sampling_eff=sampling_eff,
-            max_iter=max_iter,
-            seed=seed,
-        ))
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_multinest)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
 
         mn_kwargs = sort_dict(dict(
             n_dims=self.n_opt_params,
@@ -1843,12 +1876,12 @@ class Reco(object):
         finally:
             rmtree(tmpdir)
 
-        run_info = sort_dict(dict(
-            method='run_multinest',
-            kwargs=kwargs,
-            mn_kwargs=mn_kwargs,
-            fit_meta=sort_dict(fit_meta),
-        ))
+        run_info = OrderedDict([
+            ('method', 'run_multinest'),
+            ('kwargs', kwargs),
+            ('mn_kwargs', mn_kwargs),
+            ('fit_meta', fit_meta),
+        ])
         return run_info
 
 
