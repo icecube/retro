@@ -542,6 +542,10 @@ def prior_from_reco(
         if i == 0:
             ax.legend(loc='best', frameon=False, fontsize=6)
 
+    # Turn off any excess axes in the grid
+    for ax in axiter:
+        ax.axis('off')
+
     suptitle = '{} {}: true $-$ reco'.format(reco, param)
     fname = '{}_{}_neg_error'.format(reco, param)
     fontsize = 8
