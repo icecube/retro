@@ -185,7 +185,7 @@ OSCNEXT_L5_V1_PRIORS = dict(
                 RETRO_DIR,
                 'data',
                 'priors',
-                'L5_SPEFit11_azimuth_neg_error_splitby_reco_coszen_12.pkl',
+                'L5_SPEFit11_azimuth_neg_error_splitby_reco_coszen_10.pkl',
             ),
         ),
         LineFit_DC=LazyLoader(
@@ -193,7 +193,7 @@ OSCNEXT_L5_V1_PRIORS = dict(
                 RETRO_DIR,
                 'data',
                 'priors',
-                'LineFit_DC_azimuth_neg_error_splitby_reco_coszen_12.pkl',
+                'LineFit_DC_azimuth_neg_error_splitby_reco_coszen_10.pkl',
             ),
         ),
     ),
@@ -316,7 +316,7 @@ def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
     return prior_def, misc
 
 
-def define_generic_prior(kind, kwargs, low, high, extent=None):
+def define_generic_prior(kind, kwargs, low, high, extent=None):  # pylint: disable=unused-argument
     """Create prior definition for a `kind` that exists in `scipy.stats.distributions`.
 
     Parameters
