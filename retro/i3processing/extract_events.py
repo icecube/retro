@@ -443,7 +443,7 @@ def extract_pulses(frame, pulse_series_name):
 
     pulse_series = frame[pulse_series_name]
 
-     time_range_name = None
+    time_range_name = None
     if pulse_series_name + 'TimeRange' in frame:
         time_range_name = pulse_series_name + 'TimeRange'
     elif 'UncleanedInIcePulsesTimeRange' in frame:
