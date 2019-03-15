@@ -405,10 +405,10 @@ class Reco(object):
 
                     prefit_run_info = self.run_crs(
                         n_live=160,
-                        max_iter=8000,
+                        max_iter=10000,
                         max_noimprovement=1000,
-                        min_llh_std=1.0,
-                        min_vertex_std=dict(x=10, y=10, z=7.5, time=35),
+                        min_llh_std=0.5,
+                        min_vertex_std=dict(x=5, y=5, z=4, time=20),
                         use_priors=False,
                         use_sobol=True,
                         seed=0,
