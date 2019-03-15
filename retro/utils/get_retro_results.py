@@ -81,10 +81,10 @@ KEEP_ATTRS = ('num_llh', 'max_llh', 'max_postproc_llh')
 KEEP_RUN_INFO_KEYS = ('run_time',)
 
 # only for "estimate"
-KEEP_EST_FIT_META_KEYS = ('ins_logZ', 'ins_logZ_err', 'logZ', 'logZ_err')
+KEEP_MULTINEST_META_KEYS = ('ins_logZ', 'ins_logZ_err', 'logZ', 'logZ_err')
 
 # only for "estimate_prefit"
-KEEP_EST_PRFT_FIT_META_KEYS = (
+KEEP_CRS_META_KEYS = (
     'iterations',
     'stopping_flag',
     'llh_std',
@@ -294,9 +294,9 @@ def extract_from_leaf_dir(
 
                 fit_meta = run_info['fit_meta']
                 if is_prefit:
-                    keep_fit_meta_keys = KEEP_EST_PRFT_FIT_META_KEYS
+                    keep_fit_meta_keys = KEEP_CRS_META_KEYS
                 else:
-                    keep_fit_meta_keys = KEEP_EST_FIT_META_KEYS
+                    keep_fit_meta_keys = KEEP_MULTINEST_META_KEYS
                 for key in keep_fit_meta_keys:
                     if key not in fit_meta:
                         continue

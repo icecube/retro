@@ -88,7 +88,8 @@ COMPR_EXTENSIONS = ZSTD_EXTENSIONS
 
 
 class LazyLoader(object):
-    """Lazily load a pickled datasource only when its value is requested.
+    """Lazily load a pickled datasource only when its data or SHA-256 sum is
+    requested.
 
     Parameters
     ----------
@@ -98,18 +99,36 @@ class LazyLoader(object):
 
     """
     def __init__(self, datasource):
-        self.datasource = expanduser(expandvars(datasource))
-        if not isfile(self.datasource):
-            raise IOError('path is not a file: "{}"'.format(self.datasource))
+        self._datasource = abspath(expanduser(expandvars(datasource)))
+        if not isfile(self._datasource):
+            raise IOError('path is not a file: "{}"'.format(self._datasource))
         self._data = None
+        self._sha256 = None
         self._is_loaded = False
+
+    def _load_data(self):
+        sdata = open(self.datasource).read()
+        self._sha256 = hashlib.sha256(sdata).hexdigest()
+        self._data = pickle.loads(sdata)
+
+    @property
+    def datasource(self):
+        """Absolute path to file from which data is loaded"""
+        return self._datasource
 
     @property
     def data(self):
-        """Retrieve the data, loading on first access from `self.datasource`"""
+        """Un-pickled contents of the file"""
         if not self._is_loaded:
-            self._data = pickle.load(open(self.datasource))
+            self._load_data()
         return self._data
+
+    @property
+    def sha256(self):
+        """SHA256 sum of the file"""
+        if not self._is_loaded:
+            self._load_data()
+        return self._sha256
 
 
 def expand(p):

@@ -262,6 +262,8 @@ def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
         )
 
     prior_info = OSCNEXT_L5_V1_PRIORS[dim_name][reco].data
+    prior_sha256 = OSCNEXT_L5_V1_PRIORS[dim_name][reco].sha256
+    prior_fname = basename(OSCNEXT_L5_V1_PRIORS[dim_name][reco].datasource)
 
     split_by_reco_param = prior_info['metadata']['split_by_reco_param']
     if split_by_reco_param is None:
@@ -310,6 +312,8 @@ def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
     prior_def = (pri_kind, (pri['x'] + reco_val, pri['pdf'], low, high))
 
     misc = deepcopy(prior_info['metadata'])
+    misc['prior_file_name'] = prior_fname
+    misc['prior_file_sha256'] = prior_sha256[:10]
     misc['reco_val'] = reco_val
     misc['split_val'] = split_val
 
