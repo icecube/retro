@@ -38,6 +38,7 @@ import matplotlib as mpl
 mpl.use('agg', warn=False)
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from scipy import interpolate
 
 from pisa.utils.vbwkde import vbwkde
@@ -175,6 +176,25 @@ def prior_from_reco(
     if isinstance(reco_array, basestring):
         reco_array = pickle.load(open(reco_array, 'rb'))
 
+    if isinstance(reco_array, pd.DataFrame):
+        pnames = [param]
+        if split_by_reco_param is not None:
+            pnames.append(split_by_reco_param)
+        fields = []
+        dt_spec = []
+        for pname in pnames:
+            field = '{}_{}'.format(reco, param)
+            if field not in reco_array:
+                if param == 'coszen':
+                    field = '{}_{}'.format(reco, 'zenith')
+                elif param == 'zenith':
+                    field = '{}_{}'.format(reco, 'coszen')
+                else:
+                    raise ValueError()
+            fields.append(field)
+            dt_spec.append((pname, reco_array.dtypes[field]))
+        reco_array = np.array(reco_array[fields].values, dtype=np.dtype(dt_spec))
+
     if isinstance(reco_array, Mapping):
         reco_array = reco_array[reco]
 
@@ -185,10 +205,19 @@ def prior_from_reco(
 
     # `param`
 
-    if param == 'zenith':
-        true_vals = np.arccos(true_array['coszen'])
-    else:
+    try:
         true_vals = true_array[param]
+    except (KeyError, ValueError):
+        if 'zenith' in param:
+            newp = param.replace('zenith', 'coszen')
+            true_vals = np.arccos(true_array[newp])
+        elif 'coszen' in param:
+            newp = param.replace('coszen', 'zenith')
+            true_vals = np.cos(true_array[newp])
+        else:
+            raise
+    if isinstance(true_vals, pd.Series):
+        true_vals = true_vals.values
 
     if param in reco_array.dtype.names:
         reco_vals = reco_array[param]

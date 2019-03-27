@@ -70,7 +70,7 @@ METHODS = set([
     "multinest",
     "crs",
     "crs_prefit",
-    "crs_prefit_mn8d",
+    "mn8d",
     "nlopt",
     "scipy",
     "skopt",
@@ -394,7 +394,7 @@ class Reco(object):
                 save=True,
             )
 
-        elif method == 'crs_prefit_mn8d':
+        elif method == 'mn8d':
             self.setup_hypo(
                 cascade_kernel='scaling_aligned_one_dim',
                 track_kernel='pegleg',
@@ -576,6 +576,8 @@ class Reco(object):
                 ax.set_title(
                     '{}: {} {}'.format(dim_name, self.priors_used[dim_name][0], misc_str)
                 )
+            for ax in axit:
+                ax.axis('off')
             fig.tight_layout()
             plt_fpath_base = self.event_prefix + 'priors'
             fig.savefig(plt_fpath_base + '.png', dpi=120)
@@ -802,11 +804,10 @@ class Reco(object):
 
         param_values : array
 
-        fname : str, optional
-            If provided, llhp for the event reco are saved to file at path
-              {self.outdir}/evt{event_idx}.{fname}.npy
-
         save : bool
+            If True, llhp for the event reco are saved to file at path
+              {self.outdir}/evt{event_idx}.retro_{method}.llhp.npy
+
 
         Returns
         -------
@@ -912,6 +913,8 @@ class Reco(object):
             Remove effect of priors
         fit_meta : mapping, optional
         save : bool
+            If True, estimate is saved to a file at path
+                {self.outdir}/{self.slice_prefix}retro_{method}.estimate.npy
 
         Returns
         -------
@@ -1744,8 +1747,9 @@ def parse_args(description=__doc__):
         '--outdir', required=True
     )
     parser.add_argument(
-        '--method', required=True, choices=METHODS,
-        help='Method to use for performing reconstructions'
+        '--method', required=True, choices=METHODS, action='append',
+        help='''Method(s) to use for performing reconstructions. Repeat to run
+        multiple methods'''
     )
     parser.add_argument(
         '--save-llhp', action='store_true',

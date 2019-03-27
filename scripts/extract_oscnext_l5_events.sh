@@ -22,8 +22,6 @@ do
         --recos CascadeLast_DC FiniteRecoFit L4_ToIEval2 L4_iLineFit LineFit MM_DC_LineFitI_MM_DC_Pulses_1P_C05 MPEFit PoleMuonLinefit SPEFit2 SPEFit2_DC SPEFitSingle_DC DipoleFit_DC L4_ToI L4_ToIEval3 L5_SPEFit11 LineFit_DC MM_IC_LineFitI MPEFitMuEX PoleMuonLlhFit SPEFit2MuEX_FSS SPEFitSingle ToI_DC \
         --fpath "$full_i3_filepath" \
         --outdir "$outdir" &
-        #--recos L5_SPEFit11 LineFit_DC \
-
 done
 
 wait
