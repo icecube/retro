@@ -18,11 +18,12 @@ __all__ = [
     'PRI_AZ_INTERP',
     'PRI_SPEFIT2',
     'PRI_SPEFIT2TIGHT',
-    'PRI_OSCNEXT_L5_V1',
+    'PRI_OSCNEXT_L5_V1_PREFIT',
+    'PRI_OSCNEXT_L5_V1_CRS',
     'OSCNEXT_L5_V1_PRIORS',
-    'define_oscnext_l5_v1_prior',
+    'define_prefit_prior',
     'define_generic_prior',
-    'get_prior_fun',
+    'get_prior_func',
 ]
 
 __author__ = 'J.L. Lanfranchi, P. Eller'
@@ -42,7 +43,8 @@ limitations under the License.'''
 
 from collections import OrderedDict
 from copy import deepcopy
-from os.path import abspath, dirname, join
+import enum
+from os.path import abspath, basename, dirname, join
 import sys
 
 import numpy as np
@@ -73,175 +75,106 @@ PRI_SPEFIT2 = 'spefit2'
 PRI_SPEFIT2TIGHT = 'spefit2tight'
 """From fits to DRAGON (GRECO?) i.e. pre-oscNext MC"""
 
-PRI_OSCNEXT_L5_V1 = 'oscnext_l5_v1'
-"""Priors from best-fits to oscNext level 5 (first version of processing, or
-v1) events.
-
-Priority is to use L5_SPEFit11 fit as prior, but this fails on some events, so
-fall back to using LineFit_DC for these (LineFit_DC did not fail in any MC
-events).
-
-L5_SPEFit11 priors are derived for each dimension from:
-    * time : splined-sampled VBWKDE fit to (negative) error dists
-    * x : splined-sampled VBWKDE fit to (negative) error dists
-    * y : splined-sampled VBWKDE fit to (negative) error dists
-    * z : splined-sampled VBWKDE fit to (negative) error dists
-    * azimuth : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
-    * coszen : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
-    * zenith : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
-
-LineFit_DC priors are derived for each dimension from:
-    * time : splined-sampled VBWKDE fit to (negative) error dists
-    * x : splined-sampled VBWKDE fit to (negative) error dists
-    * y : splined-sampled VBWKDE fit to (negative) error dists
-    * z : splined-sampled VBWKDE fit to (negative) error dists
-    * azimuth : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
-    * coszen : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
-    * zenith : splined-sampled VBWKDE fit to (negative) error dists divided by coszen
-
-All distributions (names from scipy.stats.distributions) are fit to event with
-weights, where the weights are taken from the `weight` field in each event's
-I3MCWeightDict.
-
-See retro/notebooks/plot_prior_reco_candidates.ipynb for the fitting process.
+PRI_OSCNEXT_L5_V1_PREFIT = 'oscnext_l5_v1_prefit'
+"""Priors from L5_SPEFit11 (and fallback to LineFit_DC) fits to oscNext level 5
+(first version of processing, or v1) events. See
+  retro/notebooks/plot_prior_reco_candidates.ipynb for the fitting process.
 """
 
-OSCNEXT_L5_V1_PRIORS = dict(
-    time=dict(
-        L5_SPEFit11=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'L5_SPEFit11_time_neg_error.pkl',
-            ),
-        ),
-        LineFit_DC=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'LineFit_DC_time_neg_error.pkl',
-            ),
-        ),
-    ),
-    x=dict(
-        L5_SPEFit11=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'L5_SPEFit11_x_neg_error.pkl',
-            ),
-        ),
-        LineFit_DC=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'LineFit_DC_x_neg_error.pkl',
-            ),
-        ),
-    ),
-    y=dict(
-        L5_SPEFit11=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'L5_SPEFit11_y_neg_error.pkl',
-            ),
-        ),
-        LineFit_DC=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'LineFit_DC_y_neg_error.pkl',
-            ),
-        ),
-    ),
-    z=dict(
-        L5_SPEFit11=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'L5_SPEFit11_z_neg_error.pkl',
-            ),
-        ),
-        LineFit_DC=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'LineFit_DC_z_neg_error.pkl',
-            ),
-        ),
-    ),
-    azimuth=dict(
-        L5_SPEFit11=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'L5_SPEFit11_azimuth_neg_error_splitby_reco_coszen_10.pkl',
-            ),
-        ),
-        LineFit_DC=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'LineFit_DC_azimuth_neg_error_splitby_reco_coszen_10.pkl',
-            ),
-        ),
-    ),
-    coszen=dict(
-        L5_SPEFit11=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'L5_SPEFit11_coszen_neg_error_splitby_reco_coszen_16.pkl',
-            ),
-        ),
-        LineFit_DC=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'LineFit_DC_coszen_neg_error_splitby_reco_coszen_16.pkl',
-            ),
-        ),
-    ),
-    zenith=dict(
-        L5_SPEFit11=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'L5_SPEFit11_zenith_neg_error_splitby_reco_coszen_16.pkl',
-            ),
-        ),
-        LineFit_DC=LazyLoader(
-            datasource=join(
-                RETRO_DIR,
-                'data',
-                'priors',
-                'LineFit_DC_zenith_neg_error_splitby_reco_coszen_16.pkl',
-            ),
-        ),
-    ),
+PRI_OSCNEXT_L5_V1_CRS = 'oscnext_l5_v1_crs'
+"""Priors from CRS fits to oscNext level 5 (first version of processing, or v1)
+events. See
+  retro/notebooks/plot_prior_reco_candidates.ipynb for the fitting process.
+"""
+
+class Bounds(enum.IntEnum):
+    ABS = 0
+    REL = 1
+
+
+EXT_TIGHT = dict(
+    x=((-200, Bounds.REL), (200, Bounds.REL)),
+    y=((-200, Bounds.REL), (200, Bounds.REL)),
+    z=((-100, Bounds.REL), (100, Bounds.REL)),
+    time=((-1000, Bounds.REL), (1000, Bounds.REL)),
+)
+
+EXT_MN = dict(
+    x=((-300, Bounds.ABS), (300, Bounds.ABS)),
+    y=((-300, Bounds.ABS), (300, Bounds.ABS)),
+    z=((-200, Bounds.ABS), (200, Bounds.ABS)),
+    time=((-800, Bounds.ABS), (800, Bounds.ABS)),
+)
+
+EXT_IC = dict(
+    x=((-860, Bounds.ABS), (870, Bounds.ABS)),
+    y=((-780, Bounds.ABS), (770, Bounds.ABS)),
+    z=((-780, Bounds.ABS), (790, Bounds.ABS)),
+)
+
+EXT_DC = dict(
+    x=((-150, Bounds.ABS), (270, Bounds.ABS)),
+    y=((-210, Bounds.ABS), (150, Bounds.ABS)),
+    z=((-770, Bounds.ABS), (760, Bounds.ABS)),
+)
+
+EXT_DC_SUBDUST = deepcopy(EXT_DC)
+EXT_DC_SUBDUST['z'] = ((-610, Bounds.ABS), (60, Bounds.ABS))
+
+
+PRISPEC_OSCNEXT_PREFIT_TIGHT = dict(
+    x=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=EXT_TIGHT['x']),
+    y=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=EXT_TIGHT['y']),
+    z=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=EXT_TIGHT['z']),
+    time=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=EXT_TIGHT['time']),
+    azimuth=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
+    zenith=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
+)
+
+PRISPEC_OSCNEXT_CRS_MN = dict(
+    x=dict(kind=PRI_OSCNEXT_L5_V1_CRS, extents=EXT_MN['x']),
+    y=dict(kind=PRI_OSCNEXT_L5_V1_CRS, extents=EXT_MN['y']),
+    z=dict(kind=PRI_OSCNEXT_L5_V1_CRS, extents=EXT_MN['z']),
+    time=dict(kind=PRI_OSCNEXT_L5_V1_CRS, extents=EXT_MN['time']),
+    azimuth=dict(kind=PRI_OSCNEXT_L5_V1_CRS),
+    zenith=dict(kind=PRI_OSCNEXT_L5_V1_CRS),
 )
 
 
-def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
-    """Construct (first-stage) prior def for OSCNEXT_L5_V1_PRIORS"""
-    reco = 'L5_SPEFit11'
-    if event['recos'][reco]['fit_status'] != FitStatus.OK:
-        reco = 'LineFit_DC'
-        assert event['recos'][reco]['fit_status'] == FitStatus.OK
+OSCNEXT_L5_V1_PRIORS = OrderedDict()
+for _dim in ('time', 'x', 'y', 'z', 'azimuth', 'zenith', 'coszen'):
+    OSCNEXT_L5_V1_PRIORS[_dim] = OrderedDict()
+    for _reco in ('L5_SPEFit11', 'LineFit_DC', 'crs_prefit'):
+        OSCNEXT_L5_V1_PRIORS[_dim][_reco] = LazyLoader(datasource=join(RETRO_DIR, 'data', 'priors', '{reco}_{dim}_neg_error.pkl'.format(reco=_reco, dim=_dim)))
+
+
+def define_prefit_prior(
+    dim_name,
+    event,
+    priors,
+    candidate_recos,
+    extents=None,
+):
+    """Define a prior from pre-fit(s). Priors are defined by the interpolation
+    of KDE'd negative-error distribution for the pre-fits, and "fallback" fits
+    can be defined in case one or more fits failed."""
+    if isinstance(candidate_recos, basestring):
+        candidate_recos = [candidate_recos]
+
+    reco = None
+    for candidate_reco in candidate_recos:
+        try:
+            fit_status = event['recos'][candidate_reco]['fit_status']
+        except (KeyError, ValueError):
+            fit_status = FitStatus.OK
+        if fit_status == FitStatus.OK:
+            reco = candidate_reco
+            break
+
+    if reco is None:
+        raise ValueError(
+            "Couldn't find a valid prefit reco from among {}".format(candidate_recos)
+        )
 
     # Remove "track_*", etc prefixes
     for prefix in ('track', 'cascade'):
@@ -252,7 +185,6 @@ def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
     if dim_name == 'coszen':
         reco_val = np.cos(event['recos'][reco]['zenith'])
     else:
-
         reco_val = event['recos'][reco][dim_name]
 
     if not np.isfinite(reco_val):
@@ -261,9 +193,9 @@ def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
             .format(dim_name, reco, reco_val)
         )
 
-    prior_info = OSCNEXT_L5_V1_PRIORS[dim_name][reco].data
-    prior_sha256 = OSCNEXT_L5_V1_PRIORS[dim_name][reco].sha256
-    prior_fname = basename(OSCNEXT_L5_V1_PRIORS[dim_name][reco].datasource)
+    prior_info = priors[dim_name][reco].data
+    prior_sha256 = priors[dim_name][reco].sha256
+    prior_fname = basename(priors[dim_name][reco].datasource)
 
     split_by_reco_param = prior_info['metadata']['split_by_reco_param']
     if split_by_reco_param is None:
@@ -296,20 +228,36 @@ def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
             .format(split_by_reco_param, split_val, prior_info['dists'].keys())
         )
 
-    if dim_name == 'azimuth':
-        pri_kind = PRI_AZ_INTERP
+    xvals = pri['x'] + reco_val
+
+    if extents is None:
+        low = np.min(xvals)
+        high = np.max(xvals)
     else:
-        pri_kind = PRI_INTERP
+        (low, low_absrel), (high, high_absrel) = extents
+        low = low if low_absrel == Bounds.ABS else reco_val + low
+        high = high if high_absrel == Bounds.ABS else reco_val + high
+        # extra correction for bias in LineFit_DC's z reco
+        if (reco, dim_name) == ('LineFit_DC', 'z'):
+            if low_absrel == Bounds.REL:
+                low -= 15
+            if high_absrel == Bounds.REL:
+                high -= 15
 
-    # 'tight' (low, high) extents are relative to the fit value
-    if extent is not None and extent.lower() == 'tight':
-        low += reco_val
-        high += reco_val
-        if reco == 'LineFit_DC' and dim_name == 'z':
-            low -= 15
-            high -= 15
+    basic_pri_kind = PRI_AZ_INTERP if 'azimuth' in dim_name else PRI_INTERP
 
-    prior_def = (pri_kind, (pri['x'] + reco_val, pri['pdf'], low, high))
+    prior_def = (
+        basic_pri_kind,
+        (
+            reco,
+            reco_val,
+            prior_sha256,
+            xvals,
+            pri['pdf'],
+            low,
+            high,
+        ),
+    )
 
     misc = deepcopy(prior_info['metadata'])
     misc['prior_file_name'] = prior_fname
@@ -320,35 +268,35 @@ def define_oscnext_l5_v1_prior(dim_name, event, low, high, extent=None):
     return prior_def, misc
 
 
-def define_generic_prior(kind, kwargs, low, high, extent=None):  # pylint: disable=unused-argument
-    """Create prior definition for a `kind` that exists in `scipy.stats.distributions`.
+def define_generic_prior(prior_kind, extents, kwargs):
+    """Create prior definition for a `prior_kind` that exists in `scipy.stats.distributions`.
 
     Parameters
     ----------
-    kind : str
+    prior_kind : str
         Must be a continuous distribution in `scipy.stats.distributions`
+    extents
     kwargs : Mapping
         Must contain keys for any `shapes` (shape parameters) taken by the
         distribution as well as "loc" and "scale" (which are required for all
         distributions).
-    low : finite scalar
-        Range of values after prior is applied is clipped from below at `low`
-    high : finite scalar
-        Range of values after prior is applied is clipped from above at `high`
-    extent : str or None
 
     Returns
     -------
     prior_def : tuple
-        As defined/used in `retro.priors.get_prior_fun`; i.e., formatted as ::
+        As defined/used in `retro.priors.get_prior_func`; i.e., formatted as ::
 
-            (kind, (arg0, arg1, ..., argN, low, high)
+            (prior_kind, (arg0, arg1, ..., argN, low, high)
 
     """
-    kind = kind.lower()
     loc = kwargs['loc']
     scale = kwargs['scale']
-    dist = getattr(stats.distributions, kind)
+    dist = getattr(stats.distributions, prior_kind)
+    (low, low_absrel), (high, high_absrel) = extents
+    if not low_absrel == high_absrel == Bounds.ABS:
+        raise ValueError(
+            'Only absolute bounds allowed for `prior_kind` "{}"'.format(prior_kind)
+        )
     if dist.shapes:
         args = []
         for shape_param in dist.shapes:
@@ -356,13 +304,18 @@ def define_generic_prior(kind, kwargs, low, high, extent=None):  # pylint: disab
         args = tuple(args)
     else:
         args = tuple()
-    #if extent is not None and extent.lower() == 'tight':
-    #    low -= fit
-    prior_def = (kind, args + (loc, scale, low, high))
+    prior_def = (prior_kind, args + (loc, scale, low, high))
     return prior_def
 
 
-def get_prior_fun(dim_num, dim_name, event, **kwargs):
+def get_prior_func(
+    dim_num,
+    dim_name,
+    event,
+    prior_kind=None,
+    extents=None,
+    **kwargs
+):
     """Generate prior function given a prior definition and the actual event
 
     Parameters
@@ -372,319 +325,146 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
     dim_name : str
         parameter name
     event : event
+    extents : str or sequence of two floats, optional
     kwargs : any additional arguments
 
     Returns
     -------
-    prior_fun : callable
+    prior_func : callable
     prior_def : tuple
+    misc : OrderedDict
 
     """
-    hits_summary = event['hits_summary']
+    # -- Set default prior kind & extents depending on dimension name -- #
 
-    # -- setup default values and prior defintions -- #
+    if 'zenith' in dim_name:
+        if prior_kind is None:
+            prior_kind = PRI_COSINE
+        if extents is None:
+            extents = ((0, Bounds.ABS), (np.pi, Bounds.ABS))
+    elif 'coszen' in dim_name:
+        if prior_kind is None:
+            prior_kind = PRI_UNIFORM
+        if extents is None:
+            extents = ((-1, Bounds.ABS), (1, Bounds.ABS))
+    elif 'azimuth' in dim_name:
+        if prior_kind is None:
+            prior_kind = PRI_UNIFORM
+        if extents is None:
+            extents = ((0, Bounds.ABS), (2*np.pi, Bounds.ABS))
+    elif dim_name == 'x':
+        if prior_kind is None:
+            prior_kind = PRI_UNIFORM
+        if extents is None:
+            extents = EXT_IC[dim_name]
+    elif dim_name == 'y':
+        if prior_kind is None:
+            prior_kind = PRI_UNIFORM
+        if extents is None:
+            extents = EXT_IC[dim_name]
+    elif dim_name == 'z':
+        if prior_kind is None:
+            prior_kind = PRI_UNIFORM
+        if extents is None:
+            extents = EXT_IC[dim_name]
+    elif dim_name == 'time':
+        if prior_kind is None:
+            prior_kind = PRI_UNIFORM
+        if extents is None:
+            # TODO: make this the time window from the event
+            extents = ((-4e3, Bounds.ABS), (0.0, Bounds.ABS))
+    elif 'energy' in dim_name:
+        if prior_kind is None:
+            prior_kind = PRI_UNIFORM
+        if extents is None:
+            if prior_kind in (PRI_LOG_NORMAL, PRI_LOG_UNIFORM):
+                extents = ((0.1, Bounds.ABS), (1e3, Bounds.ABS))
+            else:
+                extents = ((0.0, Bounds.ABS), (1e3, Bounds.ABS))
+    else:
+        raise ValueError('Unrecognized dimension "{}"'.format(dim_name))
+
+    # -- Define prior so that it is simple to turn into a function -- #
 
     misc = OrderedDict()
-    prior_def = None
 
-    # Note in the following, invalid or unhandled cases are treated by
-    # checking after if/else nested branches here, `prior_def` is still `None`.
-
-    if 'zenith' in  dim_name:
-        kind = kwargs.get('kind', PRI_COSINE).lower()
-        low = kwargs.get('low', 0)
-        high = kwargs.get('high', np.pi)
-
-        if kind == "PRI_COSINE":
-            prior_def = (kind, (low, high))
-
-        elif kind == PRI_LOG_NORMAL and dim_name == 'cascade_d_zenith':
-            # scipy.stats.lognorm 3 dim_nameters (from fit to data)
-            shape = 0.6486628230670546
-            loc = -0.1072667784813348
-            scale = 0.6337073562137334
-            prior_def = ('lognorm', (shape, loc, scale, low, high))
-
-        elif kind == PRI_OSCNEXT_L5_V1:
-            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high)
-
-        elif hasattr(stats.distributions, kind):
-            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-
-    elif 'coszen' in dim_name:
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        low = kwargs.get('low', -1)
-        high = kwargs.get('high', 1)
-
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-
-        elif kind == PRI_OSCNEXT_L5_V1:
-            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high)
-
-        elif hasattr(stats.distributions, kind):
-            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-
-    elif 'azimuth' in dim_name:
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        low = kwargs.get('low', 0)
-        high = kwargs.get('high', 2 * np.pi)
-
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-
-        elif kind == PRI_OSCNEXT_L5_V1:
-            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high)
-
-        elif hasattr(stats.distributions, kind):
-            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-
-    elif dim_name == 'x':
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        extent = kwargs.get('extent', 'ic').lower()
-        if extent == 'ic':
-            low = kwargs.get('low', -860)
-            high = kwargs.get('high', 870)
-        elif extent in ['dc', 'dc_subdust']:
-            low = kwargs.get('low', -150)
-            high = kwargs.get('high', 270)
-        elif extent == 'tight':
-            low = -200
-            high = 200
-        else:
-            raise ValueError('invalid extent "{}"'.format(extent))
-
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-
-        elif kind == PRI_SPEFIT2:
-            reco = 'SPEFit2'
-            fit_status = FitStatus(event['recos'][reco]['fit_status'])
-            if fit_status is not FitStatus.OK:
-                raise GarbageInputError(
-                    'dim_name "{}", reco "{}": fit status = {!r}'
-                    .format(dim_name, reco, fit_status)
-                )
-            fit_val = event['recos'][reco][dim_name]
-            loc = -0.19687812829978152 + fit_val
-            scale = 14.282171566308806
-            if extent == 'tight':
-                low += loc
-                high += loc
-            prior_def = ('cauchy', (loc, scale, low, high))
-            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
-
-        elif kind == PRI_OSCNEXT_L5_V1:
-            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
-
-        elif hasattr(stats.distributions, kind):
-            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-
-    elif dim_name == 'y':
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        extent = kwargs.get('extent', 'ic').lower()
-        if extent == 'ic':
-            low = kwargs.get('low', -780)
-            high = kwargs.get('high', 770)
-        elif extent in ['dc', 'dc_subdust']:
-            low = kwargs.get('low', -210)
-            high = kwargs.get('high', 150)
-        elif extent == 'tight':
-            low = -200
-            high = 200
-        else:
-            raise ValueError('invalid extent "{}"'.format(extent))
-
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-
-        elif kind == PRI_SPEFIT2:
-            reco = 'SPEFit2'
-            fit_status = FitStatus(event['recos'][reco]['fit_status'])
-            if fit_status is not FitStatus.OK:
-                raise GarbageInputError(
-                    'dim_name "{}", reco "{}": fit val = {}'
-                    .format(dim_name, reco, fit_val)
-                )
-            fit_val = event['recos'][reco][dim_name]
-            loc = -0.2393645701205161 + fit_val
-            scale = 15.049528023495354
-            if extent == 'tight':
-                low += loc
-                high += loc
-            prior_def = ('cauchy', (loc, scale, low, high))
-            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
-
-        elif kind == PRI_OSCNEXT_L5_V1:
-            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
-
-        elif hasattr(stats.distributions, kind):
-            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-
-    elif dim_name == 'z':
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        extent = kwargs.get('extent', 'ic').lower()
-        if extent is None or extent.lower() == 'ic':
-            low = kwargs.get('low', -780)
-            high = kwargs.get('high', 790)
-        elif extent.lower() == 'dc':
-            # are these number sensible?
-            low = kwargs.get('low', -770)
-            high = kwargs.get('high', 760)
-        elif extent.lower() == 'dc_subdust':
-            low = kwargs.get('low', -610)
-            high = kwargs.get('high', 60)
-        elif extent.lower() == 'tight':
-            low = -100
-            high = 100
-        else:
-            raise ValueError('invalid extent "{}"'.format(extent))
-
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-
-        elif kind == PRI_SPEFIT2:
-            reco = 'SPEFit2'
-            fit_status = FitStatus(event['recos'][reco]['fit_status'])
-            if fit_status is not FitStatus.OK:
-                raise GarbageInputError(
-                    'dim_name "{}", reco "{}": fit val = {}'
-                    .format(dim_name, reco, fit_val)
-                )
-            fit_val = event['recos'][reco][dim_name]
-            loc = -5.9170661027492546 + fit_val
-            scale = 12.089399308036718
-            if extent.lower() == 'tight':
-                low += loc
-                high += loc
-            prior_def = ('cauchy', (loc, scale, low, high))
-            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
-
-        elif kind == PRI_OSCNEXT_L5_V1:
-            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
-
-        elif hasattr(stats.distributions, kind):
-            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-
-    elif dim_name == 'time':
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        low = kwargs.get('low', -4e3)
-        high = kwargs.get('high', 0)
-        extent = kwargs.get('extent', 'none')
-        if extent.lower() == 'hits_window':
-            low += hits_summary['earliest_hit_time']
-            high += hits_summary['latest_hit_time']
-        elif extent.lower() == 'tight':
-            low = -1000
-            high = 1000
-        else:
-            raise ValueError()
-
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-
-        elif kind == PRI_SPEFIT2:
-            reco = 'SPEFit2'
-            fit_status = FitStatus(event['recos'][reco]['fit_status'])
-            if fit_status is not FitStatus.OK:
-                raise GarbageInputError(
-                    'dim_name "{}", reco "{}": fit val = {}'
-                    .format(dim_name, reco, fit_val)
-                )
-            fit_val = event['recos'][reco][dim_name]
-            loc = -82.631395081663754 + fit_val
-            scale = 75.619895703067343
-            if extent.lower() == 'tight':
-                low += loc
-                high += loc
-            prior_def = ('cauchy', (loc, scale, low, high))
-            misc = OrderedDict([('reco', reco), ('fit_val', fit_val)])
-
-        elif kind == PRI_OSCNEXT_L5_V1:
-            prior_def, misc = define_oscnext_l5_v1_prior(dim_name, event, low, high, extent)
-
-        elif hasattr(stats.distributions, kind):
-            prior_def = define_generic_prior(kind=kind, kwargs=kwargs, low=low, high=high)
-
-    elif 'energy' in dim_name:
-        kind = kwargs.get('kind', PRI_UNIFORM).lower()
-        low = kwargs.get('low', 0.1 if kind == PRI_LOG_UNIFORM else 0.0)
-        high = kwargs.get('high', 1e3)
-
-        if kind == PRI_UNIFORM:
-            prior_def = (kind, (low, high))
-        elif kind == PRI_LOG_NORMAL:
-            shape = 0.96251341305506233
-            loc = 0.4175592980195757
-            scale = 17.543915051586644
-            prior_def = ('lognorm', (shape, loc, scale, low, high))
-
-    if prior_def is None:
-        kind = kwargs.get('kind', None)
+    if prior_kind in (PRI_UNIFORM, PRI_COSINE):
+        (low, low_absrel), (high, high_absrel) = extents
+        if not low_absrel == high_absrel == Bounds.ABS:
+            raise ValueError(
+                "Don't know what to do with relative bounds for {}".format(prior_kind)
+            )
+        prior_def = (prior_kind, (low, high))
+    elif prior_kind == PRI_OSCNEXT_L5_V1_PREFIT:
+        prior_def, misc = define_prefit_prior(
+            dim_name=dim_name,
+            event=event,
+            priors=OSCNEXT_L5_V1_PRIORS,
+            candidate_recos=['L5_SPEFit11', 'LineFit_DC'],
+            extents=extents,
+        )
+    elif prior_kind == PRI_OSCNEXT_L5_V1_CRS:
+        prior_def, misc = define_prefit_prior(
+            dim_name=dim_name,
+            event=event,
+            priors=OSCNEXT_L5_V1_PRIORS,
+            candidate_recos=['retro_crs_prefit'],
+            extents=extents,
+        )
+    elif hasattr(stats.distributions, prior_kind):
+        prior_def = define_generic_prior(prior_kind, extents, kwargs)
+    else:
         raise ValueError(
-            'Unhandled or invalid prior "{}" for dim_name "{}"'.format(kind, dim_name)
+            'Unhandled or invalid prior "{}" for dim_name "{}"'
+            .format(prior_kind, dim_name)
         )
 
-    # create prior function
+    # -- Create prior function -- #
 
-    if not prior_def:
-        raise ValueError("no prior def?")
+    prior_kind, prior_args = prior_def
 
-    kind, args = prior_def
+    # pylint: disable=unused-argument, missing-docstring
+    if prior_kind == PRI_UNIFORM:
+        low, high = prior_args
+        width = high - low
+        def prior_func(cube, n=dim_num, width=width, low=low):
+            cube[n] = cube[n] * width + low
 
-    #if not np.all(np.isfinite(args)):
-    #    raise ValueError(
-    #        'Dimension "{}" got non-finite arg(s) for prior kind "{}"; args = {}'
-    #        .format(dim_name, kind, args)
-    #    )
+    elif prior_kind == PRI_LOG_UNIFORM:
+        low, high = prior_args
+        log_low = np.log(low)
+        log_width = np.log(high) - log_low
+        def prior_func(cube, n=dim_num, log_width=log_width, log_low=log_low):
+            cube[n] = np.exp(cube[n] * log_width + log_low)
 
-    if kind == PRI_UNIFORM:
-        if args == (0, 1):
-            def prior_fun(cube): # pylint: disable=unused-argument, missing-docstring
-                pass
-        elif np.min(args[0]) == 0:
-            maxval = np.max(args)
-            def prior_fun(cube, n=dim_num, maxval=maxval): # pylint: disable=missing-docstring
-                cube[n] = cube[n] * maxval
-        else:
-            minval = np.min(args)
-            width = np.max(args) - minval
-            def prior_fun(cube, n=dim_num, width=width, minval=minval): # pylint: disable=missing-docstring
-                cube[n] = cube[n] * width + minval
-
-    elif kind == PRI_LOG_UNIFORM:
-        log_min = np.log(np.min(args))
-        log_width = np.log(np.max(args) / np.min(args))
-        def prior_fun(cube, n=dim_num, log_width=log_width, log_min=log_min): # pylint: disable=missing-docstring
-            cube[n] = np.exp(cube[n] * log_width + log_min)
-
-    elif kind == PRI_COSINE:
-        assert args[-2:] == (0, np.pi)
-        def prior_fun(cube, n=dim_num): # pylint: disable=missing-docstring
+    elif prior_kind == PRI_COSINE:
+        if prior_args != (0, np.pi):
+            raise NotImplementedError()
+        def prior_func(cube, n=dim_num):
             x = (2 * cube[n]) - 1
             cube[n] = np.arccos(x)
 
-    elif kind == PRI_GAUSSIAN:
+    elif prior_kind == PRI_GAUSSIAN:
         raise NotImplementedError('limits not correctly working') # TODO
-        mean, stddev, low, high = args
+        mean, stddev, low, high = prior_args
         norm = 1 / (stddev * np.sqrt(TWO_PI))
-        def prior_fun(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev): # pylint: disable=missing-docstring
+        def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
             cube[n] = norm * np.exp(-((cube[n] - mean) / stddev)**2)
 
-    elif kind in (PRI_INTERP, PRI_AZ_INTERP):
-        x, pdf, low, high = args
+    elif prior_kind in (PRI_INTERP, PRI_AZ_INTERP):
+        x, pdf, low, high = prior_args[-4:]
 
         if (
-            kind == PRI_AZ_INTERP and not np.isclose(x.max() - x.min(), high - low)
-            or kind == PRI_INTERP and (x.min() > low or x.max() < high)
+            prior_kind == PRI_AZ_INTERP and not np.isclose(x.max() - x.min(), high - low)
+            or prior_kind == PRI_INTERP and (x.min() > low or x.max() < high)
         ):
             print(
                 'Dim "{}", prior kind "{}" `x` range = [{}, {}] does not cover'
                 " [low, high] range = [{}, {}]"
-                .format(dim_name, kind, x.min(), x.max(), low, high)
+                .format(dim_name, prior_kind, x.min(), x.max(), low, high)
             )
 
-        if kind == PRI_AZ_INTERP:
+        if prior_kind == PRI_AZ_INTERP:
             if not (np.isclose(low, 0) and np.isclose(high, 2*np.pi)):
                 raise ValueError("az range [low, high) must be [0, 2pi)")
 
@@ -703,7 +483,7 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             # Create smooth spline interpolator for isf (inverse of cdf)
             isf_interp = interpolate.UnivariateSpline(x=cdf, y=x, ext='raise', s=0)
 
-            def prior_fun(  # pylint: disable=missing-docstring
+            def prior_func(
                 cube,
                 n=dim_num,
                 isf_interp=isf_interp,
@@ -739,20 +519,20 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             # Create smooth spline interpolator for isf (inverse of cdf)
             isf_interp = interpolate.UnivariateSpline(x=cdf, y=x, ext='raise', s=0)
 
-            def prior_fun(cube, n=dim_num, isf_interp=isf_interp): # pylint: disable=missing-docstring
+            def prior_func(cube, n=dim_num, isf_interp=isf_interp):
                 cube[n] = isf_interp(cube[n])
 
-    elif hasattr(stats.distributions, kind):
-        dist_args = args[:-2]
-        low, high = args[-2:]
-        frozen_dist_isf = getattr(stats.distributions, kind)(*dist_args).isf
-        def prior_fun(
+    elif hasattr(stats.distributions, prior_kind):
+        dist_args = prior_args[:-2]
+        low, high = prior_args[-2:]
+        frozen_dist_isf = getattr(stats.distributions, prior_kind)(*dist_args).isf
+        def prior_func(
             cube,
             frozen_dist_isf=frozen_dist_isf,
             dim_num=dim_num,
             low=low,
             high=high,
-        ): # pylint: disable=missing-docstring
+        ):
             cube[dim_num] = np.clip(
                 frozen_dist_isf(cube[dim_num]),
                 a_min=low,
@@ -760,6 +540,6 @@ def get_prior_fun(dim_num, dim_name, event, **kwargs):
             )
 
     else:
-        raise NotImplementedError('Prior "{}" not implemented.'.format(kind))
+        raise NotImplementedError('Prior "{}" not implemented.'.format(prior_kind))
 
-    return prior_fun, prior_def, misc
+    return prior_func, prior_def, misc

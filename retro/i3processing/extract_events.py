@@ -189,6 +189,7 @@ I3PARTICLE_ATTRS = OrderedDict([
     ('major_id', dict(dtype=np.uint64, default=0)),
     ('minor_id', dict(dtype=np.int32, default=0)),
     ('zenith', dict(path='dir.zenith', dtype=np.float32, default=np.nan)),
+    ('coszen', dict(path='dir.zenith', xform=np.cos, dtype=np.float32, default=np.nan)),
     ('azimuth', dict(path='dir.azimuth', dtype=np.float32, default=np.nan)),
     ('x', dict(path='pos.x', dtype=np.float32, default=np.nan)),
     ('y', dict(path='pos.y', dtype=np.float32, default=np.nan)),
@@ -255,9 +256,11 @@ def extract_reco(frame, reco):
             reco_dict['time'] = neutrino.time
             reco_dict['energy'] = neutrino.energy
             reco_dict['zenith'] = neutrino.dir.zenith
+            reco_dict['coszen'] = np.cos(neutrino.dir.zenith)
             reco_dict['azimuth'] = neutrino.dir.azimuth
             reco_dict['track_energy'] = track.energy
             reco_dict['track_zenith'] = track.dir.zenith
+            reco_dict['track_coszen'] = np.cos(track.dir.zenith)
             reco_dict['track_azimuth'] = track.dir.azimuth
             reco_dict['cascade_energy'] = casc.energy
         else:
@@ -267,9 +270,11 @@ def extract_reco(frame, reco):
             reco_dict['time'] = np.nan
             reco_dict['energy'] = np.nan
             reco_dict['zenith'] = np.nan
+            reco_dict['coszen'] = np.nan
             reco_dict['azimuth'] = np.nan
             reco_dict['track_energy'] = np.nan
             reco_dict['track_zenith'] = np.nan
+            reco_dict['track_coszen'] = np.nan
             reco_dict['track_azimuth'] = np.nan
             reco_dict['cascade_energy'] = np.nan
 
@@ -288,6 +293,7 @@ def extract_reco(frame, reco):
         reco_dict['time'] = neutrino.time
         reco_dict['energy'] = neutrino.energy
         reco_dict['zenith'] = neutrino.dir.zenith
+        reco_dict['coszen'] = np.cos(neutrino.dir.zenith)
         reco_dict['azimuth'] = neutrino.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
 
@@ -315,9 +321,11 @@ def extract_reco(frame, reco):
         reco_dict['time'] = neutrino.time
         reco_dict['energy'] = neutrino.energy
         reco_dict['zenith'] = neutrino.dir.zenith
+        reco_dict['coszen'] = np.cos(neutrino.dir.zenith)
         reco_dict['azimuth'] = neutrino.dir.azimuth
         reco_dict['track_energy'] = track.energy
         reco_dict['track_zenith'] = track.dir.zenith
+        reco_dict['track_coszen'] = np.cos(track.dir.zenith)
         reco_dict['track_azimuth'] = track.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
 
@@ -335,12 +343,15 @@ def extract_reco(frame, reco):
         reco_dict['time'] = neutrino.time
         reco_dict['energy'] = neutrino.energy
         reco_dict['zenith'] = neutrino.dir.zenith
+        reco_dict['coszen'] = np.cos(neutrino.dir.zenith)
         reco_dict['azimuth'] = neutrino.dir.azimuth
         reco_dict['track_energy'] = track.energy
         reco_dict['track_zenith'] = track.dir.zenith
+        reco_dict['track_coszen'] = np.cos(track.dir.zenith)
         reco_dict['track_azimuth'] = track.dir.azimuth
         reco_dict['cascade_energy'] = casc.energy
         reco_dict['cascade_zenith'] = track.dir.zenith
+        reco_dict['cascade_coszen'] = np.cos(track.dir.zenith)
         reco_dict['cascade_azimuth'] = track.dir.azimuth
 
         dt_spec = [(k, np.float32) for k in reco_dict.keys()]
@@ -355,9 +366,10 @@ def extract_reco(frame, reco):
                 # If "path" key present in `info`, get its value; otherwise,
                 # path is just attr's name
                 path = info.get('path', attr)
+                xform = info.get('xform', lambda x: x)
 
                 # Recursively apply getattr on the i3particle for each path
-                reco_dict[attr] = reduce(getattr, path.split('.'), i3particle)
+                reco_dict[attr] = xform(reduce(getattr, path.split('.'), i3particle))
         else:
             for attr, info in I3PARTICLE_ATTRS.items():
                 reco_dict[attr] = info['default']
@@ -667,6 +679,7 @@ def get_cascade_and_track_info(particles, mctree):
         total_track['y'] = tracks[0]['y']
         total_track['z'] = tracks[0]['z']
         total_track['zenith'] = zenith
+        total_track['coszen'] = np.cos(zenith)
         total_track['azimuth'] = azimuth
         total_track['directionality'] = directionality
         # (energy and length already set inside above loop)
@@ -745,6 +758,7 @@ def populate_track_t(mctree, particle):
     track['y'] = particle.pos.y
     track['z'] = particle.pos.z
     track['zenith'] = particle.dir.zenith
+    track['coszen'] = np.cos(particle.dir.zenith)
     track['azimuth'] = particle.dir.azimuth
     track['directionality'] = 1
     track['energy'] = particle.energy
@@ -814,6 +828,7 @@ def extract_truth(frame, run_id, event_id):
     event_truth['z'] = primary.pos.z
     event_truth['time'] = primary.time
     event_truth['energy'] = primary.energy
+    event_truth['zenith'] = primary.dir.zenith
     event_truth['coszen'] = np.cos(primary.dir.zenith)
     event_truth['azimuth'] = primary.dir.azimuth
     event_truth['extraction_error'] = ExtractionError.NO_ERROR
@@ -917,6 +932,7 @@ def extract_truth(frame, run_id, event_id):
                 if charged_lepton_pdg in ELECTRONS:
                     cascade0['pdg'] = charged_lepton_pdg
                     cascade0['zenith'] = charged_lepton.dir.zenith
+                    cascade0['coszen'] = np.cos(charged_lepton.dir.zenith)
                     cascade0['azimuth'] = charged_lepton.dir.azimuth
                     cascade0['directionality'] = 1
                     cascade0['energy'] = charged_lepton.energy
@@ -926,6 +942,7 @@ def extract_truth(frame, run_id, event_id):
 
                     cascade1['pdg'] = ParticleType.unknown
                     cascade1['zenith'] = remaining_dir.zenith
+                    cascade1['coszen'] = np.cos(remaining_dir.zenith)
                     cascade1['azimuth'] = remaining_dir.azimuth
                     cascade1['directionality'] = 1
                     cascade1['energy'] = remaining_energy
@@ -938,6 +955,7 @@ def extract_truth(frame, run_id, event_id):
 
                     cascade1['pdg'] = ParticleType.unknown
                     cascade1['zenith'] = remaining_dir.zenith
+                    cascade1['coszen'] = np.cos(remaining_dir.zenith)
                     cascade1['azimuth'] = remaining_dir.azimuth
                     cascade1['directionality'] = np.nan
                     cascade1['energy'] = remaining_energy
@@ -952,6 +970,7 @@ def extract_truth(frame, run_id, event_id):
                     # energy in a separate hadronic cascade)
                     cascade0['pdg'] = charged_lepton_pdg
                     cascade0['zenith'] = charged_lepton.dir.zenith
+                    cascade0['coszen'] = np.cos(charged_lepton.dir.zenith)
                     cascade0['azimuth'] = charged_lepton.dir.azimuth
                     cascade0['directionality'] = 1
                     cascade0['energy'] = charged_lepton.mass + charged_lepton.energy
@@ -961,6 +980,7 @@ def extract_truth(frame, run_id, event_id):
 
                     cascade1['pdg'] = ParticleType.unknown
                     cascade1['zenith'] = remaining_dir.zenith
+                    cascade1['coszen'] = np.cos(remaining_dir.zenith)
                     cascade1['azimuth'] = remaining_dir.azimuth
                     cascade1['directionality'] = None
                     cascade1['energy'] = remaining_energy
@@ -1010,6 +1030,7 @@ def extract_truth(frame, run_id, event_id):
                 cascade1['y'] = outgoing_nu.pos.y
                 cascade1['z'] = outgoing_nu.pos.z
                 cascade1['zenith'] = remaining_dir.zenith
+                cascade1['coszen'] = np.cos(remaining_dir.zenith)
                 cascade1['azimuth'] = remaining_dir.azimuth
                 cascade1['directionality'] = 1
                 cascade1['energy'] = remaining_energy
@@ -1053,6 +1074,7 @@ def extract_truth(frame, run_id, event_id):
                 cascade1['y'] = secondary.pos.y
                 cascade1['z'] = secondary.pos.z
                 cascade1['zenith'] = secondary.dir.zenith
+                cascade1['coszen'] = np.cos(secondary.dir.zenith)
                 cascade1['azimuth'] = secondary.dir.azimuth
                 cascade1['directionality'] = 1
                 cascade1['energy'] = secondary_energy
@@ -1112,6 +1134,7 @@ def extract_truth(frame, run_id, event_id):
         total_cascade['y'] = primary.pos.y
         total_cascade['z'] = primary.pos.z
         total_cascade['zenith'] = zenith
+        total_cascade['coszen'] = np.cos(zenith)
         total_cascade['azimuth'] = azimuth
         total_cascade['directionality'] = directionality
         total_cascade['energy'] = total_energy

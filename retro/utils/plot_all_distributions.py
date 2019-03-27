@@ -31,6 +31,299 @@ def interquartile_range(x, lower_percentile=25, upper_percentile=75):
     return np.diff(np.percentile(x, [lower_percentile, upper_percentile]))[0]
 
 
+def plot_res(xedges, bin_indices, errcol, ax, med_color, quant_color, fill_color,
+             med_lw=1, quant_lw=1, number=False):
+    quantiles = [0.25, 0.5, 0.75]
+
+    quants = []
+    counts = []
+    for idx, grp in errcol.groupby(bin_indices):
+        quants.append(grp.quantile(quantiles))
+        counts.append((idx, grp.count()))
+    quants = np.array(quants)
+    #print('')
+    #counts = np.array(counts)
+
+    x = xedges
+    y0 = quants[:, 0]
+    y2 = quants[:, 2]
+
+    ax.plot(ebin_edges, np.zeros_like(ebin_edges), 'w:', lw=0.5, alpha=1) #, zorder=-1)
+
+    if fill_color not in [None, 'none']:
+        for blk in range(len(ebin_edges) - 1):
+            ee = ebin_edges[blk:blk+2]
+            y00 = y0[blk], y0[blk]
+            y22 = y2[blk], y2[blk]
+            ax.fill_between(ee, y00, y22, color=fill_color)
+
+    if med_color not in [None, 'none']:
+        for col in [1]:
+            y = quants[:, col]
+            if col in [0, 2]:
+                ls = '--'
+            else:
+                ls = '-'
+            ax.step(x, [y[0]] + y.tolist(), lw=1, ls=ls, c=med_color)
+
+    if quant_color not in [None, 'none']:
+        for col in [0, 2]:
+            y = quants[:, col]
+            if col in [0, 2]:
+                ls = '--'
+            else:
+                ls = '-'
+            ax.step(x, [y[0]] + y.tolist(), lw=1, ls=ls, c=quant_color)
+
+    return counts, quants
+
+def stuff():
+    ebin_edges = np.logspace(np.log10(1), np.log10(100), 6)
+
+    fill = (0.3,)*3
+    figsize = (6, 3)
+    dpi = 200
+    mc = (.5, .5,0)
+    qc = (1, 1, 0)
+
+    bin_indices = pd.cut(events['energy'], bins=ebin_edges, right=False)
+
+    # -- total energy -- #
+
+    ymin, ymax = -0.3, 0.8
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    #cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_lograt_en_err, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    #cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_lograt_en_err, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_fract_en_err, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_fract_en_err, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro track+cascade energy resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    #ax.set_yticks(np.arange(ymin, ymax+0.1, 0.1), minor=True)
+    #ax.set_yticks(np.arange(-5.5, 5.51, 0.5), minor=False)
+    #ax.set_ylim(ymin, ymax)
+
+    ax.set_xlabel(r'true energy (GeV)')
+    #ax.set_ylabel(r'$\log_{10}(E_{\rm reco} / E_{\rm true}), \; {\rm track + cascade}$')
+    ax.set_ylabel(r'$E_{\rm reco} / E_{\rm true} - 1, \; {\rm track + cascade}$')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    #outfbase = join(outdir, 'log10_reco_energy_by_true_energy')
+    outfbase = join(outdir, 'fract_energy_error')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+    # -- track energy -- #
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_lograt_track_en_err, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_lograt_track_en_err, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro track energy resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    #ax.set_yticks(np.arange(-.5, .51, 0.1), minor=True)
+    #ax.set_yticks(np.arange(-.5, .51, 0.5), minor=False)
+    #ax.set_ylim(-.5, .5)
+
+    ax.set_xlabel(r'true energy (GeV)')
+    #ax.set_ylabel(r'$\log_{10}(E_{\rm reco} / E_{\rm true}), \; {\rm track}$')
+    ax.set_ylabel(r'$E_{\rm reco} / E_{\rm true} - 1, \; {\rm track}$')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    #outfbase = join(outdir, 'log10_reco_track_energy_by_true_track_energy')
+    outfbase = join(outdir, 'fract_track_energy_error')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+    # -- cascade energy -- #
+
+    ymin, ymax = -1.5, 2
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_lograt_cascade_en_err, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_lograt_cascade_en_err, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro cscd energy resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    # ax.set_yticks(np.arange(ymin, ymax+0.1, 0.1), minor=True)
+    # ax.set_yticks(np.arange(-5.5, 5.51, 0.5), minor=False)
+    #ax.set_ylim(ymin, ymax)
+
+    ax.set_xlabel(r'true energy (GeV)')
+    #ax.set_ylabel(r'$\log_{10}(E_{\rm reco} / E_{\rm true}), \; {\rm cascade}$')
+    ax.set_ylabel(r'$E_{\rm reco} / E_{\rm true} - 1, \; {\rm cascade}$')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    #outfbase = join(outdir, 'log10_reco_cascade_energy_by_true_track_energy')
+    outfbase = join(outdir, 'fract_cascade_energy_error')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+    # -- zenith -- #
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_zen_err*180/np.pi, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_zen_err*180/np.pi, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro zenith angle resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    #ax.set_yticks(np.linspace(-25, 25, 11), minor=True)
+    #ax.set_ylim(-25, 25)
+    ax.set_xlabel(r'true energy (GeV)')
+    ax.set_ylabel(r'reco zenith $-$ true zenith (deg)')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    outfbase = join(outdir, 'reco_zenith-true_zenith')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+    # -- coszen -- #
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_coszen_err, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_coszen_err, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro coszen resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    #ax.set_yticks(np.linspace(-25, 25, 11), minor=True)
+    #ax.set_ylim(-25, 25)
+    ax.set_xlabel(r'true energy (GeV)')
+    ax.set_ylabel(r'reco cos(zen) $-$ true cos(zen)')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    outfbase = join(outdir, 'reco_coszen-true_coszen')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+    # -- track coszen -- #
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_track_coszen_err, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_track_coszen_err, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro track coszen resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    #ax.set_yticks(np.linspace(-25, 25, 11), minor=True)
+    #ax.set_ylim(-25, 25)
+    ax.set_xlabel(r'true energy (GeV)')
+    ax.set_ylabel(r'reco - true, $cos(\theta_{\rm zen})$ track')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    outfbase = join(outdir, 'reco_track_coszen-true_track_coszen')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+    # -- track azimuth -- #
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_track_az_err, ax=ax, med_color='k', quant_color=None, fill_color=fill)
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=mn_track_az_err, ax=ax, med_color=mc, quant_color=qc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro track azimuth resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    #ax.set_yticks(np.linspace(-25, 25, 11), minor=True)
+    #ax.set_ylim(-25, 25)
+    ax.set_xlabel(r'true energy (GeV)')
+    ax.set_ylabel(r'reco - true, $\phi_{\rm az}$ track')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    outfbase = join(outdir, 'reco_track_az-true_track_az')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+    # -- angle -- #
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    cnt0, quants0 = plot_res(ebin_edges, bin_indices, errcol=plmn_alpha*180/np.pi, ax=ax, med_color='w', quant_color='gray', fill_color='none')
+    cnt1, quants1 = plot_res(ebin_edges, bin_indices, errcol=retro_alpha*180/np.pi, ax=ax, med_color=qc, quant_color=mc, fill_color='none')
+
+    res0 = np.diff(quants0[:, [0, -1]], axis=1)
+    res1 = np.diff(quants1[:, [0, -1]], axis=1)
+    print('Retro angle resolutions are:')
+    for ivl, r in zip([c[0] for c in cnt0], 100 * (res1 / res0)):
+        print('    In [{:5.1f}, {:5.1f}] GeV : {:5.1f}% of PegLeg/MN'.format(ivl.left, ivl.right, r[0]))
+
+    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+    ax.set_xscale('log')
+
+    # ax.set_yticks(np.arange(0, 105+1, 15), minor=True)
+    # ax.set_yticks(np.arange(0, 91, 30), minor=False)
+    #ax.set_ylim(0, 105)
+    ax.set_xlabel(r'true energy (GeV)')
+    ax.set_ylabel(r'track angle error (deg)')
+    remove_border(ax)
+
+    fig.tight_layout()
+
+    outfbase = join(outdir, 'reco_opening_angle')
+    fig.savefig(outfbase + '.png', dpi=300, transparent=True)
+    fig.savefig(outfbase + '.pdf')
+
+
 def plot_comparison(
     pegleg,
     retro,
@@ -121,7 +414,14 @@ def plot_comparison(
             color=(0.7,)*3,
             label=truth_label,
         )
-    _, b, _ = ax.hist(retro, bins=b, histtype='step', lw=2, color='C0', label=retro_label)
+    _, b, _ = ax.hist(
+        retro,
+        bins=b,
+        histtype='step',
+        lw=2,
+        color='C0',
+        label=retro_label,
+    )
     if pegleg is not None:
         _, b, _ = ax.hist(
             pegleg,

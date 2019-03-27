@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
 
+
+"""
+Retro Reco: global defs
+"""
+
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    '__version__',
     'GarbageInputError',
     'NUMBA_AVAIL',
     'numba_jit',
@@ -51,8 +57,15 @@ from six import PY2, PY3
 from six.moves import cPickle as pickle
 import numpy as np
 
+from ._version import get_versions
+
+
+__version__ = get_versions()['version']
+del get_versions
+
 
 class GarbageInputError(ValueError):
+    """Input value is bad"""
     pass
 
 

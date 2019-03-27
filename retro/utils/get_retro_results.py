@@ -176,8 +176,9 @@ def extract_from_leaf_dir(
     if isfile(tru_npy_f):
         truths = np.load(tru_npy_f)
     else:
+        truths = None
         wstderr('no truth info at path "{}"\n'.format(tru_npy_f))
-        return infos.values()
+        #return infos.values()
 
     evt_npy_f = join(eventdir, 'events.npy')
     if isfile(evt_npy_f):
@@ -264,11 +265,11 @@ def extract_from_leaf_dir(
                     for k in event.dtype.names:
                         info[k] = event[k]
 
-                    truth = truths[event_idx]
-                    #for k in KEEP_TRUTH_KEYS:
-                    for k in truth.dtype.names:
-                        #if k in truth:
-                        info[k] = truth[k]
+                    if truths is not None:
+                        truth = truths[event_idx]
+                        for k in truth.dtype.names:
+                            #if k in truth:
+                            info[k] = truth[k]
 
                     # -- Get Pegleg & other recos into info dict -- #
 
