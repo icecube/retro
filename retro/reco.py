@@ -489,10 +489,10 @@ class Reco(object):
         Call, e.g., via:
 
             self.generate_prior_method(
-                x=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=(-100, 100), relative=True),
-                y=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=(-100, 100), relative=True),
-                z=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=(-50, 50), relative=True),
-                time=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=(-1000, 1000), relative=True),
+                x=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-100, Bounds.REL), (100, Bounds.REL))),
+                y=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-100, Bounds.REL), (100, Bounds.REL))),
+                z=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-50, Bounds.REL), (50, Bounds.REL))),
+                time=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-1000, Bounds.REL), (1000, Bounds.REL))),
                 azimuth=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
                 zenith=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
             )
