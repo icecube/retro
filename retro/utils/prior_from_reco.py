@@ -12,8 +12,8 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = ["orient_az_diff", "prior_from_reco"]
 
-__author__ = 'J.L. Lanfranchi'
-__license__ = '''Copyright 2019 Philipp Eller and Justin L. Lanfranchi
+__author__ = "J.L. Lanfranchi"
+__license__ = """Copyright 2019 Philipp Eller and Justin L. Lanfranchi
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
-limitations under the License.'''
+limitations under the License."""
 
 from collections import Iterable, Mapping, OrderedDict
 from copy import deepcopy
@@ -35,7 +35,8 @@ import pickle
 import sys
 
 import matplotlib as mpl
-mpl.use('agg', warn=False)
+
+mpl.use("agg", warn=False)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -43,7 +44,7 @@ from scipy import interpolate
 
 from pisa.utils.vbwkde import vbwkde
 
-if __name__ == '__main__' and __package__ is None:
+if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
@@ -63,7 +64,7 @@ def orient_az_diff(err):
     reoriented_diff
 
     """
-    return ((err + np.pi) % (2*np.pi)) - np.pi
+    return ((err + np.pi) % (2 * np.pi)) - np.pi
 
 
 def prior_from_reco(
@@ -174,7 +175,7 @@ def prior_from_reco(
     # `reco_array`
 
     if isinstance(reco_array, basestring):
-        reco_array = pickle.load(open(reco_array, 'rb'))
+        reco_array = pickle.load(open(reco_array, "rb"))
 
     if isinstance(reco_array, pd.DataFrame):
         pnames = [param]
@@ -183,12 +184,12 @@ def prior_from_reco(
         fields = []
         dt_spec = []
         for pname in pnames:
-            field = '{}_{}'.format(reco, param)
+            field = "{}_{}".format(reco, param)
             if field not in reco_array:
-                if param == 'coszen':
-                    field = '{}_{}'.format(reco, 'zenith')
-                elif param == 'zenith':
-                    field = '{}_{}'.format(reco, 'coszen')
+                if param == "coszen":
+                    field = "{}_{}".format(reco, "zenith")
+                elif param == "zenith":
+                    field = "{}_{}".format(reco, "coszen")
                 else:
                     raise ValueError()
             fields.append(field)
@@ -201,18 +202,18 @@ def prior_from_reco(
     # `true_array`
 
     if isinstance(true_array, basestring):
-        true_array = pickle.load(open(true_array, 'rb'))
+        true_array = pickle.load(open(true_array, "rb"))
 
     # `param`
 
     try:
         true_vals = true_array[param]
     except (KeyError, ValueError):
-        if 'zenith' in param:
-            newp = param.replace('zenith', 'coszen')
+        if "zenith" in param:
+            newp = param.replace("zenith", "coszen")
             true_vals = np.arccos(true_array[newp])
-        elif 'coszen' in param:
-            newp = param.replace('coszen', 'zenith')
+        elif "coszen" in param:
+            newp = param.replace("coszen", "zenith")
             true_vals = np.cos(true_array[newp])
         else:
             raise
@@ -221,12 +222,13 @@ def prior_from_reco(
 
     if param in reco_array.dtype.names:
         reco_vals = reco_array[param]
-    elif param == 'coszen':
-        reco_vals = np.cos(reco_array['zenith'])
+    elif param == "coszen":
+        reco_vals = np.cos(reco_array["zenith"])
     else:
         raise ValueError(
-            'param "{}" not accessible in reco "{}" with dtype.names {}'
-            .format(param, reco, reco_vals.dtype.names)
+            'param "{}" not accessible in reco "{}" with dtype.names {}'.format(
+                param, reco, reco_vals.dtype.names
+            )
         )
 
     # `split_by_reco_param`
@@ -239,15 +241,16 @@ def prior_from_reco(
     else:
         if split_by_reco_param in reco_array.dtype.names:
             split_by_vals = reco_array[split_by_reco_param]
-        elif split_by_reco_param == 'coszen':
-            split_by_vals = np.cos(reco_array['zenith'])
+        elif split_by_reco_param == "coszen":
+            split_by_vals = np.cos(reco_array["zenith"])
         else:
             raise ValueError(
-                'split_by_reco_param "{}" not accessible in reco "{}" with dtype.names {}'
-                .format(split_by_reco_param, reco, reco_vals.dtype.names)
+                'split_by_reco_param "{}" not accessible in reco "{}" with dtype.names {}'.format(
+                    split_by_reco_param, reco, reco_vals.dtype.names
+                )
             )
 
-        if split_by_reco_param == 'coszen':
+        if split_by_reco_param == "coszen":
             split_bin_edges = np.linspace(-1, 1, num_split_bins + 1)
         else:
             raise NotImplementedError(str(split_by_reco_param))
@@ -256,9 +259,9 @@ def prior_from_reco(
 
     assert isinstance(use_flux_weights, bool)
     if use_flux_weights:
-        weights = true_array['weight']
+        weights = true_array["weight"]
     else:
-        weights = np.ones_like(true_array['weight'])
+        weights = np.ones_like(true_array["weight"])
 
     # `deweight_by_true_params`
 
@@ -278,7 +281,9 @@ def prior_from_reco(
             )
 
         dwtp = deweight_by_true_params[0]
-        hist_vals, hist_edges = np.histogram(true_array[dwtp], bins=1000, weights=weights)
+        hist_vals, hist_edges = np.histogram(
+            true_array[dwtp], bins=1000, weights=weights
+        )
         bin_labels = np.digitize(true_array[dwtp], bins=hist_edges)
         new_weights = deepcopy(weights)
         for bnum, hist_val in enumerate(hist_vals):
@@ -289,7 +294,7 @@ def prior_from_reco(
 
     assert isinstance(weight_tails, bool)
     if weight_tails:
-        if param not in ('coszen', 'zenith'):
+        if param not in ("coszen", "zenith"):
             raise ValueError("Weighting tails only makes sense for zenith or coszen")
         assert weight_tails_max_weight >= 0
     else:
@@ -317,39 +322,42 @@ def prior_from_reco(
 
     # Create dict for storing results
 
-    neg_err_dists = OrderedDict([
-        (
-            'metadata', OrderedDict(
-                [
-                    ('mc_version', mc_version),
-                    ('reco', reco),
-                    ('param', param),
-                    ('split_by_reco_param', split_by_reco_param),
-                    ('num_split_bins', num_split_bins),
-                    ('use_flux_weights', use_flux_weights),
-                    ('deweight_by_true_params', deweight_by_true_params),
-                    ('weight_tails', weight_tails),
-                    ('weight_tails_max_weight', weight_tails_max_weight),
-                    ('mirror_about_finite_edges', mirror_about_finite_edges),
-                    ('num_density_samples', num_density_samples),
-                    ('n_dct', n_dct),
-                    ('n_addl_iter', n_addl_iter),
-                ]
-            )
-        ),
-        ('dists', OrderedDict()),
-    ])
+    neg_err_dists = OrderedDict(
+        [
+            (
+                "metadata",
+                OrderedDict(
+                    [
+                        ("mc_version", mc_version),
+                        ("reco", reco),
+                        ("param", param),
+                        ("split_by_reco_param", split_by_reco_param),
+                        ("num_split_bins", num_split_bins),
+                        ("use_flux_weights", use_flux_weights),
+                        ("deweight_by_true_params", deweight_by_true_params),
+                        ("weight_tails", weight_tails),
+                        ("weight_tails_max_weight", weight_tails_max_weight),
+                        ("mirror_about_finite_edges", mirror_about_finite_edges),
+                        ("num_density_samples", num_density_samples),
+                        ("n_dct", n_dct),
+                        ("n_addl_iter", n_addl_iter),
+                    ]
+                ),
+            ),
+            ("dists", OrderedDict()),
+        ]
+    )
 
     # Define max possible ranges for the param (assumed to apply equally to
     # reco and true in below logic; would need to revisit for e.g. energy)
 
-    if param == 'coszen':
+    if param == "coszen":
         range_lower, range_upper = -1, 1
-    elif param == 'zenith':
+    elif param == "zenith":
         range_lower, range_upper = 0, np.pi
-    elif param == 'azimuth':
-        range_lower, range_upper = 0, 2*np.pi
-    elif param in ('time', 'x', 'y', 'z'):
+    elif param == "azimuth":
+        range_lower, range_upper = 0, 2 * np.pi
+    elif param in ("time", "x", "y", "z"):
         range_lower, range_upper = -np.inf, np.inf
     else:
         raise NotImplementedError(param)
@@ -378,7 +386,7 @@ def prior_from_reco(
             this_true_vals = true_vals[mask]
             this_weights = weights[mask]
         else:
-            split_bin_lower, split_bin_upper = split_bin_edges[i:i+2]
+            split_bin_lower, split_bin_upper = split_bin_edges[i : i + 2]
             mask = (
                 (split_by_vals >= split_bin_lower)
                 & (split_by_vals <= split_bin_upper)
@@ -392,16 +400,16 @@ def prior_from_reco(
         # Compute negative of error, accounting for azimuth wraparound
 
         neg_err = this_true_vals - this_reco_vals
-        if param == 'azimuth':
+        if param == "azimuth":
             # az negative-error is 0 at reco-azimuth and ranges from -pi to pi
             neg_err = orient_az_diff(neg_err)
 
         # Compute limits of reco param values given the split bin edges
 
-        if param == 'zenith' and split_by_reco_param == 'coszen':
+        if param == "zenith" and split_by_reco_param == "coszen":
             inbin_lower = np.arccos(split_bin_upper)
             inbin_upper = np.arccos(split_bin_lower)
-        elif param == 'coszen' and split_by_reco_param == 'zenith':
+        elif param == "coszen" and split_by_reco_param == "zenith":
             inbin_lower = np.cos(split_bin_upper)
             inbin_upper = np.cos(split_bin_lower)
         elif param == split_by_reco_param:
@@ -417,7 +425,7 @@ def prior_from_reco(
         # therefore the difference:
         #   (true - reco) ∈ [range_lower - inbin_upper, range_upper - inbin_lower]
 
-        if param == 'azimuth':
+        if param == "azimuth":
             theor_neg_err_lower = -np.pi
             theor_neg_err_upper = +np.pi
         else:
@@ -446,12 +454,12 @@ def prior_from_reco(
 
         neg_err_to_cat = [neg_err]
         if np.isfinite(theor_neg_err_lower) and mirror_about_finite_edges:
-            neg_err_to_cat.append(2*theor_neg_err_lower - neg_err)
+            neg_err_to_cat.append(2 * theor_neg_err_lower - neg_err)
         if np.isfinite(theor_neg_err_upper) and mirror_about_finite_edges:
-            neg_err_to_cat.append(2*theor_neg_err_upper - neg_err)
+            neg_err_to_cat.append(2 * theor_neg_err_upper - neg_err)
         num_copies = len(neg_err_to_cat)
         cat_neg_err = np.concatenate(neg_err_to_cat)
-        cat_weights = np.concatenate([this_weights]*num_copies)
+        cat_weights = np.concatenate([this_weights] * num_copies)
 
         # For finite-range limits, evaluate kernels to full extent; for
         # infinite-range params, 25% below and above error range actually seen
@@ -464,12 +472,12 @@ def prior_from_reco(
         if np.isfinite(theor_neg_err_lower):
             eval_lower = theor_neg_err_lower
         else:
-            eval_lower = actual_neg_err_lower - actual_neg_err_range/10
+            eval_lower = actual_neg_err_lower - actual_neg_err_range / 10
 
         if np.isfinite(theor_neg_err_upper):
             eval_upper = theor_neg_err_upper
         else:
-            eval_upper = actual_neg_err_upper + actual_neg_err_range/10
+            eval_upper = actual_neg_err_upper + actual_neg_err_range / 10
 
         x = np.linspace(eval_lower, eval_upper, num_density_samples)
 
@@ -499,51 +507,55 @@ def prior_from_reco(
 
         # Record result to dict
         key = (split_bin_lower, split_bin_upper) if split_by_reco_param else None
-        neg_err_dists['dists'][key] = OrderedDict([('x', x), ('pdf', pdf), ('cdf', cdf)])
+        neg_err_dists["dists"][key] = OrderedDict(
+            [("x", x), ("pdf", pdf), ("cdf", cdf)]
+        )
 
-        #_, interp = generate_lerp(
+        # _, interp = generate_lerp(
         #    x=cdf,
         #    y=x,
         #    low_behavior='error',
         #    high_behavior='error',
-        #)
-        interp = interpolate.UnivariateSpline(x=cdf, y=x, ext='raise', s=0)
+        # )
+        interp = interpolate.UnivariateSpline(x=cdf, y=x, ext="raise", s=0)
         samps = interp(np.linspace(0, 1, int(1e6)))
 
         plot_bins = np.linspace(eval_lower, eval_upper, n_plot_bins + 1)
-        samp_bins = np.linspace(eval_lower, eval_upper, n_plot_bins*1 + 1)
+        samp_bins = np.linspace(eval_lower, eval_upper, n_plot_bins * 1 + 1)
         if use_flux_weights or deweight_by_true_params or weight_tails:
             ax.hist(
                 neg_err,
                 weights=None,
                 bins=plot_bins,
                 density=True,
-                histtype='step',
-                color='C0',
+                histtype="step",
+                color="C0",
                 linewidth=1,
-                label='unweighted',
+                label="unweighted",
             )
 
         label_parts = []
         if use_flux_weights:
-            label_parts.append('flux-weighted')
+            label_parts.append("flux-weighted")
         if deweight_by_true_params:
-            label_parts.append('deweighted by true {}'.format(', '.join(deweight_by_true_params)))
+            label_parts.append(
+                "deweighted by true {}".format(", ".join(deweight_by_true_params))
+            )
         if weight_tails:
-            label_parts.append('tail-comp')
+            label_parts.append("tail-comp")
 
         if label_parts:
-            label = ', '.join(label_parts)
+            label = ", ".join(label_parts)
         else:
-            label = 'unweighted'
+            label = "unweighted"
 
         ax.hist(
             neg_err,
             weights=this_weights,
             bins=plot_bins,
             density=True,
-            histtype='step',
-            color='C2',
+            histtype="step",
+            color="C2",
             linewidth=1,
             label=label,
         )
@@ -552,35 +564,36 @@ def prior_from_reco(
             weights=None,
             bins=samp_bins,
             density=True,
-            histtype='step',
-            color='C3',
+            histtype="step",
+            color="C3",
             linewidth=1,
-            label='histo of generated samples',
+            label="histo of generated samples",
         )
-        ax.plot(x, dens, lw=2, ls='--', zorder=+10, color='C1', label='vbwkde')
+        ax.plot(x, dens, lw=2, ls="--", zorder=+10, color="C1", label="vbwkde")
 
         ax.set_xlim(eval_lower, eval_upper)
         ax.set_yticklabels([0])
 
         if split_by_reco_param:
             ax.set_title(
-                r'Reco {} $\in$ [{:.3f}, {:.3f}]'
-                .format(split_by_reco_param, split_bin_lower, split_bin_upper)
+                r"Reco {} $\in$ [{:.3f}, {:.3f}]".format(
+                    split_by_reco_param, split_bin_lower, split_bin_upper
+                )
             )
 
         if i == 0:
-            ax.legend(loc='best', frameon=False, fontsize=6)
+            ax.legend(loc="best", frameon=False, fontsize=6)
 
     # Turn off any excess axes in the grid
     for ax in axiter:
-        ax.axis('off')
+        ax.axis("off")
 
-    suptitle = '{} {}: true $-$ reco'.format(reco, param)
-    fname = '{}_{}_neg_error'.format(reco, param)
+    suptitle = "{} {}: true $-$ reco".format(reco, param)
+    fname = "{}_{}_neg_error".format(reco, param)
     fontsize = 8
     if split_by_reco_param:
-        suptitle += ' split by reco {}'.format(split_by_reco_param)
-        fname += '_splitby_reco_{}_{:d}'.format(split_by_reco_param, num_split_bins)
+        suptitle += " split by reco {}".format(split_by_reco_param)
+        fname += "_splitby_reco_{}_{:d}".format(split_by_reco_param, num_split_bins)
         fontsize = 16
 
     fig.suptitle(suptitle, fontsize=fontsize)
@@ -588,12 +601,14 @@ def prior_from_reco(
 
     if outdir is not None:
         basefpath = join(outdir, fname)
-        fig.savefig(basefpath + '.png', dpi=120)
-        fig.savefig(basefpath + '.pdf')
+        fig.savefig(basefpath + ".png", dpi=120)
+        fig.savefig(basefpath + ".pdf")
         print('saved plots to "{}.{{png, pdf}}"'.format(basefpath))
 
-        outfpath = basefpath + '.pkl'
-        pickle.dump(neg_err_dists, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        outfpath = basefpath + ".pkl"
+        pickle.dump(
+            neg_err_dists, open(outfpath, "wb"), protocol=pickle.HIGHEST_PROTOCOL
+        )
         print('saved neg err dist(s) to "{}"'.format(outfpath))
 
     return neg_err_dists, axes
