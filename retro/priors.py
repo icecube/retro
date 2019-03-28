@@ -22,7 +22,7 @@ __all__ = [
     "PRI_OSCNEXT_L5_V1_CRS",
     "OSCNEXT_L5_V1_PRIORS",
     "get_reco_scalar",
-    "define_prefit_prior",
+    "define_prior_from_prefit",
     "define_generic_prior",
     "get_prior_func",
 ]
@@ -59,8 +59,6 @@ if __name__ == "__main__" and __package__ is None:
 from retro import GarbageInputError
 from retro.const import TWO_PI
 from retro.retro_types import FitStatus
-
-# from retro.utils.lerp import generate_lerp
 from retro.utils.misc import LazyLoader
 
 
@@ -91,39 +89,41 @@ events. See
 """
 
 
-class Bounds(enum.IntEnum):
+class Bound(enum.IntEnum):
+    """Specify a boundary is absolute or relative"""
+
     ABS = 0
     REL = 1
 
 
 EXT_TIGHT = dict(
-    x=((-200, Bounds.REL), (200, Bounds.REL)),
-    y=((-200, Bounds.REL), (200, Bounds.REL)),
-    z=((-100, Bounds.REL), (100, Bounds.REL)),
-    time=((-1000, Bounds.REL), (1000, Bounds.REL)),
+    x=((-200, Bound.REL), (200, Bound.REL)),
+    y=((-200, Bound.REL), (200, Bound.REL)),
+    z=((-100, Bound.REL), (100, Bound.REL)),
+    time=((-1000, Bound.REL), (1000, Bound.REL)),
 )
 
 EXT_MN = dict(
-    x=((-300, Bounds.ABS), (300, Bounds.ABS)),
-    y=((-300, Bounds.ABS), (300, Bounds.ABS)),
-    z=((-200, Bounds.ABS), (200, Bounds.ABS)),
-    time=((-800, Bounds.ABS), (800, Bounds.ABS)),
+    x=((-300, Bound.ABS), (300, Bound.ABS)),
+    y=((-300, Bound.ABS), (300, Bound.ABS)),
+    z=((-200, Bound.ABS), (200, Bound.ABS)),
+    time=((-800, Bound.ABS), (800, Bound.ABS)),
 )
 
 EXT_IC = dict(
-    x=((-860, Bounds.ABS), (870, Bounds.ABS)),
-    y=((-780, Bounds.ABS), (770, Bounds.ABS)),
-    z=((-780, Bounds.ABS), (790, Bounds.ABS)),
+    x=((-860, Bound.ABS), (870, Bound.ABS)),
+    y=((-780, Bound.ABS), (770, Bound.ABS)),
+    z=((-780, Bound.ABS), (790, Bound.ABS)),
 )
 
 EXT_DC = dict(
-    x=((-150, Bounds.ABS), (270, Bounds.ABS)),
-    y=((-210, Bounds.ABS), (150, Bounds.ABS)),
-    z=((-770, Bounds.ABS), (760, Bounds.ABS)),
+    x=((-150, Bound.ABS), (270, Bound.ABS)),
+    y=((-210, Bound.ABS), (150, Bound.ABS)),
+    z=((-770, Bound.ABS), (760, Bound.ABS)),
 )
 
 EXT_DC_SUBDUST = deepcopy(EXT_DC)
-EXT_DC_SUBDUST["z"] = ((-610, Bounds.ABS), (60, Bounds.ABS))
+EXT_DC_SUBDUST["z"] = ((-610, Bound.ABS), (60, Bound.ABS))
 
 
 PRISPEC_OSCNEXT_PREFIT_TIGHT = dict(
@@ -182,7 +182,7 @@ def get_reco_scalar(val, kind):
     return val[kind]
 
 
-def define_prefit_prior(dim_name, event, priors, candidate_recos, extents=None):
+def define_prior_from_prefit(dim_name, event, priors, candidate_recos, extents=None):
     """Define a prior from pre-fit(s). Priors are defined by the interpolation
     of KDE'd negative-error distribution for the pre-fits, and "fallback" fits
     can be defined in case one or more fits failed."""
@@ -214,14 +214,12 @@ def define_prefit_prior(dim_name, event, priors, candidate_recos, extents=None):
         reco_val = get_reco_scalar(event["recos"][reco][dim_name], kind="median")
     except (KeyError, ValueError):
         if dim_name == "coszen":
-            reco_val = get_reco_scalar(
-                np.cos(event["recos"][reco]["zenith"]),
-                kind="median",
+            reco_val = np.cos(
+                get_reco_scalar(event["recos"][reco]["zenith"], kind="median")
             )
         elif dim_name == "zenith":
-            reco_val = get_reco_scalar(
-                np.arccos(event["recos"][reco]["coszen"]),
-                kind="median",
+            reco_val = np.arccos(
+                get_reco_scalar(event["recos"][reco]["coszen"], kind="median")
             )
         else:
             raise ValueError('No dim "{}" in reco "{}"'.format(dim_name, reco))
@@ -275,13 +273,13 @@ def define_prefit_prior(dim_name, event, priors, candidate_recos, extents=None):
         high = np.max(xvals)
     else:
         (low, low_absrel), (high, high_absrel) = extents
-        low = low if low_absrel == Bounds.ABS else reco_val + low
-        high = high if high_absrel == Bounds.ABS else reco_val + high
+        low = low if low_absrel == Bound.ABS else reco_val + low
+        high = high if high_absrel == Bound.ABS else reco_val + high
         # extra correction for bias in LineFit_DC's z reco
         if (reco, dim_name) == ("LineFit_DC", "z"):
-            if low_absrel == Bounds.REL:
+            if low_absrel == Bound.REL:
                 low -= 15
-            if high_absrel == Bounds.REL:
+            if high_absrel == Bound.REL:
                 high -= 15
 
     basic_pri_kind = PRI_AZ_INTERP if "azimuth" in dim_name else PRI_INTERP
@@ -325,10 +323,8 @@ def define_generic_prior(kind, extents, kwargs):
     scale = kwargs["scale"]
     dist = getattr(stats.distributions, kind)
     (low, low_absrel), (high, high_absrel) = extents
-    if not low_absrel == high_absrel == Bounds.ABS:
-        raise ValueError(
-            'Only absolute bounds allowed for `kind` "{}"'.format(kind)
-        )
+    if not low_absrel == high_absrel == Bound.ABS:
+        raise ValueError('Only absolute bound allowed for `kind` "{}"'.format(kind))
     if dist.shapes:
         args = []
         for shape_param in dist.shapes:
@@ -366,17 +362,17 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
         if kind is None:
             kind = PRI_COSINE
         if extents is None:
-            extents = ((0, Bounds.ABS), (np.pi, Bounds.ABS))
+            extents = ((0, Bound.ABS), (np.pi, Bound.ABS))
     elif "coszen" in dim_name:
         if kind is None:
             kind = PRI_UNIFORM
         if extents is None:
-            extents = ((-1, Bounds.ABS), (1, Bounds.ABS))
+            extents = ((-1, Bound.ABS), (1, Bound.ABS))
     elif "azimuth" in dim_name:
         if kind is None:
             kind = PRI_UNIFORM
         if extents is None:
-            extents = ((0, Bounds.ABS), (2 * np.pi, Bounds.ABS))
+            extents = ((0, Bound.ABS), (2 * np.pi, Bound.ABS))
     elif dim_name == "x":
         if kind is None:
             kind = PRI_UNIFORM
@@ -397,32 +393,33 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             kind = PRI_UNIFORM
         if extents is None:
             # TODO: make this the time window from the event
-            extents = ((-4e3, Bounds.ABS), (0.0, Bounds.ABS))
+            extents = ((-4e3, Bound.ABS), (0.0, Bound.ABS))
     elif "energy" in dim_name:
         if kind is None:
             kind = PRI_UNIFORM
         if extents is None:
             if kind in (PRI_LOG_NORMAL, PRI_LOG_UNIFORM):
-                extents = ((0.1, Bounds.ABS), (1e3, Bounds.ABS))
+                extents = ((0.1, Bound.ABS), (1e3, Bound.ABS))
             else:
-                extents = ((0.0, Bounds.ABS), (1e3, Bounds.ABS))
+                extents = ((0.0, Bound.ABS), (1e3, Bound.ABS))
     else:
         raise ValueError('Unrecognized dimension "{}"'.format(dim_name))
 
-    # -- Define prior so that it is simple to turn into a function -- #
+    # -- Re-cast priors as something simple to make a func out of -- #
 
     misc = OrderedDict()
 
     if kind in (PRI_UNIFORM, PRI_COSINE):
         (low, low_absrel), (high, high_absrel) = extents
-        if not low_absrel == high_absrel == Bounds.ABS:
+        if not low_absrel == high_absrel == Bound.ABS:
             raise ValueError(
-                "Dim #{} ({}): Don't know what to do with relative bounds for prior {}"
-                .format(dim_num, dim_name, kind)
+                "Dim #{} ({}): Don't know what to do with relative bounds for prior {}".format(
+                    dim_num, dim_name, kind
+                )
             )
         prior_def = (kind, (low, high))
     elif kind == PRI_OSCNEXT_L5_V1_PREFIT:
-        prior_def, misc = define_prefit_prior(
+        prior_def, misc = define_prior_from_prefit(
             dim_name=dim_name,
             event=event,
             priors=OSCNEXT_L5_V1_PRIORS,
@@ -430,7 +427,7 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             extents=extents,
         )
     elif kind == PRI_OSCNEXT_L5_V1_CRS:
-        prior_def, misc = define_prefit_prior(
+        prior_def, misc = define_prior_from_prefit(
             dim_name=dim_name,
             event=event,
             priors=OSCNEXT_L5_V1_PRIORS,
@@ -441,16 +438,15 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
         prior_def = define_generic_prior(kind, extents, kwargs)
     else:
         raise ValueError(
-            'Unhandled or invalid prior "{}" for dim_name "{}"'.format(
-                kind, dim_name
-            )
+            'Unhandled or invalid prior "{}" for dim_name "{}"'.format(kind, dim_name)
         )
 
     # -- Create prior function -- #
 
+    # pylint: disable=unused-argument, missing-docstring
+
     kind, prior_args = prior_def
 
-    # pylint: disable=unused-argument, missing-docstring
     if kind == PRI_UNIFORM:
         low, high = prior_args
         width = high - low
@@ -537,14 +533,6 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             cdf -= cdf[0]
             # Ensure last value in cdf is exactly 1
             cdf /= cdf[-1]
-
-            ## Create linear interpolator for isf (inverse of cdf)
-            # _, isf_interp = generate_lerp(
-            #    x=cdf,
-            #    y=x,
-            #    low_behavior='error',
-            #    high_behavior='error',
-            # )
 
             # Create smooth spline interpolator for isf (inverse of cdf)
             isf_interp = interpolate.UnivariateSpline(x=cdf, y=x, ext="raise", s=0)
