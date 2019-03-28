@@ -442,6 +442,7 @@ class Reco(object):
             Each must be one of `METHODS`
 
         """
+        start_time = time.time()
         if isinstance(methods, string_types):
             methods = [methods]
 
@@ -453,13 +454,23 @@ class Reco(object):
                     )
                 )
 
+        if len(set(methods)) != len(methods):
+            raise ValueError("Same reco specified multiple times")
+
         print("Running {} reconstruction(s) on all specified events".format(methods))
-        t00 = time.time()
 
         self.successful_reco_counter = {method: 0 for method in methods}
 
         for _ in self.events:
+            existing_recos = self.current_event.get("recos", {})
             for method in methods:
+                # TODO: if we populate an already-existing numpy array, must
+                # check for a "reco run" flag being set at this index into that
+                # array, not whether the reco exists...
+                if "retro_" + method in existing_recos:
+                    print('Method "{}" already run on event; skipping'.format(method))
+                    continue
+
                 print('Running "{}" reconstruction'.format(method))
                 try:
                     self._reco_event(method)
@@ -473,7 +484,7 @@ class Reco(object):
                 else:
                     self.successful_reco_counter[method] += 1
 
-        print("Total run time is {:.3f} s".format(time.time() - t00))
+        print("Total run time is {:.3f} s".format(time.time() - start_time))
 
     def generate_prior_method(self, **kwargs):
         """Generate the prior transform method `self.prior` and info
@@ -947,6 +958,7 @@ class Reco(object):
             meta=fit_meta,
         )
 
+        # Place reco in current event in case another reco depends on it
         if "recos" not in self.current_event:
             self.current_event["recos"] = OrderedDict()
         self.current_event["recos"]["retro_" + method] = estimate
