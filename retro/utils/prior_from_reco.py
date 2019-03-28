@@ -181,26 +181,26 @@ def prior_from_reco(
         reco_array = pickle.load(open(reco_array, "rb"))
 
     if isinstance(reco_array, pd.DataFrame):
-        pnames = [param]
-        if split_by_reco_param is not None and split_by_reco_param not in pnames:
-            pnames.append(split_by_reco_param)
-        fields = []
-        dt_spec = []
+        pnames = set([param])
+        if split_by_reco_param is not None:
+            pnames.add(split_by_reco_param)
+        pnames = sorted(pnames)
+
+        new_df = pd.DataFrame()
         for pname in pnames:
-            field = "{}_{}".format(reco, param)
-            if field not in reco_array:
-                if param == "coszen":
-                    vals = reco_array["{}_zenith".format(reco)].values
-                    reco_array[field] = np.cos(vals).astype(vals.dtype)
-                elif param == "zenith":
-                    vals = reco_array["{}_coszen".format(reco)].values
-                    reco_array[field] = np.arccos(vals).astype(vals.dtype)
-                else:
-                    raise ValueError()
-            if field not in fields:
-                fields.append(field)
-                dt_spec.append((pname, reco_array.dtypes[field]))
-        reco_array = np.squeeze(np.array(reco_array[fields].values, dtype=np.dtype(dt_spec)))
+            field = "{}_{}".format(reco, pname)
+            if field in reco_array:
+                vals = reco_array[field]
+            elif pname == "coszen":
+                vals = np.cos(reco_array["{}_zenith".format(reco)].values)
+            elif pname == "zenith":
+                vals = np.arccos(reco_array["{}_coszen".format(reco)].values)
+            else:
+                raise ValueError(
+                    'retrieving pname "{}" via field "{}" failed'.format(pname, field)
+                )
+            new_df[pname] = vals
+        reco_array = np.array(new_df[pnames].to_records())[pnames]
 
     if isinstance(reco_array, Mapping):
         reco_array = reco_array[reco]
@@ -230,6 +230,8 @@ def prior_from_reco(
         reco_vals = reco_array[param]
     elif param == "coszen":
         reco_vals = np.cos(reco_array["zenith"])
+    elif param == "zenith":
+        reco_vals = np.arccos(reco_array["coszen"])
     else:
         raise ValueError(
             'param "{}" not accessible in reco "{}" with dtype.names {}'.format(
@@ -249,15 +251,18 @@ def prior_from_reco(
             split_by_vals = reco_array[split_by_reco_param]
         elif split_by_reco_param == "coszen":
             split_by_vals = np.cos(reco_array["zenith"])
+        elif split_by_reco_param == "zenith":
+            split_by_vals = np.arccos(reco_array["coszen"])
         else:
             raise ValueError(
-                'split_by_reco_param "{}" not accessible in reco "{}" with dtype.names {}'.format(
+                'split_by_reco_param "{}" not in reco "{}" with dtype.names {}'.format(
                     split_by_reco_param, reco, reco_vals.dtype.names
                 )
             )
-
         if split_by_reco_param == "coszen":
             split_bin_edges = np.linspace(-1, 1, num_split_bins + 1)
+        elif split_by_reco_param == "zenith":
+            split_bin_edges = np.linspace(0, np.pi, num_split_bins + 1)
         else:
             raise NotImplementedError(str(split_by_reco_param))
 
@@ -291,9 +296,7 @@ def prior_from_reco(
         if isinstance(dwtp, pd.Series):
             dwtp = dwtp.values
 
-        hist_vals, hist_edges = np.histogram(
-            dwtp, bins=1000, weights=weights
-        )
+        hist_vals, hist_edges = np.histogram(dwtp, bins=1000, weights=weights)
         bin_labels = np.digitize(dwtp, bins=hist_edges)
         new_weights = deepcopy(weights)
         for bnum, hist_val in enumerate(hist_vals):
