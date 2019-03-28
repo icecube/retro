@@ -40,6 +40,7 @@ mpl.use("agg", warn=False)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from six import string_types
 from scipy import interpolate
 
 from pisa.utils.vbwkde import vbwkde
@@ -96,15 +97,17 @@ def prior_from_reco(
 
     Parameters
     ----------
-    reco_array : struct array or dict with reco names as keys & struct arrays as vals
-        The array must contain a field matching `param` (or a field from which
-        this can be derived)
+    reco_array : pandas.DataFrame, struct array, or dict
+        * DataFrame must have columns named as {reco}_{param}
+        * dict must have reco names as keys & struct arrays as vals
+        * struct arrays must contain a field matching `param` (or a field from
+          which this can be derived)
 
-    true_array : struct array
-        Monte Carlo truth should reside in this structured array, with fields
-        including the `param` being characterized, the split_by_reco_param (if one is
-        specified), any `deweight_by_true_params`, and optionally a "weight"
-        field if `use_flux_weights` is True.
+    true_array : pandas.DataFrame or struct array
+        Monte Carlo truth. Columns (for DataFrame) or fields (for struct array)
+        must include the `param` being characterized, the `split_by_reco_param`
+        (if one is specified), any `deweight_by_true_params`, and optionally
+        "weight" if `use_flux_weights` is True.
 
     mc_version : str
         String describing the Monte Carlo used for the characterization
@@ -174,12 +177,12 @@ def prior_from_reco(
     """
     # `reco_array`
 
-    if isinstance(reco_array, basestring):
+    if isinstance(reco_array, string_types):
         reco_array = pickle.load(open(reco_array, "rb"))
 
     if isinstance(reco_array, pd.DataFrame):
         pnames = [param]
-        if split_by_reco_param is not None:
+        if split_by_reco_param is not None and split_by_reco_param not in pnames:
             pnames.append(split_by_reco_param)
         fields = []
         dt_spec = []
@@ -194,14 +197,14 @@ def prior_from_reco(
                     raise ValueError()
             fields.append(field)
             dt_spec.append((pname, reco_array.dtypes[field]))
-        reco_array = np.array(reco_array[fields].values, dtype=np.dtype(dt_spec))
+        reco_array = np.squeeze(np.array(reco_array[fields].values, dtype=np.dtype(dt_spec)))
 
     if isinstance(reco_array, Mapping):
         reco_array = reco_array[reco]
 
     # `true_array`
 
-    if isinstance(true_array, basestring):
+    if isinstance(true_array, string_types):
         true_array = pickle.load(open(true_array, "rb"))
 
     # `param`
@@ -258,14 +261,15 @@ def prior_from_reco(
     # `use_flux_weights`
 
     assert isinstance(use_flux_weights, bool)
-    if use_flux_weights:
-        weights = true_array["weight"]
-    else:
-        weights = np.ones_like(true_array["weight"])
+    weights = true_array["weight"]
+    if isinstance(weights, pd.Series):
+        weights = weights.values
+    if not use_flux_weights:
+        weights = np.ones_like(weights)
 
     # `deweight_by_true_params`
 
-    if isinstance(deweight_by_true_params, basestring):
+    if isinstance(deweight_by_true_params, string_types):
         deweight_by_true_params = [deweight_by_true_params]
 
     if isinstance(deweight_by_true_params, Iterable):
@@ -280,11 +284,14 @@ def prior_from_reco(
                 "`deweight_by_true_params` = {}".format(deweight_by_true_params)
             )
 
-        dwtp = deweight_by_true_params[0]
+        dwtp = true_array[deweight_by_true_params[0]]
+        if isinstance(dwtp, pd.Series):
+            dwtp = dwtp.values
+
         hist_vals, hist_edges = np.histogram(
-            true_array[dwtp], bins=1000, weights=weights
+            dwtp, bins=1000, weights=weights
         )
-        bin_labels = np.digitize(true_array[dwtp], bins=hist_edges)
+        bin_labels = np.digitize(dwtp, bins=hist_edges)
         new_weights = deepcopy(weights)
         for bnum, hist_val in enumerate(hist_vals):
             new_weights[bin_labels == (bnum + 1)] /= hist_val
@@ -382,20 +389,18 @@ def prior_from_reco(
             split_bin_lower = range_lower
             split_bin_upper = range_upper
             mask = np.isfinite(reco_vals)
-            this_reco_vals = reco_vals[mask]
-            this_true_vals = true_vals[mask]
-            this_weights = weights[mask]
         else:
-            split_bin_lower, split_bin_upper = split_bin_edges[i : i + 2]
+            split_bin_lower = split_bin_edges[i]
+            split_bin_upper = split_bin_edges[i + 1]
             mask = (
                 (split_by_vals >= split_bin_lower)
                 & (split_by_vals <= split_bin_upper)
                 & np.isfinite(split_by_vals)
                 & np.isfinite(reco_vals)
             )
-            this_reco_vals = reco_vals[mask]
-            this_true_vals = true_vals[mask]
-            this_weights = weights[mask]
+        this_reco_vals = reco_vals[mask]
+        this_true_vals = true_vals[mask]
+        this_weights = weights[mask]
 
         # Compute negative of error, accounting for azimuth wraparound
 
