@@ -190,13 +190,16 @@ def prior_from_reco(
             field = "{}_{}".format(reco, param)
             if field not in reco_array:
                 if param == "coszen":
-                    field = "{}_{}".format(reco, "zenith")
+                    vals = reco_array["{}_zenith".format(reco)].values
+                    reco_array[field] = np.cos(vals).astype(vals.dtype)
                 elif param == "zenith":
-                    field = "{}_{}".format(reco, "coszen")
+                    vals = reco_array["{}_coszen".format(reco)].values
+                    reco_array[field] = np.arccos(vals).astype(vals.dtype)
                 else:
                     raise ValueError()
-            fields.append(field)
-            dt_spec.append((pname, reco_array.dtypes[field]))
+            if field not in fields:
+                fields.append(field)
+                dt_spec.append((pname, reco_array.dtypes[field]))
         reco_array = np.squeeze(np.array(reco_array[fields].values, dtype=np.dtype(dt_spec)))
 
     if isinstance(reco_array, Mapping):
