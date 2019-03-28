@@ -32,6 +32,7 @@ import sys
 
 import numba
 import numpy as np
+from six import string_types
 
 if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -65,7 +66,7 @@ class AggregateHypo(Hypo):
 
         # -- Convert `hypo_names` to tuple of strs and validate -- #
 
-        if isinstance(hypo_names, basestring):
+        if isinstance(hypo_names, string_types):
             hypo_names = (hypo_names,)
         else:
             hypo_names = tuple(hypo_names)

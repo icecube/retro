@@ -43,6 +43,7 @@ import matplotlib as mpl
 mpl.use('agg', warn=False)
 import matplotlib.pyplot as plt
 import numpy as np
+from six import string_types
 
 from pisa.utils.jsons import from_json
 from pisa.utils.format import format_num
@@ -206,25 +207,25 @@ def plot_clsim_table_summary(
     """
     orig_summaries = deepcopy(summaries)
 
-    if isinstance(summaries, (basestring, Mapping)):
+    if isinstance(summaries, (string_types, Mapping)):
         summaries = [summaries]
 
     tmp_summaries = []
     for summary in summaries:
         if isinstance(summary, Mapping):
             tmp_summaries.append(summary)
-        elif isinstance(summary, basestring):
+        elif isinstance(summary, string_types):
             tmp_summaries.extend(glob(expand(summary)))
     summaries = tmp_summaries
 
     for summary_n, summary in enumerate(summaries):
-        if isinstance(summary, basestring):
+        if isinstance(summary, string_types):
             summary = from_json(summary)
             summaries[summary_n] = summary
 
     if formats is None:
         formats = []
-    elif isinstance(formats, basestring):
+    elif isinstance(formats, string_types):
         formats = [formats]
 
     if outdir is not None:
@@ -249,7 +250,7 @@ def plot_clsim_table_summary(
         for key, value in summary.items():
             if key == 'dimensions':
                 continue
-            if not all_items.has_key(key):
+            if key not in all_items:
                 all_items[key] = []
             all_items[key].append(value)
 

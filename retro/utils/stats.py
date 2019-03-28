@@ -42,9 +42,9 @@ import time
 import traceback
 import warnings
 
-import enum
 import numpy as np
 from scipy import interpolate, optimize, special, stats
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -497,7 +497,7 @@ def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
     if not x_is_data:
         raise NotImplementedError()
 
-    if isinstance(distribution, basestring):
+    if isinstance(distribution, string_types):
         distribution = getattr(stats.distributions, distribution)
 
     t0 = time.time()

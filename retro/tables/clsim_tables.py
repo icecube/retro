@@ -15,7 +15,6 @@ __all__ = [
     'CLSIM_TABLE_METANAME_PROTO',
     'CLSIM_TABLE_METANAME_RE',
     'CLSIM_TABLE_TILE_FNAME_PROTO',
-    'CLSIM_TABLE_TILE_FNAME_RE',
     'CLSIM_TABLE_TILE_METANAME_PROTO',
     'CLSIM_TABLE_TILE_METANAME_RE',
     'interpret_clsim_table_fname',
@@ -45,6 +44,7 @@ import sys
 from time import time
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -265,7 +265,7 @@ def interpret_clsim_table_fname(fname):
     try:
         info['string'] = int(info['string'])
     except ValueError:
-        assert isinstance(info['string'], basestring)
+        assert isinstance(info['string'], string_types)
         assert info['string'].lower() in ['ic', 'dc']
         info['string'] = info['string'].lower()
 

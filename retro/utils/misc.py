@@ -70,7 +70,7 @@ import sys
 
 import enum
 import numpy as np
-from six import BytesIO
+from six import BytesIO, string_types
 from six.moves import map, range
 
 if __name__ == '__main__' and __package__ is None:
@@ -100,8 +100,6 @@ class LazyLoader(object):
     """
     def __init__(self, datasource):
         self._datasource = abspath(expanduser(expandvars(datasource)))
-        if not isfile(self._datasource):
-            raise IOError('path is not a file: "{}"'.format(self._datasource))
         self._data = None
         self._sha256 = None
         self._is_loaded = False
@@ -462,7 +460,7 @@ def validate_and_convert_enum(val, enum_type, none_evaluates_to=None):
             "if enum, `val` must be a {}; got {} instead".format(enum_type, type(val))
         )
 
-    if isinstance(val, basestring):
+    if isinstance(val, string_types):
         if hasattr(enum_type, val):
             val = getattr(enum_type, val)
         elif hasattr(enum_type, val.lower()):

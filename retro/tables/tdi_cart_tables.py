@@ -36,6 +36,7 @@ import sys
 from time import time
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -137,7 +138,7 @@ class TDICartTable(object):
         tables_dir = expand(tables_dir)
         assert isdir(tables_dir)
         assert isinstance(use_directionality, bool)
-        assert isinstance(proto_tile_hash, basestring)
+        assert isinstance(proto_tile_hash, string_types)
         assert scale > 0
 
         self.tables_dir = tables_dir

@@ -29,6 +29,7 @@ from os.path import abspath, dirname
 import sys
 
 from funcsigs import signature # use builtin `inspect` in python 3
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -93,7 +94,7 @@ class Hypo(object):
                 )
             )
 
-        if isinstance(internal_param_names, basestring):
+        if isinstance(internal_param_names, string_types):
             internal_param_names = (internal_param_names,)
         else:
             internal_param_names = tuple(internal_param_names)
@@ -150,7 +151,7 @@ class Hypo(object):
             # Detect singleton tuple of strings and convert to tuple-of-tuple
             is_singleton = True
             for p in internal_sph_pairs:
-                if not isinstance(p, basestring):
+                if not isinstance(p, string_types):
                     is_singleton = False
             if is_singleton:
                 internal_sph_pairs = (internal_sph_pairs,)
@@ -161,7 +162,7 @@ class Hypo(object):
             # Detect singleton tuple of strings and convert to tuple-of-tuple
             is_singleton = True
             for p in external_sph_pairs:
-                if not isinstance(p, basestring):
+                if not isinstance(p, string_types):
                     is_singleton = False
             if is_singleton:
                 external_sph_pairs = (external_sph_pairs,)

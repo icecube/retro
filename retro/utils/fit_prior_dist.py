@@ -47,6 +47,7 @@ import time
 
 import numpy as np
 import pandas as pd
+from six import string_types
 from scipy.stats import distributions as stats_distributions
 from scipy.stats._continuous_distns import _distn_names  # pylint: disable=protected-access
 
@@ -272,12 +273,12 @@ def fit_distributions_to_data(
     if distributions is None:
         distributions = DISTRIBUTIONS
 
-    if isinstance(distributions, basestring) or not isinstance(distributions, Iterable):
+    if isinstance(distributions, string_types) or not isinstance(distributions, Iterable):
         distributions = [distributions]
 
     tmp_distributions = []
     for distribution in distributions:
-        if isinstance(distribution, basestring):
+        if isinstance(distribution, string_types):
             distribution = getattr(stats_distributions, distribution)
         tmp_distributions.append(distribution)
     distributions = tmp_distributions
@@ -357,15 +358,15 @@ def fit(datadir, reco, params=PARAMS, distributions=DISTRIBUTIONS, timeout=TIMEO
     datadir = expanduser(expandvars(datadir))
     assert isdir(datadir)
 
-    if isinstance(params, basestring):
+    if isinstance(params, string_types):
         params = [params]
 
-    if isinstance(distributions, basestring) or not isinstance(distributions, Iterable):
+    if isinstance(distributions, string_types) or not isinstance(distributions, Iterable):
         distributions = [distributions]
 
     tmp_distributions = []
     for distribution in distributions:
-        if isinstance(distribution, basestring):
+        if isinstance(distribution, string_types):
             distribution = getattr(stats_distributions, distribution)
         tmp_distributions.append(distribution)
     distributions = tmp_distributions

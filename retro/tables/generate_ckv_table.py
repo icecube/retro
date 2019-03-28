@@ -39,6 +39,7 @@ from os.path import abspath, dirname, isdir, isfile, join
 import sys
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -105,7 +106,7 @@ def generate_ckv_table(
 
     """
     input_filename = None
-    if isinstance(table, basestring):
+    if isinstance(table, string_types):
         input_filename = expand(table)
         table = load_clsim_table_minimal(input_filename, mmap=mmap_src)
 

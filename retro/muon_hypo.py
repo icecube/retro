@@ -47,6 +47,7 @@ from os.path import abspath, dirname, join
 from sys import path
 
 import numpy as np
+from six import string_types
 
 RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == '__main__' and __package__ is None:
@@ -307,7 +308,7 @@ def generate_gms_table_converters(losses="all"):
         Tables, Vol. 78, No. 2, July 2001, p. 312. Table II-28.
 
     """
-    if isinstance(losses, basestring):
+    if isinstance(losses, string_types):
         losses = tuple(x.strip().lower() for x in losses.split(","))
 
     VALID_MECHANISMS = ("ionization", "brems", "pair_prod", "photonucl", "all")
