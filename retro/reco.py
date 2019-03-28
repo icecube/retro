@@ -183,7 +183,7 @@ class Reco(object):
         self.current_event = None
         self.current_event_idx = -1
         self.event_counter = -1
-        self.successful_reco_counter = 0
+        self.successful_reco_counter = {}
         self.hypo_handler = None
         self.prior = None
         self.priors_used = None
@@ -453,8 +453,10 @@ class Reco(object):
                     )
                 )
 
-        print("Running {} reconstruction(s)...".format(methods))
+        print("Running {} reconstruction(s) on all specified events".format(methods))
         t00 = time.time()
+
+        self.successful_reco_counter = {method: 0 for method in methods}
 
         for _ in self.events:
             for method in methods:
@@ -469,7 +471,7 @@ class Reco(object):
                         )
                     )
                 else:
-                    self.successful_reco_counter += 1
+                    self.successful_reco_counter[method] += 1
 
         print("Total run time is {:.3f} s".format(time.time() - t00))
 
@@ -502,11 +504,12 @@ class Reco(object):
 
         miscellany = []
         for dim_num, dim_name in enumerate(self.hypo_handler.opt_param_names):
+            spec = kwargs.get(dim_name, {})
             prior_func, prior_def, misc = get_prior_func(
                 dim_num=dim_num,
                 dim_name=dim_name,
                 event=self.current_event,
-                **kwargs.get(dim_name, {})
+                **spec
             )
             prior_funcs.append(prior_func)
             self.priors_used[dim_name] = prior_def
@@ -946,7 +949,7 @@ class Reco(object):
 
         if "recos" not in self.current_event:
             self.current_event["recos"] = OrderedDict()
-        self.current_event["recos"][method] = estimate
+        self.current_event["recos"]["retro_" + method] = estimate
 
         if not save:
             return estimate
@@ -960,7 +963,7 @@ class Reco(object):
         #    self.outdir, '{}{}.pkl'.format('meta', fname)
         # )
         # meta_file_exists = os.path.isfile(meta_outf)
-        if self.successful_reco_counter == 0:
+        if self.successful_reco_counter[method] == 0:
             if est_file_exists:
                 raise IOError('Est file already exists at "{}"'.format(estimate_outf))
             # if meta_file_exists:
@@ -1151,15 +1154,15 @@ class Reco(object):
                 )
 
         # set standard reordering so subsequent calls with different input
-        # ordering will have store identical metadata files
+        # ordering will create identical metadata
         min_vertex_std = OrderedDict(
-            [(d, min_vertex_std[d]) for d in CART_DIMS if d in min_vertex_std]
+            [(d, min_vertex_std[d]) for d in opt_param_names if d in min_vertex_std]
         )
 
         # storage for info about stddev, whether met, and when met
-        vertex_std = OrderedDict([(d, np.nan) for d in min_vertex_std.keys()])
+        vertex_std = np.full(shape=1, fill_value=np.nan, dtype=[(d, np.float32) for d in min_vertex_std.keys()])
         vertex_std_met = OrderedDict([(d, False) for d in min_vertex_std.keys()])
-        vertex_std_met_at_iter = OrderedDict([(d, -1) for d in min_vertex_std.keys()])
+        vertex_std_met_at_iter = np.full(shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()])
 
         # Record kwargs user supplied (after translation & standardization)
         kwargs = OrderedDict()
@@ -1378,16 +1381,14 @@ class Reco(object):
                 ("kwargs", kwargs),
             ]
         )
-
         fit_meta = OrderedDict(
             [
                 ("iterations", np.uint32(iter_num)),
                 ("stopping_flag", np.int8(stopping_flag)),
                 ("llh_std", np.float32(llh_std)),
                 ("no_improvement_counter", np.uint32(no_improvement_counter)),
-                ("vertex_std", np.float32(vertex_std)),
-                ("vertex_std_met", np.bool8(vertex_std_met)),
-                ("vertex_std_met_at_iter", np.uint32(vertex_std_met_at_iter)),
+                ("vertex_std", vertex_std),
+                ("vertex_std_met_at_iter", vertex_std_met_at_iter),
                 ("num_simplex_successes", np.uint32(num_simplex_successes)),
                 ("num_mutation_successes", np.uint32(num_mutation_successes)),
                 ("num_failures", np.uint32(num_failures)),
@@ -1476,9 +1477,7 @@ class Reco(object):
 
         def func(x, grad):  # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
-            # print(param_vals)
             self.prior(param_vals)
-            # print(param_vals)
             llh = self.loglike(param_vals)
             del param_vals
             return -llh
@@ -1690,8 +1689,6 @@ class Reco(object):
         run_info = OrderedDict(
             [("method", "run_multinest"), ("kwargs", kwargs), ("mn_kwargs", mn_kwargs)]
         )
-
-        print("Runing MultiNest...")
 
         fit_meta = OrderedDict()
         tmpdir = mkdtemp()

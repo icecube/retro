@@ -21,6 +21,7 @@ __all__ = [
     "PRI_OSCNEXT_L5_V1_PREFIT",
     "PRI_OSCNEXT_L5_V1_CRS",
     "OSCNEXT_L5_V1_PRIORS",
+    "get_reco_scalar",
     "define_prefit_prior",
     "define_generic_prior",
     "get_prior_func",
@@ -158,6 +159,29 @@ for _dim in ("time", "x", "y", "z", "azimuth", "zenith", "coszen"):
         )
 
 
+def get_reco_scalar(val, kind):
+    """Retrieve a scalar for a reconstructed value.
+
+    Allows for simple scalar recos, or for "estimates from LLH/Params" where a
+    number of values are returned using different estimation techniques.
+
+    Parameters
+    ----------
+    val : scalar, numpy array of struct dtype, or Mapping
+    kind : str
+        Not used if `val` is a scalar, otherwise used to get field from numpy
+        struct array or item from a Mapping
+
+    Returns
+    -------
+    scalar_val
+
+    """
+    if np.isscalar(val):
+        return val
+    return val[kind]
+
+
 def define_prefit_prior(dim_name, event, priors, candidate_recos, extents=None):
     """Define a prior from pre-fit(s). Priors are defined by the interpolation
     of KDE'd negative-error distribution for the pre-fits, and "fallback" fits
@@ -186,10 +210,21 @@ def define_prefit_prior(dim_name, event, priors, candidate_recos, extents=None):
             dim_name = dim_name[len(prefix) :].lstrip("_")
             break
 
-    if dim_name == "coszen":
-        reco_val = np.cos(event["recos"][reco]["zenith"])
-    else:
-        reco_val = event["recos"][reco][dim_name]
+    try:
+        reco_val = get_reco_scalar(event["recos"][reco][dim_name], kind="median")
+    except (KeyError, ValueError):
+        if dim_name == "coszen":
+            reco_val = get_reco_scalar(
+                np.cos(event["recos"][reco]["zenith"]),
+                kind="median",
+            )
+        elif dim_name == "zenith":
+            reco_val = get_reco_scalar(
+                np.arccos(event["recos"][reco]["coszen"]),
+                kind="median",
+            )
+        else:
+            raise ValueError('No dim "{}" in reco "{}"'.format(dim_name, reco))
 
     if not np.isfinite(reco_val):
         raise GarbageInputError(
@@ -265,12 +300,12 @@ def define_prefit_prior(dim_name, event, priors, candidate_recos, extents=None):
     return prior_def, misc
 
 
-def define_generic_prior(prior_kind, extents, kwargs):
-    """Create prior definition for a `prior_kind` that exists in `scipy.stats.distributions`.
+def define_generic_prior(kind, extents, kwargs):
+    """Create prior definition for a `kind` that exists in `scipy.stats.distributions`.
 
     Parameters
     ----------
-    prior_kind : str
+    kind : str
         Must be a continuous distribution in `scipy.stats.distributions`
     extents
     kwargs : Mapping
@@ -283,16 +318,16 @@ def define_generic_prior(prior_kind, extents, kwargs):
     prior_def : tuple
         As defined/used in `retro.priors.get_prior_func`; i.e., formatted as ::
 
-            (prior_kind, (arg0, arg1, ..., argN, low, high)
+            (kind, (arg0, arg1, ..., argN, low, high)
 
     """
     loc = kwargs["loc"]
     scale = kwargs["scale"]
-    dist = getattr(stats.distributions, prior_kind)
+    dist = getattr(stats.distributions, kind)
     (low, low_absrel), (high, high_absrel) = extents
     if not low_absrel == high_absrel == Bounds.ABS:
         raise ValueError(
-            'Only absolute bounds allowed for `prior_kind` "{}"'.format(prior_kind)
+            'Only absolute bounds allowed for `kind` "{}"'.format(kind)
         )
     if dist.shapes:
         args = []
@@ -301,11 +336,11 @@ def define_generic_prior(prior_kind, extents, kwargs):
         args = tuple(args)
     else:
         args = tuple()
-    prior_def = (prior_kind, args + (loc, scale, low, high))
+    prior_def = (kind, args + (loc, scale, low, high))
     return prior_def
 
 
-def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kwargs):
+def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
     """Generate prior function given a prior definition and the actual event
 
     Parameters
@@ -328,46 +363,46 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
     # -- Set default prior kind & extents depending on dimension name -- #
 
     if "zenith" in dim_name:
-        if prior_kind is None:
-            prior_kind = PRI_COSINE
+        if kind is None:
+            kind = PRI_COSINE
         if extents is None:
             extents = ((0, Bounds.ABS), (np.pi, Bounds.ABS))
     elif "coszen" in dim_name:
-        if prior_kind is None:
-            prior_kind = PRI_UNIFORM
+        if kind is None:
+            kind = PRI_UNIFORM
         if extents is None:
             extents = ((-1, Bounds.ABS), (1, Bounds.ABS))
     elif "azimuth" in dim_name:
-        if prior_kind is None:
-            prior_kind = PRI_UNIFORM
+        if kind is None:
+            kind = PRI_UNIFORM
         if extents is None:
             extents = ((0, Bounds.ABS), (2 * np.pi, Bounds.ABS))
     elif dim_name == "x":
-        if prior_kind is None:
-            prior_kind = PRI_UNIFORM
+        if kind is None:
+            kind = PRI_UNIFORM
         if extents is None:
             extents = EXT_IC[dim_name]
     elif dim_name == "y":
-        if prior_kind is None:
-            prior_kind = PRI_UNIFORM
+        if kind is None:
+            kind = PRI_UNIFORM
         if extents is None:
             extents = EXT_IC[dim_name]
     elif dim_name == "z":
-        if prior_kind is None:
-            prior_kind = PRI_UNIFORM
+        if kind is None:
+            kind = PRI_UNIFORM
         if extents is None:
             extents = EXT_IC[dim_name]
     elif dim_name == "time":
-        if prior_kind is None:
-            prior_kind = PRI_UNIFORM
+        if kind is None:
+            kind = PRI_UNIFORM
         if extents is None:
             # TODO: make this the time window from the event
             extents = ((-4e3, Bounds.ABS), (0.0, Bounds.ABS))
     elif "energy" in dim_name:
-        if prior_kind is None:
-            prior_kind = PRI_UNIFORM
+        if kind is None:
+            kind = PRI_UNIFORM
         if extents is None:
-            if prior_kind in (PRI_LOG_NORMAL, PRI_LOG_UNIFORM):
+            if kind in (PRI_LOG_NORMAL, PRI_LOG_UNIFORM):
                 extents = ((0.1, Bounds.ABS), (1e3, Bounds.ABS))
             else:
                 extents = ((0.0, Bounds.ABS), (1e3, Bounds.ABS))
@@ -378,14 +413,15 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
 
     misc = OrderedDict()
 
-    if prior_kind in (PRI_UNIFORM, PRI_COSINE):
+    if kind in (PRI_UNIFORM, PRI_COSINE):
         (low, low_absrel), (high, high_absrel) = extents
         if not low_absrel == high_absrel == Bounds.ABS:
             raise ValueError(
-                "Don't know what to do with relative bounds for {}".format(prior_kind)
+                "Dim #{} ({}): Don't know what to do with relative bounds for prior {}"
+                .format(dim_num, dim_name, kind)
             )
-        prior_def = (prior_kind, (low, high))
-    elif prior_kind == PRI_OSCNEXT_L5_V1_PREFIT:
+        prior_def = (kind, (low, high))
+    elif kind == PRI_OSCNEXT_L5_V1_PREFIT:
         prior_def, misc = define_prefit_prior(
             dim_name=dim_name,
             event=event,
@@ -393,7 +429,7 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
             candidate_recos=["L5_SPEFit11", "LineFit_DC"],
             extents=extents,
         )
-    elif prior_kind == PRI_OSCNEXT_L5_V1_CRS:
+    elif kind == PRI_OSCNEXT_L5_V1_CRS:
         prior_def, misc = define_prefit_prior(
             dim_name=dim_name,
             event=event,
@@ -401,28 +437,28 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
             candidate_recos=["retro_crs_prefit"],
             extents=extents,
         )
-    elif hasattr(stats.distributions, prior_kind):
-        prior_def = define_generic_prior(prior_kind, extents, kwargs)
+    elif hasattr(stats.distributions, kind):
+        prior_def = define_generic_prior(kind, extents, kwargs)
     else:
         raise ValueError(
             'Unhandled or invalid prior "{}" for dim_name "{}"'.format(
-                prior_kind, dim_name
+                kind, dim_name
             )
         )
 
     # -- Create prior function -- #
 
-    prior_kind, prior_args = prior_def
+    kind, prior_args = prior_def
 
     # pylint: disable=unused-argument, missing-docstring
-    if prior_kind == PRI_UNIFORM:
+    if kind == PRI_UNIFORM:
         low, high = prior_args
         width = high - low
 
         def prior_func(cube, n=dim_num, width=width, low=low):
             cube[n] = cube[n] * width + low
 
-    elif prior_kind == PRI_LOG_UNIFORM:
+    elif kind == PRI_LOG_UNIFORM:
         low, high = prior_args
         log_low = np.log(low)
         log_width = np.log(high) - log_low
@@ -430,7 +466,7 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
         def prior_func(cube, n=dim_num, log_width=log_width, log_low=log_low):
             cube[n] = np.exp(cube[n] * log_width + log_low)
 
-    elif prior_kind == PRI_COSINE:
+    elif kind == PRI_COSINE:
         if prior_args != (0, np.pi):
             raise NotImplementedError()
 
@@ -438,7 +474,7 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
             x = (2 * cube[n]) - 1
             cube[n] = np.arccos(x)
 
-    elif prior_kind == PRI_GAUSSIAN:
+    elif kind == PRI_GAUSSIAN:
         raise NotImplementedError("limits not correctly working")  # TODO
         mean, stddev, low, high = prior_args
         norm = 1 / (stddev * np.sqrt(TWO_PI))
@@ -446,23 +482,23 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
         def prior_func(cube, n=dim_num, norm=norm, mean=mean, stddev=stddev):
             cube[n] = norm * np.exp(-((cube[n] - mean) / stddev) ** 2)
 
-    elif prior_kind in (PRI_INTERP, PRI_AZ_INTERP):
+    elif kind in (PRI_INTERP, PRI_AZ_INTERP):
         x, pdf, low, high = prior_args[-4:]
 
         if (
-            prior_kind == PRI_AZ_INTERP
+            kind == PRI_AZ_INTERP
             and not np.isclose(x.max() - x.min(), high - low)
-            or prior_kind == PRI_INTERP
+            or kind == PRI_INTERP
             and (x.min() > low or x.max() < high)
         ):
             print(
                 'Dim "{}", prior kind "{}" `x` range = [{}, {}] does not cover'
                 " [low, high] range = [{}, {}]".format(
-                    dim_name, prior_kind, x.min(), x.max(), low, high
+                    dim_name, kind, x.min(), x.max(), low, high
                 )
             )
 
-        if prior_kind == PRI_AZ_INTERP:
+        if kind == PRI_AZ_INTERP:
             if not (np.isclose(low, 0) and np.isclose(high, 2 * np.pi)):
                 raise ValueError("az range [low, high) must be [0, 2pi)")
 
@@ -516,10 +552,10 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
             def prior_func(cube, n=dim_num, isf_interp=isf_interp):
                 cube[n] = isf_interp(cube[n])
 
-    elif hasattr(stats.distributions, prior_kind):
+    elif hasattr(stats.distributions, kind):
         dist_args = prior_args[:-2]
         low, high = prior_args[-2:]
-        frozen_dist_isf = getattr(stats.distributions, prior_kind)(*dist_args).isf
+        frozen_dist_isf = getattr(stats.distributions, kind)(*dist_args).isf
 
         def prior_func(
             cube, frozen_dist_isf=frozen_dist_isf, dim_num=dim_num, low=low, high=high
@@ -529,6 +565,6 @@ def get_prior_func(dim_num, dim_name, event, prior_kind=None, extents=None, **kw
             )
 
     else:
-        raise NotImplementedError('Prior "{}" not implemented.'.format(prior_kind))
+        raise NotImplementedError('Prior "{}" not implemented.'.format(kind))
 
     return prior_func, prior_def, misc
