@@ -140,16 +140,17 @@ def aggregate_retro_results(
                 info["to_remove"].append(fpath)
 
             stop = start + step * len(reco_subset)
+            indices = np.array(range(start, stop, step))
             num_aggregated += len(reco_subset)
 
             info["reco_subsets"].append(reco_subset)
-            info["indices"].append(np.array(range(start, stop, step)))
-            if stop > info["length"]:
-                info["length"] = stop
+            info["indices"].append(indices)
+            if indices[-1] + 1 > info["length"]:
+                info["length"] = indices[-1] + 1
 
         for reco_name, info in infos.items():
             dtype = info["reco_subsets"][0].dtype
-            reco_array = np.zeros(shape=info["length"], dtype=dtype)
+            reco_array = np.full(shape=info["length"], fill_value=np.nan, dtype=dtype)
             for indices, reco_subset in zip(info["indices"], info["reco_subsets"]):
                 try:
                     reco_array[indices] = reco_subset
@@ -168,7 +169,7 @@ def aggregate_retro_results(
                     remove(fpath)
 
     dt = time.time() - t0
-    print("\nTook {:.3f} s to aggregate {} events".format(dt, num_aggregated))
+    print("\nTook {:.3f} s to aggregate {} recos".format(dt, num_aggregated))
 
 
 def main(description=__doc__):

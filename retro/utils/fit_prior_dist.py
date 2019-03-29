@@ -57,6 +57,7 @@ if __name__ == '__main__' and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import FitStatus
 from retro.utils.stats import weighted_percentile, fit_cdf
+from retro.utils.weight_diff_tails import weight_diff_tails
 
 
 RECOS = tuple(sorted(
@@ -113,6 +114,9 @@ def extract(
     truth : numpy.array
 
     """
+    if isinstance(recos, string_types):
+        recos = [recos]
+
     recos_by_flav = OrderedDict()
     truth_by_flav = OrderedDict()
 
@@ -183,21 +187,56 @@ def extract(
         weights = truth['weight']
         for param in params:
             try:
-                err = vals[param] - truth[param]
-                mask = np.isfinite(err) & (vals['fit_status'] == FitStatus.OK)
+                xform = None
+                try:
+                    pvals = vals[param]
+                except (KeyError, ValueError):
+                    if 'coszen' in param:
+                        reco_pname = param.replace('coszen', 'zenith')
+                        pvals = vals[reco_pname]
+                        xform = np.cos
+                    elif 'zenith' in param:
+                        reco_pname = param.replace('zenith', 'coszen')
+                        pvals = vals[reco_pname]
+                        xform = np.arccos
+
+                if 'median' in pvals.dtype.names:
+                    pvals = pvals['median']
+
+                if xform is not None:
+                    pvals = xform(pvals)
+
+                if param.startswith('cascade'):
+                    if param == 'cascade_energy':
+                        true_pname = 'total_cascade_em_equiv_energy'
+                    else:
+                        true_pname = 'total_' + param
+                else:
+                    true_pname = param
+
+                err = pvals - truth[true_pname][:len(pvals)]
+                if 'fit_status' in vals.dtype.names:
+                    mask = np.isfinite(err) & (vals['fit_status'] == FitStatus.OK)
+                else:
+                    mask = np.isfinite(err)
                 valid_err = err[mask]
                 if len(valid_err) == 0:
                     raise ValueError("{} {}".format(reco, param))
                 if param == 'coszen':
-                    cw, dlims = weight_coszen_tails(
-                        cz_diff=-err,
-                        cz_bin_edges=np.array([range_min, range_max]),
-                        input_weights=np.array([]),
+                    cw, _ = weight_diff_tails(
+                        diff=err,
+                        weights=weights[:len(pvals)][mask],
+                        inbin_lower=-1,
+                        inbin_upper=+1,
+                        range_lower=-1,
+                        range_upper=+1,
                     )
+                else:
+                    cw = weights[:len(pvals)][mask]
                 minval, q5, q25, median, q75, q95, maxval = weighted_percentile(
                     a=err[mask],
                     q=(0, 5, 25, 50, 75, 95, 100),
-                    weights=weights[mask],
+                    weights=cw,
                 )
                 iq50 = q75 - q25
                 iq90 = q95 - q5
@@ -205,7 +244,7 @@ def extract(
                 info['reco'] = reco
                 info['param'] = param
                 info['n_invalid'] = len(err) - len(valid_err)
-                info['err_mean'] = np.average(err[mask], weights=weights[mask])
+                info['err_mean'] = np.average(err[mask], weights=weights[:len(pvals)][mask])
                 info['err_median'] = median
                 info['err_min'] = minval
                 info['err_max'] = maxval

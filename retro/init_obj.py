@@ -458,7 +458,14 @@ def get_events(
         if isdir(dpath):
             # TODO: make check a regex including colons, etc. so we don't
             # accidentally exclude a valid reco that starts with "slc"
-            recos = [splitext(f)[0] for f in listdir(dpath) if not f.startswith('slc')]
+            recos = []
+            for fname in listdir(dpath):
+                if fname[:3] in ("slc", "evt"):
+                    continue
+                fbase = splitext(fname)[0]
+                if fbase.endswith(".llhp"):
+                    continue
+                recos.append(fbase)
         else:
             recos = False
     elif isinstance(recos, str):

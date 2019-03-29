@@ -37,7 +37,7 @@ limitations under the License."""
 from argparse import ArgumentParser
 from collections import OrderedDict
 import os
-from os.path import abspath, dirname, isdir, join
+from os.path import abspath, basename, dirname, isdir, join
 from shutil import rmtree
 import sys
 from tempfile import mkdtemp
@@ -58,7 +58,7 @@ from retro.priors import (
     PRISPEC_OSCNEXT_CRS_MN,
     get_prior_func,
 )
-from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T
+from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T, FitStatus
 from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.utils.geom import (
     rotate_points,
@@ -116,7 +116,10 @@ class Reco(object):
         key "outdir".
 
     outdir : string
-        Directory in which to save any generated files
+        Directory in which to save any generated files. Note that recos will be
+        placed in a leaf directory named "recos", which will be created and
+        appended to `outdir` if `outdir` does not already specify a "recos"
+        leaf directory.
 
     save_llhp : bool, optional
         Whether to save llhp (within 30 LLH of max-LLH) to disk; default is
@@ -149,6 +152,8 @@ class Reco(object):
                 ("tdi_tables_kw", self.tdi_tables_kw),
             ]
         )
+        if basename(outdir.rstrip("/")) != "recos":
+            outdir = join(outdir, "recos")
         self.outdir = outdir
         self.save_llhp = save_llhp
 
@@ -283,11 +288,6 @@ class Reco(object):
             elif method == "skopt":
                 run_info, fit_meta = self.run_skopt()
 
-            t1 = time.time()
-            fit_meta = run_info.get("fit_meta", OrderedDict())
-            fit_meta["run_time"] = np.float32(t1 - t0)
-            run_info["fit_meta"] = fit_meta
-
             llhp = self.make_llhp(
                 method, log_likelihoods, param_values, save=self.save_llhp
             )
@@ -301,7 +301,6 @@ class Reco(object):
             )
 
         elif method == "fast":
-            t0 = time.time()
             self.setup_hypo(
                 cascade_kernel="scaling_aligned_point_ckv",
                 track_kernel="pegleg",
@@ -1717,9 +1716,14 @@ class Reco(object):
                 **mn_kwargs
             )
             fit_meta = get_multinest_meta(outputfiles_basename=outputfiles_basename)
+        except:
+            fit_status = FitStatus.GeneralFailure
+        else:
+            fit_status = FitStatus.OK
         finally:
             rmtree(tmpdir)
 
+        fit_meta["fit_status"] = np.int8(fit_status)
         fit_meta["run_time"] = np.float32(time.time() - t0)
 
         return run_info, fit_meta
