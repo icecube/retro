@@ -456,7 +456,9 @@ def get_events(
     if recos is None:
         dpath = join(events_base, 'recos')
         if isdir(dpath):
-            recos = [splitext(d)[0] for d in listdir(dpath)]
+            # TODO: make check a regex including colons, etc. so we don't
+            # accidentally exclude a valid reco that starts with "slc"
+            recos = [splitext(f)[0] for f in listdir(dpath) if not f.startswith('slc')]
         else:
             recos = False
     elif isinstance(recos, str):
@@ -570,6 +572,9 @@ def iterate_file(fpath, start=0, stop=None, step=None):
         events = load_pickle(fpath)
     elif ext == '.npy':
         try:
+            # Note that memory mapping the file is useful for not consuming too
+            # much memory, and also might be essential in the future if we
+            # write recos directly to the {reco}.npy file
             events = np.load(fpath, mmap_mode='r')
         except:
             print(fpath)
