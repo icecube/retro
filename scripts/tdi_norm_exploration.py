@@ -29,7 +29,7 @@ import sys
 import time
 
 import numpy as np
-import pyfits
+from astropy.io import fits
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -83,7 +83,7 @@ if not isdir(outdir):
 
 gcd_info = extract_gcd(gcd_file=GCD_FILE)
 
-fwdsim_histos = pickle.load(file(join(
+fwdsim_histos = pickle.load(open(join(
     SIMDIR,
     SIM['fwd_sim_histo_file'],
 )))
@@ -93,7 +93,7 @@ spec_fname = (
     .format(hash=TILESET_HASH, tilt_onoff=tilt_onoff, anisotropy_onoff=anisotropy_onoff)
 )
 specs = []
-for line in file(join(tdi_tile_dir, spec_fname), 'r').readlines():
+for line in open(join(tdi_tile_dir, spec_fname), 'r').readlines():
     spec = OrderedDict()
     (tile, string, dom, seed, n_events, x_min, x_max, n_x, y_min, y_max, n_y,
      z_min, z_max, n_z, n_costhetadir, n_phidir) = (
@@ -190,7 +190,7 @@ for tilenum, spec in enumerate(specs):
         '_seed_{seed}_n_{n_events}.fits'
         .format(hash=TILESET_HASH, **spec)
     )
-    tile_fits = pyfits.open(
+    tile_fits = fits.open(
         join(tdi_tile_dir, tile_fname),
         memmap=True,
     )

@@ -260,7 +260,7 @@ class TDICartTable(object):
         match, then stitch these together into one large TDI table."""
         if self.tables_loaded and not force_reload:
             return
-        import pyfits
+        from astropy.io import fits
 
         t0 = time()
 
@@ -417,7 +417,7 @@ class TDICartTable(object):
                     ).lower()
                 )
 
-                with pyfits.open(fpath) as fits_table:
+                with fits.open(fpath) as fits_table:
                     data = force_little_endian(fits_table[0].data) # pylint: disable=no-member
 
                 if self.scale != 1 and table_name == 'survival_prob':

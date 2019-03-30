@@ -44,7 +44,7 @@ setup(
         'funcsigs',
         'matplotlib>=2.0',
         'numba>=0.37',
-        'pyfits',
+        'astropy',
         'scipy>=0.17',
         'sobol',
     ],

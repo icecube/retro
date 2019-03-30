@@ -28,7 +28,7 @@ limitations under the License.'''
 
 import sys
 
-import pyfits
+from astropy.io import fits
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
@@ -42,7 +42,7 @@ writer = Writer(fps=15, bitrate=20000)
 
 log = True
 
-table = pyfits.open(sys.argv[1])
+table = fits.open(sys.argv[1])
 #table.info()
 # cut off under and overflow bins
 n_photons = table[0].data
