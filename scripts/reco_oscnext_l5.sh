@@ -122,6 +122,7 @@ fi
 $retro_dir/retro/reco.py \
     --outdir "$outdir" \
     --method "crs_prefit" \
+    --method "mn8d" \
     \
     --gcd "GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise" \
     --dom-tables-kind "$tblkind" \
@@ -136,8 +137,6 @@ $retro_dir/retro/reco.py \
     --step $STEP \
     \
     --pulses "SplitInIcePulses" \
-    --recos L5_SPEFit11 \
-    --recos LineFit_DC \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SplitInIcePulses" \
     --angsens-model "9"
