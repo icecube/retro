@@ -36,8 +36,7 @@ limitations under the License."""
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-import os
-from os.path import abspath, basename, dirname, isdir, join
+from os.path import abspath, basename, dirname, isdir, isfile, join
 from shutil import rmtree
 import sys
 from tempfile import mkdtemp
@@ -143,6 +142,10 @@ class Reco(object):
         events_kw.pop("recos", None)
         self.events_kw = sort_dict(events_kw)
 
+        self.num_events = len(
+            np.load(join(events_kw["events_base"], "events.npy"), mmap_mode="r")
+        )
+
         self.dom_tables_kw = sort_dict(dom_tables_kw)
         self.tdi_tables_kw = sort_dict(tdi_tables_kw)
         self.attrs = OrderedDict(
@@ -235,7 +238,6 @@ class Reco(object):
         """
         # simple 1-stage recos
         if method in ("multinest", "test", "truth", "crs", "scipy", "nlopt", "skopt"):
-            t0 = time.time()
             self.setup_hypo(
                 cascade_kernel="scaling_aligned_one_dim",
                 track_kernel="pegleg",
@@ -461,14 +463,16 @@ class Reco(object):
         self.successful_reco_counter = {method: 0 for method in methods}
 
         for _ in self.events:
-            existing_recos = self.current_event.get("recos", {})
             for method in methods:
-                # TODO: if we populate an already-existing numpy array, must
-                # check for a "reco run" flag being set at this index into that
-                # array, not whether the reco exists...
-                if "retro_" + method in existing_recos:
-                    print('Method "{}" already run on event; skipping'.format(method))
-                    continue
+                estimate_outf = join(self.outdir, "retro_{}.npy".format(method))
+                if isfile(estimate_outf):
+                    estimates = np.load(estimate_outf, mmap_mode="r")
+                    fit_status = estimates[self.current_event_idx]["fit_status"]
+                    if fit_status != FitStatus.NotSet:
+                        print(
+                            'Method "{}" already run on event; skipping'.format(method)
+                        )
+                        continue
 
                 print('Running "{}" reconstruction'.format(method))
                 try:
@@ -516,10 +520,7 @@ class Reco(object):
         for dim_num, dim_name in enumerate(self.hypo_handler.opt_param_names):
             spec = kwargs.get(dim_name, {})
             prior_func, prior_def, misc = get_prior_func(
-                dim_num=dim_num,
-                dim_name=dim_name,
-                event=self.current_event,
-                **spec
+                dim_num=dim_num, dim_name=dim_name, event=self.current_event, **spec
             )
             prior_funcs.append(prior_func)
             self.priors_used[dim_name] = prior_def
@@ -965,52 +966,62 @@ class Reco(object):
         if not save:
             return estimate
 
-        fname = "retro_{}.estimate".format(method)
-        estimate_outf = os.path.join(
-            self.outdir, "{}{}.npy".format(self.slice_prefix, fname)
-        )
-        est_file_exists = os.path.isfile(estimate_outf)
-        # meta_outf = os.path.join(
-        #    self.outdir, '{}{}.pkl'.format('meta', fname)
-        # )
-        # meta_file_exists = os.path.isfile(meta_outf)
-        if self.successful_reco_counter[method] == 0:
-            if est_file_exists:
-                raise IOError('Est file already exists at "{}"'.format(estimate_outf))
-            # if meta_file_exists:
-            #    raise IOError('Meta file already exists at "{}"'.format(meta_outf))
-            estimates = estimate
-        else:
-            if not est_file_exists:
-                raise IOError(
-                    'Est file with previous events does not exist at "{}"'.format(
-                        estimate_outf
-                    )
-                )
-            # if not meta_file_exists:
-            #    raise IOError(
-            #        'Metadata file does not exist at "{}"'
-            #        .format(meta_outf)
-            #    )
-            previous_estimates = np.load(estimate_outf)
-            estimates = np.concatenate([previous_estimates, estimate])
+        # fname = "retro_{}.estimate".format(method)
+        # estimate_outf = join(self.outdir, "{}{}.npy".format(self.slice_prefix, fname))
+        estimate_outf = join(self.outdir, "retro_{}.npy".format(method))
+        if not isfile(estimate_outf):
+            invalid_estimates = np.full(
+                shape=self.num_events, fill_value=np.nan, dtype=estimate.dtype
+            )
+            invalid_estimates["fit_status"] = FitStatus.NotSet
+            np.save(estimate_outf, invalid_estimates)
 
-            # TODO: verify meta data hasn't changed?
-            # existing_meta = pickle.load(open(meta_outf))
+        estimates = np.load(estimate_outf, mmap_mode="r+")
+        estimates[self.current_event_idx] = estimate
+        del estimates
 
-        np.save(file=estimate_outf, arr=estimates)
-        # if not meta_file_exists:
-        #    pickle.dump(
-        #        obj=meta,
-        #        file=open(meta_outf, 'wb'),
-        #        protocol=pickle.HIGHEST_PROTOCOL,
-        #    )
+        ## meta_outf = join(
+        ##    self.outdir, '{}{}.pkl'.format('meta', fname)
+        ## )
+        ## meta_file_exists = isfile(meta_outf)
+        # if self.successful_reco_counter[method] == 0:
+        #    if est_file_exists:
+        #        raise IOError('Est file already exists at "{}"'.format(estimate_outf))
+        #    # if meta_file_exists:
+        #    #    raise IOError('Meta file already exists at "{}"'.format(meta_outf))
+        #    estimates = estimate
+        # else:
+        #    if not est_file_exists:
+        #        raise IOError(
+        #            'Est file with previous events does not exist at "{}"'.format(
+        #                estimate_outf
+        #            )
+        #        )
+        #    # if not meta_file_exists:
+        #    #    raise IOError(
+        #    #        'Metadata file does not exist at "{}"'
+        #    #        .format(meta_outf)
+        #    #    )
+        #    previous_estimates = np.load(estimate_outf)
+        #    estimates = np.concatenate([previous_estimates, estimate])
+
+        #    # TODO: verify meta data hasn't changed?
+        #    # existing_meta = pickle.load(open(meta_outf))
+
+        # np.save(file=estimate_outf, arr=estimates)
+        ## if not meta_file_exists:
+        ##    pickle.dump(
+        ##        obj=meta,
+        ##        file=open(meta_outf, 'wb'),
+        ##        protocol=pickle.HIGHEST_PROTOCOL,
+        ##    )
 
         return estimate
 
     def run_test(self, seed):
         """Random sampling instead of an actual minimizer"""
         raise NotImplementedError("`run_test` not implemented")  # TODO
+        t0 = time.time()
 
         kwargs = OrderedDict()
         for arg_name in get_arg_names(self.run_test)[1:]:
@@ -1022,7 +1033,12 @@ class Reco(object):
             self.prior(param_vals)
             llh = self.loglike(param_vals)
         run_info = OrderedDict([("method", "run_test"), ("kwargs", kwargs)])
-        fit_meta = OrderedDict()
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
         return run_info, fit_meta
 
     def run_with_truth(self, rand_dims=None, n_samples=10000, seed=0):
@@ -1039,6 +1055,7 @@ class Reco(object):
 
         """
         raise NotImplementedError("`run_with_truth` not implemented")  # TODO
+        t0 = time.time()
         if rand_dims is None:
             rand_dims = []
 
@@ -1066,7 +1083,13 @@ class Reco(object):
             llh = self.loglike(true_params)
 
         run_info = OrderedDict([("method", "run_with_truth"), ("kwargs", kwargs)])
-        fit_meta = OrderedDict()
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
+
         return run_info, fit_meta
 
     def run_crs(
@@ -1171,9 +1194,15 @@ class Reco(object):
         )
 
         # storage for info about stddev, whether met, and when met
-        vertex_std = np.full(shape=1, fill_value=np.nan, dtype=[(d, np.float32) for d in min_vertex_std.keys()])
+        vertex_std = np.full(
+            shape=1,
+            fill_value=np.nan,
+            dtype=[(d, np.float32) for d in min_vertex_std.keys()],
+        )
         vertex_std_met = OrderedDict([(d, False) for d in min_vertex_std.keys()])
-        vertex_std_met_at_iter = np.full(shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()])
+        vertex_std_met_at_iter = np.full(
+            shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()]
+        )
 
         # Record kwargs user supplied (after translation & standardization)
         kwargs = OrderedDict()
@@ -1394,6 +1423,7 @@ class Reco(object):
         )
         fit_meta = OrderedDict(
             [
+                ("fit_status", np.int8(FitStatus.OK)),
                 ("iterations", np.uint32(iter_num)),
                 ("stopping_flag", np.int8(stopping_flag)),
                 ("llh_std", np.float32(llh_std)),
@@ -1439,7 +1469,12 @@ class Reco(object):
             optimize.minimize(func, x0, method=method, bounds=bounds, options=settings)
 
         run_info = OrderedDict([("method", "run_scipy"), ("kwargs", kwargs)])
-        fit_meta = OrderedDict([("run_time", np.float32(time.time() - t0))])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
 
         return run_info, fit_meta
 
@@ -1476,7 +1511,12 @@ class Reco(object):
         )
 
         run_info = OrderedDict([("method", "run_skopt"), ("settings", settings)])
-        fit_meta = OrderedDict([("run_time", np.float32(time.time() - t0))])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
 
         return run_info, fit_meta
 
@@ -1619,7 +1659,12 @@ class Reco(object):
         )
 
         run_info = OrderedDict([("method", "run_nlopt"), ("settings", settings)])
-        fit_meta = OrderedDict([("run_time", np.float32(time.time() - t0))])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
 
         return run_info, fit_meta
 
@@ -1702,6 +1747,7 @@ class Reco(object):
         )
 
         fit_meta = OrderedDict()
+        fit_meta["fit_status"] = np.int8(FitStatus.NotSet)
         tmpdir = mkdtemp()
         outputfiles_basename = join(tmpdir, "")
         try:
@@ -1716,14 +1762,10 @@ class Reco(object):
                 **mn_kwargs
             )
             fit_meta = get_multinest_meta(outputfiles_basename=outputfiles_basename)
-        except:
-            fit_status = FitStatus.GeneralFailure
-        else:
-            fit_status = FitStatus.OK
         finally:
             rmtree(tmpdir)
-
-        fit_meta["fit_status"] = np.int8(fit_status)
+        # TODO: Can MultiNest fail? If so, set status accordingly...
+        fit_meta["fit_status"] = np.int8(FitStatus.OK)
         fit_meta["run_time"] = np.float32(time.time() - t0)
 
         return run_info, fit_meta
