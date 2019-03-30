@@ -177,9 +177,10 @@ def get_reco_scalar(val, kind):
     scalar_val
 
     """
-    if np.isscalar(val):
-        return val
-    return val[kind]
+    a = np.array(val)
+    if a.dtype.names and kind in a.dtype.names:
+        return val[kind]
+    return val
 
 
 def define_prior_from_prefit(dim_name, event, priors, candidate_recos, extents=None):
