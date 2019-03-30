@@ -47,6 +47,7 @@ setup(
         'astropy',
         'scipy>=0.17',
         'sobol',
+        'pymultinest',
     ],
     packages=find_packages(),
     include_dirs=[np.get_include()],

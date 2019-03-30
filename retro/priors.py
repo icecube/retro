@@ -223,7 +223,8 @@ def define_prior_from_prefit(dim_name, event, priors, candidate_recos, extents=N
                 get_reco_scalar(event["recos"][reco]["coszen"], kind="median")
             )
         else:
-            raise ValueError('No dim "{}" in reco "{}"'.format(dim_name, reco))
+            print('No dim "{}" in reco "{}"'.format(dim_name, reco))
+            raise
 
     if not np.isfinite(reco_val):
         raise GarbageInputError(
