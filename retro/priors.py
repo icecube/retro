@@ -21,7 +21,7 @@ __all__ = [
     "PRI_OSCNEXT_L5_V1_PREFIT",
     "PRI_OSCNEXT_L5_V1_CRS",
     "OSCNEXT_L5_V1_PRIORS",
-    "get_reco_scalar",
+    "get_point_estimate",
     "define_prior_from_prefit",
     "define_generic_prior",
     "get_prior_func",
@@ -159,7 +159,7 @@ for _dim in ("time", "x", "y", "z", "azimuth", "zenith", "coszen"):
         )
 
 
-def get_reco_scalar(val, kind):
+def get_point_estimate(val, estimator):
     """Retrieve a scalar for a reconstructed value.
 
     Allows for simple scalar recos, or for "estimates from LLH/Params" where a
@@ -168,7 +168,7 @@ def get_reco_scalar(val, kind):
     Parameters
     ----------
     val : scalar, numpy array of struct dtype, or Mapping
-    kind : str
+    estimator : str
         Not used if `val` is a scalar, otherwise used to get field from numpy
         struct array or item from a Mapping
 
@@ -177,13 +177,26 @@ def get_reco_scalar(val, kind):
     scalar_val
 
     """
-    a = np.array(val)
-    if a.dtype.names and kind in a.dtype.names:
-        return val[kind]
-    return val
+    # Convert a recarray to a simple array with struct dtype; convert scalar to 0-d array
+    valarray = np.array(val)
+
+    # If struct dtype, extract the point estimator
+    if valarray.dtype.names:
+        valarray = np.array(valarray[estimator])
+
+    assert valarray.size == 1
+
+    # Since we've forced it to be an array and we don't know the exact
+    # dimensionality, use `flat` iterator and extract the first element of the
+    # array
+    scalar_val = next(valarray.flat)
+
+    return scalar_val
 
 
-def define_prior_from_prefit(dim_name, event, priors, candidate_recos, extents=None):
+def define_prior_from_prefit(
+    dim_name, event, priors, candidate_recos, point_estimator, extents=None
+):
     """Define a prior from pre-fit(s). Priors are defined by the interpolation
     of KDE'd negative-error distribution for the pre-fits, and "fallback" fits
     can be defined in case one or more fits failed."""
@@ -212,15 +225,21 @@ def define_prior_from_prefit(dim_name, event, priors, candidate_recos, extents=N
             break
 
     try:
-        reco_val = get_reco_scalar(event["recos"][reco][dim_name], kind="median")
+        reco_val = get_point_estimate(
+            event["recos"][reco][dim_name], estimator=point_estimator
+        )
     except (KeyError, ValueError):
         if dim_name == "coszen":
             reco_val = np.cos(
-                get_reco_scalar(event["recos"][reco]["zenith"], kind="median")
+                get_point_estimate(
+                    event["recos"][reco]["zenith"], estimator=point_estimator
+                )
             )
         elif dim_name == "zenith":
             reco_val = np.arccos(
-                get_reco_scalar(event["recos"][reco]["coszen"], kind="median")
+                get_point_estimate(
+                    event["recos"][reco]["coszen"], estimator=point_estimator
+                )
             )
         else:
             print('No dim "{}" in reco "{}"'.format(dim_name, reco))
@@ -427,6 +446,7 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             priors=OSCNEXT_L5_V1_PRIORS,
             candidate_recos=["L5_SPEFit11", "LineFit_DC"],
             extents=extents,
+            point_estimator="median",
         )
     elif kind == PRI_OSCNEXT_L5_V1_CRS:
         prior_def, misc = define_prior_from_prefit(
@@ -435,6 +455,7 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             priors=OSCNEXT_L5_V1_PRIORS,
             candidate_recos=["retro_crs_prefit"],
             extents=extents,
+            point_estimator="median",
         )
     elif hasattr(stats.distributions, kind):
         prior_def = define_generic_prior(kind, extents, kwargs)
@@ -522,11 +543,19 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             # If x covers _more_ than the allowed [low, high] range, resample the
             # pdf in the allowed range (expected to occur for binned zenith and
             # coszen error distributions)
-            if dim_name != "time" and (x.min() < low or x.max() > high):
+            if x.min() < low or x.max() > high:
                 xp = x
                 x = np.linspace(low, high, len(x))
                 pdf = np.interp(x=x, xp=xp, fp=pdf)
-                pdf /= np.trapz(x=x, y=pdf)
+                integral = np.trapz(x=x, y=pdf)
+                try:
+                    pdf /= integral
+                except:
+                    print("x.shape:", x.shape)
+                    print("xp.shape:", xp.shape)
+                    print("pdf.shape:", pdf.shape)
+                    print("integral.shape:", integral.shape)
+                    raise
 
             # Compute cumulative distribution function (cdf) via trapezoidal-rule
             # integration
