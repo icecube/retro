@@ -75,7 +75,7 @@ DISTRIBUTIONS = tuple(sorted(_distn_names))
 #PATH_PROTO = '~/oscNext/pass2/genie/level5/{abs_flav:d}9002/oscNext_genie_level5_pass2.{abs_flav:d}9002.{i:06d}'
 PATH_PROTO = '/data/icecube/sim/ic86/i3/oscNext/pass2/genie/level5/{abs_flav:d}9002/oscNext_genie_level5_pass2.{abs_flav:d}9002.{i:06d}'
 
-TRUTH_FNAME = 'truth.pkl'
+TRUTH_FNAME = 'truth.npy'
 
 RECOS_FNAME = 'recos.pkl'
 
@@ -93,6 +93,7 @@ def extract(
     recos=RECOS,
     params=PARAMS,
     outdir=None,
+    verbosity=0,
 ):
     """Extract truth and reco information, and produce summary of reco errors,
     optionally saving all of this to disk.
@@ -121,7 +122,8 @@ def extract(
     truth_by_flav = OrderedDict()
 
     for abs_flav in ABS_FLAVS:
-        sys.stderr.write('{}\n'.format(abs_flav))
+        if verbosity > 1:
+            sys.stderr.write('{}\n'.format(abs_flav))
         flav_truth = []
 
         # TODO: use globbing rather than specifying path_proto as such (also
@@ -137,7 +139,8 @@ def extract(
             except IOError:
                 break
             flav_truth.append(vals)
-            sys.stderr.write('{}\n'.format(fpath))
+            if verbosity > 1:
+                sys.stderr.write('{}\n'.format(fpath))
         if flav_truth:
             flav_truth = np.concatenate(flav_truth)
         truth_by_flav[abs_flav] = flav_truth
@@ -150,22 +153,25 @@ def extract(
                 i += 1
                 fpath = join(
                     path_proto.format(abs_flav=abs_flav, i=i),
-                    'recos/{reco:s}.npy'.format(reco=reco)
+                    'recos',
+                    '{reco:s}.npy'.format(reco=reco)
                 )
                 try:
                     vals = np.load(fpath)
                 except IOError:
                     break
                 reco_vals.append(vals)
-                sys.stderr.write('{}\n'.format(fpath))
+                if verbosity > 1:
+                    sys.stderr.write('{}\n'.format(fpath))
             if reco_vals:
                 reco_vals = np.concatenate(reco_vals)
                 flav_recos[reco] = reco_vals
             if len(reco_vals) != len(flav_truth):
-                sys.stderr.write(
-                    'abs_flav {} reco "{}" has len {} but truth has len {}\n'
-                    .format(abs_flav, reco, len(reco_vals), len(flav_truth))
-                )
+                if verbosity > 0:
+                    sys.stderr.write(
+                        'abs_flav {} reco "{}" has len {} but truth has len {}\n'
+                        .format(abs_flav, reco, len(reco_vals), len(flav_truth))
+                    )
         recos_by_flav[abs_flav] = flav_recos
 
     reco_vals = OrderedDict()
@@ -200,7 +206,7 @@ def extract(
                         pvals = vals[reco_pname]
                         xform = np.arccos
 
-                if 'median' in pvals.dtype.names:
+                if pvals.dtype.names and 'median' in pvals.dtype.names:
                     pvals = pvals['median']
 
                 if xform is not None:
@@ -266,19 +272,24 @@ def extract(
         outdir = expanduser(expandvars(outdir))
         if not isdir(outdir):
             makedirs(outdir, mode=0o750)
-            sys.stderr.write('created dir "{}"\n'.format(outdir))
+            if verbosity > 0:
+                sys.stderr.write('created dir "{}"\n'.format(outdir))
 
         outfpath = join(outdir, RECO_PERF_FNAME)
         reco_perf.to_pickle(outfpath)
-        sys.stderr.write('wrote reco performance summary to "{}"\n'.format(outfpath))
+        if verbosity > 0:
+            sys.stderr.write('wrote reco performance summary to "{}"\n'.format(outfpath))
 
         outfpath = join(outdir, TRUTH_FNAME)
-        pickle.dump(truth, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
-        sys.stderr.write('wrote all truth info to "{}"\n'.format(outfpath))
+        #pickle.dump(truth, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        np.save(outfpath, truth)
+        if verbosity > 0:
+            sys.stderr.write('wrote all truth info to "{}"\n'.format(outfpath))
 
         outfpath = join(outdir, RECOS_FNAME)
         pickle.dump(reco_vals, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
-        sys.stderr.write('wrote all reco info to "{}"\n'.format(outfpath))
+        if verbosity > 0:
+            sys.stderr.write('wrote all reco info to "{}"\n'.format(outfpath))
 
     return reco_perf, reco_vals, truth
 

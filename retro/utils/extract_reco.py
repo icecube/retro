@@ -75,7 +75,8 @@ def extract_reco(reco, recodir, eventsdir=None):
     all_recos = []
 
     for events_dirpath, _, filenames in walk(eventsdir):
-        if not "events.npy" in filenames:
+        if "events.npy" not in filenames:
+            #print('no events.npy in dir "{}"'.format(events_dirpath))
             continue
         reco_filepath = join(
             recodir,
@@ -84,6 +85,7 @@ def extract_reco(reco, recodir, eventsdir=None):
             "{}.npy".format(reco),
         )
         if not isfile(reco_filepath):
+            #print('no reco found at "{}"'.format(reco_filepath))
             continue
 
         events = np.load(join(events_dirpath, "events.npy"))

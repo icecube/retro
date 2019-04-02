@@ -159,7 +159,7 @@ for _dim in ("time", "x", "y", "z", "azimuth", "zenith", "coszen"):
         )
 
 
-def get_point_estimate(val, estimator):
+def get_point_estimate(val, estimator, expect_scalar=True):
     """Retrieve a scalar for a reconstructed value.
 
     Allows for simple scalar recos, or for "estimates from LLH/Params" where a
@@ -171,6 +171,7 @@ def get_point_estimate(val, estimator):
     estimator : str
         Not used if `val` is a scalar, otherwise used to get field from numpy
         struct array or item from a Mapping
+    expect_scalar : bool
 
     Returns
     -------
@@ -184,14 +185,15 @@ def get_point_estimate(val, estimator):
     if valarray.dtype.names:
         valarray = np.array(valarray[estimator])
 
-    assert valarray.size == 1
+    if expect_scalar:
+        assert valarray.size == 1
 
-    # Since we've forced it to be an array and we don't know the exact
-    # dimensionality, use `flat` iterator and extract the first element of the
-    # array
-    scalar_val = next(valarray.flat)
+        # Since we've forced it to be an array and we don't know the exact
+        # dimensionality, use `flat` iterator and extract the first element of the
+        # array
+        scalar_val = next(valarray.flat)
 
-    return scalar_val
+    return valarray
 
 
 def define_prior_from_prefit(
