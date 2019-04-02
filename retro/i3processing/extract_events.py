@@ -796,7 +796,6 @@ def extract_truth(frame, run_id, event_id):
     # cascades and tracks are added
     truth_dtypes = dict(
         pdg=np.int32,
-        unique_id=np.uint64,
         highest_energy_daughter_pdg=np.int32,
         longest_daughter_pdg=np.int32,
         InteractionType=np.int8,
@@ -832,12 +831,6 @@ def extract_truth(frame, run_id, event_id):
     event_truth['coszen'] = np.cos(primary.dir.zenith)
     event_truth['azimuth'] = primary.dir.azimuth
     event_truth['extraction_error'] = ExtractionError.NO_ERROR
-
-    # Get event number and generate a unique ID
-    unique_id = (
-        int(1e13) * np.abs(primary_pdg) + int(1e7) * run_id + event_id
-    )
-    event_truth['unique_id'] = unique_id
 
     # Extract per-event info from I3MCWeightDict
     mcwd_copy_keys = '''
@@ -1266,18 +1259,19 @@ def extract_events(
 
     # Anything not listed defaults to float32
     event_dtypes = dict(
+        sourcefile_sha256=np.uint64,
+        index=np.uint32,
         run_id=np.uint32,
         sub_run_id=np.uint32,
         event_id=np.uint32,
         sub_event_id=np.uint32,
-        unique_id=np.uint64,
         state=np.uint32,
         start_time=np.uint64,
         stop_time=np.uint64,
     )
 
     fpath = expand(fpath)
-    sha256_sum = sha256(open(fpath, 'rb').read()).hexdigest()
+    sha256_hex = sha256(open(fpath, 'rb').read()).hexdigest()
     i3file = I3File(fpath, 'r')
 
     events = []
@@ -1306,8 +1300,8 @@ def extract_events(
     mkdir(outdir)
 
     # Write SHA-256 in format compatible with `sha256` Linux utility
-    with open(join(outdir, "source_i3_file_sha256sum.txt"), "w") as sha_file:
-        sha_file.write("{}  {}\n".format(sha256_sum, fpath))
+    with open(join(outdir, "sourcefile_sha256.txt"), "w") as sha_file:
+        sha_file.write("{}  {}\n".format(sha256_hex, fpath))
 
     frame_buffer = []
     frame_counter = 0
@@ -1341,6 +1335,13 @@ def extract_events(
             i3header = frame['I3EventHeader']
 
             event = OrderedDict()
+            event['sourcefile_sha256'] = np.uint64(int(sha256_hex[:16], base=16))
+            if len(events) > 2**32 - 1:
+                raise ValueError(
+                    "only using uint32 to store event index, but have event index of {}"
+                    .format(len(events))
+                )
+            event['index'] = np.uint32(len(events))
             event['run_id'] = run_id = i3header.run_id
             event['sub_run_id'] = i3header.sub_run_id
             event['event_id'] = event_id = i3header.event_id
@@ -1369,7 +1370,6 @@ def extract_events(
                     )
                     raise
                 truths.append(event_truth)
-                event['unique_id'] = truths[-1]['unique_id']
 
             events.append(event)
 
