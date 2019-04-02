@@ -104,10 +104,10 @@ EXT_TIGHT = dict(
 )
 
 EXT_MN = dict(
-    x=((-300, Bound.ABS), (300, Bound.ABS)),
-    y=((-300, Bound.ABS), (300, Bound.ABS)),
-    z=((-200, Bound.ABS), (200, Bound.ABS)),
-    time=((-800, Bound.ABS), (800, Bound.ABS)),
+    x=((-300, Bound.REL), (300, Bound.REL)),
+    y=((-300, Bound.REL), (300, Bound.REL)),
+    z=((-400, Bound.REL), (400, Bound.REL)),
+    time=((-1500, Bound.REL), (1500, Bound.REL)),
 )
 
 EXT_IC = dict(
