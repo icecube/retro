@@ -13,14 +13,25 @@ __all__ = ["extract_reco", "summarize_reco"]
 
 from collections import OrderedDict
 from os import makedirs, walk
-from os.path import abspath, basename, dirname, expanduser, expandvars, join, isdir, isfile, relpath
+from os.path import (
+    abspath,
+    basename,
+    dirname,
+    expanduser,
+    expandvars,
+    join,
+    isdir,
+    isfile,
+    relpath,
+)
 import pickle
 import sys
 
 import numpy as np
 import pandas as pd
 
-if __name__ == '__main__' and __package__ is None:
+
+if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
@@ -76,7 +87,6 @@ def extract_reco(reco, recodir, eventsdir=None):
 
     for events_dirpath, _, filenames in walk(eventsdir):
         if "events.npy" not in filenames:
-            #print('no events.npy in dir "{}"'.format(events_dirpath))
             continue
         reco_filepath = join(
             recodir,
@@ -85,7 +95,6 @@ def extract_reco(reco, recodir, eventsdir=None):
             "{}.npy".format(reco),
         )
         if not isfile(reco_filepath):
-            #print('no reco found at "{}"'.format(reco_filepath))
             continue
 
         events = np.load(join(events_dirpath, "events.npy"))
@@ -113,13 +122,7 @@ def extract_reco(reco, recodir, eventsdir=None):
     return events, truth, recos
 
 
-def summarize_reco(
-    truth,
-    recos,
-    point_estimator="median",
-    outdir=None,
-    verbosity=0,
-):
+def summarize_reco(truth, recos, point_estimator="median", outdir=None, verbosity=0):
     """
     Parameters
     ----------
@@ -160,11 +163,11 @@ def summarize_reco(
             if pvals.dtype.names and point_estimator in pvals.dtype.names:
                 pvals = pvals[point_estimator]
 
-            if param.startswith('cascade'):
-                if param == 'cascade_energy':
-                    true_pname = 'total_cascade_em_equiv_energy'
+            if param.startswith("cascade"):
+                if param == "cascade_energy":
+                    true_pname = "total_cascade_em_equiv_energy"
                 else:
-                    true_pname = 'total_' + param
+                    true_pname = "total_" + param
             else:
                 true_pname = param
 
@@ -175,12 +178,12 @@ def summarize_reco(
                 weights = weights[mask]
 
             err = pvals[mask] - truth[true_pname][mask]
-            if 'azimuth' in param:
-                err = ((err + np.pi) % (2*np.pi)) - np.pi
-            elif 'energy' in param:
+            if "azimuth" in param:
+                err = ((err + np.pi) % (2 * np.pi)) - np.pi
+            elif "energy" in param:
                 err /= truth[true_pname]
 
-            if param == 'coszen':
+            if param == "coszen":
                 corrected_weights, _ = weight_diff_tails(
                     diff=err,
                     weights=weights,
@@ -193,21 +196,21 @@ def summarize_reco(
                 corrected_weights = weights
 
             minval, q5, q25, median, q75, q95, maxval = weighted_percentile(
-                a=err[mask],
-                q=(0, 5, 25, 50, 75, 95, 100),
-                weights=corrected_weights,
+                a=err[mask], q=(0, 5, 25, 50, 75, 95, 100), weights=corrected_weights
             )
 
             info = OrderedDict()
-            info['reco'] = reco
-            info['param'] = param
-            info['n_invalid'] = len(mask) - np.count_nonzero(mask)
-            info['err_mean'] = np.average(err[mask], weights=weights[:len(pvals)][mask])
-            info['err_median'] = median
-            info['err_min'] = minval
-            info['err_max'] = maxval
-            info['err_iq50'] = q75 - q25
-            info['err_iq90'] = q95 - q5
+            info["reco"] = reco
+            info["param"] = param
+            info["n_invalid"] = len(mask) - np.count_nonzero(mask)
+            info["err_mean"] = np.average(
+                err[mask], weights=weights[: len(pvals)][mask]
+            )
+            info["err_median"] = median
+            info["err_min"] = minval
+            info["err_max"] = maxval
+            info["err_iq50"] = q75 - q25
+            info["err_iq90"] = q95 - q5
             summary.append(info)
         except:
             sys.stderr.write('ERROR! -> "{}" reco, param "{}"\n'.format(reco, param))
@@ -217,8 +220,8 @@ def summarize_reco(
     summary = summary[info.keys()]
     summary.sort_values(by=info.keys(), inplace=True)
 
-    for param in ['mean', 'median', 'min', 'max']:
-        reco_perf['err_abs{}'.format(param)] = reco_perf['err_{}'.format(param)].abs()
+    for param in ["mean", "median", "min", "max"]:
+        reco_perf["err_abs{}".format(param)] = reco_perf["err_{}".format(param)].abs()
 
     if outdir is not None:
         outdir = expanduser(expandvars(outdir))
@@ -230,16 +233,18 @@ def summarize_reco(
         outfpath = join(outdir, RECO_PERF_FNAME)
         reco_perf.to_pickle(outfpath)
         if verbosity > 0:
-            sys.stderr.write('wrote reco performance summary to "{}"\n'.format(outfpath))
+            sys.stderr.write(
+                'wrote reco performance summary to "{}"\n'.format(outfpath)
+            )
 
         outfpath = join(outdir, TRUTH_FNAME)
-        #pickle.dump(truth, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        # pickle.dump(truth, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
         np.save(outfpath, truth)
         if verbosity > 0:
             sys.stderr.write('wrote all truth info to "{}"\n'.format(outfpath))
 
         outfpath = join(outdir, RECOS_FNAME)
-        pickle.dump(reco_vals, open(outfpath, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(reco_vals, open(outfpath, "wb"), protocol=pickle.HIGHEST_PROTOCOL)
         if verbosity > 0:
             sys.stderr.write('wrote all reco info to "{}"\n'.format(outfpath))
 
