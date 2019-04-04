@@ -134,9 +134,9 @@ def merge_recos(sourcedirs, destdir, recos, overwrite=False):
 def main(description=__doc__):
     """Script interface to `merge_recos` function"""
     parser = ArgumentParser(description=description)
-    parser.add_argument("--sourcedirs", nargs="+")
-    parser.add_argument("--destdir")
-    parser.add_argument("--recos", nargs="+")
+    parser.add_argument("--sourcedirs", nargs="+", required=True)
+    parser.add_argument("--destdir", required=True)
+    parser.add_argument("--recos", nargs="+", required=True)
     parser.add_argument("--overwrite", action="store_true")
     kwargs = vars(parser.parse_args())
     merge_recos(**kwargs)
