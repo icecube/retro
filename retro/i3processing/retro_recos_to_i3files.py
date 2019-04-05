@@ -3,7 +3,7 @@
 # pylint: disable=wrong-import-position
 
 """
-Populate Retro reco(s) and important metadata to source I3 files.
+Populate Retro recos and metadata to I3 files.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -38,7 +38,7 @@ from argparse import ArgumentParser
 from collections import OrderedDict, Sequence
 from copy import deepcopy
 from glob import glob
-from os import walk
+from os import remove, walk
 from os.path import (
     abspath,
     basename,
@@ -60,7 +60,7 @@ from icecube import (  # pylint: disable=unused-import
     simclasses,
     dataio,
 )
-from icecube.dataclasses import (
+from icecube.dataclasses import (  # pylint: disable=no-name-in-module
     I3Constants,
     I3Direction,
     I3MapStringDouble,
@@ -75,8 +75,8 @@ from icecube.dataclasses import (
     I3VectorUInt64,
     I3VectorBool,
 )
-from icecube.icetray import I3Frame, I3Units
-from icecube.dataio import I3File
+from icecube.icetray import I3Frame, I3Units  # pylint: disable=no-name-in-module
+from icecube.dataio import I3File  # pylint: disable=no-name-in-module
 
 
 if __name__ == "__main__" and __package__ is None:
@@ -87,11 +87,13 @@ from retro.muon_hypo import generate_gms_table_converters
 from retro.retro_types import FitStatus
 
 
-muon_energy_to_length, _, _ = generate_gms_table_converters()  # pylint: disable=invalid-name
+muon_energy_to_length, _, _ = generate_gms_table_converters()
 
 
 DEFAULT_I3PARTICLE_ATTRS = {
-    "dir": dict(fields=["zenith", "azimuth"], func=I3Direction),
+    "dir": dict(
+        fields=["zenith", "azimuth"], func=lambda z, a: I3Direction(float(z), float(a))
+    ),
     "energy": dict(fields="energy", units=I3Units.GeV),
     "fit_status": dict(fields="fit_status", func=I3Particle.FitStatus),
     "length": dict(value=np.nan, units=I3Units.m),
@@ -112,11 +114,9 @@ TRACK_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
 TRACK_ATTRS["length"] = dict(
     fields="energy", func=muon_energy_to_length, units=I3Units.m
 )
-TRACK_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Null)
 
 CASCADE_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
-CASCADE_ATTRS["energy"] = dict(fields="em_equiv_energy", units=I3Units.GeV)
-TRACK_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Cascade)
+CASCADE_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Cascade)
 
 
 def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
@@ -155,7 +155,7 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
             value = info["value"]
             try:
                 value = value[point_estimator]
-            except (KeyError, ValueError, IndexError):
+            except (KeyError, ValueError, IndexError, TypeError):
                 pass
             if hasattr(value, "tolist"):
                 value = value.tolist()
@@ -194,7 +194,11 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
                     or hasattr(value_, "dtype")
                     and len(value_.dtype) > 0
                 ):
-                    raise ValueError("value {!r} is not a simple scalar".format(value_))
+                    raise ValueError(
+                        "value {!r} type {} is not a simple scalar".format(
+                            value_, type(value)
+                        )
+                    )
 
                 value.append(value_)
 
@@ -209,12 +213,12 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
             value = value[0]
 
         # Test to see if we actually have a scalar and not have a struct dtype
-        if (
-            not np.isscalar(value_)
-            or hasattr(value_, "dtype")
-            and len(value_.dtype) > 0
+        if not isinstance(value, I3Direction) and (
+            not np.isscalar(value) or hasattr(value, "dtype") and len(value.dtype) > 0
         ):
-            raise ValueError("value {!r} is not a simple scalar".format(value_))
+            raise ValueError(
+                "value {!r} type {} is not a simple scalar".format(value, type(value))
+            )
 
         # Apply units if specified
         if "units" in info:
@@ -230,7 +234,32 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
             obj = getattr(obj, attr_to_get)
         setattr(obj, attr_to_set, value)
 
-    return particle
+    return particle, consumed_fields
+
+
+def setitem_pframe(frame, key, val, event_index, overwrite=False):
+    """Put value in frame, with wrapper for warn or error if the key is already present.
+
+    Parameters
+    ----------
+    frame
+    key
+    val
+    event_index
+    overwrite : bool
+
+    """
+    if key in frame:
+        if not overwrite:
+            raise KeyError(
+                "frame for event index {} has key '{}' already".format(event_index, key)
+            )
+        print(
+            "WARNING: frame for event index {} has key '{}' already; will be overwritten".format(
+                event_index, key
+            )
+        )
+    frame[key] = val
 
 
 def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
@@ -316,7 +345,7 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
 
         for particle, identifier in particles_identifiers:
             key = "__".join([reco_name, point_estimator, identifier])
-            pframe[key] = particle
+            setitem_pframe(pframe, key, particle, event_index, overwrite=False)
 
         # -- Populate ALL Retro reco information -- #
 
@@ -330,15 +359,17 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
             val = reco[field]
             if hasattr(val, "dtype") and len(val.dtype) > 0:
                 # TODO: handle I3MapStringBool, I3MapStringInt?
-                val = I3MapStringDouble(zip(val.dtype.names, val.tolist()))
+                val = I3MapStringDouble(list(zip(val.dtype.names, val.tolist())))
             else:
                 val_type = getattr(val, "dtype", type(val))
 
                 # floating types
                 if val_type in (float, np.float64, np.float_, np.float):
                     i3type = I3VectorDouble
+                    pytype = float
                 elif val_type in (np.float16, np.float32):
                     i3type = I3VectorFloat
+                    pytype = float
 
                 # (signed) integer types
                 elif val_type in (
@@ -351,44 +382,51 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
                     np.int0,
                 ):
                     i3type = I3VectorInt64
+                    pytype = int
                 elif val_type in (np.int32,):
                     i3type = I3VectorInt
+                    pytype = int
                 elif val_type in (np.int8, np.int16):
                     i3type = I3VectorShort
+                    pytype = int
 
                 # unisgned integer types
                 elif val_type in (np.uint, np.uintp, np.uint64):
                     i3type = I3VectorUInt64
+                    pytype = int
                 elif val_type in (np.uint8, np.uint16, np.uint32):
                     i3type = I3VectorUInt
+                    pytype = int
                 elif val_type in (np.int8, np.int16):
                     i3type = I3VectorUShort
+                    pytype = int
 
                 # boolean types
                 elif val_type in (bool, np.bool, np.bool_, np.bool8):
                     i3type = I3VectorBool
+                    pytype = bool
 
                 else:
                     raise TypeError("Don't know how to handle type {}".format(val_type))
 
-                val = i3type([val])
+                val = i3type([pytype(val)])
 
-            pframe[key] = val
+            setitem_pframe(pframe, key, val, event_index, overwrite=False)
 
 
-def retro_recos_to_i3files(recos, eventsdir, point_estimator, i3dir=None, suffix=None):
+def retro_recos_to_i3files(
+    recos, eventsdir, point_estimator, i3dir=None, overwrite=False
+):
     """
 
     Parameters
     ----------
     recos : str or iterable thereof
     eventsdir : str
+    point_estimator : str in {"mean", "median", "max"}
     i3dir : str, optional
         If None or not specified, defaults to `eventsdir`
-    suffix : str, optional
-        Suffix to appended to the I3 filename. If not provided, `recos` are
-        sorted alphabetically and joined by double underscore to form the
-        suffix.
+    overwrite : bool
 
     """
     if isinstance(recos, string_types):
@@ -412,10 +450,6 @@ def retro_recos_to_i3files(recos, eventsdir, point_estimator, i3dir=None, suffix
     else:
         i3dir = abspath(expanduser(expandvars(i3dir)))
 
-    if suffix is None:
-        suffix = "__" + "__".join(recos)
-    assert suffix != ""
-
     # -- Walk directories and match (events, recos) to i3 paths -- #
 
     for events_dirpath, _, filenames in walk(eventsdir):
@@ -425,9 +459,10 @@ def retro_recos_to_i3files(recos, eventsdir, point_estimator, i3dir=None, suffix
         missing_recos = []
         reco_filepaths = {}
         for reco in recos:
-            reco_filepath = join(eventsdir, "recos", "{}.npy".format(reco))
-            reco_filepaths[reco] = reco_filepath
-            if not isfile(reco_filepath):
+            reco_filepath = join(events_dirpath, "recos", "{}.npy".format(reco))
+            if isfile(reco_filepath):
+                reco_filepaths[reco] = reco_filepath
+            else:
                 missing_recos.append(reco)
 
         if missing_recos:
@@ -436,13 +471,18 @@ def retro_recos_to_i3files(recos, eventsdir, point_estimator, i3dir=None, suffix
                     missing_recos, events_dirpath
                 )
             )
-            continue
+            if set(missing_recos) == set(recos):
+                continue
 
-        eventdir_basename = basename(events_dirpath)
+        eventsdir_basename = basename(events_dirpath)
         i3filedir = join(i3dir, relpath(dirname(events_dirpath), start=eventsdir))
-        i3filepaths = sorted(glob(join(i3filedir, "{}.i3*".format(eventdir_basename))))
+        i3filepaths = sorted(glob(join(i3filedir, "{}.i3*".format(eventsdir_basename))))
         if not i3filepaths:
-            raise IOError('No matching i3 file in directory "{}"'.format(i3filedir))
+            raise IOError(
+                'No matching i3 file "{}.i3*" in directory "{}"'.format(
+                    eventsdir_basename, i3filedir
+                )
+            )
         input_i3filepath = i3filepaths[0]
         if len(i3filepaths) > 1:
             print(
@@ -451,22 +491,36 @@ def retro_recos_to_i3files(recos, eventsdir, point_estimator, i3dir=None, suffix
                 )
             )
         print("input_i3filepath:", input_i3filepath)
+
+        suffix = "__" + "__".join(sorted(reco_filepaths.keys()))
         output_i3filepath = join(
             i3filedir,
             "{base}{suffix}{extensions}".format(
-                base=basename(input_i3filepath)[: len(eventdir_basename)],
+                base=basename(input_i3filepath)[: len(eventsdir_basename)],
                 suffix=suffix,
                 extensions=".i3.zst",
             ),
         )
+        if not overwrite and isfile(output_i3filepath):
+            print(
+                'WARNING: skipping writing output path that already exists: "{}"'.format(
+                    output_i3filepath
+                )
+            )
+            continue
         print("output_i3filepath:", output_i3filepath)
-        assert not isfile(output_i3filepath)
+
         print("events_dirpath:", events_dirpath)
         events = np.load(join(events_dirpath, "events.npy"))
         recos_d = OrderedDict()
-        for reco in recos:
-            recos_d[reco] = np.load(reco_filepaths[reco])
-            assert len(recos) == len(events)
+        for reco, reco_filepath in reco_filepaths.items():
+            recos_d[reco] = np.load(reco_filepath)
+            if len(recos_d[reco]) != len(events):
+                raise ValueError(
+                    "{} has len {}, events has len {}".format(
+                        reco, len(recos_d[reco]), len(events)
+                    )
+                )
 
         input_i3file = I3File(input_i3filepath, "r")
         output_i3file = I3File(output_i3filepath, "w")
@@ -484,8 +538,8 @@ def retro_recos_to_i3files(recos, eventsdir, point_estimator, i3dir=None, suffix
         # file, and then create a new chain with the new-found DAQ frame (or
         # quit if at end of file).
 
-        while True:
-            try:
+        try:
+            while True:
                 if input_i3file.more():
                     try:
                         next_frame = input_i3file.pop_frame()
@@ -525,25 +579,58 @@ def retro_recos_to_i3files(recos, eventsdir, point_estimator, i3dir=None, suffix
                 else:
                     frame_buffer.append(next_frame)
 
-            except:
-                sys.stderr.write(
-                    'ERROR! file "{}", frame #{}\n'.format(
-                        input_i3filepath, frame_counter + 1
-                    )
+        except:
+            output_i3file.close()
+            del output_i3file
+            remove(output_i3filepath)
+
+            sys.stderr.write(
+                'ERROR! file "{}", frame #{}\n'.format(
+                    input_i3filepath, frame_counter + 1
                 )
-                raise
+            )
+            raise
+
+        else:
+            output_i3file.close()
+            del output_i3file
 
 
 def main(description=__doc__):
     """Script interface to `populate_recos` function"""
     parser = ArgumentParser(description=description)
-    parser.add_argument("--recos", required=True, nargs="+")
-    parser.add_argument("--eventsdir", required=True)
-    parser.add_argument("--i3dir", required=False, default=None)
     parser.add_argument(
-        "--point-estimator", required=True, choices=("mean", "median", "max")
+        "--recos",
+        required=True,
+        nargs="+",
+        help="""Reco names to populate to the i3 file(s)""",
     )
-    parser.add_argument("--suffix", required=False, default=None)
+    parser.add_argument(
+        "--eventsdir",
+        required=True,
+        help="""Parent directory in which to look for Retro events / reconstructions""",
+    )
+    parser.add_argument(
+        "--i3dir",
+        required=False,
+        default=None,
+        help="""Directory with parallel structure to --eventsdir in which to
+        look for i3 files to populate""",
+    )
+    parser.add_argument(
+        "--point-estimator",
+        required=True,
+        choices=("mean", "median", "max"),
+        help="""Reconstructed values estimated from a posterior distribution
+        have several point estimators; choose one to use for producing
+        I3Particles describing the basic reconstructed varaibles of the
+        reconstruction.""",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="""Overwrite existing output file(s) if they exist""",
+    )
     kwargs = vars(parser.parse_args())
     retro_recos_to_i3files(**kwargs)
 
