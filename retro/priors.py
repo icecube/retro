@@ -546,15 +546,22 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             # pdf in the allowed range (expected to occur for binned zenith and
             # coszen error distributions)
             if x.min() < low or x.max() > high:
-                xp = x
-                x = np.linspace(low, high, len(x))
-                pdf = np.interp(x=x, xp=xp, fp=pdf)
+                x_orig = x
+                pdf_orig = pdf
+                x = np.linspace(start=max(low, x_orig.min()), stop=min(high, x_orig.max()), num=len(x_orig)).squeeze()
+                pdf = np.interp(x=x, xp=x_orig, fp=pdf_orig)
                 integral = np.trapz(x=x, y=pdf)
                 try:
                     pdf /= integral
                 except:
+                    print("low, high:", low, high)
+                    print("x_orig.min, x_orig.max:", x_orig.min(), x_orig.max())
+                    print("len(x):", len(x))
                     print("x.shape:", x.shape)
-                    print("xp.shape:", xp.shape)
+                    print("x:", x)
+                    print("x_orig.shape:", x_orig.shape)
+                    print("x_orig:", x_orig)
+                    print("pdf_orig.shape:", pdf_orig.shape)
                     print("pdf.shape:", pdf.shape)
                     print("integral.shape:", integral.shape)
                     raise
