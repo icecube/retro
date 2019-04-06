@@ -140,8 +140,8 @@ PRISPEC_OSCNEXT_CRS_MN = dict(
     y=dict(kind=PRI_OSCNEXT_L5_V1_CRS, extents=EXT_MN["y"]),
     z=dict(kind=PRI_OSCNEXT_L5_V1_CRS, extents=EXT_MN["z"]),
     time=dict(kind=PRI_OSCNEXT_L5_V1_CRS, extents=EXT_MN["time"]),
-    azimuth=dict(kind=PRI_OSCNEXT_L5_V1_CRS),
-    zenith=dict(kind=PRI_OSCNEXT_L5_V1_CRS),
+    #azimuth=dict(kind=PRI_OSCNEXT_L5_V1_CRS),
+    #zenith=dict(kind=PRI_OSCNEXT_L5_V1_CRS),
 )
 
 
