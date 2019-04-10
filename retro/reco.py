@@ -345,6 +345,54 @@ class Reco(object):
                 save=True,
             )
 
+        elif method == "stopping_atm_muon_crs":
+            self.setup_hypo(
+                track_kernel="stopping_table_energy_loss",
+                track_time_step=3.0,
+            )
+
+            self.generate_prior_method(
+                x=dict(kind=PRI_UNIFORM, extents=EXT_IC["x"]),
+                y=dict(kind=PRI_UNIFORM, extents=EXT_IC["y"]),
+                z=dict(kind=PRI_UNIFORM, extents=EXT_IC["z"]),
+                time=dict(kind=PRI_TIME_RANGE, extents=((0, Bound.REL), (0, Bound.Rel)),
+                track_zenith=dict(kind=PRI_COSINE, extents=((0, Bound.ABS), (np.pi/2, Bound.ABS))),
+            )
+
+            param_values = []
+            log_likelihoods = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_crs(
+                n_live=160,
+                max_iter=10000,
+                max_noimprovement=1000,
+                min_llh_std=0.5,
+                min_vertex_std=dict(x=5, y=5, z=4, time=20),
+                use_priors=False,
+                use_sobol=True,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method, log_likelihoods, param_values, save=self.save_llhp
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=False,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
+
         elif method == "crs_prefit":
             self.setup_hypo(
                 cascade_kernel="scaling_aligned_point_ckv",
