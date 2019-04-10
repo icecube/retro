@@ -16,6 +16,7 @@ __all__ = [
     "PRI_GAUSSIAN",
     "PRI_INTERP",
     "PRI_AZ_INTERP",
+    "PRI_TIME_RANGE",
     "PRI_SPEFIT2",
     "PRI_SPEFIT2TIGHT",
     "PRI_OSCNEXT_L5_V1_PREFIT",
@@ -69,7 +70,7 @@ PRI_COSINE = "cosine"
 PRI_GAUSSIAN = "gaussian"
 PRI_INTERP = "interp"
 PRI_AZ_INTERP = "az_interp"
-
+PRI_TIME_RANGE = "time_range"
 PRI_SPEFIT2 = "spefit2"
 """From fits to DRAGON (GRECO?) i.e. pre-oscNext MC"""
 
@@ -191,7 +192,7 @@ def get_point_estimate(val, estimator, expect_scalar=True):
         # Since we've forced it to be an array and we don't know the exact
         # dimensionality, use `flat` iterator and extract the first element of the
         # array
-        scalar_val = next(valarray.flat)
+        return next(valarray.flat)
 
     return valarray
 
@@ -411,12 +412,38 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             kind = PRI_UNIFORM
         if extents is None:
             extents = EXT_IC[dim_name]
+
     elif dim_name == "time":
         if kind is None:
+            kind = PRI_TIME_RANGE
+
+        if extents is None or kind == PRI_TIME_RANGE:
+            tr_keys = []
+            for key in event["pulses"].keys():
+                if key.endswith("TimeRange"):
+                    tr_keys.append(key)
+            if not tr_keys:
+                raise KeyError("No <pulse series>TimeRange key in pulses")
+            if len(tr_keys) > 1:
+                sys.stderr.write(
+                    "WARNING: found multiple <pulse series>TimeRange keys, using the"
+                    " first of {}\n".format(tr_keys)
+                )
+            time_range = event["pulses"][tr_keys[0]]
+
+            if extents is None:
+                low = 0
+                high = 0
+            else:
+                (low, low_absrel), (high, high_absrel) = extents
+                assert low_absrel == Bound.REL
+                assert high_absrel == Bound.REL
+
+            extents = ((time_range[0] + low, Bound.ABS), (time_range[1] + high, Bound.ABS))
+
+        if kind == PRI_TIME_RANGE:
             kind = PRI_UNIFORM
-        if extents is None:
-            # TODO: make this the time window from the event
-            extents = ((-4e3, Bound.ABS), (0.0, Bound.ABS))
+
     elif "energy" in dim_name:
         if kind is None:
             kind = PRI_UNIFORM
@@ -425,6 +452,7 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
                 extents = ((0.1, Bound.ABS), (1e3, Bound.ABS))
             else:
                 extents = ((0.0, Bound.ABS), (1e3, Bound.ABS))
+
     else:
         raise ValueError('Unrecognized dimension "{}"'.format(dim_name))
 
@@ -488,11 +516,13 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             cube[n] = np.exp(cube[n] * log_width + log_low)
 
     elif kind == PRI_COSINE:
-        if prior_args != (0, np.pi):
-            raise NotImplementedError()
+        zen_low, zen_high = prior_args
+        cz_low = np.cos(zen_high)
+        cz_high = np.cos(zen_low)
+        cz_diff = cz_high - cz_low
 
-        def prior_func(cube, n=dim_num):
-            x = (2 * cube[n]) - 1
+        def prior_func(cube, n=dim_num, cz_low=cz_low, cz_diff=cz_diff):
+            x = (cz_diff * cube[n]) + cz_low
             cube[n] = np.arccos(x)
 
     elif kind == PRI_GAUSSIAN:
@@ -548,7 +578,11 @@ def get_prior_func(dim_num, dim_name, event, kind=None, extents=None, **kwargs):
             if x.min() < low or x.max() > high:
                 x_orig = x
                 pdf_orig = pdf
-                x = np.linspace(start=max(low, x_orig.min()), stop=min(high, x_orig.max()), num=len(x_orig)).squeeze()
+                x = np.linspace(
+                    start=max(low, x_orig.min()),
+                    stop=min(high, x_orig.max()),
+                    num=len(x_orig),
+                ).squeeze()
                 pdf = np.interp(x=x, xp=x_orig, fp=pdf_orig)
                 integral = np.trapz(x=x, y=pdf)
                 try:
