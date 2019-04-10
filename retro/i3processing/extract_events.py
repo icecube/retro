@@ -35,6 +35,7 @@ __all__ = [
     'NUES',
     'NUMUS',
     'NUTAUS',
+    'NEUTRINOS',
     'FILENAME_INFO_RE',
     'GENERIC_I3_FNAME_RE',
     'I3PARTICLE_ATTRS',
@@ -162,6 +163,7 @@ TAUS = (ParticleType.TauPlus, ParticleType.TauMinus)
 NUES = (ParticleType.NuE, ParticleType.NuEBar)
 NUMUS = (ParticleType.NuMu, ParticleType.NuMuBar)
 NUTAUS = (ParticleType.NuTau, ParticleType.NuTauBar)
+NEUTRINOS = NUES + NUMUS + NUTAUS
 
 FILENAME_INFO_RE = re.compile(
     r'''
@@ -204,6 +206,10 @@ I3PARTICLE_ATTRS = OrderedDict([
     ('fit_status', dict(enum=FitStatus, dtype=np.int8, default=FitStatus.NotSet)),
     ('location_type', dict(enum=LocationType, dtype=np.uint8, default=LocationType.Anywhere)),
 ])
+
+
+class MissingPhysicsFrameError(Exception):
+    pass
 
 
 def extract_file_metadata(fname):
@@ -773,7 +779,35 @@ def populate_track_t(mctree, particle):
     return track
 
 
-def extract_truth(frame, run_id, event_id):
+def record_particles(particles):
+    """
+    Parameters
+    ----------
+    particles : OrderedDict
+
+    Returns
+    -------
+    values_dict : OrderedDict
+    dtypes_dict : OrderedDict
+
+    """
+    values_dict = OrderedDict()
+    dtypes_dict = OrderedDict()
+
+    for particle_name, particle in particles.items():
+        dtype = particle.dtype
+        # note `fields` attr is un-ordered, while `names` IS ordered
+        fields = dtype.fields
+        for field_name in dtype.names:
+            key = '{}_{}'.format(particle_name, field_name)
+            values_dict[key] = particle[field_name]
+            # `fields` contains dtype and byte offset; just want dtype
+            dtypes_dict[key] = fields[field_name][0]
+
+    return values_dict, dtypes_dict
+
+
+def extract_truth(frame):
     """Get event truth information from a frame.
 
     Parameters
@@ -814,18 +848,11 @@ def extract_truth(frame, run_id, event_id):
 
     # TODO: deal with charged leptons e.g. for CORSIKA/MuonGun
 
-    is_nu = False
-    is_charged_lepton = False
-    if np.abs(primary_pdg) in [11, 13, 15]:
-        is_charged_lepton = True
-    elif np.abs(primary_pdg) in [12, 14, 16]:
-        is_nu = True
-
     event_truth['pdg'] = primary_pdg
+    event_truth['time'] = primary.time
     event_truth['x'] = primary.pos.x
     event_truth['y'] = primary.pos.y
     event_truth['z'] = primary.pos.z
-    event_truth['time'] = primary.time
     event_truth['energy'] = primary.energy
     event_truth['zenith'] = primary.dir.zenith
     event_truth['coszen'] = np.cos(primary.dir.zenith)
@@ -833,29 +860,29 @@ def extract_truth(frame, run_id, event_id):
     event_truth['extraction_error'] = ExtractionError.NO_ERROR
 
     # Extract per-event info from I3MCWeightDict
-    mcwd_copy_keys = '''
-        Crosssection
-        EnergyLost
-        GENIEWeight
-        GlobalProbabilityScale
-        InteractionProbabilityWeight
-        InteractionType
-        LengthInVolume
-        OneWeight
-        TargetPDGCode
-        TotalInteractionProbabilityWeight
-        weight
-    '''.split()
+    #mcwd_copy_keys = '''
+    #    Crosssection
+    #    EnergyLost
+    #    GENIEWeight
+    #    GlobalProbabilityScale
+    #    InteractionProbabilityWeight
+    #    InteractionType
+    #    LengthInVolume
+    #    OneWeight
+    #    TargetPDGCode
+    #    TotalInteractionProbabilityWeight
+    #    weight
+    #'''.split()
     mcwd = frame['I3MCWeightDict']
-    for key in mcwd_copy_keys:
+    #for key in mcwd_copy_keys:
+    for key in sorted(mcwd.keys()): #mcwd_copy_keys:
         try:
             event_truth[key] = mcwd[key]
         except KeyError:
             sys.stderr.write('Could not get "{}" from I3MCWeightDict\n'.format(key))
             raise
 
-    # If neutrino, get charged lepton daughter particles
-    if is_nu:
+    if primary_pdg in NEUTRINOS:
         # By default, track and cascades all "zero"; convention is that
         # cascade0 is on lepton side of interaction
         track = deepcopy(NO_TRACK)
@@ -1135,26 +1162,44 @@ def extract_truth(frame, run_id, event_id):
         total_cascade['em_equiv_energy'] = total_em_equiv_energy
         total_cascade['hadr_equiv_energy'] = total_hadr_equiv_energy
 
-        record_particles = OrderedDict(
-            (
+        particles_to_record = OrderedDict(
+            [
                 ('track', track),
                 ('cascade0', cascade0),
                 ('cascade1', cascade1),
                 ('total_cascade', total_cascade),
-            )
+            ]
         )
-        for particle_name, particle in record_particles.items():
-            dtype = particle.dtype
-            # note `fields` attr is un-ordered, while `names` IS ordered
-            fields = dtype.fields
-            for field_name in dtype.names:
-                key = '{}_{}'.format(particle_name, field_name)
-                event_truth[key] = particle[field_name]
-                # `fields` contains dtype and byte offset; just want dtype
-                truth_dtypes[key] = fields[field_name][0]
+
+    elif primary_pdg == ParticleType.unknown:
+        # TODO: how to handle muon bundles?
+
+        secondaries = mctree.get_daughters(primary)
+        muon = None
+        if len(secondaries) == 1:
+            secondary_pdg = secondaries[0].pdg_encoding
+            if secondary_pdg in MUONS:
+                muon = secondaries[0]
+            else:
+                raise NotImplementedError(
+                    "Unknown primary with {} secondary not implemented".format(
+                        ParticleType(secondary_pdg)
+                    )
+                )
+        else:
+            raise NotImplementedError("Unknown primary with multiple secondaries not implemented")
+
+        # If we get here, we have a single muon
+
+        track = populate_track_t(mctree=mctree, particle=muon)
+        particles_to_record = OrderedDict([('track', track)])
 
     else:  # is not neutrino:
         raise NotImplementedError("Only neutrino primaries are implemented")
+
+    values_dict, dtypes_dict = record_particles(particles_to_record)
+    event_truth.update(values_dict)
+    truth_dtypes.update(dtypes_dict)
 
     struct_dtype_spec = []
     for key in event_truth.keys():
@@ -1293,6 +1338,91 @@ def extract_events(
     for name in triggers:
         trigger_hierarchies[name] = []
 
+
+    def extract_buffer(frame_buffer):
+        num_qframes = 0
+        for frame in frame_buffer:
+            print(frame.Stop)
+            if frame.Stop == I3Frame.DAQ:
+                num_qframes += 1
+        if num_qframes > 1:
+            raise ValueError(
+                "Found {} DAQ (Q) frames in chain, must have only one".format(
+                    num_qframes
+                )
+            )
+
+        pframe = None
+        for frame in frame_buffer[::-1]:
+            if frame.Stop == I3Frame.DAQ:
+                raise ValueError("DAQ (Q) frame found after last physics (P) frame")
+            if frame.Stop == I3Frame.Physics:
+                pframe = frame
+                break
+        if pframe is None:
+            raise MissingPhysicsFrameError()
+        if num_qframes == 0:
+            raise ValueError("Found a physics (P) frame but no DAQ (Q) frame")
+
+        i3header = pframe['I3EventHeader']
+
+        event = OrderedDict()
+        event['sourcefile_sha256'] = np.uint64(int(sha256_hex[:16], base=16))
+        if len(events) > 2**32 - 1:
+            raise ValueError(
+                "only using uint32 to store event index, but have event index of {}"
+                .format(len(events))
+            )
+        event['index'] = np.uint32(len(events))
+        event['run_id'] = i3header.run_id
+        event['sub_run_id'] = i3header.sub_run_id
+        event['event_id'] = i3header.event_id
+        event['sub_event_id'] = i3header.sub_event_id
+        # TODO: map "state" string to uint enum value if defined in I3
+        # software? np dtypes don't handle ragged data like strings but I don't
+        # want to invent an encoding of our own if at all possible
+        #event['sub_event_stream'] = sub_event_stream
+        event['state'] = i3header.state
+
+        event['start_time'] = i3header.start_time.utc_daq_time
+        event['end_time'] = i3header.end_time.utc_daq_time
+
+        if 'TimeShift' in pframe:
+            event['TimeShift'] = pframe['TimeShift'].value
+
+        if truth:
+            try:
+                event_truth = extract_truth(pframe)
+            except:
+                sys.stderr.write("Failed to get truth from frame buffer")
+                raise
+            truths.append(event_truth)
+
+        events.append(event)
+
+        for photon_name in photons:
+            photons_d[photon_name].append(extract_photons(pframe, photon_name))
+
+        for pulse_series_name in pulses:
+            pulses_list, time_range = extract_pulses(pframe, pulse_series_name)
+            pulses_d[pulse_series_name].append(pulses_list)
+            tr_key = pulse_series_name + 'TimeRange'
+            if time_range is not None:
+                if tr_key not in pulses_d:
+                    pulses_d[tr_key] = []
+                pulses_d[tr_key].append(time_range)
+
+        for reco_name in recos:
+            recos_d[reco_name].append(extract_reco(pframe, reco_name))
+
+        for trigger_hierarchy_name in triggers:
+            trigger_hierarchies[trigger_hierarchy_name].append(
+                extract_trigger_hierarchy(pframe, trigger_hierarchy_name)
+            )
+
+        return event
+
+
     # Default to dir same path as I3 file but with ".i3<compr ext>" removed
     if outdir is None:
         fname_parts = GENERIC_I3_FNAME_RE.match(fpath).groupdict()
@@ -1308,6 +1438,7 @@ def extract_events(
     finished = False
     while not finished:
         try:
+            next_frame = None
             if i3file.more():
                 try:
                     next_frame = i3file.pop_frame()
@@ -1315,89 +1446,32 @@ def extract_events(
                 except:
                     sys.stderr.write('Failed to pop frame #{}\n'.format(frame_counter + 1))
                     raise
-            else:
-                finished = True
 
-            if len(frame_buffer) == 0 or next_frame.Stop != I3Frame.DAQ:
-                if next_frame.Stop in [I3Frame.DAQ, I3Frame.Physics]:
-                    frame_buffer.append(next_frame)
-                if not finished:
-                    continue
+            if next_frame is None or next_frame.Stop == I3Frame.DAQ:
+                if frame_buffer:
+                    print("extracting event from frame_buffer", [f.Stop for f in frame_buffer])
+                    event = extract_buffer(frame_buffer)
+                    frame_buffer = []
+                if next_frame is None:
+                    break
+            print('appending', next_frame.Stop, 'frame')
+            frame_buffer.append(next_frame)
 
-            if not frame_buffer:
-                raise ValueError(
-                    'Empty frame buffer; possibly no Q frames in file "{}"'
-                    .format(fpath)
+        except (KeyError, ValueError) as err:
+            sys.stderr.write(
+                'ERROR! file "{}", frame #{}, error: {}\n'.format(
+                    fpath, frame_counter + 1, err
                 )
-
-            frame = frame_buffer[-1]
-
-            i3header = frame['I3EventHeader']
-
-            event = OrderedDict()
-            event['sourcefile_sha256'] = np.uint64(int(sha256_hex[:16], base=16))
-            if len(events) > 2**32 - 1:
-                raise ValueError(
-                    "only using uint32 to store event index, but have event index of {}"
-                    .format(len(events))
-                )
-            event['index'] = np.uint32(len(events))
-            event['run_id'] = run_id = i3header.run_id
-            event['sub_run_id'] = i3header.sub_run_id
-            event['event_id'] = event_id = i3header.event_id
-            event['sub_event_id'] = i3header.sub_event_id
-            # TODO: map "state" string to uint enum value if defined in I3
-            # software? np dtypes don't handle ragged data like strings but I don't
-            # want to invent an encoding of our own if at all possible
-            #event['sub_event_stream'] = sub_event_stream
-            event['state'] = i3header.state
-
-            event['start_time'] = i3header.start_time.utc_daq_time
-            event['end_time'] = i3header.end_time.utc_daq_time
-
-            if 'TimeShift' in frame:
-                event['TimeShift'] = frame['TimeShift'].value
-
-            if truth:
-                try:
-                    event_truth = extract_truth(
-                        frame, run_id=run_id, event_id=event_id
-                    )
-                except:
-                    sys.stderr.write(
-                        'Failed to get truth from "{}" event_id {} (frame {})\n'
-                        .format(fpath, event_id, frame_counter)
-                    )
-                    raise
-                truths.append(event_truth)
-
-            events.append(event)
-
-            for photon_name in photons:
-                photons_d[photon_name].append(extract_photons(frame, photon_name))
-
-            for pulse_series_name in pulses:
-                pulses_list, time_range = extract_pulses(frame, pulse_series_name)
-                pulses_d[pulse_series_name].append(pulses_list)
-                tr_key = pulse_series_name + 'TimeRange'
-                if time_range is not None:
-                    if tr_key not in pulses_d:
-                        pulses_d[tr_key] = []
-                    pulses_d[tr_key].append(time_range)
-
-            for reco_name in recos:
-                recos_d[reco_name].append(extract_reco(frame, reco_name))
-
-            for trigger_hierarchy_name in triggers:
-                trigger_hierarchies[trigger_hierarchy_name].append(
-                    extract_trigger_hierarchy(frame, trigger_hierarchy_name)
-                )
-
-            # Clear frame buffer and start a new "chain" with the next frame
-            frame_buffer = [next_frame]
-        except:
-            sys.stderr.write('ERROR! file "{}", frame #{}\n'.format(fpath, frame_counter + 1))
+            )
             raise
+
+        except MissingPhysicsFrameError:
+            sys.stderr.write(
+                'Warning: file "{}", frame chain from #{} through #{}'
+                ' lacks a Physics frame\n'.format(
+                    fpath, frame_counter - len(frame_buffer), frame_counter - 1
+                )
+            )
 
     # Sanity check that a pulse series that has corresponding TimeRange field
     # exists in all frames, since this is populated by appending to a list (so
