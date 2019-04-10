@@ -39,6 +39,7 @@ __all__ = [
     'FILENAME_INFO_RE',
     'GENERIC_I3_FNAME_RE',
     'I3PARTICLE_ATTRS',
+    'MissingPhysicsFrameError',
     'extract_file_metadata',
     'extract_reco',
     'extract_trigger_hierarchy',
@@ -46,6 +47,8 @@ __all__ = [
     'extract_photons',
     'get_cascade_and_track_info',
     'populate_track_t',
+    'record_particles',
+    'process_true_neutrino',
     'extract_truth',
     'extract_metadata_from_frame',
     'extract_events',
@@ -807,6 +810,315 @@ def record_particles(particles):
     return values_dict, dtypes_dict
 
 
+def process_true_neutrino(nu, mctree, frame, event_truth):
+    """Get particles to record "truth" information from an MC neutrino.
+
+    Parameters
+    ----------
+    nu : icecube.dataclasses.I3Particle
+    mctree : icecube.dataclasses.I3MCTree
+    frame : icecube.icetray.I3Frame
+    event_truth : OrderedDict
+
+    Returns
+    -------
+    particles_to_record : OrderedDict
+
+    """
+    from icecube.dataclasses import I3Direction  # pylint: disable=no-name-in-module
+
+    # By default, track and cascades all "zero"; convention is that
+    # cascade0 is on lepton side of interaction
+    track = deepcopy(NO_TRACK)
+    cascade0 = deepcopy(NO_CASCADE)
+    cascade1 = deepcopy(NO_CASCADE)
+    total_cascade = deepcopy(NO_CASCADE)
+
+    nu_pdg = nu.pdg_encoding
+    secondaries = mctree.get_daughters(nu)
+    interaction_type = InteractionType(int(event_truth['InteractionType']))
+
+    # neutrino 4-momentum
+    nu_p4 = (
+        nu.energy * np.array([1, nu.dir.x, nu.dir.y, nu.dir.z])
+    )
+
+    if interaction_type == InteractionType.CC:
+        # Find the charged lepton generated in the interaction
+        charged_lepton = None
+        for secondary in secondaries:
+            # charged lepton PDG one less than corresponding neutrino's PDG
+            if (
+                abs(int(secondary.pdg_encoding)) == abs(nu_pdg) - 1
+                and secondary.time == nu.time
+                and secondary.pos == nu.pos
+            ):
+                if charged_lepton is None:
+                    charged_lepton = secondary
+                elif secondary.energy > charged_lepton.energy:
+                    charged_lepton = secondary
+
+        if charged_lepton is None:
+            msg = "ERROR: Couldn't find charged lepton daughter in CC MCTree"
+            event_truth['extraction_error'] = ExtractionError.NU_CC_LEPTON_SECONDARY_MISSING
+            sys.stderr.write(msg + "\n")
+            #raise ValueError(msg)
+            if nu_pdg in NUES + NUTAUS:
+                cascade0 = INVALID_CASCADE
+            elif nu_pdg in NUMUS:
+                track = INVALID_TRACK
+            else:
+                raise ValueError()
+
+        else:
+            charged_lepton_pdg = ParticleType(int(charged_lepton.pdg_encoding))
+
+            # 4-momentum; note I3Particle.energy is particle's kinetic energy
+            # and I3Particle.dir.{x, y, z} point in direction of particle's
+            # travel while I3Particle.dir.{zenith, azimuth} point oppositely
+            # to particle's direction of travel
+            charged_lepton_p4 = np.array([
+                charged_lepton.energy + charged_lepton.mass,
+                charged_lepton.dir.x * charged_lepton.energy,
+                charged_lepton.dir.y * charged_lepton.energy,
+                charged_lepton.dir.z * charged_lepton.energy,
+            ])
+            remaining_p4 = nu_p4 - charged_lepton_p4
+            remaining_energy = remaining_p4[0]
+            remaining_dir = I3Direction(*remaining_p4[1:])
+
+            # All these fields are the same for all CC events
+            for cascade in (cascade0, cascade1, total_cascade):
+                cascade['time'] = charged_lepton.time
+                cascade['x'] = charged_lepton.pos.x
+                cascade['y'] = charged_lepton.pos.y
+                cascade['z'] = charged_lepton.pos.z
+
+            if charged_lepton_pdg in ELECTRONS:
+                cascade0['pdg'] = charged_lepton_pdg
+                cascade0['zenith'] = charged_lepton.dir.zenith
+                cascade0['coszen'] = np.cos(charged_lepton.dir.zenith)
+                cascade0['azimuth'] = charged_lepton.dir.azimuth
+                cascade0['directionality'] = 1
+                cascade0['energy'] = charged_lepton.energy
+                cascade0['hadr_fraction'] = 0
+                cascade0['em_equiv_energy'] = charged_lepton.energy
+                cascade0['hadr_equiv_energy'] = em2hadr(charged_lepton.energy)
+
+                cascade1['pdg'] = ParticleType.unknown
+                cascade1['zenith'] = remaining_dir.zenith
+                cascade1['coszen'] = np.cos(remaining_dir.zenith)
+                cascade1['azimuth'] = remaining_dir.azimuth
+                cascade1['directionality'] = 1
+                cascade1['energy'] = remaining_energy
+                cascade1['hadr_fraction'] = 1
+                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+                cascade1['hadr_equiv_energy'] = remaining_energy
+
+            elif charged_lepton_pdg in MUONS:
+                track = populate_track_t(mctree=mctree, particle=charged_lepton)
+
+                cascade1['pdg'] = ParticleType.unknown
+                cascade1['zenith'] = remaining_dir.zenith
+                cascade1['coszen'] = np.cos(remaining_dir.zenith)
+                cascade1['azimuth'] = remaining_dir.azimuth
+                cascade1['directionality'] = np.nan
+                cascade1['energy'] = remaining_energy
+                cascade1['hadr_fraction'] = 1
+                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+                cascade1['hadr_equiv_energy'] = remaining_energy
+
+            elif charged_lepton_pdg in TAUS:
+                # Until we can see which taus have muon decay product, this is
+                # as good as we can do (i.e. keep track as NO_TRACK, assume all
+                # tau's energy in tau-based hadronic cascade and remaining
+                # energy in a separate hadronic cascade)
+                cascade0['pdg'] = charged_lepton_pdg
+                cascade0['zenith'] = charged_lepton.dir.zenith
+                cascade0['coszen'] = np.cos(charged_lepton.dir.zenith)
+                cascade0['azimuth'] = charged_lepton.dir.azimuth
+                cascade0['directionality'] = 1
+                cascade0['energy'] = charged_lepton.mass + charged_lepton.energy
+                cascade0['hadr_fraction'] = 1
+                cascade0['em_equiv_energy'] = hadr2em(charged_lepton.energy)
+                cascade0['hadr_equiv_energy'] = charged_lepton.energy
+
+                cascade1['pdg'] = ParticleType.unknown
+                cascade1['zenith'] = remaining_dir.zenith
+                cascade1['coszen'] = np.cos(remaining_dir.zenith)
+                cascade1['azimuth'] = remaining_dir.azimuth
+                cascade1['directionality'] = None
+                cascade1['energy'] = remaining_energy
+                cascade1['hadr_fraction'] = 1
+                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+                cascade1['hadr_equiv_energy'] = remaining_energy
+
+            else:
+                raise ValueError("unrecognized PDG code : {}".format(charged_lepton_pdg))
+
+    elif interaction_type == InteractionType.NC:
+        outgoing_nu = None
+        for secondary in secondaries:
+            if (
+                int(secondary.pdg_encoding) == nu_pdg
+                and secondary.time == nu.time
+                and secondary.pos == nu.pos
+            ):
+                if outgoing_nu is None:
+                    outgoing_nu = secondary
+                elif secondary.energy > outgoing_nu.energy:
+                    outgoing_nu = secondary
+        if outgoing_nu is None:
+            msg = "ERROR: Couldn't find outgoing neutrino in NC MCTree"
+            event_truth['extraction_error'] = ExtractionError.NU_NC_OUTOING_NU_MISSING
+            sys.stderr.write(msg + "\n")
+            cascade1 = INVALID_CASCADE
+            #raise ValueError(msg)
+
+        else:
+            # No track and no cascade from lepton (escaping neutrino is
+            # invisible); energy not carried off by neutrino is dumped into a
+            # hadronic cascade
+
+            # 4-momentum
+            outgoing_nu_p4 = (
+                outgoing_nu.energy
+                * np.array([1, outgoing_nu.dir.x, outgoing_nu.dir.y, outgoing_nu.dir.z])
+            )
+            remaining_p4 = nu_p4 - outgoing_nu_p4
+            remaining_energy = remaining_p4[0]
+            remaining_dir = I3Direction(*remaining_p4[1:])
+
+            cascade1['pdg'] = ParticleType.unknown
+            cascade1['time'] = outgoing_nu.time
+            cascade1['x'] = outgoing_nu.pos.x
+            cascade1['y'] = outgoing_nu.pos.y
+            cascade1['z'] = outgoing_nu.pos.z
+            cascade1['zenith'] = remaining_dir.zenith
+            cascade1['coszen'] = np.cos(remaining_dir.zenith)
+            cascade1['azimuth'] = remaining_dir.azimuth
+            cascade1['directionality'] = 1
+            cascade1['energy'] = remaining_energy
+            cascade1['hadr_fraction'] = 1
+            cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
+            cascade1['hadr_equiv_energy'] = remaining_energy
+
+    else: # interaction_type == InteractionType.undefined
+        from icecube import genie_icetray  # pylint: disable=unused-variable
+        grd = frame['I3GENIEResultDict']
+        if not grd['nuel']: # nuel=True means elastic collision, apparently
+            grd_s = '{{{}}}'.format(
+                ', '.join("'{}': {!r}".format(k, grd[k]) for k in sorted(grd.keys()))
+            )
+            raise ValueError(
+                "Not recognized as NC, CC, or elastic. I3GENIEResultDict:\n{}".format(grd_s)
+            )
+        if len(secondaries) > 1:
+            raise NotImplementedError("more than one secondary reported in elastic collision")
+        secondary = secondaries[0]
+        secondary_pdg = ParticleType(int(secondary.pdg_encoding))
+        if secondary_pdg in EM_CASCADE_PTYPES:
+            is_em = True
+        elif secondary_pdg in HADR_CASCADE_PTYPES:
+            is_em = False
+        else:
+            raise NotImplementedError("{!r} not handled".format(secondary_pdg))
+
+        if secondary_pdg in MUONS:
+            raise NotImplementedError()
+
+        else:
+            if secondary_pdg in TAUS:
+                secondary_energy = secondary.energy + secondary.mass
+            else:
+                secondary_energy = secondary.energy
+
+            cascade1['pdg'] = int(secondary_pdg)
+            cascade1['time'] = secondary.time
+            cascade1['x'] = secondary.pos.x
+            cascade1['y'] = secondary.pos.y
+            cascade1['z'] = secondary.pos.z
+            cascade1['zenith'] = secondary.dir.zenith
+            cascade1['coszen'] = np.cos(secondary.dir.zenith)
+            cascade1['azimuth'] = secondary.dir.azimuth
+            cascade1['directionality'] = 1
+            cascade1['energy'] = secondary_energy
+            cascade1['hadr_fraction'] = 0 if is_em else 1
+            cascade1['em_equiv_energy'] = (
+                secondary_energy if is_em else hadr2em(secondary_energy)
+            )
+            cascade1['hadr_equiv_energy'] = (
+                em2hadr(secondary_energy) if is_em else secondary_energy
+            )
+
+    num_cascades = 0
+    total_cascade_pdg = None
+    total_energy = 0
+    total_hadr_equiv_energy = 0
+    total_em_equiv_energy = 0
+    total_hadr_fraction = 0
+    em_equiv_energy_weighted_dirvec = np.zeros(shape=3)
+
+    for cascade in (cascade0, cascade1):
+        if cascade['energy'] == 0:
+            continue
+        num_cascades += 1
+
+        if total_cascade_pdg is None:
+            total_cascade_pdg = cascade['pdg']
+        elif cascade['pdg'] != total_cascade_pdg:
+            total_cascade_pdg = ParticleType.unknown
+
+        total_energy += cascade['energy']
+        total_hadr_fraction += cascade['hadr_fraction']
+        em_equiv_energy = cascade['em_equiv_energy']
+        total_em_equiv_energy += em_equiv_energy
+        total_hadr_equiv_energy += cascade['hadr_equiv_energy']
+
+        # note that (theta, phi) points oppositely to direction defined by
+        # (zenith, azimuth)
+        neg_dirvec = sph2cart_np(
+            r=em_equiv_energy,
+            theta=cascade['zenith'],
+            phi=cascade['azimuth'],
+        )
+        em_equiv_energy_weighted_dirvec -= np.concatenate(neg_dirvec)
+
+    total_hadr_fraction /= num_cascades
+    em_equiv_energy_weighted_dirvec /= total_em_equiv_energy
+
+    directionality, zenith, azimuth = cart2sph_np(
+        x=-em_equiv_energy_weighted_dirvec[0],
+        y=-em_equiv_energy_weighted_dirvec[1],
+        z=-em_equiv_energy_weighted_dirvec[2],
+    )
+
+    total_cascade['pdg'] = total_cascade_pdg
+    total_cascade['time'] = nu.time
+    total_cascade['x'] = nu.pos.x
+    total_cascade['y'] = nu.pos.y
+    total_cascade['z'] = nu.pos.z
+    total_cascade['zenith'] = zenith
+    total_cascade['coszen'] = np.cos(zenith)
+    total_cascade['azimuth'] = azimuth
+    total_cascade['directionality'] = directionality
+    total_cascade['energy'] = total_energy
+    total_cascade['hadr_fraction'] = total_hadr_fraction
+    total_cascade['em_equiv_energy'] = total_em_equiv_energy
+    total_cascade['hadr_equiv_energy'] = total_hadr_equiv_energy
+
+    particles_to_record = OrderedDict(
+        [
+            ('track', track),
+            ('cascade0', cascade0),
+            ('cascade1', cascade1),
+            ('total_cascade', total_cascade),
+        ]
+    )
+
+    return particles_to_record
+
+
 def extract_truth(frame):
     """Get event truth information from a frame.
 
@@ -820,7 +1132,6 @@ def extract_truth(frame):
 
     """
     from icecube import dataclasses, icetray  # pylint: disable=unused-variable
-    from icecube.dataclasses import I3Direction  # pylint: disable=no-name-in-module
     try:
         from icecube import multinest_icetray  # pylint: disable=unused-variable
     except ImportError:
@@ -859,316 +1170,19 @@ def extract_truth(frame):
     event_truth['azimuth'] = primary.dir.azimuth
     event_truth['extraction_error'] = ExtractionError.NO_ERROR
 
+    # TODO: should we prefix I3MCWeightDict items to avoid overwriting
+    # something else?
+
     # Extract per-event info from I3MCWeightDict
-    #mcwd_copy_keys = '''
-    #    Crosssection
-    #    EnergyLost
-    #    GENIEWeight
-    #    GlobalProbabilityScale
-    #    InteractionProbabilityWeight
-    #    InteractionType
-    #    LengthInVolume
-    #    OneWeight
-    #    TargetPDGCode
-    #    TotalInteractionProbabilityWeight
-    #    weight
-    #'''.split()
     mcwd = frame['I3MCWeightDict']
-    #for key in mcwd_copy_keys:
-    for key in sorted(mcwd.keys()): #mcwd_copy_keys:
-        try:
-            event_truth[key] = mcwd[key]
-        except KeyError:
-            sys.stderr.write('Could not get "{}" from I3MCWeightDict\n'.format(key))
-            raise
+    for key in sorted(mcwd.keys()):
+        if key in event_truth:
+            raise ValueError("key '{}' already in event_truth".format(key))
+        event_truth[key] = mcwd[key]
 
     if primary_pdg in NEUTRINOS:
-        # By default, track and cascades all "zero"; convention is that
-        # cascade0 is on lepton side of interaction
-        track = deepcopy(NO_TRACK)
-        cascade0 = deepcopy(NO_CASCADE)
-        cascade1 = deepcopy(NO_CASCADE)
-        total_cascade = deepcopy(NO_CASCADE)
-
-        secondaries = mctree.get_daughters(primary)
-        interaction_type = InteractionType(int(event_truth['InteractionType']))
-
-        # neutrino 4-momentum
-        primary_p4 = (
-            primary.energy * np.array([1, primary.dir.x, primary.dir.y, primary.dir.z])
-        )
-
-        if interaction_type is InteractionType.CC:
-            # Find the charged lepton generated in the interaction
-            charged_lepton = None
-            for secondary in secondaries:
-                # charged lepton PDG one less than corresponding neutrino's PDG
-                if (
-                    abs(int(secondary.pdg_encoding)) == abs(primary_pdg) - 1
-                    and secondary.time == primary.time
-                    and secondary.pos == primary.pos
-                ):
-                    if charged_lepton is None:
-                        charged_lepton = secondary
-                    elif secondary.energy > charged_lepton.energy:
-                        charged_lepton = secondary
-
-            if charged_lepton is None:
-                msg = "ERROR: Couldn't find charged lepton daughter in CC MCTree"
-                event_truth['extraction_error'] = ExtractionError.NU_CC_LEPTON_SECONDARY_MISSING
-                sys.stderr.write(msg + "\n")
-                #raise ValueError(msg)
-                if primary_pdg in NUES + NUTAUS:
-                    cascade0 = INVALID_CASCADE
-                elif primary_pdg in NUMUS:
-                    track = INVALID_TRACK
-                else:
-                    raise ValueError()
-
-            else:
-                charged_lepton_pdg = ParticleType(int(charged_lepton.pdg_encoding))
-
-                # 4-momentum; note I3Particle.energy is particle's kinetic energy
-                # and I3Particle.dir.{x, y, z} point in direction of particle's
-                # travel while I3Particle.dir.{zenith, azimuth} point oppositely
-                # to particle's direction of travel
-                charged_lepton_p4 = np.array([
-                    charged_lepton.energy + charged_lepton.mass,
-                    charged_lepton.dir.x * charged_lepton.energy,
-                    charged_lepton.dir.y * charged_lepton.energy,
-                    charged_lepton.dir.z * charged_lepton.energy,
-                ])
-                remaining_p4 = primary_p4 - charged_lepton_p4
-                remaining_energy = remaining_p4[0]
-                remaining_dir = I3Direction(*remaining_p4[1:])
-
-                # All these fields are the same for all CC events
-                for cascade in (cascade0, cascade1, total_cascade):
-                    cascade['time'] = charged_lepton.time
-                    cascade['x'] = charged_lepton.pos.x
-                    cascade['y'] = charged_lepton.pos.y
-                    cascade['z'] = charged_lepton.pos.z
-
-                if charged_lepton_pdg in ELECTRONS:
-                    cascade0['pdg'] = charged_lepton_pdg
-                    cascade0['zenith'] = charged_lepton.dir.zenith
-                    cascade0['coszen'] = np.cos(charged_lepton.dir.zenith)
-                    cascade0['azimuth'] = charged_lepton.dir.azimuth
-                    cascade0['directionality'] = 1
-                    cascade0['energy'] = charged_lepton.energy
-                    cascade0['hadr_fraction'] = 0
-                    cascade0['em_equiv_energy'] = charged_lepton.energy
-                    cascade0['hadr_equiv_energy'] = em2hadr(charged_lepton.energy)
-
-                    cascade1['pdg'] = ParticleType.unknown
-                    cascade1['zenith'] = remaining_dir.zenith
-                    cascade1['coszen'] = np.cos(remaining_dir.zenith)
-                    cascade1['azimuth'] = remaining_dir.azimuth
-                    cascade1['directionality'] = 1
-                    cascade1['energy'] = remaining_energy
-                    cascade1['hadr_fraction'] = 1
-                    cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-                    cascade1['hadr_equiv_energy'] = remaining_energy
-
-                elif charged_lepton_pdg in MUONS:
-                    track = populate_track_t(mctree=mctree, particle=charged_lepton)
-
-                    cascade1['pdg'] = ParticleType.unknown
-                    cascade1['zenith'] = remaining_dir.zenith
-                    cascade1['coszen'] = np.cos(remaining_dir.zenith)
-                    cascade1['azimuth'] = remaining_dir.azimuth
-                    cascade1['directionality'] = np.nan
-                    cascade1['energy'] = remaining_energy
-                    cascade1['hadr_fraction'] = 1
-                    cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-                    cascade1['hadr_equiv_energy'] = remaining_energy
-
-                elif charged_lepton_pdg in TAUS:
-                    # Until we can see which taus have muon decay product, this is
-                    # as good as we can do (i.e. keep track as NO_TRACK, assume all
-                    # tau's energy in tau-based hadronic cascade and remaining
-                    # energy in a separate hadronic cascade)
-                    cascade0['pdg'] = charged_lepton_pdg
-                    cascade0['zenith'] = charged_lepton.dir.zenith
-                    cascade0['coszen'] = np.cos(charged_lepton.dir.zenith)
-                    cascade0['azimuth'] = charged_lepton.dir.azimuth
-                    cascade0['directionality'] = 1
-                    cascade0['energy'] = charged_lepton.mass + charged_lepton.energy
-                    cascade0['hadr_fraction'] = 1
-                    cascade0['em_equiv_energy'] = hadr2em(charged_lepton.energy)
-                    cascade0['hadr_equiv_energy'] = charged_lepton.energy
-
-                    cascade1['pdg'] = ParticleType.unknown
-                    cascade1['zenith'] = remaining_dir.zenith
-                    cascade1['coszen'] = np.cos(remaining_dir.zenith)
-                    cascade1['azimuth'] = remaining_dir.azimuth
-                    cascade1['directionality'] = None
-                    cascade1['energy'] = remaining_energy
-                    cascade1['hadr_fraction'] = 1
-                    cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-                    cascade1['hadr_equiv_energy'] = remaining_energy
-
-                else:
-                    raise ValueError("unrecognized PDG code : {}".format(charged_lepton_pdg))
-
-        elif interaction_type is InteractionType.NC:
-            outgoing_nu = None
-            for secondary in secondaries:
-                if (
-                    int(secondary.pdg_encoding) == primary_pdg
-                    and secondary.time == primary.time
-                    and secondary.pos == primary.pos
-                ):
-                    if outgoing_nu is None:
-                        outgoing_nu = secondary
-                    elif secondary.energy > outgoing_nu.energy:
-                        outgoing_nu = secondary
-            if outgoing_nu is None:
-                msg = "ERROR: Couldn't find outgoing neutrino in NC MCTree"
-                event_truth['extraction_error'] = ExtractionError.NU_NC_OUTOING_NU_MISSING
-                sys.stderr.write(msg + "\n")
-                cascade1 = INVALID_CASCADE
-                #raise ValueError(msg)
-
-            else:
-                # No track and no cascade from lepton (escaping neutrino is
-                # invisible); energy not carried off by neutrino is dumped into a
-                # hadronic cascade
-
-                # 4-momentum
-                outgoing_nu_p4 = (
-                    outgoing_nu.energy
-                    * np.array([1, outgoing_nu.dir.x, outgoing_nu.dir.y, outgoing_nu.dir.z])
-                )
-                remaining_p4 = primary_p4 - outgoing_nu_p4
-                remaining_energy = remaining_p4[0]
-                remaining_dir = I3Direction(*remaining_p4[1:])
-
-                cascade1['pdg'] = ParticleType.unknown
-                cascade1['time'] = outgoing_nu.time
-                cascade1['x'] = outgoing_nu.pos.x
-                cascade1['y'] = outgoing_nu.pos.y
-                cascade1['z'] = outgoing_nu.pos.z
-                cascade1['zenith'] = remaining_dir.zenith
-                cascade1['coszen'] = np.cos(remaining_dir.zenith)
-                cascade1['azimuth'] = remaining_dir.azimuth
-                cascade1['directionality'] = 1
-                cascade1['energy'] = remaining_energy
-                cascade1['hadr_fraction'] = 1
-                cascade1['em_equiv_energy'] = hadr2em(remaining_energy)
-                cascade1['hadr_equiv_energy'] = remaining_energy
-
-        else: # interaction_type is InteractionType.undefined
-            from icecube import genie_icetray  # pylint: disable=unused-variable
-            grd = frame['I3GENIEResultDict']
-            if not grd['nuel']: # nuel=True means elastic collision, apparently
-                grd_s = '{{{}}}'.format(
-                    ', '.join("'{}': {!r}".format(k, grd[k]) for k in sorted(grd.keys()))
-                )
-                raise ValueError(
-                    "Not recognized as NC, CC, or elastic. I3GENIEResultDict:\n{}".format(grd_s)
-                )
-            if len(secondaries) > 1:
-                raise NotImplementedError("more than one secondary reported in elastic collision")
-            secondary = secondaries[0]
-            secondary_pdg = ParticleType(int(secondary.pdg_encoding))
-            if secondary_pdg in EM_CASCADE_PTYPES:
-                is_em = True
-            elif secondary_pdg in HADR_CASCADE_PTYPES:
-                is_em = False
-            else:
-                raise NotImplementedError("{!r} not handled".format(secondary_pdg))
-
-            if secondary_pdg in MUONS:
-                raise NotImplementedError()
-
-            else:
-                if secondary_pdg in TAUS:
-                    secondary_energy = secondary.energy + secondary.mass
-                else:
-                    secondary_energy = secondary.energy
-
-                cascade1['pdg'] = int(secondary_pdg)
-                cascade1['time'] = secondary.time
-                cascade1['x'] = secondary.pos.x
-                cascade1['y'] = secondary.pos.y
-                cascade1['z'] = secondary.pos.z
-                cascade1['zenith'] = secondary.dir.zenith
-                cascade1['coszen'] = np.cos(secondary.dir.zenith)
-                cascade1['azimuth'] = secondary.dir.azimuth
-                cascade1['directionality'] = 1
-                cascade1['energy'] = secondary_energy
-                cascade1['hadr_fraction'] = 0 if is_em else 1
-                cascade1['em_equiv_energy'] = (
-                    secondary_energy if is_em else hadr2em(secondary_energy)
-                )
-                cascade1['hadr_equiv_energy'] = (
-                    em2hadr(secondary_energy) if is_em else secondary_energy
-                )
-
-        num_cascades = 0
-        total_cascade_pdg = None
-        total_energy = 0
-        total_hadr_equiv_energy = 0
-        total_em_equiv_energy = 0
-        total_hadr_fraction = 0
-        em_equiv_energy_weighted_dirvec = np.zeros(shape=3)
-
-        for cascade in (cascade0, cascade1):
-            if cascade['energy'] == 0:
-                continue
-            num_cascades += 1
-
-            if total_cascade_pdg is None:
-                total_cascade_pdg = cascade['pdg']
-            elif cascade['pdg'] != total_cascade_pdg:
-                total_cascade_pdg = ParticleType.unknown
-
-            total_energy += cascade['energy']
-            total_hadr_fraction += cascade['hadr_fraction']
-            em_equiv_energy = cascade['em_equiv_energy']
-            total_em_equiv_energy += em_equiv_energy
-            total_hadr_equiv_energy += cascade['hadr_equiv_energy']
-
-            # note that (theta, phi) points oppositely to direction defined by
-            # (zenith, azimuth)
-            neg_dirvec = sph2cart_np(
-                r=em_equiv_energy,
-                theta=cascade['zenith'],
-                phi=cascade['azimuth'],
-            )
-            em_equiv_energy_weighted_dirvec -= np.concatenate(neg_dirvec)
-
-        total_hadr_fraction /= num_cascades
-        em_equiv_energy_weighted_dirvec /= total_em_equiv_energy
-
-        directionality, zenith, azimuth = cart2sph_np(
-            x=-em_equiv_energy_weighted_dirvec[0],
-            y=-em_equiv_energy_weighted_dirvec[1],
-            z=-em_equiv_energy_weighted_dirvec[2],
-        )
-
-        total_cascade['pdg'] = total_cascade_pdg
-        total_cascade['time'] = primary.time
-        total_cascade['x'] = primary.pos.x
-        total_cascade['y'] = primary.pos.y
-        total_cascade['z'] = primary.pos.z
-        total_cascade['zenith'] = zenith
-        total_cascade['coszen'] = np.cos(zenith)
-        total_cascade['azimuth'] = azimuth
-        total_cascade['directionality'] = directionality
-        total_cascade['energy'] = total_energy
-        total_cascade['hadr_fraction'] = total_hadr_fraction
-        total_cascade['em_equiv_energy'] = total_em_equiv_energy
-        total_cascade['hadr_equiv_energy'] = total_hadr_equiv_energy
-
-        particles_to_record = OrderedDict(
-            [
-                ('track', track),
-                ('cascade0', cascade0),
-                ('cascade1', cascade1),
-                ('total_cascade', total_cascade),
-            ]
+        particles_to_record = process_true_neutrino(
+            nu=primary, mctree=mctree, frame=frame, event_truth=event_truth
         )
 
     elif primary_pdg == ParticleType.unknown:
@@ -1339,10 +1353,28 @@ def extract_events(
         trigger_hierarchies[name] = []
 
 
-    def extract_buffer(frame_buffer):
+    def process_frame_buffer(frame_buffer):
+        """Get event information from an set of frames that, together, should
+        completely describe a single event.
+
+        Information gathered about the event is added to the (pre-existing)
+        data structures listed in the "Out" section below.
+
+        Parameters
+        ----------
+        frame_buffer : list
+
+        Out
+        ---
+        events : list
+        photons_d : OrderedDict
+        pulses_d : OrderedDict
+        recos_d : OrderedDict
+        trigger_hierarchies : OrderedDict
+
+        """
         num_qframes = 0
         for frame in frame_buffer:
-            print(frame.Stop)
             if frame.Stop == I3Frame.DAQ:
                 num_qframes += 1
         if num_qframes > 1:
@@ -1420,8 +1452,6 @@ def extract_events(
                 extract_trigger_hierarchy(pframe, trigger_hierarchy_name)
             )
 
-        return event
-
 
     # Default to dir same path as I3 file but with ".i3<compr ext>" removed
     if outdir is None:
@@ -1435,43 +1465,33 @@ def extract_events(
 
     frame_buffer = []
     frame_counter = 0
-    finished = False
-    while not finished:
+    while i3file.more():
         try:
-            next_frame = None
-            if i3file.more():
-                try:
-                    next_frame = i3file.pop_frame()
-                    frame_counter += 1
-                except:
-                    sys.stderr.write('Failed to pop frame #{}\n'.format(frame_counter + 1))
-                    raise
+            frame = None
+            try:
+                frame = i3file.pop_frame()
+            except:
+                sys.stderr.write('Failed to pop frame #{}\n'.format(frame_counter + 1))
+                raise
+            frame_counter += 1
 
-            if next_frame is None or next_frame.Stop == I3Frame.DAQ:
-                if frame_buffer:
-                    print("extracting event from frame_buffer", [f.Stop for f in frame_buffer])
-                    event = extract_buffer(frame_buffer)
-                    frame_buffer = []
-                if next_frame is None:
-                    break
-            print('appending', next_frame.Stop, 'frame')
-            frame_buffer.append(next_frame)
+            if frame is None:
+                break
 
-        except (KeyError, ValueError) as err:
+            frame_buffer.append(frame)
+
+            if frame.Stop == I3Frame.Physics:
+                process_frame_buffer(frame_buffer)
+            elif frame.Stop == I3Frame.DAQ:
+                frame_buffer = frame_buffer[-1:]
+
+        except Exception as err:
             sys.stderr.write(
                 'ERROR! file "{}", frame #{}, error: {}\n'.format(
                     fpath, frame_counter + 1, err
                 )
             )
             raise
-
-        except MissingPhysicsFrameError:
-            sys.stderr.write(
-                'Warning: file "{}", frame chain from #{} through #{}'
-                ' lacks a Physics frame\n'.format(
-                    fpath, frame_counter - len(frame_buffer), frame_counter - 1
-                )
-            )
 
     # Sanity check that a pulse series that has corresponding TimeRange field
     # exists in all frames, since this is populated by appending to a list (so
@@ -1486,6 +1506,18 @@ def extract_events(
                 "{} present in some frames but not present in other frames"
                 .format(tr_key)
             )
+
+    if not events:
+        assert not truths
+        assert not photons
+        for key, val in pulses_d.items():
+            assert not val, "'{}': {}".format(name, val)
+        for key, val in recos_d.items():
+            assert not val, "'{}': {}".format(name, val)
+        for key, val in trigger_hierarchies.items():
+            assert not val, "'{}': {}".format(name, val)
+        sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(fpath))
+        return
 
     photon_series_dir = join(outdir, 'photons')
     pulse_series_dir = join(outdir, 'pulses')
@@ -1502,7 +1534,7 @@ def extract_events(
         mkdir(trigger_hierarchy_dir)
 
     struct_dtype_spec = []
-    for key in event.keys():
+    for key in events[0].keys():
         struct_dtype_spec.append((key, event_dtypes.get(key, np.float32)))
 
     events = np.array([tuple(ev.values()) for ev in events], dtype=struct_dtype_spec)
