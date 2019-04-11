@@ -123,9 +123,9 @@ def extract_gcd(gcd_file, outdir=None):
             for src_dir in dirs:
                 fpath = join(src_dir, src_gcd_stripped)
                 if isfile(fpath):
-                    gcd_info = load_pickle(src_gcd_stripped)
+                    gcd_info = load_pickle(fpath)
                     if outdir is not None and outdir != src_gcd_dir:
-                        copyfile(src_gcd_stripped, outfpath)
+                        copyfile(fpath, outfpath)
                     return gcd_info
 
     if not parsed:

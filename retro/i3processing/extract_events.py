@@ -1159,6 +1159,117 @@ def extract_truth(frame):
 
     # TODO: deal with charged leptons e.g. for CORSIKA/MuonGun
 
+<<<<<<< HEAD
+    is_nu = False
+    if abs_pdg in [11, 13, 15]:
+        is_charged_lepton = True
+    elif abs_pdg in [12, 14, 16]:
+        is_nu = True
+
+    et['pdg'] = pdg
+    et['x'] = primary.pos.x
+    et['y'] = primary.pos.y
+    et['z'] = primary.pos.z
+    et['time'] = primary.time
+    et['energy'] = primary.energy
+    et['coszen'] = np.cos(primary.dir.zenith)
+    et['azimuth'] = primary.dir.azimuth
+
+    # need to offset vertext by length if not NaN
+    if np.isfinite(primary.length):
+        et['x'] += primary.dir.x * primary.length
+        et['y'] += primary.dir.y * primary.length
+        et['z'] += primary.dir.z * primary.length
+        et['time'] += primary.length / primary.speed
+
+    # Get event number and generate a unique ID
+    unique_id = (
+        int(1e13) * abs_pdg + int(1e7) * run_id + event_id
+    )
+    #et['run_id'] = run_id
+    #et['sub_run_id'] = sub_run_id
+    #et['event_id'] = event_id
+    #et['sub_event_id'] = sub_event_id
+    #et['sub_event_stream'] = sub_event_stream  # string, unhandled as of now
+    #et['state'] = state
+    et['unique_id'] = unique_id
+
+    # If neutrino, get charged lepton daughter particles
+    if is_nu:
+        daughters = mctree.get_daughters(primary)
+        highest_e_daughter = None
+        longest_daughter = None
+        highest_energy = 0
+        longest_length = 0
+        for daughter in daughters:
+            d_pdg = daughter.pdg_encoding
+            d_energy = daughter.energy
+            d_length = daughter.length
+
+            # Look only at charged leptons
+            if np.abs(d_pdg) in [11, 13, 15]:
+                if d_energy > highest_energy:
+                    highest_e_daughter = daughter
+                    highest_energy = d_energy
+                if d_length > longest_length:
+                    longest_daughter = daughter
+                    longest_length = d_length
+
+        daughter_info_defaults = OrderedDict([
+            ('pdg', 0),
+            ('energy', np.nan),
+            ('length', np.nan),
+            ('coszen', np.nan),
+            ('azimuth', np.nan),
+        ])
+
+        highest_e_info = OrderedDict()
+        he_name = 'highest_energy_daughter'
+        if highest_e_daughter:
+            hei = highest_e_info
+            hei['%s_pdg' % he_name] = (
+                highest_e_daughter.pdg_encoding
+            )
+            hei['%s_energy' % he_name] = highest_e_daughter.energy
+            hei['%s_length' % he_name] = highest_e_daughter.length
+            hei['%s_coszen' % he_name] = (
+                np.cos(highest_e_daughter.dir.zenith)
+            )
+            hei['%s_azimuth' % he_name] = highest_e_daughter.dir.azimuth
+        else:
+            for key, default_value in daughter_info_defaults.items():
+                highest_e_info['%s_%s' % (he_name, key)] = default_value
+        et.update(highest_e_info)
+
+        longest_info = OrderedDict()
+        l_name = 'longest_daughter'
+        if longest_daughter is None:
+            if highest_e_daughter:
+                for subfield in daughter_info_defaults.keys():
+                    l_key = '%s_%s' % (l_name, subfield)
+                    he_key = '%s_%s' % (he_name, subfield)
+                    longest_info[l_key] = deepcopy(highest_e_info[he_key])
+            else:
+                for key, default_value in daughter_info_defaults.items():
+                    longest_info['%s_%s' % (l_name, key)] = default_value
+        else:
+            li = longest_info
+            li['%s_pdg' % l_name] = longest_daughter.pdg_encoding
+            li['%s_energy' % l_name] = longest_daughter.energy
+            li['%s_length' % l_name] = longest_daughter.length
+            li['%s_coszen' % l_name] = np.cos(longest_daughter.dir.zenith)
+            li['%s_azimuth' % l_name] = longest_daughter.dir.azimuth
+        et.update(longest_info)
+
+    # Extract info from {MC,true}Cascade
+    has_mc_true_cascade = True
+    if 'trueCascade' in frame:
+        true_cascade = frame['trueCascade']
+    elif 'MCCascade' in frame:
+        true_cascade = frame['MCCascade']
+    else:
+        has_mc_true_cascade = False
+=======
     event_truth['pdg'] = primary_pdg
     event_truth['time'] = primary.time
     event_truth['x'] = primary.pos.x
@@ -1169,6 +1280,7 @@ def extract_truth(frame):
     event_truth['coszen'] = np.cos(primary.dir.zenith)
     event_truth['azimuth'] = primary.dir.azimuth
     event_truth['extraction_error'] = ExtractionError.NO_ERROR
+>>>>>>> oscnext_second_try
 
     # TODO: should we prefix I3MCWeightDict items to avoid overwriting
     # something else?

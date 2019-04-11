@@ -63,7 +63,7 @@ MUON_KINDS = sorted([k[:-len('_muon')] for k in __all__ if k.endswith('_muon')])
 ALL_REALS = (-np.inf, np.inf)
 
 
-def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=3000):
+def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=10000):
     """Simple discrete-time track hypothesis.
 
     Use as a hypo_kernel with the DiscreteHypo class.
