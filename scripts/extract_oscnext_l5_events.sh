@@ -3,11 +3,11 @@
 start_dt=$( date +'%Y-%m-%dT%H%M%z' )
 
 chunksize=$( nproc --all )
-based="/data/icecube/sim/ic86/i3/oscNext/pass2/genie/level5/"
+based="$1"
 mydir=$( dirname "$0" )
 
 i=0
-for full_i3_filepath in $( find "$based" -name "*.i3*" | sort -V )
+find "$based" -name "*.i3*" | sort -V | while read full_i3_filepath
 do
     (( i++ )) ; (( i % chunksize == 0 )) && wait
 
