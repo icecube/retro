@@ -347,16 +347,17 @@ class Reco(object):
 
         elif method == "stopping_atm_muon_crs":
             self.setup_hypo(
-                track_kernel="stopping_table_energy_loss",
-                track_time_step=3.0,
+                track_kernel="stopping_table_energy_loss", track_time_step=3.0
             )
 
             self.generate_prior_method(
                 x=dict(kind=PRI_UNIFORM, extents=EXT_IC["x"]),
                 y=dict(kind=PRI_UNIFORM, extents=EXT_IC["y"]),
                 z=dict(kind=PRI_UNIFORM, extents=EXT_IC["z"]),
-                time=dict(kind=PRI_TIME_RANGE, extents=((0, Bound.REL), (0, Bound.Rel)),
-                track_zenith=dict(kind=PRI_COSINE, extents=((0, Bound.ABS), (np.pi/2, Bound.ABS))),
+                time=dict(kind=PRI_TIME_RANGE),
+                track_zenith=dict(
+                    kind=PRI_COSINE, extents=((0, Bound.ABS), (np.pi / 2, Bound.ABS))
+                ),
             )
 
             param_values = []
