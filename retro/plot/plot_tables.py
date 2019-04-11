@@ -17,7 +17,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-import pyfits
+from astropy.io import fits
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
@@ -32,7 +32,7 @@ writer = Writer(fps=15, bitrate=20000)
 
 log = True
 
-table = pyfits.open(sys.argv[1])
+table = fits.open(sys.argv[1])
 #table.info()
 # cut off under and overflow bins
 data = table[0].data[1:-1, 1:-1, 1:-1, 1:-1, 1:-1]

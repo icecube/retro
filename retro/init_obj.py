@@ -2,9 +2,9 @@
 # pylint: disable=wrong-import-position
 
 """
-Convenience functions for intializing major objects needed for Retro likelihood
-processing (includes instantiating objects and loading the data needed for
-them).
+Convenience functions for initializing major objects needed for Retro
+likelihood processing (includes instantiating objects and loading the data
+needed for them).
 """
 
 from __future__ import absolute_import, division, print_function
@@ -53,7 +53,7 @@ from retro.hypo import discrete_muon_kernels as dmk
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
 from retro.retro_types import (
-    HIT_T, SD_INDEXER_T, HITS_SUMMARY_T, ConfigID, TypeID, SourceID
+    HIT_T, SD_INDEXER_T, HITS_SUMMARY_T, TriggerConfigID, TriggerTypeID, TriggerSourceID
 )
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
@@ -392,7 +392,7 @@ def get_events(
         series.
 
     recos : sequence of strings, optional
-        Reeconstruction names to extract. Default is to not extract any
+        Reconstruction names to extract. Default is to not extract any
         reconstructions.
 
     triggers : sequence of strings
@@ -456,7 +456,16 @@ def get_events(
     if recos is None:
         dpath = join(events_base, 'recos')
         if isdir(dpath):
-            recos = [splitext(d)[0] for d in listdir(dpath)]
+            # TODO: make check a regex including colons, etc. so we don't
+            # accidentally exclude a valid reco that starts with "slc"
+            recos = []
+            for fname in listdir(dpath):
+                if fname[:3] in ("slc", "evt"):
+                    continue
+                fbase = splitext(fname)[0]
+                if fbase.endswith(".llhp"):
+                    continue
+                recos.append(fbase)
         else:
             recos = False
     elif isinstance(recos, str):
@@ -570,6 +579,9 @@ def iterate_file(fpath, start=0, stop=None, step=None):
         events = load_pickle(fpath)
     elif ext == '.npy':
         try:
+            # Note that memory mapping the file is useful for not consuming too
+            # much memory, and also might be essential in the future if we
+            # write recos directly to the {reco}.npy file
             events = np.load(fpath, mmap_mode='r')
         except:
             print(fpath)
@@ -654,35 +666,35 @@ def get_hits(event, path, angsens_model=None):
             source = trigger['source']
 
             # Do not expand the in-ice window based on GLOBAL triggers (of
-            # any TypeID)
-            if source == SourceID.GLOBAL:
+            # any TriggerTypeID)
+            if source == TriggerSourceID.GLOBAL:
                 continue
 
             tr_type = trigger['type']
             config_id = trigger['config_id']
             tr_time = trigger['time']
 
-            # TODO: rework to _only_ use ConfigID?
+            # TODO: rework to _only_ use TriggerConfigID?
             # Below values can be extracted by running
             # $I3_SRC/trigger-sim/resources/scripts/print_trigger_configuration.py -g GCDFILE
             trigger_handled = False
-            if tr_type == TypeID.SIMPLE_MULTIPLICITY:
-                if source == SourceID.IN_ICE:
-                    if config_id == ConfigID.SMT8_IN_ICE:
+            if tr_type == TriggerTypeID.SIMPLE_MULTIPLICITY:
+                if source == TriggerSourceID.IN_ICE:
+                    if config_id == TriggerConfigID.SMT8_IN_ICE:
                         trigger_handled = True
                         left_dt = -4e3
                         right_dt = 5e3 + 6e3
-                    elif config_id == ConfigID.SMT3_DeepCore:
+                    elif config_id == TriggerConfigID.SMT3_DeepCore:
                         trigger_handled = True
                         left_dt = -4e3
                         right_dt = 2.5e3 + 6e3
-            elif tr_type == TypeID.VOLUME:
-                if source == SourceID.IN_ICE:
+            elif tr_type == TriggerTypeID.VOLUME:
+                if source == TriggerSourceID.IN_ICE:
                     trigger_handled = True
                     left_dt = -4e3
                     right_dt = 1e3 + 6e3
-            elif tr_type == TypeID.STRING:
-                if source == SourceID.IN_ICE:
+            elif tr_type == TriggerTypeID.STRING:
+                if source == TriggerSourceID.IN_ICE:
                     trigger_handled = True
                     left_dt = -4e3
                     right_dt = 1.5e3 + 6e3
@@ -691,8 +703,8 @@ def get_hits(event, path, angsens_model=None):
                 raise NotImplementedError(
                     'Trigger TypeID {}, SourceID {}, config_id {} not'
                     ' implemented'
-                    .format(TypeID(tr_type).name, # pylint: disable=no-member
-                            SourceID(source).name, # pylint: disable=no-member
+                    .format(TriggerTypeID(tr_type).name, # pylint: disable=no-member
+                            TriggerSourceID(source).name, # pylint: disable=no-member
                             config_id)
                 )
 
@@ -940,7 +952,7 @@ def parse_args(
         group.add_argument(
             '--events-base', type=str,
             required=True,
-            help='''i3 file or a directory contining Retro .npy/.pkl events
+            help='''i3 file or a directory containing Retro .npy/.pkl events
             files'''
         )
         group.add_argument(
@@ -1018,7 +1030,7 @@ def parse_args(
             use_sd_indices = const.DC_ALL_SUBDUST_STRS_DOMS
         else:
             raise ValueError(use_doms)
-        print('nubmer of doms = {}'.format(len(use_sd_indices)))
+        print('number of doms = {}'.format(len(use_sd_indices)))
         kwargs['use_sd_indices'] = use_sd_indices
         kwargs['compute_t_indep_exp'] = not kwargs.pop('no_t_indep')
 

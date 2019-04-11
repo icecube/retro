@@ -32,21 +32,21 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 from glob import glob
-import json
 from os.path import abspath, dirname, isdir, isfile, join
 import pickle
 import sys
 
 import numpy as np
-import pyfits
+from astropy.io import fits
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import load_pickle
 from retro.i3info.angsens_model import load_angsens_model
 from retro.i3info.extract_gcd import extract_gcd
-from retro.utils.misc import expand, load_pickle, mkdir, wstderr, wstdout
+from retro.utils.misc import expand, mkdir, wstderr, wstdout
 
 
 def extract_meta_from_keys(keys, prefix):
@@ -122,7 +122,7 @@ def combine_tdi_tiles(
     phidir_min = phidir_edges.min()
     phidir_max = phidir_edges.max()
 
-    with file(tile_spec_file, 'r') as f:
+    with open(tile_spec_file, 'r') as f:
         tile_specs = [l.strip() for l in f.readlines()]
 
     table = np.zeros(shape=(n_x, n_y, n_z, n_ctdir, n_phidir), dtype=np.float32)
@@ -181,7 +181,7 @@ def combine_tdi_tiles(
                 '.fits'.format(table_hash=table_hash, **info)
             ))[0]
             try:
-                fits_table = pyfits.open(tile_fpath, mode='readonly', memmap=True)
+                fits_table = fits.open(tile_fpath, mode='readonly', memmap=True)
             except:
                 wstderr('Failed on tile_fpath "{}"'.format(tile_fpath))
                 raise
@@ -337,7 +337,7 @@ def combine_tdi_tiles(
     wstdout('saving bin edges to "{}"\n'.format(outfpath))
     pickle.dump(
         bin_edges,
-        file(outfpath, 'wb'),
+        open(outfpath, 'wb'),
         protocol=pickle.HIGHEST_PROTOCOL,
     )
 
@@ -353,7 +353,7 @@ def combine_tdi_tiles(
     wstdout('saving metadata to "{}"\n'.format(outfpath))
     pickle.dump(
         metadata,
-        file(outfpath, 'wb'),
+        open(outfpath, 'wb'),
         protocol=pickle.HIGHEST_PROTOCOL,
     )
 

@@ -36,6 +36,7 @@ import pickle
 import sys
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -104,7 +105,7 @@ def generate_ckv_tdi_table(
     """
     input_filename = None
     input_dirname = None
-    if isinstance(tdi_table, basestring):
+    if isinstance(tdi_table, string_types):
         tdi_table = expand(tdi_table)
         if isdir(tdi_table):
             input_filename = join(tdi_table, 'tdi_table.npy')

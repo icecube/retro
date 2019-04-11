@@ -11,11 +11,12 @@ __all__ = [
     'omkeys_to_sd_indices', 'get_sd_idx', 'get_string_dom_pair',
 
     # Constants
-    'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS',
+    'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS', 'MUON_REST_MASS',
+    'NOMINAL_ICE_DENSITY',
 
     # Pre-calculated values
     'COS_CKV', 'THETA_CKV', 'SIN_CKV',
-    'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'CASCADE_PHOTONS_PER_GEV',
+    'TRACK_M_PER_GEV', 'TRACK_PHOTONS_PER_M', 'EM_CASCADE_PHOTONS_PER_GEV',
     'IC_DOM_JITTER_NS', 'DC_DOM_JITTER_NS', 'POL_TABLE_DCOSTHETA',
     'POL_TABLE_DRPWR', 'POL_TABLE_DT', 'POL_TABLE_RPWR', 'POL_TABLE_RMAX',
     'POL_TABLE_NTBINS', 'POL_TABLE_NRBINS', 'POL_TABLE_NTHETABINS',
@@ -29,7 +30,10 @@ __all__ = [
     # "Enum"-like things
     'STR_ALL', 'STR_IC', 'STR_DC', 'AGG_STR_NONE', 'AGG_STR_ALL',
     'AGG_STR_SUBDET', 'DOM_ALL',
+    'SRC_OMNI', 'SRC_CKV_BETA1',
+    'SrcHandling',
 
+    'I3_Z0_DEPTH', 'BEDROCK_DEPTH',
     'NUM_STRINGS', 'NUM_DOMS_PER_STRING', 'NUM_DOMS_TOT',
 
     'IC_STRS', 'DC_STRS', 'DC_IC_STRS', 'DC_ALL_STRS', 'DC_SUBDUST_DOMS',
@@ -38,9 +42,10 @@ __all__ = [
     'ALL_STRS_DOMS_SET', 'DC_ALL_STRS_DOMS',
 
     'EMPTY_HITS', 'EMPTY_SOURCES',
-    'SRC_OMNI', 'SRC_CKV_BETA1',
 
     'PARAM_NAMES', 'PEGLEG_PARAM_NAMES', 'SCALING_PARAM_NAMES',
+
+    'dummy_pegleg_gens',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -62,13 +67,14 @@ from itertools import product
 from os.path import abspath, dirname
 import sys
 
+from enum import IntEnum
 import numpy as np
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import FTYPE
+from retro import DFLT_NUMBA_JIT_KWARGS, FTYPE, numba_jit
 from retro import retro_types
 
 
@@ -148,6 +154,26 @@ PI_BY_TWO = FTYPE(np.pi / 2)
 SPEED_OF_LIGHT_M_PER_NS = FTYPE(299792458 / 1e9)
 """Speed of light in units of m/ns"""
 
+MUON_REST_MASS = 105.65837e-3 # (GeV/c^2)
+"""Rest mass of muon in GeV/c^2, ~ from ref
+  K.A. Olive et al. (Particle Data Group), Chin. Phys. C38 , 090001 (2014)"""
+
+NOMINAL_ICE_DENSITY = 0.92062 #0.92
+"""Nominal value of South Pole Ice density in (g/cm^3 = Mg/m^3); one ref I found uses 0.917:
+  J.-H. Koehne et al. / Computer Physics Communications 184 (2013) 2070–2090,
+but this shows bias when comparing secondary-muon length vs. energy in low-energy GRECO
+simulation; 0.92 shows little to no bias, which is in the range reported at, e.g.,
+  https://icecube.wisc.edu/~mnewcomb/radio/density
+but then I looked at
+  https://icecube.wisc.edu/~dima/work/WISC/ppc/spice/ppc/rho/a_3.gif
+and extracted points from that plot via the tool at
+  https://apps.automeris.io/wpd/
+linearly interpolated this and averaged over the sub-dust-layer deepcore region
+(layer tilt turned off; z from -505.4100036621094 to -156.41000366210938 meters
+in I3 coordinates) to obtain 0.92062.
+
+But if you want to be really precise, a depth-dependent model should be used"""
+
 
 # -- Pre-calculated values -- #
 
@@ -164,10 +190,12 @@ TRACK_M_PER_GEV = FTYPE(15 / 3.3)
 """Track length per energy, in units of m/GeV"""
 
 TRACK_PHOTONS_PER_M = FTYPE(2451.4544553)
-"""Track photons per length, in units of 1/m (see ``nphotons.py``)"""
+"""Track photons per length, in units of 1/m (see
+``retro/i3info/track_and_cascade_photon_parameterizations.py``)"""
 
-CASCADE_PHOTONS_PER_GEV = FTYPE(12805.3383311)
-"""Cascade photons per energy, in units of 1/GeV (see ``nphotons.py``)"""
+EM_CASCADE_PHOTONS_PER_GEV = FTYPE(12818.970) #12805.3383311
+"""Cascade photons per energy, in units of 1/GeV (see
+``retro/i3info/track_and_cascade_photon_parameterizations.py``)"""
 
 # TODO: Is jitter same (or close enough to the same) for all DOMs? Is it
 #       different for DeepCore vs. non-DeepCore DOMs? Didn't see as much in
@@ -196,6 +224,7 @@ IC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) IceCube (i.e. non-DeepCore)
 DOM quantum efficiency. Multiplies the tabulated detection probabilities to
 yield the actual probabilitiy that a photon is detected."""
+
 #DC_DOM_QUANT_EFF = 0.35
 DC_DOM_QUANT_EFF = 1.
 """scalar in [0, 1] : (Very rough approximation!) DeepCore DOM quantum
@@ -230,11 +259,31 @@ STR_TO_PDG_INTER = {v: k for k, v in PDG_INTER_STR.items()}
 
 
 # -- "enums" -- #
+
 STR_ALL, STR_IC, STR_DC = -1, -2, -3
 AGG_STR_NONE, AGG_STR_ALL, AGG_STR_SUBDET = 0, 1, 2
 DOM_ALL = -1
 
+SRC_OMNI = np.uint32(0)
+"""Source kind designator for a point emitting omnidirectional light"""
+
+SRC_CKV_BETA1 = np.uint32(1)
+"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
+
+class SrcHandling(IntEnum):
+    """Kinds of sources each hypothesis can generate"""
+    none = 0
+    nonscaling = 1
+    scaling = 2
+
+
 # -- geom constants --- #
+
+I3_Z0_DEPTH = 1948.07
+"""Depth of IceCube coordinate system's origin beneath the "surface" (m)"""
+
+BEDROCK_DEPTH = 2832.0
+"""Depth of bedrock beneath the "surface" of IceCube (m)"""
 
 NUM_STRINGS = 86
 NUM_DOMS_PER_STRING = 60
@@ -271,13 +320,6 @@ EMPTY_HITS = np.empty(shape=0, dtype=retro_types.HIT_T)
 
 EMPTY_SOURCES = np.empty(shape=0, dtype=retro_types.SRC_T)
 
-SRC_OMNI = np.uint32(0)
-"""Source kind designator for a point emitting omnidirectional light"""
-
-SRC_CKV_BETA1 = np.uint32(1)
-"""Source kind designator for a point emitting Cherenkov light with beta ~ 1"""
-
-
 PARAM_NAMES = [
     'time', 'x', 'y', 'z', 'track_azimuth', 'track_zenith', 'cascade_azimuth',
     'cascade_zenith', 'track_energy', 'cascade_energy', 'cascade_d_zenith',
@@ -290,3 +332,10 @@ PEGLEG_PARAM_NAMES = ['track_energy']
 
 SCALING_PARAM_NAMES = ['cascade_energy']
 """Hypothesis param names handled by scaling, if it's used"""
+
+
+@numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+def dummy_pegleg_gens(gen_idx): # pylint: disable=unused-argument
+    """Pegleg generator stand-in that yields "empty" / "none" values that pass Numba
+    type checking but don't contribute to photon expectations"""
+    yield (EMPTY_SOURCES,), (SrcHandling.none,)
