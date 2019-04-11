@@ -1865,17 +1865,19 @@ class Reco(object):
         outputfiles_basename = join(tmpdir, "")
         print(dn_kwargs)
         try:
-            sampler = dynesty.DynamicNestedSampler(
+            sampler = dynesty.NestedSampler(
                 loglikelihood=self.loglike,
                 prior_transform=self.prior,
                 method='unif',
                 bound='single',
+                update_interval=1,
                 **dn_kwargs
             )
             print('sampler instantiated')
             sampler.run_nested(
                                 maxiter=5000,
-                                nlive_init=n_live,
+                                maxcall=30000,
+                                dlogz=0.1,
                                 )
             #fit_meta = sampler.results
         finally:
