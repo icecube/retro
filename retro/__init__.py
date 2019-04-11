@@ -19,6 +19,7 @@ __all__ = [
     'UITYPE',
     'DEBUG',
     'DFLT_NUMBA_JIT_KWARGS',
+    'PL_NUMBA_JIT_KWARGS',
     'DFLT_PULSE_SERIES',
     'DFLT_ML_RECO_NAME',
     'DFLT_SPE_RECO_NAME',
@@ -121,6 +122,15 @@ DFLT_NUMBA_JIT_KWARGS = dict(
     error_model='numpy',
 )
 """kwargs to pass to numba.jit"""
+PL_NUMBA_JIT_KWARGS = dict(
+    nopython=True,
+    nogil=True,
+    fastmath=True,
+    cache=True,
+    error_model='numpy',
+    parallel=True,
+)
+"""kwargs to pass to numba.jit for parallel computation"""
 
 DFLT_PULSE_SERIES = 'SRTInIcePulses'
 """Default pulse series to extract from events"""
