@@ -8,12 +8,15 @@ Statistics
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    'DELTA_LLH_CUTOFF',
+    'EST_KINDS',
     'poisson_llh',
     'partial_poisson_llh',
     'weighted_average',
     'weighted_percentile',
     'test_weighted_percentile',
     'estimate_from_llhp',
+    'fit_cdf',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -31,26 +34,30 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
+from collections import OrderedDict
 from copy import copy, deepcopy
-import enum
 from os.path import abspath, dirname
 import sys
+import time
+import traceback
+import warnings
 
 import numpy as np
-from scipy.special import gammaln
-from scipy import stats
-import xarray as xr
+from scipy import interpolate, optimize, special, stats
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 import retro
-from retro.utils.misc import sort_dict
+from retro.priors import PRI_INTERP, PRI_AZ_INTERP
 
 
 DELTA_LLH_CUTOFF = 15.5
 """What values of the llhp space to include relative to the max-LLH point"""
+
+EST_KINDS = ['lower_bound', 'mean', 'median', 'max', 'upper_bound']
 
 
 def poisson_llh(expected, observed):
@@ -73,7 +80,7 @@ def poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    return observed * np.log(expected) - expected - gammaln(observed + 1)
+    return observed * np.log(expected) - expected - special.gammaln(observed + 1)
 
 
 def partial_poisson_llh(expected, observed):
@@ -98,7 +105,7 @@ def partial_poisson_llh(expected, observed):
         Log likelihood(s)
 
     """
-    return observed * np.log(expected) - gammaln(observed + 1)
+    return observed * np.log(expected) - special.gammaln(observed + 1)
 
 
 @retro.numba_jit(**retro.DFLT_NUMBA_JIT_KWARGS)
@@ -179,17 +186,7 @@ def test_weighted_percentile():
         2.759355114021582,
     ])
     assert np.allclose(vals, ref_vals, atol=0, rtol=1e-12)
-
-
-class Est(enum.IntEnum):
-    max = 0
-    mean = 1
-    median = 2
-    lower_bound = 3
-    upper_bound = 4
-
-EST_KINDS = [k.name for k in Est]
-NUM_EST_KINDS = len(Est)
+    print("<< PASS : test_weighted_percentile >>")
 
 
 def estimate_from_llhp(
@@ -197,6 +194,7 @@ def estimate_from_llhp(
     treat_dims_independently,
     use_prob_weights,
     priors_used=None,
+    meta=None,
 ):
     """Evaluate estimate for reconstruction quantities given the MultiNest
     points of LLH space exploration. .
@@ -218,15 +216,17 @@ def estimate_from_llhp(
         Specify the priors used to remove their effects on the posterior LLH
         distributions; if not specified, effects of priors will not be removed
 
+    meta : OrderedDict, optional
+
     Returns
     -------
-    estimate : xarray.DataArray
-        Dims are "kind" (coords "max", "mean", "median", "lower_bound", and
-        "upper_bound") and "param" (coords are parameter names, such as
-        "time", "x", "track_energy", etc.). "lower_bound" and "upper_bound"
-        come from the `percentile` bounds.
+    estimate : numpy struct array
+    estimation_settings : OrderedDict
 
     """
+    if meta is None:
+        meta = OrderedDict()
+
     # currently spherical averages are not supported if dimensions are treated
     # independently (how would this even work?)
     averages_spherically_aware = not treat_dims_independently
@@ -287,6 +287,10 @@ def estimate_from_llhp(
                 w = None
             elif prior_kind == 'log_normal' and dim == 'cascade_d_zenith':
                 w = None
+            elif prior_kind in (PRI_AZ_INTERP, PRI_INTERP):
+                x, pdf, low, high = prior_params[-4:]
+                pdf_interp = interpolate.UnivariateSpline(x=x, y=pdf, ext='raise', s=0)
+                w = 1 / pdf_interp(llhp[dim])
             else:
                 raise NotImplementedError(
                     'Prior "{}" for dimension/param "{}" is unhandled'
@@ -333,14 +337,34 @@ def estimate_from_llhp(
         cut_postproc_llh = postproc_llh[cut]
         cut_weights = weights[cut]
 
-    # -- Construct ndarray for storing estimated values -- #
+    # -- Construct struct array for storing estimates and per-event metadata -- #
 
-    est = np.empty(shape=(NUM_EST_KINDS, num_params), dtype=np.float32)
+    sub_dtype = np.dtype([(kind, np.float32) for kind in EST_KINDS], align=False)
+    est_dtype = np.dtype(
+        [(dim, sub_dtype) for dim in params]
+        + [('max_llh', np.float32), ('max_postproc_llh', np.float32), ('num_llh', np.uint32)]
+        + [(key, val.dtype) for key, val in meta.items()],
+        align=False,
+    )
+
+    # Note that filling with nan does not fail but stuffs undefined (?) values
+    # to int/uint fields
+    estimate = np.full(shape=1, fill_value=np.nan, dtype=est_dtype)
+
+    estimate['num_llh'] = num_llh
+    estimate['max_llh'] = max_llh
+    estimate['max_postproc_llh'] = max_postproc_llh
+    for key, val in meta.items():
+        estimate[key] = val
 
     # -- Calculate each kind of estimate for each param -- #
 
-    # TODO: document origin of constants used: why 13.35, 86.65?
-    qth_percentiles = np.array([13.35, 50.0, 86.65])
+    one_sigma_range = 100 * 0.682689492137086
+    qth_percentiles = np.array([
+        50.0 - one_sigma_range / 2,
+        50.0,
+        50.0 + one_sigma_range / 2,
+    ])
 
     for param_idx, param in enumerate(params):
         if treat_dims_independently:
@@ -359,7 +383,7 @@ def estimate_from_llhp(
             this_weights = cut_weights
             param_vals = cut_llhp[param]
 
-        est[Est.max, param_idx] = param_at_max_llh
+        estimate[param]['max'] = param_at_max_llh
 
         if 'azimuth' in param:
             # azimuth is a cyclic function, so need some special treatment to
@@ -383,32 +407,24 @@ def estimate_from_llhp(
                 weights=this_weights,
             )
 
-        est[Est.mean, param_idx] = mean
-        est[Est.median, param_idx] = median
-        est[Est.lower_bound, param_idx] = lower
-        est[Est.upper_bound, param_idx] = upper
+        estimate[param]['mean'] = mean
+        estimate[param]['median'] = median
+        estimate[param]['lower_bound'] = lower
+        estimate[param]['upper_bound'] = upper
 
-    # -- Construct xarray.DataArray for storing estimates & metadata -- #
+    # -- Construct estimates array & metadata dict -- #
 
-    estimate = xr.DataArray(
-        data=est,
-        dims=('kind', 'param'),
-        coords=dict(kind=EST_KINDS, param=params),
-        attrs=sort_dict(dict(
-            estimation_settings=sort_dict(dict(
-                treat_dims_independently=treat_dims_independently,
-                use_prob_weights=use_prob_weights,
-                remove_priors=remove_priors,
-                averages_spherically_aware=averages_spherically_aware,
-            )),
-            num_llh=num_llh,
-            max_llh=max_llh,
-            max_postproc_llh=max_postproc_llh,
-        ))
+    estimation_settings = OrderedDict(
+        [
+            ('treat_dims_independently', np.bool8(treat_dims_independently)),
+            ('use_prob_weights', np.bool8(use_prob_weights)),
+            ('remove_priors', np.bool8(remove_priors)),
+            ('averages_spherically_aware', np.bool8(averages_spherically_aware)),
+        ]
     )
 
     if not averages_spherically_aware:
-        return estimate
+        return estimate, estimation_settings
 
     # Idea: calculate the meanns on the sphere for az and zen combined
     #
@@ -443,13 +459,174 @@ def estimate_from_llhp(
         # normalize if r > 0
         r = np.sqrt(np.sum(np.square(cart_mean)))
         if r == 0:
-            est[Est.mean, zen_idx] = 0
-            est[Est.mean, az_idx] = 0
+            estimate[zen_name]['mean'] = 0
+            estimate[az_name]['mean'] = 0
         else:
-            est[Est.mean, zen_idx] = np.arccos(cart_mean[2] / r)
-            est[Est.mean, az_idx] = np.arctan2(cart_mean[1], cart_mean[0]) % (2 * np.pi)
+            estimate[zen_name]['mean'] = np.arccos(cart_mean[2] / r)
+            estimate[az_name]['mean'] = np.arctan2(cart_mean[1], cart_mean[0]) % (2 * np.pi)
 
-    return estimate
+    return estimate, estimation_settings
+
+
+def fit_cdf(x, cdf, distribution, x_is_data, verbosity=0):
+    """Fit a distribution to a supplied cumulative distribution function (cdf).
+    This allows fitting a distribution to weighted data.
+
+    Parameters
+    ----------
+    x : array of same len as `cdf`
+        `cdf` is sampled at `x` (sorted datapoints)
+
+    cdf : array of same len as `x`, values in [0, 1]
+        Values of the cdf at each `x`
+
+    distribution : scipy.stats.distributions
+        Continuous distribution with same interface as scipy's distributions
+
+    x_is_data : bool
+        If the `x` values are datapoint values, use these for getting a simple
+        first guess fit
+
+    Returns
+    -------
+    best_fit_params
+    first_guess_params
+    mse
+
+    """
+    if not x_is_data:
+        raise NotImplementedError()
+
+    if isinstance(distribution, string_types):
+        distribution = getattr(stats.distributions, distribution)
+
+    t0 = time.time()
+    if distribution.shapes:
+        shape_param_names = [d.strip() for d in distribution.shapes.split(',')]
+    else:
+        shape_param_names = []
+
+    all_param_names = shape_param_names + ['loc', 'scale']
+
+    failed_params = OrderedDict([(p, np.nan) for p in all_param_names])
+    retval = OrderedDict(
+        [
+            ('name', distribution.name),
+            ('success', False),
+            ('total_time', np.nan),
+
+            ('first_guess_params', failed_params),
+            ('first_guess_mse', np.nan),
+            ('first_guess_fit_time', np.nan),
+            ('first_guess_exception', None),
+
+            ('best_fit_params', failed_params),
+            ('best_fit_mse', np.nan),
+            ('best_fit_time', np.nan),
+            ('best_fit_exception', None),
+        ]
+    )
+    key_valfmts = OrderedDict([
+        ('name', 's'),
+        ('success', ''),
+        ('total_time', '.3f'),
+
+        ('first_guess_params', ''),
+        ('first_guess_mse', '.3e'),
+        ('first_guess_fit_time', '.1f'),
+        ('first_guess_exception', 's'),
+
+        ('best_fit_params', ''),
+        ('best_fit_mse', '.3e'),
+        ('best_fit_time', '.1f'),
+        ('best_fit_exception', 's'),
+    ])
+    def print_info(retval, keys=None, stream=sys.stderr):
+        """print info about fits"""
+        if keys is None:
+            keys = retval.keys()
+        string = ''
+        for key in keys:
+            val = retval[key]
+            if key.endswith('_params'):
+                val = ', '.join('{} = {:.15e}'.format(*xx) for xx in val.items())
+            elif key.endswith('_exception') and val is not None:
+                val = '\n' + val
+            string += ('{} : {:%s}\n' % key_valfmts[key]).format(key.rjust(25), val)
+        string += '\n'
+        stream.write(string)
+        stream.flush()
+
+    # Get first-guess param values by fitting unweighted data
+    t1 = time.time()
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            first_guess = distribution.fit(x)
+    except Exception:
+        exc_info = sys.exc_info()
+        try:
+            retval['first_guess_fit_time'] = time.time() - t1
+            retval['first_guess_exception'] = ''.join(traceback.format_exception(*exc_info))
+            retval['total_time'] = time.time() - t0
+        finally:
+            del exc_info
+        sys.stderr.write('ERROR: Dist "{}" first guess fit failed.\n'.format(distribution.name))
+        if verbosity > 0:
+            print_info(retval)
+        return retval
+
+    first_guess_params = OrderedDict([(p, v) for p, v in zip(all_param_names, first_guess)])
+    first_guess_cdf = distribution.cdf(x, **first_guess_params)
+    first_guess_mse = np.mean(np.square(first_guess_cdf - cdf))
+    t2 = time.time()
+    retval['first_guess_params'] = first_guess_params
+    retval['first_guess_mse'] = first_guess_mse
+    retval['first_guess_fit_time'] = t2 - t1
+
+    if verbosity > 0:
+        print_info(
+            retval,
+            keys=['name', 'first_guess_params', 'first_guess_mse', 'first_guess_fit_time'],
+        )
+
+    # Use weighted average as first-guess for 'loc' param instead?
+    #weighted_average = np.average(a=data, weights=weights)
+
+    # -- Perform fit to weighted data via CDF -- #
+
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            best_fit, _ = optimize.curve_fit(distribution.cdf, x, cdf, p0=first_guess)
+    except Exception:
+        exc_info = sys.exc_info()
+        try:
+            retval['best_fit_time'] = time.time() - t2
+            retval['best_fit_exception'] = ''.join(traceback.format_exception(*exc_info))
+            retval['total_time'] = time.time() - t0
+        finally:
+            del exc_info
+        sys.stderr.write('ERROR: Dist "{}" best fit failed.\n'.format(distribution.name))
+        if verbosity > 0:
+            print_info(retval)
+        return retval
+
+    best_fit_params = OrderedDict([(p, v) for p, v in zip(all_param_names, best_fit)])
+    best_fit_cdf = distribution.cdf(x, **best_fit_params)
+    best_fit_mse = np.mean(np.square(best_fit_cdf - cdf))
+    t3 = time.time()
+    if np.all(np.isfinite(best_fit_params.values())) and np.isfinite(best_fit_mse):
+        retval['success'] = True
+    retval['best_fit_params'] = best_fit_params
+    retval['best_fit_mse'] = best_fit_mse
+    retval['best_fit_time'] = t3 - t2
+    retval['total_time'] = t3 - t0
+
+    if verbosity > 0:
+        print_info(retval)
+
+    return retval
 
 
 if __name__ == '__main__':

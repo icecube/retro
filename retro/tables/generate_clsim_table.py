@@ -608,13 +608,13 @@ def generate_clsim_table(
 
     assert n_bins > 0
 
-    if n_bins > 2**32:
-        raise ValueError(
-            'The flattened bin index in CLSim is represented by uint32 which'
-            ' has a max of 4 294 967 296, but the binning specified comes to'
-            ' {} bins ({} times too many).'
-            .format(n_bins, n_bins / 2**32)
-        )
+    #if n_bins > 2**32:
+    #    raise ValueError(
+    #        'The flattened bin index in CLSim is represented by uint32 which'
+    #        ' has a max of 4 294 967 296, but the binning specified comes to'
+    #        ' {} bins ({} times too many).'
+    #        .format(n_bins, n_bins / 2**32)
+    #    )
 
     # For now, hole ice model is hard-coded in our CLSim branch to "9"
     # (i.e., as.9, aka new25)

@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=wrong-import-position, invalid-name
 
+
+"""
+Retro Reco: global defs
+"""
+
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    '__version__',
     'GarbageInputError',
     'NUMBA_AVAIL',
     'numba_jit',
@@ -51,8 +57,15 @@ from six import PY2, PY3
 from six.moves import cPickle as pickle
 import numpy as np
 
+from ._version import get_versions
+
+
+__version__ = get_versions()['version']
+del get_versions
+
 
 class GarbageInputError(ValueError):
+    """Input value is bad"""
     pass
 
 
@@ -89,7 +102,7 @@ else:
 
 # -- Datatype choices for consistency throughout code -- #
 
-FTYPE = np.float64
+FTYPE = np.float32
 """Datatype to use for explicitly-typed floating point numbers"""
 
 UITYPE = np.int64
@@ -100,7 +113,13 @@ UITYPE = np.int64
 DEBUG = 0
 """Level of debug messages to display"""
 
-DFLT_NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, fastmath=True, cache=True)
+DFLT_NUMBA_JIT_KWARGS = dict(
+    nopython=True,
+    nogil=True,
+    fastmath=True,
+    cache=True,
+    error_model='numpy',
+)
 """kwargs to pass to numba.jit"""
 
 DFLT_PULSE_SERIES = 'SRTInIcePulses'

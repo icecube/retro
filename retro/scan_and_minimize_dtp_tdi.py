@@ -29,13 +29,14 @@ limitations under the License.'''
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
-import cPickle as pickle
+import pickle
 from os import makedirs
 from os.path import abspath, dirname, isdir, join
 import sys
 import time
 
 import numpy as np
+from six import string_types
 from pyswarm import pso
 
 if __name__ == '__main__' and __package__ is None:
@@ -268,7 +269,7 @@ def main(events_fpath, tables_dir, geom_file=None, start_index=None,
             for dims in SCAN_DIM_SETS:
                 print('Scanning dimension(s): %s...' % str(dims))
 
-                if isinstance(dims, basestring):
+                if isinstance(dims, string_types):
                     dims = [dims]
 
                 nominal_params = deepcopy(truth_params)

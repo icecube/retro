@@ -21,6 +21,7 @@ import sys
 import time
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -53,7 +54,7 @@ def generate_time_indep_tables(
     t_indep_table : numpy.ndarray of size (n_r, n_costheta, n_costhetadir, n_deltaphidir)
 
     """
-    if isinstance(kind, basestring):
+    if isinstance(kind, string_types):
         kind = [kind]
     kinds = [k.strip().lower() for k in kind]
 
