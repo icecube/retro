@@ -1,0 +1,2 @@
+include versioneer.py
+include retro/_version.py

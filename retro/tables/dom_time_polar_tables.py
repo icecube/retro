@@ -141,7 +141,7 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
 
     """
     # pylint: disable=no-member
-    import pyfits
+    from astropy.io import fits
 
     assert 0 <= scale <= 1
     assert exponent >= 0
@@ -152,7 +152,7 @@ def load_t_r_theta_table(fpath, depth_idx, scale=1, exponent=1,
             empty_dicts.append({})
         photon_info = RetroPhotonInfo(*empty_dicts)
 
-    with pyfits.open(expand(fpath)) as table:
+    with fits.open(expand(fpath)) as table:
         data = force_little_endian(table[0].data)
 
         if scale == exponent == 1:

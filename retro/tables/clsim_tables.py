@@ -15,7 +15,6 @@ __all__ = [
     'CLSIM_TABLE_METANAME_PROTO',
     'CLSIM_TABLE_METANAME_RE',
     'CLSIM_TABLE_TILE_FNAME_PROTO',
-    'CLSIM_TABLE_TILE_FNAME_RE',
     'CLSIM_TABLE_TILE_METANAME_PROTO',
     'CLSIM_TABLE_TILE_METANAME_RE',
     'interpret_clsim_table_fname',
@@ -45,6 +44,7 @@ import sys
 from time import time
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -266,7 +266,7 @@ def interpret_clsim_table_fname(fname):
     try:
         info['string'] = int(info['string'])
     except ValueError:
-        assert isinstance(info['string'], basestring)
+        assert isinstance(info['string'], string_types)
         assert info['string'].lower() in ['ic', 'dc']
         info['string'] = info['string'].lower()
 
@@ -309,7 +309,7 @@ def load_clsim_table_minimal(
     fpath : string
         Path to file to be loaded. If the file has extension 'zst', 'zstd', or
         'zstandard', the file will be decompressed using the `python-zstandard`
-        Python library before passing to `pyfits` for interpreting.
+        Python library before passing to `fits` for interpreting.
 
     t_is_residual_time : bool, optional
         Whether time dimension in table represents residual time. If a value is
@@ -373,11 +373,11 @@ def load_clsim_table_minimal(
                 wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
 
     elif isfile(fpath):
-        import pyfits
+        from astropy.io import fits
         fobj = get_decompressd_fobj(fpath)
         pf_table = None
         try:
-            pf_table = pyfits.open(fobj, mode='readonly', memmap=mmap)
+            pf_table = fits.open(fobj, mode='readonly', memmap=mmap)
 
             header = pf_table[0].header  # pylint: disable=no-member
             table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
@@ -555,7 +555,7 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract,
     fpath : string
         Path to file to be loaded. If the file has extension 'zst', 'zstd', or
         'zstandard', the file will be decompressed using the `python-zstandard`
-        Python library before passing to `pyfits` for interpreting.
+        Python library before passing to `fits` for interpreting.
 
     Returns
     -------

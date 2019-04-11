@@ -21,6 +21,7 @@ __all__ = [
     'pegleg_muon',
     'const_energy_loss_muon',
     'table_energy_loss_muon',
+    'stopping_table_energy_loss_muon',
     'pegleg_eval',
 ]
 
@@ -52,8 +53,8 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.const import (
-    COS_CKV, SIN_CKV, THETA_CKV, SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV,
-    TRACK_PHOTONS_PER_M, SRC_CKV_BETA1, EMPTY_SOURCES
+    SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M,
+    SRC_CKV_BETA1, EMPTY_SOURCES
 )
 from retro.retro_types import SRC_T
 
@@ -126,10 +127,6 @@ def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=10000
     sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
-
-    sources['ckv_theta'] = THETA_CKV
-    sources['ckv_costheta'] = COS_CKV
-    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
 
@@ -212,10 +209,6 @@ def const_energy_loss_muon(
     sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
-
-    sources['ckv_theta'] = THETA_CKV
-    sources['ckv_costheta'] = COS_CKV
-    sources['ckv_sintheta'] = SIN_CKV
 
     return sources
 
@@ -336,9 +329,53 @@ def table_energy_loss_muon(
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
 
-    sources['ckv_theta'] = THETA_CKV
-    sources['ckv_costheta'] = COS_CKV
-    sources['ckv_sintheta'] = SIN_CKV
+    return sources
+
+
+def stopping_table_energy_loss_muon(
+    time,
+    x,
+    y,
+    z,
+    track_azimuth,
+    track_zenith,
+    dt,
+):
+    muon_max_length = 2.0e3  # meters
+
+    # NOTE: add pi to make dir vector go in "math-standard" vector notation
+    # (vector components point in direction of motion), as opposed to "IceCube"
+    # vector notation (vector components point opposite to direction of
+    # motion).
+
+    opposite_zenith = np.pi - track_zenith
+    opposite_azimuth = np.pi + track_azimuth
+
+    dir_costheta = math.cos(opposite_zenith)
+    dir_sintheta = math.sin(opposite_zenith)
+
+    dir_cosphi = np.cos(opposite_azimuth)
+    dir_sinphi = np.sin(opposite_azimuth)
+
+    dir_x = dir_sintheta * dir_cosphi
+    dir_y = dir_sintheta * dir_sinphi
+    dir_z = dir_costheta
+
+    # TODO: intelligently set the length of the muon based on (x,y,z,zen,az) to
+    # minimize number of sources
+    muon_length = muon_max_length
+    muon_energy = MUEN_INTERP(muon_length)
+
+    sources = table_energy_loss_muon(
+        time=time - muon_length/SPEED_OF_LIGHT_M_PER_NS,
+        x=x - dir_x*muon_length,
+        y=y - dir_y*muon_length,
+        z=z - dir_z*muon_length,
+        track_energy=muon_energy,
+        track_azimuth=track_azimuth,
+        track_zenith=track_zenith,
+        dt=dt,
+    )
 
     return sources
 

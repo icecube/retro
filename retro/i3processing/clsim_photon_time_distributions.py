@@ -31,12 +31,13 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-import cPickle as pickle
+import pickle
 from os.path import abspath, dirname, expanduser, expandvars, isfile
 import re
 import sys
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -129,7 +130,7 @@ def generate_histos(
 
     """
     photons_file_name = None
-    if isinstance(photons, basestring):
+    if isinstance(photons, string_types):
         photons_file_name = photons
         photons = load_pickle(photons_file_name)
     dom_info = photons['doms']
@@ -138,7 +139,7 @@ def generate_histos(
     bin_widths = np.diff(bin_edges)
 
     gcd_info = None
-    if isinstance(gcd, basestring):
+    if isinstance(gcd, string_types):
         exp_gcd = expanduser(expandvars(gcd))
         if exp_gcd.endswith('.pkl'):
             gcd_info = load_pickle(exp_gcd)

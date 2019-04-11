@@ -62,7 +62,7 @@ import sys
 import time
 
 import numpy as np
-import pyfits
+from astropy.io import fits
 
 if __name__ == '__main__' and __package__ is None:
     PARENT_DIR = dirname(dirname(abspath(__file__)))
@@ -345,7 +345,7 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
         for name in names:
             fpath = join(tables_dir,
                          tdi_meta['fbasename'] + '_' + name + '.fits')
-            with pyfits.open(fpath) as fits_file:
+            with fits.open(fpath) as fits_file:
                 tmp = fits_file[0].data # pylint: disable=no-member
             if name == 'survival_prob':
                 binned_sp = tmp
@@ -512,14 +512,14 @@ def generate_tdi_table(tables_dir, geom_fpath, dom_tables_hash, n_phibins,
     for array, name in arrays_names:
         fname = '%s_%s.fits' % (tdi_meta['fbasename'], name)
         fpath = join(tables_dir, fname)
-        hdulist = pyfits.HDUList([
-            pyfits.PrimaryHDU(array.astype(np.float32)),
-            pyfits.ImageHDU(xyz_shape),
-            pyfits.ImageHDU(np.array([x_lims, y_lims, z_lims])),
-            pyfits.ImageHDU(geom)
+        hdulist = fits.HDUList([
+            fits.PrimaryHDU(array.astype(np.float32)),
+            fits.ImageHDU(xyz_shape),
+            fits.ImageHDU(np.array([x_lims, y_lims, z_lims])),
+            fits.ImageHDU(geom)
         ])
         print('Saving %s to file\n%s\n' % (name, fpath))
-        hdulist.writeto(fpath, clobber=True)
+        hdulist.writeto(fpath, clobber=True)  # pylint: disable=unexpected-keyword-arg
     t5 = time.time()
     print('Time to save tables to disk: {} s'.format(np.round(t5 - t4, 3)))
     print('')

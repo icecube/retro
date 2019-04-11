@@ -10,6 +10,7 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     'ZSTD_EXTENSIONS',
     'COMPR_EXTENSIONS',
+    'LazyLoader',
     'expand',
     'mkdir',
     'get_decompressd_fobj',
@@ -21,15 +22,22 @@ __all__ = [
     'get_file_md5',
     'sort_dict',
     'convert_to_namedtuple',
-    'event_to_hypo_params',
-    'hypo_to_track_params',
+    'check_kwarg_keys',
+    'validate_and_convert_enum',
+    'hrlist2list',
+    'hr_range_formatter',
+    'list2hrlist',
     'generate_anisotropy_str',
     'generate_unique_ids',
     'get_primary_interaction_str',
     'get_primary_interaction_tex',
-    'hrlist2list',
-    'hr_range_formatter',
-    'list2hrlist'
+    'get_partial_match_expr',
+    'AZ_REGEX',
+    'ZEN_REGEX',
+    'deduce_sph_pairs',
+    'RE_INVALID_CHARS',
+    'RE_LEADING_INVALID',
+    'make_valid_python_name',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -49,26 +57,27 @@ limitations under the License.'''
 
 import base64
 from collections import Iterable, OrderedDict, Mapping, Sequence
-import pickle
 import errno
 import hashlib
 from numbers import Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
+import pickle
 import re
 import struct
 from subprocess import Popen, PIPE
 import sys
 
+import enum
 import numpy as np
-from six import BytesIO
+from six import BytesIO, string_types
 from six.moves import map, range
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const, retro_types
+from retro import const
 
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
@@ -76,6 +85,48 @@ ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
 
 COMPR_EXTENSIONS = ZSTD_EXTENSIONS
 """Extensions recognized as a compressed file"""
+
+
+class LazyLoader(object):
+    """Lazily load a pickled datasource only when its data or SHA-256 sum is
+    requested.
+
+    Parameters
+    ----------
+    datasource : str
+        Path to the pickle file; must exist at time of instantiation (though
+        not guaranteed to exist at first access time)
+
+    """
+    def __init__(self, datasource):
+        self._datasource = abspath(expanduser(expandvars(datasource)))
+        self._data = None
+        self._sha256 = None
+        self._is_loaded = False
+
+    def _load_data(self):
+        sdata = open(self.datasource).read()
+        self._sha256 = hashlib.sha256(sdata).hexdigest()
+        self._data = pickle.loads(sdata)
+
+    @property
+    def datasource(self):
+        """Absolute path to file from which data is loaded"""
+        return self._datasource
+
+    @property
+    def data(self):
+        """Un-pickled contents of the file"""
+        if not self._is_loaded:
+            self._load_data()
+        return self._data
+
+    @property
+    def sha256(self):
+        """SHA256 sum of the file"""
+        if not self._is_loaded:
+            self._load_data()
+        return self._sha256
 
 
 def expand(p):
@@ -350,82 +401,76 @@ def convert_to_namedtuple(val, nt_type):
     raise TypeError('Cannot convert %s to %s' % (type(val), nt_type))
 
 
-# -- Retro-specific functions -- #
+def check_kwarg_keys(required_keys, provided_kwargs, meta_name, message_pfx):
+    """Check that provided kwargs' keys match exactly those required.
+
+    Raises
+    ------
+    TypeError
+        if there are too few or too many keys provided
+
+    """
+    provided_keys = provided_kwargs.keys()
+
+    provided_set = set(provided_keys)
+    required_set = set(required_keys)
+
+    missing_set = required_set.difference(provided_set)
+    excess_set = provided_set.difference(required_set)
+    missing_keys = [k for k in required_keys if k in missing_set]
+    excess_keys = [k for k in provided_keys if k in excess_set]
+
+    kwarg_error_strings = []
+    if missing_keys:
+        kwarg_error_strings.append("missing {} {}".format(meta_name, missing_keys))
+    if excess_keys:
+        kwarg_error_strings.append("excess {} {}".format(meta_name, excess_keys))
+    if kwarg_error_strings:
+        raise TypeError("{} ".format(message_pfx) + " and ".join(kwarg_error_strings))
 
 
-def generate_anisotropy_str(anisotropy):
-    """Generate a string from anisotropy specification parameters.
+def validate_and_convert_enum(val, enum_type, none_evaluates_to=None):
+    """Validate `val` and, if valid, convert to the `enum_type` specified.
+
+    Validation proceeds via the following rules:
+        * If `val` is None and `none_evaluates_to` is specified, return the value
+          of `none_evaluates_to`
+        * If `val` is an enum, only accept it if it is of type `enum_type`.
+        * If `val` is a string, lookup the corresponding enum in `enum_type` by
+          attribute name (trying also lowercase and uppercase versions of `val`
+        * Otherwise, attempt to extract the enum corresponding to `val` by
+          calling the `enum_type` with `val`, i.e., ``enum_type(val)``
 
     Parameters
     ----------
-    anisotropy : None or tuple of values
+    val : numeric, string, or `enum_type`
+    enum_type : enum
+    none_evaluates_to : enum, optional
 
     Returns
     -------
-    anisotropy_str : string
+    enum : `enum_type`
 
     """
-    if anisotropy is None:
-        anisotropy_str = 'none'
-    else:
-        anisotropy_str = '_'.join(str(param) for param in anisotropy)
-    return anisotropy_str
+    if val is None:
+        val = none_evaluates_to
 
+    if isinstance(type(val), enum.EnumMeta) and not isinstance(val, enum_type):
+        raise TypeError(
+            "if enum, `val` must be a {}; got {} instead".format(enum_type, type(val))
+        )
 
-def generate_unique_ids(events):
-    """Generate unique IDs from `event` fields because people are lazy
-    inconsiderate assholes.
+    if isinstance(val, string_types):
+        if hasattr(enum_type, val):
+            val = getattr(enum_type, val)
+        elif hasattr(enum_type, val.lower()):
+            val = getattr(enum_type, val.lower())
+        elif hasattr(enum_type, val.upper()):
+            val = getattr(enum_type, val.upper())
 
-    Parameters
-    ----------
-    events : array of int
+    val = enum_type(val)
 
-    Returns
-    -------
-    uids : array of int
-
-    """
-    uids = (
-        events
-        + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
-    ).astype(int)
-    return uids
-
-
-def get_primary_interaction_str(event):
-    """Produce simple string representation of event's primary neutrino and
-    interaction type (if present).
-
-    Parameters
-    ----------
-    event : Event namedtuple
-
-    Returns
-    -------
-    flavintstr : string
-
-    """
-    pdg = int(event.neutrino.pdg)
-    inter = int(event.interaction)
-    return const.PDG_INTER_STR[(pdg, inter)]
-
-
-def get_primary_interaction_tex(event):
-    """Produce latex representation of event's primary neutrino and interaction
-    type (if present).
-
-    Parameters
-    ----------
-    event : Event namedtuple
-
-    Returns
-    -------
-    flavinttex : string
-
-    """
-    pdg = int(event.neutrino.pdg)
-    inter = int(event.interaction)
-    return const.PDG_INTER_TEX[(pdg, inter)]
+    return val
 
 
 WHITESPACE_RE = re.compile(r'\s')
@@ -597,7 +642,7 @@ def list2hrlist(lst):
     if isinstance(lst, Number):
         lst = [lst]
     lst = sorted(lst)
-    rtol = np.finfo(np.float32).resolution
+    rtol = np.finfo(np.float32).resolution  # pylint: disable=no-member
     n = len(lst)
     result = []
     scan = 0
@@ -623,6 +668,201 @@ def list2hrlist(lst):
     return ','.join(result)
 
 
+# -- Retro-specific functions -- #
+
+
+def generate_anisotropy_str(anisotropy):
+    """Generate a string from anisotropy specification parameters.
+
+    Parameters
+    ----------
+    anisotropy : None or tuple of values
+
+    Returns
+    -------
+    anisotropy_str : string
+
+    """
+    if anisotropy is None:
+        anisotropy_str = 'none'
+    else:
+        anisotropy_str = '_'.join(str(param) for param in anisotropy)
+    return anisotropy_str
+
+
+def generate_unique_ids(events):
+    """Generate unique IDs from `event` fields because people are lazy
+    inconsiderate assholes.
+
+    Parameters
+    ----------
+    events : array of int
+
+    Returns
+    -------
+    uids : array of int
+
+    """
+    uids = (
+        events
+        + 1e7 * np.cumsum(np.concatenate(([0], np.diff(events) < 0)))
+    ).astype(int)
+    return uids
+
+
+def get_primary_interaction_str(event):
+    """Produce simple string representation of event's primary neutrino and
+    interaction type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavintstr : string
+
+    """
+    pdg = int(event.neutrino.pdg)
+    inter = int(event.interaction)
+    return const.PDG_INTER_STR[(pdg, inter)]
+
+
+def get_primary_interaction_tex(event):
+    """Produce latex representation of event's primary neutrino and interaction
+    type (if present).
+
+    Parameters
+    ----------
+    event : Event namedtuple
+
+    Returns
+    -------
+    flavinttex : string
+
+    """
+    pdg = int(event.neutrino.pdg)
+    inter = int(event.interaction)
+    return const.PDG_INTER_TEX[(pdg, inter)]
+
+
+def get_partial_match_expr(word, minchars):
+    """Generate regex sub-expression for matching first `minchars` of a word or
+    `minchars` + 1 of the word, or `minchars` + 2, ....
+
+    Adapted from user sberry at https://stackoverflow.com/a/13405331
+
+    Parameters
+    ----------
+    word : str
+    minchars : int
+
+    Returns
+    -------
+    expr : str
+
+    """
+    return '|'.join(word[:i] for i in range(len(word), minchars - 1, -1))
+
+
+AZ_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("azimuthal", 2)))
+
+ZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("zenith", 3)))
+
+#COSZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("coszenith", 4)))
+#
+#CZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("czenith", 2)))
+#
+#COSINEZEN_REGEX = re.compile(r"(.*)({})(.*)".format(get_partial_match_expr("cosinezenith", 7)))
+
+
+def deduce_sph_pairs(param_names):
+    """Attempt to deduce which param names represent (azimuth, zenith) pairs.
+
+    Parameters
+    ----------
+    param_names : iterable of strings
+
+    Returns
+    -------
+    sph_pairs : tuple of 2-tuples of strings
+        Sub-tuples are sorted to ensure result is the same regardless of the order
+        of `param_names`
+
+    Notes
+    -----
+    Works by looking for the prefix and suffix (if any) surrounding
+      "az", "azi", ..., or "azimuthal"
+    to match the prefix and suffix (if any) surrounding
+      "zen", "zeni", ..., or "zenith"
+
+    Examples
+    --------
+    >>> deduce_sph_pairs(("x", "azimuth", "zenith", "cascade_azimuth", "cascade_zenith"))
+    (('azimuth', 'zenith'), ('cascade_azimuth', 'cascade_zenith'))
+
+    """
+    az_pfxs_and_sfxs = OrderedDict()
+    zen_pfxs_and_sfxs = OrderedDict()
+    for param_name in param_names:
+        match = AZ_REGEX.match(param_name)
+        if match:
+            groups = match.groups()
+            az_pfxs_and_sfxs[param_name] = (groups[0], groups[2])
+            continue
+        match = ZEN_REGEX.match(param_name)
+        if match:
+            groups = match.groups()
+            zen_pfxs_and_sfxs[param_name] = (groups[0], groups[2])
+            continue
+
+    sph_pairs = []
+    matched_params = []
+    for az_param_name, az_pfx_and_sfx in az_pfxs_and_sfxs.items():
+        zen_match_found = False
+        for zen_param_name, zen_pfx_and_sfx in zen_pfxs_and_sfxs.items():
+            if zen_pfx_and_sfx == az_pfx_and_sfx and zen_param_name != az_param_name:
+                zen_match_found = True
+                pair = (az_param_name, zen_param_name)
+                sph_pairs.append(pair)
+                matched_params.extend(pair)
+        if not zen_match_found:
+            print(
+                'Warning: azimuthal parameter "{}" has no {{cos}}zenith counterpart'
+                .format(az_param_name)
+            )
+
+    for zen_param_name in zen_pfxs_and_sfxs.keys():
+        if zen_param_name not in matched_params:
+            print(
+                'Warning: {{cos}}zenith parameter "{}" has no azimuthal counterpart'
+                .format(zen_param_name)
+            )
+
+    return tuple(sorted(sph_pairs))
+
+
+RE_INVALID_CHARS = re.compile('[^0-9a-zA-Z_]')
+RE_LEADING_INVALID = re.compile('^[^a-zA-Z_]+')
+def make_valid_python_name(name):
+    """Make a name a valid Python identifier.
+
+    From user Triptych at http://stackoverflow.com/questions/3303312
+
+    Parameters
+    ----------
+    name : string
+
+    Returns
+    -------
+    valid_name : string
+
+    """
+    # Remove invalid characters
+    name = RE_INVALID_CHARS.sub('', name)
+    # Remove leading characters until we find a letter or underscore
+    name = RE_LEADING_INVALID.sub('', name)
+    return name
 
 
 if __name__ == '__main__':

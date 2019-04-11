@@ -92,6 +92,7 @@ class InvPolySampler(object):
 
         cdf_poly = pdf.integ()
         cdf_poly -= cdf_poly(self.domain[0])
+        cdf_poly /= cdf_poly(self.domain[1])
 
         # Make sure we have a valid CDF
         assert np.isclose(cdf_poly(self.domain[0]), 0)

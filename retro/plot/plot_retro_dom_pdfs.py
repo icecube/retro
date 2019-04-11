@@ -25,6 +25,7 @@ import numpy as np
 #import matplotlib as mpl
 #mpl.use('agg')
 import matplotlib.pyplot as plt
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
@@ -72,9 +73,9 @@ def plot_run_info(
     data_or_sim_label : string, optional
 
     """
-    if isinstance(files, basestring):
+    if isinstance(files, string_types):
         files = [files]
-    if isinstance(labels, basestring):
+    if isinstance(labels, string_types):
         labels = [labels]
 
     outdir = expand(outdir)

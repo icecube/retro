@@ -35,7 +35,7 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 import numpy as np
-import pyfits
+from astropy.io import fits
 import yt
 
 if __name__ == '__main__' and __package__ is None:
@@ -101,7 +101,7 @@ def visualize_tables(table_path, geom_file, slices=True, projections=True,
     data = {}
     fname = '%s_survival_prob.fits' % tables_basename
     fpath = join(tables_dir, fname)
-    with pyfits.open(fpath) as fits_file:
+    with fits.open(fpath) as fits_file:
         survival_prob = fits_file[0].data
         ma = survival_prob.max()
         print('Max survival probability         :', ma)
@@ -138,7 +138,7 @@ def visualize_tables(table_path, geom_file, slices=True, projections=True,
         for dim in ['x', 'y', 'z']:
             fname = '%s_avg_photon_%s.fits' % (tables_basename, dim)
             fpath = join(tables_dir, fname)
-            with pyfits.open(fpath) as fits_file:
+            with fits.open(fpath) as fits_file:
                 d = np.zeros_like(survival_prob)
                 d[mask] = fits_file[0].data[mask]
                 #d = -fits_file[0].data
