@@ -856,8 +856,8 @@ class Reco(object):
             llh, pegleg_idx, scalefactor = get_llh_retval[:3]
             aux_values.append(get_llh_retval[3:])
 
-            assert np.isfinite(llh), 'LLH not finite'
-            assert llh < 0, 'LLH positive'
+            assert np.isfinite(llh), "LLH not finite: {}".format(llh)
+            assert llh <= 0, "LLH positive: {}".format(llh)
 
             additional_results = []
 
