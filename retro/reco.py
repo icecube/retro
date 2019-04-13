@@ -41,6 +41,7 @@ from shutil import rmtree
 import sys
 from tempfile import mkdtemp
 import time
+import traceback
 
 import numpy as np
 from six import string_types
@@ -75,6 +76,8 @@ from retro.utils.get_arg_names import get_arg_names
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
 
+
+LLH_FUDGE_SUMMAND = 1000
 
 METHODS = set(
     [
@@ -518,13 +521,50 @@ class Reco(object):
         else:
             raise ValueError("Unknown `Method` {}".format(method))
 
-    def run(self, methods):
+    def _print_non_fatal_exception(self, method):
+        """Print to stderr a detailed message about a failure in reconstruction
+        that is non-fatal.
+
+        Parameters
+        ----------
+        method : str
+            The name of the function, e.g. "run_crs" or "run_multinest"
+
+        """
+        id_fields = ["run_id", "sub_run_id", "event_id", "sub_event_id"]
+        id_str = ", ".join(
+            "{} {}".format(f, self.current_event["header"][f]) for f in id_fields
+        )
+        sys.stderr.write(
+            "ERROR! Reco function {method} failed on event index {idx} ({id_str}) in"
+            ' path "{fpath}". Recording reco failure and continuing to next event)'
+            "\n{tbk}\n".format(
+                method=method,
+                idx=self.current_event_idx,
+                fpath=self.events_kw["events_base"],
+                id_str=id_str,
+                tbk="".join(traceback.format_exc()),
+            )
+        )
+
+    def run(self, methods, redo_failed=False, redo_all=False):
         """Run reconstruction(s) on events.
 
         Parameters
         ----------
         methods : string or iterable thereof
             Each must be one of `METHODS`
+
+        redo_failed : bool, optional
+            If `True`, reconstruct each event that either hasn't been
+            reconstructed with each method (as usual), but also re-reconstruct
+            events that have `fit_status` indicating a failure (i.e., all
+            events will be reconstructed using a given method unless they have
+            for that method `fit_status == FitStatus.OK`). Default is False.
+
+        redo_all : bool, optional
+            If `True`, reconstruct all events with all `methods`, regardless if
+            they have been reconstructed with these methods previously.
 
         """
         start_time = time.time()
@@ -553,10 +593,24 @@ class Reco(object):
                     estimates = np.load(estimate_outf, mmap_mode="r")
                     fit_status = estimates[self.current_event_idx]["fit_status"]
                     if fit_status != FitStatus.NotSet:
-                        print(
-                            'Method "{}" already run on event; skipping'.format(method)
-                        )
-                        continue
+                        if redo_all:
+                            print(
+                                'Method "{}" already run on event; redoing'.format(
+                                    method
+                                )
+                            )
+                        elif redo_failed and fit_status != FitStatus.OK:
+                            print(
+                                'Method "{}" already run on event but failed'
+                                " previously; retrying".format(method)
+                            )
+                        else:
+                            print(
+                                'Method "{}" already run on event; skipping'.format(
+                                    method
+                                )
+                            )
+                            continue
 
                 print('Running "{}" reconstruction'.format(method))
                 try:
@@ -679,7 +733,9 @@ class Reco(object):
             plt_fpath_base = self.event_prefix + "priors"
             fig.savefig(plt_fpath_base + ".png", dpi=120)
 
-    def generate_loglike_method(self, param_values, log_likelihoods, aux_values, t_start):
+    def generate_loglike_method(
+        self, param_values, log_likelihoods, aux_values, t_start
+    ):
         """Generate the LLH callback method `self.loglike` for a given event.
 
         Parameters
@@ -854,10 +910,11 @@ class Reco(object):
             )
 
             llh, pegleg_idx, scalefactor = get_llh_retval[:3]
+            llh -= LLH_FUDGE_SUMMAND
             aux_values.append(get_llh_retval[3:])
 
             assert np.isfinite(llh), "LLH not finite: {}".format(llh)
-            assert llh <= 0, "LLH positive: {}".format(llh)
+            # assert llh <= 0, "LLH positive: {}".format(llh)
 
             additional_results = []
 
@@ -951,7 +1008,7 @@ class Reco(object):
         if "cascade_d_zenith" in dim_names and "cascade_d_azimuth" in dim_names:
             derived_dim_names += ["cascade_zenith", "cascade_azimuth"]
 
-        aux_names = ['zero_dllh', 'lower_dllh', 'upper_dllh']
+        aux_names = ["zero_dllh", "lower_dllh", "upper_dllh"]
 
         all_dim_names = dim_names + derived_dim_names + aux_names
 
@@ -1056,6 +1113,18 @@ class Reco(object):
             meta=fit_meta,
         )
 
+        # Test if the LLH would be positive without LLH_FUDGE_SUMMAND
+        if estimate["max_llh"] > LLH_FUDGE_SUMMAND:
+            sys.stderr.write("WARNING: Postive LLH\n")
+            fit_status = fit_meta.get("fit_status", FitStatus.OK)
+            if fit_status not in (FitStatus.OK, FitStatus.PositiveLLH):
+                raise ValueError(
+                    "Postive LLH *and* fit failed with fit_status = {}".format(
+                        fit_status
+                    )
+                )
+            fit_meta["fit_status"] = FitStatus.PositiveLLH
+
         # Place reco in current event in case another reco depends on it
         if "recos" not in self.current_event:
             self.current_event["recos"] = OrderedDict()
@@ -1154,6 +1223,7 @@ class Reco(object):
         """
         raise NotImplementedError("`run_with_truth` not implemented")  # TODO
         t0 = time.time()
+
         if rand_dims is None:
             rand_dims = []
 
@@ -1254,11 +1324,25 @@ class Reco(object):
            130 (2) (2006), pp. 253-264.
 
         """
-        if use_sobol:
-            from sobol import i4_sobol
         t0 = time.time()
 
+        if use_sobol:
+            from sobol import i4_sobol
+
         rand = np.random.RandomState(seed=seed)
+
+        # Record kwargs user supplied (after translation & standardization)
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_crs)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
+
+        run_info = OrderedDict(
+            [
+                ("method", "run_crs"),
+                ("method_description", "CRS2spherical+lm+sampling"),
+                ("kwargs", kwargs),
+            ]
+        )
 
         n_opt_params = self.n_opt_params
         # absolute minimum number of points necessary
@@ -1291,7 +1375,8 @@ class Reco(object):
             [(d, min_vertex_std[d]) for d in opt_param_names if d in min_vertex_std]
         )
 
-        # storage for info about stddev, whether met, and when met
+        # storage for info about stddev, whether met, and when met; defaults
+        # should indicate failure if not explicitly set elsewhere
         vertex_std = np.full(
             shape=1,
             fill_value=np.nan,
@@ -1302,10 +1387,16 @@ class Reco(object):
             shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()]
         )
 
-        # Record kwargs user supplied (after translation & standardization)
-        kwargs = OrderedDict()
-        for arg_name in get_arg_names(self.run_crs)[1:]:
-            kwargs[arg_name] = locals()[arg_name]
+        # default values (in case of failure and these don't get set elsewhere,
+        # then these values will be returned)
+        fit_status = FitStatus.GeneralFailure
+        iter_num = 0
+        stopping_flag = 0
+        llh_std = np.nan
+        no_improvement_counter = 0
+        num_simplex_successes = 0
+        num_mutation_successes = 0
+        num_failures = 0
 
         # setup arrays to store points
         s_cart = np.zeros(shape=(n_live, n_cart))
@@ -1337,197 +1428,200 @@ class Reco(object):
             x[n_cart::2] = x_spher["az"]
             return x
 
-        # generate initial population
-        for i in range(n_live):
-            # Sobol seems to do slightly better than pseudo-random numbers
-            if use_sobol:
-                # Note we start at seed=1 since for n_live=1 this puts the
-                # first point in the middle of the range for all params (0.5),
-                # while seed=0 produces all zeros (the most extreme point
-                # possible, which will bias the distribution away from more
-                # likely values).
-                x, _ = i4_sobol(
-                    dim_num=n_opt_params,  # number of dimensions
-                    seed=i + 1,  # Sobol sequence number
-                )
-            else:
-                x = rand.uniform(0, 1, n_opt_params)
-
-            # Apply prior xforms to `param_vals` (contents are overwritten)
-            param_vals = np.copy(x)
-            self.prior(param_vals)
-
-            # Always use prior-xformed angles
-            x[n_cart:] = param_vals[n_cart:]
-
-            # Only use xformed Cart params if NOT using priors during operation
-            if not use_priors:
-                x[:n_cart] = param_vals[:n_cart]
-
-            # Break up into Cartesian and spherical coordinates
-            s_cart[i] = x[:n_cart]
-            s_spher[i]["zen"] = x[n_cart + 1 :: 2]
-            s_spher[i]["az"] = x[n_cart::2]
-            fill_from_spher(s_spher[i])
-            llh[i] = func(x)
-
-        best_llh = np.min(llh)
-        no_improvement_counter = -1
-
-        # optional bookkeeping
-        num_simplex_successes = 0
-        num_mutation_successes = 0
-        num_failures = 0
-        stopping_flag = 0
-
-        # minimizer loop
-        for iter_num in range(max_iter):
-            if iter_num % REPORT_AFTER == 0:
-                print(
-                    "simplex: %i, mutation: %i, failed: %i"
-                    % (num_simplex_successes, num_mutation_successes, num_failures)
-                )
-
-            # compute value for break condition 1
-            llh_std = np.std(llh)
-
-            # compute value for break condition 3
-            for dim, cond in min_vertex_std.items():
-                vertex_std[dim] = std = np.std(s_cart[:, opt_param_names.index(dim)])
-                vertex_std_met[dim] = met = std < cond
-                if met:
-                    if vertex_std_met_at_iter[dim] == -1:
-                        vertex_std_met_at_iter[dim] = iter_num
+        try:
+            # generate initial population
+            for i in range(n_live):
+                # Sobol seems to do slightly better than pseudo-random numbers
+                if use_sobol:
+                    # Note we start at seed=1 since for n_live=1 this puts the
+                    # first point in the middle of the range for all params (0.5),
+                    # while seed=0 produces all zeros (the most extreme point
+                    # possible, which will bias the distribution away from more
+                    # likely values).
+                    x, _ = i4_sobol(
+                        dim_num=n_opt_params,  # number of dimensions
+                        seed=i + 1,  # Sobol sequence number
+                    )
                 else:
-                    vertex_std_met_at_iter[dim] = -1
+                    x = rand.uniform(0, 1, n_opt_params)
 
-            # break condition 1
-            if llh_std < min_llh_std:
-                stopping_flag = 1
-                break
+                # Apply prior xforms to `param_vals` (contents are overwritten)
+                param_vals = np.copy(x)
+                self.prior(param_vals)
 
-            # break condition 2
-            if no_improvement_counter > max_noimprovement:
-                stopping_flag = 2
-                break
+                # Always use prior-xformed angles
+                x[n_cart:] = param_vals[n_cart:]
 
-            # break condition 3
-            if len(min_vertex_std) > 0 and all(vertex_std_met.values()):
-                stopping_flag = 3
-                break
+                # Only use xformed Cart params if NOT using priors during operation
+                if not use_priors:
+                    x[:n_cart] = param_vals[:n_cart]
 
-            new_best_llh = np.min(llh)
+                # Break up into Cartesian and spherical coordinates
+                s_cart[i] = x[:n_cart]
+                s_spher[i]["zen"] = x[n_cart + 1 :: 2]
+                s_spher[i]["az"] = x[n_cart::2]
+                fill_from_spher(s_spher[i])
+                llh[i] = func(x)
 
-            if new_best_llh < best_llh:
-                best_llh = new_best_llh
-                no_improvement_counter = 0
-            else:
-                no_improvement_counter += 1
+            best_llh = np.min(llh)
+            no_improvement_counter = -1
 
-            worst_idx = np.argmax(llh)
-            best_idx = np.argmin(llh)
+            # optional bookkeeping
+            num_simplex_successes = 0
+            num_mutation_successes = 0
+            num_failures = 0
+            stopping_flag = 0
 
-            # choose n_opt_params random points but not best
-            choice = rand.choice(n_live - 1, n_opt_params, replace=False)
-            choice[choice >= best_idx] += 1
+            # minimizer loop
+            for iter_num in range(max_iter):
+                if iter_num % REPORT_AFTER == 0:
+                    print(
+                        "simplex: %i, mutation: %i, failed: %i"
+                        % (num_simplex_successes, num_mutation_successes, num_failures)
+                    )
 
-            # Cartesian centroid
-            centroid_cart = (
-                np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx]
-            ) / n_opt_params
+                # compute value for break condition 1
+                llh_std = np.std(llh)
 
-            # reflect point
-            new_x_cart = 2 * centroid_cart - s_cart[choice[-1]]
+                # compute value for break condition 3
+                for dim, cond in min_vertex_std.items():
+                    vertex_std[dim] = std = np.std(
+                        s_cart[:, opt_param_names.index(dim)]
+                    )
+                    vertex_std_met[dim] = met = std < cond
+                    if met:
+                        if vertex_std_met_at_iter[dim] == -1:
+                            vertex_std_met_at_iter[dim] = iter_num
+                    else:
+                        vertex_std_met_at_iter[dim] = -1
 
-            # spherical centroid
-            centroid_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
-            centroid_spher["x"] = (
-                np.sum(s_spher["x"][choice[:-1]], axis=0) + s_spher["x"][best_idx]
-            ) / n_opt_params
-            centroid_spher["y"] = (
-                np.sum(s_spher["y"][choice[:-1]], axis=0) + s_spher["y"][best_idx]
-            ) / n_opt_params
-            centroid_spher["z"] = (
-                np.sum(s_spher["z"][choice[:-1]], axis=0) + s_spher["z"][best_idx]
-            ) / n_opt_params
-            fill_from_cart(centroid_spher)
+                # break condition 1
+                if llh_std < min_llh_std:
+                    stopping_flag = 1
+                    break
 
-            # reflect point
-            new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
-            reflect(s_spher[choice[-1]], centroid_spher, new_x_spher)
+                # break condition 2
+                if no_improvement_counter > max_noimprovement:
+                    stopping_flag = 2
+                    break
 
-            if use_priors:
-                outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
-            else:
-                outside = False
+                # break condition 3
+                if len(min_vertex_std) > 0 and all(vertex_std_met.values()):
+                    stopping_flag = 3
+                    break
 
-            if not outside:
-                new_llh = func(create_x(new_x_cart, new_x_spher))
+                new_best_llh = np.min(llh)
 
-                if new_llh < llh[worst_idx]:
-                    # found better point
-                    s_cart[worst_idx] = new_x_cart
-                    s_spher[worst_idx] = new_x_spher
-                    llh[worst_idx] = new_llh
-                    num_simplex_successes += 1
-                    continue
+                if new_best_llh < best_llh:
+                    best_llh = new_best_llh
+                    no_improvement_counter = 0
+                else:
+                    no_improvement_counter += 1
 
-            # mutation
-            w = rand.uniform(0, 1, n_cart)
-            new_x_cart2 = (1 + w) * s_cart[best_idx] - w * new_x_cart
+                worst_idx = np.argmax(llh)
+                best_idx = np.argmin(llh)
 
-            # first reflect at best point
-            reflected_new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
-            reflect(new_x_spher, s_spher[best_idx], reflected_new_x_spher)
+                # choose n_opt_params random points but not best
+                choice = rand.choice(n_live - 1, n_opt_params, replace=False)
+                choice[choice >= best_idx] += 1
 
-            new_x_spher2 = np.zeros_like(new_x_spher)
+                # Cartesian centroid
+                centroid_cart = (
+                    np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx]
+                ) / n_opt_params
 
-            # now do a combination of best and reflected point with weight w
-            for dim in ("x", "y", "z"):
-                w = rand.uniform(0, 1, n_spher_param_pairs)
-                new_x_spher2[dim] = (1 - w) * s_spher[best_idx][
-                    dim
-                ] + w * reflected_new_x_spher[dim]
-            fill_from_cart(new_x_spher2)
+                # reflect point
+                new_x_cart = 2 * centroid_cart - s_cart[choice[-1]]
 
-            if use_priors:
-                outside = np.any(new_x_cart2 < 0) or np.any(new_x_cart2 > 1)
-            else:
-                outside = False
+                # spherical centroid
+                centroid_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
+                centroid_spher["x"] = (
+                    np.sum(s_spher["x"][choice[:-1]], axis=0) + s_spher["x"][best_idx]
+                ) / n_opt_params
+                centroid_spher["y"] = (
+                    np.sum(s_spher["y"][choice[:-1]], axis=0) + s_spher["y"][best_idx]
+                ) / n_opt_params
+                centroid_spher["z"] = (
+                    np.sum(s_spher["z"][choice[:-1]], axis=0) + s_spher["z"][best_idx]
+                ) / n_opt_params
+                fill_from_cart(centroid_spher)
 
-            if not outside:
-                new_llh = func(create_x(new_x_cart2, new_x_spher2))
+                # reflect point
+                new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
+                reflect(s_spher[choice[-1]], centroid_spher, new_x_spher)
 
-                if new_llh < llh[worst_idx]:
-                    # found better point
-                    s_cart[worst_idx] = new_x_cart2
-                    s_spher[worst_idx] = new_x_spher2
-                    llh[worst_idx] = new_llh
-                    num_mutation_successes += 1
-                    continue
+                if use_priors:
+                    outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
+                else:
+                    outside = False
 
-            # if we get here no method was successful in replacing worst
-            # point -> start over
-            num_failures += 1
+                if not outside:
+                    new_llh = func(create_x(new_x_cart, new_x_spher))
 
-        print(CRS_STOP_FLAGS[stopping_flag])
+                    if new_llh < llh[worst_idx]:
+                        # found better point
+                        s_cart[worst_idx] = new_x_cart
+                        s_spher[worst_idx] = new_x_spher
+                        llh[worst_idx] = new_llh
+                        num_simplex_successes += 1
+                        continue
 
-        run_info = OrderedDict(
-            [
-                ("method", "run_crs"),
-                ("method_description", "CRS2spherical+lm+sampling"),
-                ("kwargs", kwargs),
-            ]
-        )
+                # mutation
+                w = rand.uniform(0, 1, n_cart)
+                new_x_cart2 = (1 + w) * s_cart[best_idx] - w * new_x_cart
+
+                # first reflect at best point
+                reflected_new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
+                reflect(new_x_spher, s_spher[best_idx], reflected_new_x_spher)
+
+                new_x_spher2 = np.zeros_like(new_x_spher)
+
+                # now do a combination of best and reflected point with weight w
+                for dim in ("x", "y", "z"):
+                    w = rand.uniform(0, 1, n_spher_param_pairs)
+                    new_x_spher2[dim] = (1 - w) * s_spher[best_idx][
+                        dim
+                    ] + w * reflected_new_x_spher[dim]
+                fill_from_cart(new_x_spher2)
+
+                if use_priors:
+                    outside = np.any(new_x_cart2 < 0) or np.any(new_x_cart2 > 1)
+                else:
+                    outside = False
+
+                if not outside:
+                    new_llh = func(create_x(new_x_cart2, new_x_spher2))
+
+                    if new_llh < llh[worst_idx]:
+                        # found better point
+                        s_cart[worst_idx] = new_x_cart2
+                        s_spher[worst_idx] = new_x_spher2
+                        llh[worst_idx] = new_llh
+                        num_mutation_successes += 1
+                        continue
+
+                # if we get here no method was successful in replacing worst
+                # point -> start over
+                num_failures += 1
+
+            print(CRS_STOP_FLAGS[stopping_flag])
+            fit_status = FitStatus.OK
+
+        except KeyboardInterrupt:
+            raise
+
+        except Exception:
+            self._print_non_fatal_exception(method=run_info["method"])
+
         fit_meta = OrderedDict(
             [
-                ("fit_status", np.int8(FitStatus.OK)),
+                ("fit_status", np.int8(fit_status)),
                 ("iterations", np.uint32(iter_num)),
                 ("stopping_flag", np.int8(stopping_flag)),
                 ("llh_std", np.float32(llh_std)),
                 ("no_improvement_counter", np.uint32(no_improvement_counter)),
-                ("vertex_std", vertex_std),
-                ("vertex_std_met_at_iter", vertex_std_met_at_iter),
+                ("vertex_std", vertex_std),  # already typed
+                ("vertex_std_met_at_iter", vertex_std_met_at_iter),  # already typed
                 ("num_simplex_successes", np.uint32(num_simplex_successes)),
                 ("num_mutation_successes", np.uint32(num_mutation_successes)),
                 ("num_failures", np.uint32(num_failures)),
@@ -1539,13 +1633,15 @@ class Reco(object):
 
     def run_scipy(self, method, eps):
         """Use an optimizer from scipy"""
-        from scipy import optimize
-
         t0 = time.time()
+
+        from scipy import optimize
 
         kwargs = OrderedDict()
         for arg_name in get_arg_names(self.run_scipy)[1:]:
             kwargs[arg_name] = locals()[arg_name]
+
+        run_info = OrderedDict([("method", "run_scipy"), ("kwargs", kwargs)])
 
         # initial guess
         x0 = 0.5 * np.ones(shape=self.n_opt_params)
@@ -1561,15 +1657,25 @@ class Reco(object):
         settings = OrderedDict()
         settings["eps"] = eps
 
-        if method == "differential_evolution":
-            optimize.differential_evolution(func, bounds=bounds, popsize=100)
-        else:
-            optimize.minimize(func, x0, method=method, bounds=bounds, options=settings)
+        fit_status = FitStatus.GeneralFailure
+        try:
+            if method == "differential_evolution":
+                optimize.differential_evolution(func, bounds=bounds, popsize=100)
+            else:
+                optimize.minimize(
+                    func, x0, method=method, bounds=bounds, options=settings
+                )
+            fit_status = FitStatus.OK
 
-        run_info = OrderedDict([("method", "run_scipy"), ("kwargs", kwargs)])
+        except KeyboardInterrupt:
+            raise
+
+        except Exception:
+            self._print_non_fatal_exception(method=run_info["method"])
+
         fit_meta = OrderedDict(
             [
-                ("fit_status", np.int8(FitStatus.OK)),
+                ("fit_status", np.int8(fit_status)),
                 ("run_time", np.float32(time.time() - t0)),
             ]
         )
@@ -1578,9 +1684,18 @@ class Reco(object):
 
     def run_skopt(self):
         """Use an optimizer from scikit-optimize"""
+        t0 = time.time()
+
         from skopt import gp_minimize  # , forest_minimize
 
-        t0 = time.time()
+        settings = OrderedDict(
+            [
+                ("acq_func", "EI"),  # acquisition function
+                ("n_calls", 1000),  # number of evaluations of f
+                ("n_random_starts", 5),  # number of random initialization
+            ]
+        )
+        run_info = OrderedDict([("method", "run_skopt"), ("settings", settings)])
 
         # initial guess
         x0 = 0.5 * np.ones(shape=self.n_opt_params)
@@ -1593,25 +1708,26 @@ class Reco(object):
             return -llh
 
         bounds = [(0, 1)] * self.n_opt_params
-        settings = OrderedDict(
-            [
-                ("acq_func", "EI"),  # acquisition function
-                ("n_calls", 1000),  # number of evaluations of f
-                ("n_random_starts", 5),  # number of random initialization
-            ]
-        )
 
-        _ = gp_minimize(
-            func,  # function to minimize
-            bounds,  # bounds on each dimension of x
-            x0=list(x0),
-            **settings
-        )
+        fit_status = FitStatus.GeneralFailure
+        try:
+            _ = gp_minimize(
+                func,  # function to minimize
+                bounds,  # bounds on each dimension of x
+                x0=list(x0),
+                **settings
+            )
+            fit_status = FitStatus.OK
 
-        run_info = OrderedDict([("method", "run_skopt"), ("settings", settings)])
+        except KeyboardInterrupt:
+            raise
+
+        except Exception:
+            self._print_non_fatal_exception(method=run_info["method"])
+
         fit_meta = OrderedDict(
             [
-                ("fit_status", np.int8(FitStatus.OK)),
+                ("fit_status", np.int8(fit_status)),
                 ("run_time", np.float32(time.time() - t0)),
             ]
         )
@@ -1620,9 +1736,9 @@ class Reco(object):
 
     def run_nlopt(self):
         """Use an optimizer from nlopt"""
-        import nlopt
-
         t0 = time.time()
+
+        import nlopt
 
         def func(x, grad):  # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
@@ -1664,103 +1780,113 @@ class Reco(object):
         # seed from several angles
         # opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
         opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
+        ftol_abs = 0.1
         # opt = nlopt.opt(nlopt.LN_PRAXIS, self.n_opt_params)
         opt.set_lower_bounds([0.0] * self.n_opt_params)
         opt.set_upper_bounds([1.0] * self.n_opt_params)
         opt.set_min_objective(func)
-        opt.set_ftol_abs(0.1)
-
-        # initial guess
-
-        angles = np.linspace(0, 1, 3)
-        angles = 0.5 * (angles[1:] + angles[:-1])
-
-        for zen in angles:
-            for az in angles:
-                x0 = 0.5 * np.ones(shape=self.n_opt_params)
-
-                for i in range(self.n_opt_params):
-                    if "az" in self.hypo_handler.opt_param_names[i]:
-                        x0[i] = az
-                    elif "zen" in self.hypo_handler.opt_param_names[i]:
-                        x0[i] = zen
-                x = opt.optimize(x0)  # pylint: disable=unused-variable
-
-        # local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        # local_opt.set_lower_bounds([0.]*self.n_opt_params)
-        # local_opt.set_upper_bounds([1.]*self.n_opt_params)
-        # local_opt.set_min_objective(func)
-        ##local_opt.set_ftol_abs(0.5)
-        ##local_opt.set_ftol_abs(100)
-        ##local_opt.set_xtol_rel(10)
-        # local_opt.set_ftol_abs(1)
-        # global
-        # opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
-        # opt.set_lower_bounds([0.]*self.n_opt_params)
-        # opt.set_upper_bounds([1.]*self.n_opt_params)
-        # opt.set_min_objective(func)
-        # opt.set_local_optimizer(local_opt)
-        # opt.set_ftol_abs(10)
-        # opt.set_xtol_rel(1)
-        # opt.set_maxeval(1111)
-
-        # opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
-        # opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
-        # opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
-        # opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_params)
-        # opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-
-        # opt.set_lower_bounds(lower_bounds)
-        # opt.set_upper_bounds(upper_bounds)
-        # opt.set_min_objective(func)
-        # opt.set_ftol_abs(0.1)
-        # opt.set_population([x0])
-        # opt.set_initial_step(dx)
-
-        # local_opt.set_maxeval(10)
-
-        # x = opt.optimize(x0) # pylint: disable=unused-variable
-
-        # polish it up
-        # print('***************** polishing ******************')
-
-        # dx = np.ones(shape=self.n_opt_params) * 0.001
-        # dx[0] = 0.1
-        # dx[1] = 0.1
-
-        # local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        # lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
-        # upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
-        # lower_bounds[0] = 0
-        # lower_bounds[1] = 0
-        # upper_bounds[0] = 0
-        # upper_bounds[1] = 0
-
-        # local_opt.set_lower_bounds(lower_bounds)
-        # local_opt.set_upper_bounds(upper_bounds)
-        # local_opt.set_min_objective(func)
-        # local_opt.set_ftol_abs(0.1)
-        # local_opt.set_initial_step(dx)
-        # x = opt.optimize(x)
+        opt.set_ftol_abs(ftol_abs)
 
         settings = OrderedDict(
-            [
-                ("method", opt.get_algorithm_name()),
-                ("ftol_abs", opt.get_ftol_abs()),
-                ("ftol_rel", opt.get_ftol_rel()),
-                ("xtol_abs", opt.get_xtol_abs()),
-                ("xtol_rel", opt.get_xtol_rel()),
-                ("maxeval", opt.get_maxeval()),
-                ("maxtime", opt.get_maxtime()),
-                ("stopval", opt.get_stopval()),
-            ]
+            [("method", opt.get_algorithm_name()), ("ftol_abs", np.float32(ftol_abs))]
         )
 
         run_info = OrderedDict([("method", "run_nlopt"), ("settings", settings)])
+
+        fit_status = FitStatus.GeneralFailure
+        try:
+            # initial guess
+
+            angles = np.linspace(0, 1, 3)
+            angles = 0.5 * (angles[1:] + angles[:-1])
+
+            for zen in angles:
+                for az in angles:
+                    x0 = 0.5 * np.ones(shape=self.n_opt_params)
+
+                    for i in range(self.n_opt_params):
+                        if "az" in self.hypo_handler.opt_param_names[i]:
+                            x0[i] = az
+                        elif "zen" in self.hypo_handler.opt_param_names[i]:
+                            x0[i] = zen
+                    x = opt.optimize(x0)  # pylint: disable=unused-variable
+
+            # local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+            # local_opt.set_lower_bounds([0.]*self.n_opt_params)
+            # local_opt.set_upper_bounds([1.]*self.n_opt_params)
+            # local_opt.set_min_objective(func)
+            ##local_opt.set_ftol_abs(0.5)
+            ##local_opt.set_ftol_abs(100)
+            ##local_opt.set_xtol_rel(10)
+            # local_opt.set_ftol_abs(1)
+            # global
+            # opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
+            # opt.set_lower_bounds([0.]*self.n_opt_params)
+            # opt.set_upper_bounds([1.]*self.n_opt_params)
+            # opt.set_min_objective(func)
+            # opt.set_local_optimizer(local_opt)
+            # opt.set_ftol_abs(10)
+            # opt.set_xtol_rel(1)
+            # opt.set_maxeval(1111)
+
+            # opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
+            # opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
+            # opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
+            # opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_params)
+            # opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+
+            # opt.set_lower_bounds(lower_bounds)
+            # opt.set_upper_bounds(upper_bounds)
+            # opt.set_min_objective(func)
+            # opt.set_ftol_abs(0.1)
+            # opt.set_population([x0])
+            # opt.set_initial_step(dx)
+
+            # local_opt.set_maxeval(10)
+
+            # x = opt.optimize(x0) # pylint: disable=unused-variable
+
+            # polish it up
+            # print('***************** polishing ******************')
+
+            # dx = np.ones(shape=self.n_opt_params) * 0.001
+            # dx[0] = 0.1
+            # dx[1] = 0.1
+
+            # local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+            # lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
+            # upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
+            # lower_bounds[0] = 0
+            # lower_bounds[1] = 0
+            # upper_bounds[0] = 0
+            # upper_bounds[1] = 0
+
+            # local_opt.set_lower_bounds(lower_bounds)
+            # local_opt.set_upper_bounds(upper_bounds)
+            # local_opt.set_min_objective(func)
+            # local_opt.set_ftol_abs(0.1)
+            # local_opt.set_initial_step(dx)
+            # x = opt.optimize(x)
+
+            fit_status = FitStatus.OK
+
+        except KeyboardInterrupt:
+            raise
+
+        except Exception:
+            self._print_non_fatal_exception(method=run_info["method"])
+
         fit_meta = OrderedDict(
             [
-                ("fit_status", np.int8(FitStatus.OK)),
+                ("fit_status", np.int8(fit_status)),
                 ("run_time", np.float32(time.time() - t0)),
+                ("ftol_abs", np.float32(opt.get_ftol_abs())),
+                ("ftol_rel", np.float32(opt.get_ftol_rel())),
+                ("xtol_abs", np.float32(opt.get_xtol_abs())),
+                ("xtol_rel", np.float32(opt.get_xtol_rel())),
+                ("maxeval", np.float32(opt.get_maxeval())),
+                ("maxtime", np.float32(opt.get_maxtime())),
+                ("stopval", np.float32(opt.get_stopval())),
             ]
         )
 
@@ -1806,11 +1932,11 @@ class Reco(object):
         fit_meta : OrderedDict
 
         """
+        t0 = time.time()
+
         # Import pymultinest here; it's a less common dependency, so other
         # functions/constants in this module will still be import-able w/o it.
         import pymultinest
-
-        t0 = time.time()
 
         kwargs = OrderedDict()
         for arg_name in get_arg_names(self.run_multinest)[1:]:
@@ -1844,10 +1970,10 @@ class Reco(object):
             [("method", "run_multinest"), ("kwargs", kwargs), ("mn_kwargs", mn_kwargs)]
         )
 
-        fit_meta = OrderedDict()
-        fit_meta["fit_status"] = np.int8(FitStatus.NotSet)
+        fit_status = FitStatus.GeneralFailure
         tmpdir = mkdtemp()
         outputfiles_basename = join(tmpdir, "")
+        mn_fit_meta = {}
         try:
             pymultinest.run(
                 LogLikelihood=self.loglike,
@@ -1859,12 +1985,37 @@ class Reco(object):
                 n_iter_before_update=REPORT_AFTER,
                 **mn_kwargs
             )
-            fit_meta = get_multinest_meta(outputfiles_basename=outputfiles_basename)
+            fit_status = FitStatus.OK
+            mn_fit_meta = get_multinest_meta(outputfiles_basename=outputfiles_basename)
+
+        except KeyboardInterrupt:
+            raise
+
+        except Exception:
+            self._print_non_fatal_exception(method=run_info["method"])
+
         finally:
             rmtree(tmpdir)
-        # TODO: Can MultiNest fail? If so, set status accordingly...
-        fit_meta["fit_status"] = np.int8(FitStatus.OK)
-        fit_meta["run_time"] = np.float32(time.time() - t0)
+
+        # TODO: If MultiNest fails in specific ways, set fit_status accordingly...
+
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(fit_status)),
+                ("logZ", np.float32(mn_fit_meta.pop("logZ", np.nan))),
+                ("logZ_err", np.float32(mn_fit_meta.pop("logZ_err", np.nan))),
+                ("ins_logZ", np.float32(mn_fit_meta.pop("ins_logZ", np.nan))),
+                ("ins_logZ_err", np.float32(mn_fit_meta.pop("ins_logZ_err", np.nan))),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
+
+        if mn_fit_meta:
+            sys.stderr.write(
+                "WARNING: Unrecorded MultiNest metadata: {}\n".format(
+                    ", ".join("{} = {}".format(k, v) for k, v in mn_fit_meta.items())
+                )
+            )
 
         return run_info, fit_meta
 
@@ -1940,6 +2091,22 @@ def parse_args(description=__doc__):
         action="store_true",
         help="Whether to save LLHP within 30 LLH of max-LLH to disk",
     )
+    parser.add_argument(
+        "--redo-failed",
+        action="store_true",
+        help="""Whether to re-reconstruct events that have been reconstructed
+        but have `fit_status` set to non-zero (i.e., not `FitStatus.OK`), in
+        addition to reconstructing events with `fit_status` set to -1 (i.e.,
+        `FitStatus.NotSet`)""",
+    )
+    parser.add_argument(
+        "--redo-all",
+        action="store_true",
+        help="""Whether to reconstruct all events without existing
+        reconstructions AND re-reconstruct all events that have existing
+        reconstructions, regardless if their `fit_status` is OK or some form of
+        failure""",
+    )
 
     split_kwargs = init_obj.parse_args(
         dom_tables=True, tdi_tables=True, events=True, parser=parser
@@ -1953,6 +2120,8 @@ if __name__ == "__main__":
     kwargs = parse_args()
     other_kw = kwargs.pop("other_kw")
     method = other_kw.pop("method")
+    redo_failed = other_kw.pop("redo_failed")
+    redo_all = other_kw.pop("redo_all")
     kwargs.update(other_kw)
     my_reco = Reco(**kwargs)
-    my_reco.run(methods=method)
+    my_reco.run(methods=method, redo_failed=redo_failed, redo_all=redo_all)

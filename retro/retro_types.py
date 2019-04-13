@@ -461,6 +461,7 @@ class FitStatus(enum.IntEnum):
     # pylint: disable=invalid-name
     NotSet = -1
     OK = 0
+    PositiveLLH = 1  # NOT present in IceCube / icetray software
     GeneralFailure = 10
     InsufficientHits = 20
     FailedToConverge = 30
