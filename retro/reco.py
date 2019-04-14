@@ -85,6 +85,7 @@ METHODS = set(
         "crs",
         "crs_prefit",
         "mn8d",
+        "stopping_atm_muon_crs",
         "nlopt",
         "scipy",
         "skopt",
@@ -396,7 +397,7 @@ class Reco(object):
                 n_live=160,
                 max_iter=10000,
                 max_noimprovement=1000,
-                min_llh_std=0.5,
+                min_llh_std=0.,
                 min_vertex_std=dict(x=5, y=5, z=4, time=20),
                 use_priors=False,
                 use_sobol=True,
@@ -1120,14 +1121,14 @@ class Reco(object):
                     estimate["max_llh"]
                 )
             )
-            fit_status = fit_meta.get("fit_status", FitStatus.OK)
-            if fit_status not in (FitStatus.OK, FitStatus.PositiveLLH):
-                raise ValueError(
-                    "Postive LLH *and* fit failed with fit_status = {}".format(
-                        fit_status
+            if estimate.dtype.names and "fit_status" in estimate.dtype.names:
+                if estimate["fit_status"] not in (FitStatus.OK, FitStatus.PositiveLLH):
+                    raise ValueError(
+                        "Postive LLH *and* fit failed with fit_status = {}".format(
+                            estimate["fit_status"]
+                        )
                     )
-                )
-            fit_meta["fit_status"] = FitStatus.PositiveLLH
+                estimate["fit_status"] = FitStatus.PositiveLLH
 
         # Place reco in current event in case another reco depends on it
         if "recos" not in self.current_event:
