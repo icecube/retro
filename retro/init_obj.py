@@ -428,9 +428,11 @@ def get_events(
 
     slice_kw = dict(start=start, stop=stop, step=step)
     file_iterator_tree = OrderedDict()
-    file_iterator_tree['header'] = iterate_file(
+
+    total_num_events, headers = iterate_file(
         join(events_base, 'events.npy'), **slice_kw
     )
+    file_iterator_tree['header'] = iter(headers)
 
     if truth is None:
         truth = isfile(join(events_base, 'truth.npy'))
@@ -491,40 +493,55 @@ def get_events(
         hits = hits.split('/')
 
     if truth:
-        file_iterator_tree['truth'] = iterate_file(
+        total_num_truths, truths = iterate_file(
             fpath=join(events_base, 'truth.npy'), **slice_kw
         )
+        assert total_num_truths == total_num_events
+        file_iterator_tree['truth'] = iter(truths)
     if photons:
         photons = sorted(photons)
         file_iterator_tree['photons'] = iterators = OrderedDict()
         for photon_series in photons:
-            iterators[photon_series] = iterate_file(
+            total_num_ps, photon_serieses = iterate_file(
                 fpath=join(events_base, 'photons', photon_series + '.pkl'), **slice_kw
             )
+            assert total_num_ps == total_num_events
+            iterators[photon_series] = iter(photon_serieses)
     if pulses:
         file_iterator_tree['pulses'] = iterators = OrderedDict()
         for pulse_series in sorted(pulses):
-            iterators[pulse_series] = iterate_file(
+            total_num_ps, pulse_serieses = iterate_file(
                 fpath=join(events_base, 'pulses', pulse_series + '.pkl'), **slice_kw
             )
-            iterators[pulse_series + 'TimeRange'] = iterate_file(
-                fpath=join(events_base,
-                           'pulses',
-                           pulse_series + 'TimeRange' + '.npy'),
+            assert total_num_ps == total_num_events
+            iterators[pulse_series] = iter(pulse_serieses)
+
+            total_num_tr, time_ranges = iterate_file(
+                fpath=join(
+                    events_base,
+                    'pulses',
+                    pulse_series + 'TimeRange' + '.npy'
+                ),
                 **slice_kw
             )
+            assert total_num_tr == total_num_events
+            iterators[pulse_series + 'TimeRange'] = iter(time_ranges)
     if recos:
         file_iterator_tree['recos'] = iterators = OrderedDict()
         for reco in sorted(recos):
-            iterators[reco] = iterate_file(
+            total_num_recoses, recoses = iterate_file(
                 fpath=join(events_base, 'recos', reco + '.npy'), **slice_kw
             )
+            assert total_num_recoses == total_num_events
+            iterators[reco] = iter(recoses)
     if triggers:
         file_iterator_tree['triggers'] = iterators = OrderedDict()
         for trigger_hier in sorted(triggers):
-            iterators[trigger_hier] = iterate_file(
+            total_num_th, trigger_hiers = iterate_file(
                 fpath=join(events_base, 'triggers', trigger_hier + '.pkl'), **slice_kw
             )
+            assert total_num_th == total_num_events
+            iterators[trigger_hier] = iter(trigger_hiers)
 
     if hits and hits[0] == 'photons':
         angsens_model, _ = load_angsens_model(angsens_model)
@@ -584,13 +601,15 @@ def iterate_file(fpath, start=0, stop=None, step=None):
             # write recos directly to the {reco}.npy file
             events = np.load(fpath, mmap_mode='r')
         except:
-            print(fpath)
+            sys.stderr.write('failed to load "{}"\n'.format(fpath))
             raise
     else:
         raise ValueError(fpath)
 
-    for event in events[slicer]:
-        yield event
+    total_events_in_file = len(events)
+    sliced_events = events[slicer]
+
+    return total_events_in_file, sliced_events
 
 
 def get_path(event, path):
@@ -781,11 +800,28 @@ def extract_next_event(file_iterator_tree, event=None):
     """
     if event is None:
         event = OrderedDict()
+
+    num_iterators = 0
+    num_stopped_iterators = 0
     for key, val in file_iterator_tree.items():
         if isinstance(val, Mapping):
             event[key] = extract_next_event(val)
         else:
-            event[key] = next(val)
+            num_iterators += 1
+            try:
+                event[key] = next(val)
+            except StopIteration:
+                num_stopped_iterators += 1
+
+    if num_stopped_iterators > 0:
+        if num_stopped_iterators != num_iterators:
+            raise ValueError(
+                "num_stopped_iterators = {} but num_iterators = {}".format(
+                    num_stopped_iterators, num_iterators
+                )
+            )
+        raise StopIteration
+
     return event
 
 
