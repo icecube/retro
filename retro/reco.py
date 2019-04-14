@@ -77,7 +77,7 @@ from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
 
 
-LLH_FUDGE_SUMMAND = 1000
+LLH_FUDGE_SUMMAND = -1000
 
 METHODS = set(
     [
@@ -910,7 +910,7 @@ class Reco(object):
             )
 
             llh, pegleg_idx, scalefactor = get_llh_retval[:3]
-            llh -= LLH_FUDGE_SUMMAND
+            llh += LLH_FUDGE_SUMMAND
             aux_values.append(get_llh_retval[3:])
 
             assert np.isfinite(llh), "LLH not finite: {}".format(llh)
@@ -1115,7 +1115,11 @@ class Reco(object):
 
         # Test if the LLH would be positive without LLH_FUDGE_SUMMAND
         if estimate["max_llh"] > LLH_FUDGE_SUMMAND:
-            sys.stderr.write("WARNING: Postive LLH\n")
+            sys.stderr.write(
+                "\nWARNING: Would be postive LLH w/o LLH_FUDGE_SUMMAND: {}\n".format(
+                    estimate["max_llh"]
+                )
+            )
             fit_status = fit_meta.get("fit_status", FitStatus.OK)
             if fit_status not in (FitStatus.OK, FitStatus.PositiveLLH):
                 raise ValueError(
