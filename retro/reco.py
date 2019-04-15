@@ -1117,7 +1117,7 @@ class Reco(object):
         # Test if the LLH would be positive without LLH_FUDGE_SUMMAND
         if estimate["max_llh"] > LLH_FUDGE_SUMMAND:
             sys.stderr.write(
-                "\nWARNING: Would be postive LLH w/o LLH_FUDGE_SUMMAND: {}\n".format(
+                "\nWARNING: Would be positive LLH w/o LLH_FUDGE_SUMMAND: {}\n".format(
                     estimate["max_llh"]
                 )
             )

@@ -351,7 +351,7 @@ def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=
 
 def get_events(
     events_base,
-    start=0,
+    start=None,
     stop=None,
     step=None,
     truth=True,
@@ -429,9 +429,10 @@ def get_events(
     slice_kw = dict(start=start, stop=stop, step=step)
     file_iterator_tree = OrderedDict()
 
-    total_num_events, headers = iterate_file(
+    total_num_events, event_indices, headers = iterate_file(
         join(events_base, 'events.npy'), **slice_kw
     )
+    event_indices_iter = iter(event_indices)
     file_iterator_tree['header'] = iter(headers)
 
     if truth is None:
@@ -493,7 +494,7 @@ def get_events(
         hits = hits.split('/')
 
     if truth:
-        total_num_truths, truths = iterate_file(
+        total_num_truths, _, truths = iterate_file(
             fpath=join(events_base, 'truth.npy'), **slice_kw
         )
         assert total_num_truths == total_num_events
@@ -502,7 +503,7 @@ def get_events(
         photons = sorted(photons)
         file_iterator_tree['photons'] = iterators = OrderedDict()
         for photon_series in photons:
-            total_num_ps, photon_serieses = iterate_file(
+            total_num_ps, _, photon_serieses = iterate_file(
                 fpath=join(events_base, 'photons', photon_series + '.pkl'), **slice_kw
             )
             assert total_num_ps == total_num_events
@@ -510,13 +511,13 @@ def get_events(
     if pulses:
         file_iterator_tree['pulses'] = iterators = OrderedDict()
         for pulse_series in sorted(pulses):
-            total_num_ps, pulse_serieses = iterate_file(
+            total_num_ps, _, pulse_serieses = iterate_file(
                 fpath=join(events_base, 'pulses', pulse_series + '.pkl'), **slice_kw
             )
             assert total_num_ps == total_num_events
             iterators[pulse_series] = iter(pulse_serieses)
 
-            total_num_tr, time_ranges = iterate_file(
+            total_num_tr, _, time_ranges = iterate_file(
                 fpath=join(
                     events_base,
                     'pulses',
@@ -529,7 +530,7 @@ def get_events(
     if recos:
         file_iterator_tree['recos'] = iterators = OrderedDict()
         for reco in sorted(recos):
-            total_num_recoses, recoses = iterate_file(
+            total_num_recoses, _, recoses = iterate_file(
                 fpath=join(events_base, 'recos', reco + '.npy'), **slice_kw
             )
             assert total_num_recoses == total_num_events
@@ -537,7 +538,7 @@ def get_events(
     if triggers:
         file_iterator_tree['triggers'] = iterators = OrderedDict()
         for trigger_hier in sorted(triggers):
-            total_num_th, trigger_hiers = iterate_file(
+            total_num_th, _, trigger_hiers = iterate_file(
                 fpath=join(events_base, 'triggers', trigger_hier + '.pkl'), **slice_kw
             )
             assert total_num_th == total_num_events
@@ -551,7 +552,6 @@ def get_events(
     start = 0 if start is None else start
     step = 1 if step is None else step
 
-    event_idx = start
     while True:
         try:
             event = extract_next_event(file_iterator_tree)
@@ -566,12 +566,10 @@ def get_events(
             event['hits_indexer'] = hits_indexer
             event['hits_summary'] = hits_summary
 
-        yield event_idx, event
-
-        event_idx += step
+        yield next(event_indices_iter), event
 
 
-def iterate_file(fpath, start=0, stop=None, step=None):
+def iterate_file(fpath, start=None, stop=None, step=None):
     """Iterate through the elements in a pickle (.pkl) or numpy (.npy) file. If
     a pickle file, structure must be a sequence of objects, one object per
     event. If a numpy file, it must be a one-dimensional structured array where
@@ -607,9 +605,10 @@ def iterate_file(fpath, start=0, stop=None, step=None):
         raise ValueError(fpath)
 
     total_events_in_file = len(events)
+    indices = range(total_events_in_file)[slicer]
     sliced_events = events[slicer]
 
-    return total_events_in_file, sliced_events
+    return total_events_in_file, indices, sliced_events
 
 
 def get_path(event, path):
@@ -992,7 +991,7 @@ def parse_args(
             files'''
         )
         group.add_argument(
-            '--start', type=int, default=0,
+            '--start', type=int, default=None,
             help='''Process events defined by slice [start:stop:step]. Default is 0.'''
         )
         group.add_argument(
