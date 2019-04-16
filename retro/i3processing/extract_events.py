@@ -274,11 +274,43 @@ def extract_file_metadata(fname):
     return file_info
 
 
+def extract_i3particle(frame, particle_name):
+    dt_spec = [(attr, info["dtype"]) for attr, info in I3PARTICLE_ATTRS.items()]
+    if particle_name in frame:
+        particle = frame[particle_name]
+        for attr, info in I3PARTICLE_ATTRS.items():
+            # If "path" key present in `info`, get its value; otherwise,
+            # path is just attr's name
+            path = info.get("path", attr)
+            xform = info.get("xform", lambda x: x)
+
+            # Recursively apply getattr on the particle for each path
+            value = particle
+            for sub_path in path.split("."):
+                value = getattr(value, sub_path)
+            reco_dict[attr] = xform(value)
+    else:
+        for attr, info in I3PARTICLE_ATTRS.items():
+            reco_dict[attr] = info["default"]
+
+    return particle_d, dt_spec
+
+
 def extract_reco(frame, reco):
     """Extract a reconstruction from a frame."""
     reco_dict = OrderedDict()
 
     if reco.startswith("Pegleg_Fit"):
+        from icecube import millipede
+        ['chi_squared',
+         'chi_squared_dof',
+          'logl',
+           'ndof',
+            'nmini',
+             'predicted_qtotal',
+              'qtotal',
+               'rlogl',
+                'squared_residuals']
         casc_name = reco + "HDCasc"
         track_name = reco + "Track"
         if casc_name in frame and track_name in frame:
@@ -395,23 +427,8 @@ def extract_reco(frame, reco):
     # -- Anything else -- #
 
     else:
-        dt_spec = [(attr, info["dtype"]) for attr, info in I3PARTICLE_ATTRS.items()]
-        if reco in frame:
-            i3particle = frame[reco]
-            for attr, info in I3PARTICLE_ATTRS.items():
-                # If "path" key present in `info`, get its value; otherwise,
-                # path is just attr's name
-                path = info.get("path", attr)
-                xform = info.get("xform", lambda x: x)
-
-                # Recursively apply getattr on the i3particle for each path
-                value = i3particle
-                for sub_path in path.split("."):
-                    value = getattr(value, sub_path)
-                reco_dict[attr] = xform(value)
-        else:
-            for attr, info in I3PARTICLE_ATTRS.items():
-                reco_dict[attr] = info["default"]
+        assert reco in frame
+        reco_dict, dt_spec = extract_i3particle(frame, reco)
 
     # -- (subset of) PID and cut vars -- #
 
@@ -1664,7 +1681,7 @@ def parse_args(description=__doc__):
         "--recos",
         nargs="+",
         default=[],
-        help="""Pulse series names to extract from each event""",
+        help="""Reco names to extract from each event""",
     )
     parser.add_argument(
         "--triggers",
