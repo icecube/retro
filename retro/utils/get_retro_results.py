@@ -41,7 +41,7 @@ from retro.utils.stats import estimate_from_llhp
 
 
 KEEP_TRUTH_KEYS = (
-    'pdg',
+    'pdg_encoding',
     'x',
     'y',
     'z',
