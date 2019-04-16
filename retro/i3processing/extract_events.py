@@ -293,14 +293,54 @@ def extract_file_metadata(fname):
 
 
 def dict2struct(d):
+    """Convert a dict with string keys and typed values into a numpy array with
+    struct dtype.
+
+    Parameters
+    ----------
+    d : OrderedMapping
+        The dict's keys are the names of the fields (strings) and the dict's
+        values are numpy-typed objects.
+
+    Returns
+    -------
+    array : numpy.array of struct dtype
+
+    """
     dt_spec = OrderedDict()
     for key, val in d.items():
         dt_spec[key] = val.dtype
-    array = np.array(tuple(d.values()), dtype=dt_spec)
+    array = np.array(tuple(d.values()), dtype=dt_spec.items())
     return array
 
 
 def set_explicit_dtype(x):
+    """Force `x` to have a numpy type if it doesn't already have one.
+
+    Parameters
+    ----------
+    x : numpy-typed object, bool, integer, float
+        If not numpy-typed, type is attempted to be inferred. Currently only
+        bool, int, and float are supported, where bool is converted to
+        np.bool8, integer is converted to np.int64, and float is converted to
+        np.float64. This ensures that full precision for all but the most
+        extreme cases is maintained for inferred types.
+
+    Returns
+    -------
+    x : numpy-typed object
+
+    Raises
+    ------
+    TypeError
+        In case the type of `x` is not already set or is not a valid inferred
+        type. As type inference can yield different results for different
+        inputs, rather than deal with everything, explicitly failing helps to
+        avoid inferring the different instances of the same object differently
+        (which will cause a failure later on when trying to concatenate the
+        types in a larger array).
+
+    """
     if hasattr(x, "dtype"):
         return x
 
@@ -400,10 +440,10 @@ def extract_reco(frame, reco):
                 frame=frame,
                 key=reco + "FitParams",
                 specs=MILLIPEDE_FIT_PARAMS_SPECS,
-                allow_missing=False,
+                allow_missing=True,
             )
         )
-        reco_dict["neutrino"] = dict2struct(
+        reco_dict["Neutrino"] = dict2struct(
             get_i3_entity(
                 frame=frame,
                 key=reco,
@@ -501,12 +541,11 @@ def extract_reco(frame, reco):
     # -- Anything else assume it's a single I3Particle -- #
 
     else:
-        assert reco in frame
         reco_dict = get_i3_entity(
             frame=frame,
             key=reco,
             specs=I3PARTICLE_SPECS,
-            allow_missing=False,
+            allow_missing=True,
         )
 
     # TODO: why is PID here?
