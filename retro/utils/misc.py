@@ -38,6 +38,8 @@ __all__ = [
     'RE_INVALID_CHARS',
     'RE_LEADING_INVALID',
     'make_valid_python_name',
+    'join_struct_arrays',
+    'nsort',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -863,6 +865,70 @@ def make_valid_python_name(name):
     # Remove leading characters until we find a letter or underscore
     name = RE_LEADING_INVALID.sub('', name)
     return name
+
+
+def join_struct_arrays(arrays):
+    """"Horizontal" join of structured arrays: Combine into one structured
+    array whose fields are taken from each component array.
+
+    Code from user Sven Marnach, https://stackoverflow.com/a/5355974
+
+    Parameters
+    ----------
+    arrays : sequence of numpy.arrays with struct dtypes
+
+    Returns
+    -------
+    array : numpy.array with struct dtype
+
+    """
+    sizes = np.array([a.itemsize for a in arrays])
+    offsets = np.r_[0, sizes.cumsum()]
+    n = len(arrays[0])
+    joint = np.empty((n, offsets[0]), dtype=np.uint8)
+    for a, size, offset in zip(arrays, sizes, offsets):
+        joint[:, offset : offset + size] = a.view(np.uint8).reshape(n, size)
+    dtype = sum((a.dtype.descr for a in arrays), [])
+    return joint.ravel().view(dtype)
+
+
+def nsort(l, reverse=False):
+    """Sort a sequence of strings containing integer number fields by the
+    value of those numbers, rather than by simple alpha order. Useful
+    for sorting e.g. version strings, etc..
+
+    Code adapted from nedbatchelder.com/blog/200712/human_sorting.html#comments
+
+    Parameters
+    ----------
+    l : sequence of strings
+        Sequence of strings to be sorted.
+
+    reverse : bool, optional
+        Whether to reverse the sort order (True => descending order)
+
+    Returns
+    -------
+    sorted_l : list of strings
+        Sorted strings
+
+    Examples
+    --------
+    >>> l = ['f1.10.0.txt', 'f1.01.2.txt', 'f1.1.1.txt', 'f9.txt', 'f10.txt']
+    >>> nsort(l)
+    ['f1.1.1.txt', 'f1.01.2.txt', 'f1.10.0.txt', 'f9.txt', 'f10.txt']
+
+    """
+    nsort_re = re.compile(r'(\d+)')
+    def _field_splitter(s):
+        spl = nsort_re.split(s)
+        key = []
+        for non_number, number in zip(spl[::2], spl[1::2]):
+            key.append(non_number)
+            key.append(int(number))
+        return tuple(key)
+
+    return sorted(l, key=_field_splitter, reverse=reverse)
 
 
 if __name__ == '__main__':
