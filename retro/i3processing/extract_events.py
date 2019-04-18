@@ -206,6 +206,31 @@ GENERIC_I3_FNAME_RE = re.compile(
     (re.VERBOSE | re.IGNORECASE),
 )
 
+
+I3TIME_T = np.dtype([("utc_year", np.int32), ("utc_daq_time", np.int64)])
+
+I3EVENTHEADER_SPECS = OrderedDict(
+    [
+        ("run_id", dict(dtype=np.uint32)),
+        ("sub_run_id", dict(dtype=np.uint32)),
+        ("event_id", dict(dtype=np.uint32)),
+        ("sub_event_id", dict(dtype=np.uint32)),
+        ("sub_event_stream", dict(dtype=np.dtype("S20"))),
+        ("state", dict(dtype=np.uint8)),
+        (
+            "start_time",
+            dict(
+                paths=("start_time.utc_year", "start_time.utc_daq_time"), dtype=I3TIME_T
+            ),
+        ),
+        (
+            "end_time",
+            dict(paths=("end_time.utc_year", "end_time.utc_daq_time"), dtype=I3TIME_T),
+        ),
+    ]
+)
+"""See: dataclasses/public/dataclasses/physics/I3EventHeader.h"""
+
 I3PARTICLE_SPECS = OrderedDict(
     [
         ("major_id", dict(dtype=np.uint64, default=0)),
@@ -357,7 +382,7 @@ def set_explicit_dtype(x):
     raise TypeError("Type of argument is invalid: {}".format(type(x)))
 
 
-def get_i3_entity(frame, key, specs, allow_missing):
+def get_frame_item(frame, key, specs, allow_missing):
     """
     Parameters
     ----------
@@ -399,6 +424,7 @@ def get_i3_entity(frame, key, specs, allow_missing):
                     path = "." + path
                 value = eval("obj" + path)  # pylint: disable=eval-used
                 values.append(value)
+            values = tuple(values)
 
             # Get transform if present, otherwise set to None
             xform = spec.get("xform", None)
@@ -436,7 +462,7 @@ def extract_reco(frame, reco):
 
         reco_dict = OrderedDict()
         reco_dict["fit_params"] = dict2struct(
-            get_i3_entity(
+            get_frame_item(
                 frame=frame,
                 key=reco + "FitParams",
                 specs=MILLIPEDE_FIT_PARAMS_SPECS,
@@ -444,15 +470,12 @@ def extract_reco(frame, reco):
             )
         )
         reco_dict["Neutrino"] = dict2struct(
-            get_i3_entity(
-                frame=frame,
-                key=reco,
-                specs=I3PARTICLE_SPECS,
-                allow_missing=True,
+            get_frame_item(
+                frame=frame, key=reco, specs=I3PARTICLE_SPECS, allow_missing=True
             )
         )
         reco_dict["EMCasc"] = dict2struct(
-            get_i3_entity(
+            get_frame_item(
                 frame=frame,
                 key=reco + "EMCasc",
                 specs=I3PARTICLE_SPECS,
@@ -460,7 +483,7 @@ def extract_reco(frame, reco):
             )
         )
         reco_dict["HDCasc"] = dict2struct(
-            get_i3_entity(
+            get_frame_item(
                 frame=frame,
                 key=reco + "HDCasc",
                 specs=I3PARTICLE_SPECS,
@@ -468,7 +491,7 @@ def extract_reco(frame, reco):
             )
         )
         reco_dict["Track"] = dict2struct(
-            get_i3_entity(
+            get_frame_item(
                 frame=frame,
                 key=reco + "Track",
                 specs=I3PARTICLE_SPECS,
@@ -482,7 +505,7 @@ def extract_reco(frame, reco):
     elif reco.endswith("MultiNest7D"):
         reco_dict = OrderedDict()
         reco_dict["Neutrino"] = dict2struct(
-            get_i3_entity(
+            get_frame_item(
                 frame=frame,
                 key=reco + "_Neutrino",
                 specs=I3PARTICLE_SPECS,
@@ -490,7 +513,7 @@ def extract_reco(frame, reco):
             )
         )
         reco_dict["Cascade"] = dict2struct(
-            get_i3_entity(
+            get_frame_item(
                 frame=frame,
                 key=reco + "_Cascade",
                 specs=I3PARTICLE_SPECS,
@@ -514,23 +537,17 @@ def extract_reco(frame, reco):
 
         reco_dict = OrderedDict()
         reco_dict["Neutrino"] = dict2struct(
-            get_i3_entity(
-                frame=frame,
-                key=nu_key,
-                specs=I3PARTICLE_SPECS,
-                allow_missing=False,
+            get_frame_item(
+                frame=frame, key=nu_key, specs=I3PARTICLE_SPECS, allow_missing=False
             )
         )
         reco_dict["Cascade"] = dict2struct(
-            get_i3_entity(
-                frame=frame,
-                key=casc_key,
-                specs=I3PARTICLE_SPECS,
-                allow_missing=False,
+            get_frame_item(
+                frame=frame, key=casc_key, specs=I3PARTICLE_SPECS, allow_missing=False
             )
         )
         reco_dict["Track"] = dict2struct(
-            get_i3_entity(
+            get_frame_item(
                 frame=frame,
                 key=reco + "_Track",
                 specs=I3PARTICLE_SPECS,
@@ -541,11 +558,8 @@ def extract_reco(frame, reco):
     # -- Anything else assume it's a single I3Particle -- #
 
     else:
-        reco_dict = get_i3_entity(
-            frame=frame,
-            key=reco,
-            specs=I3PARTICLE_SPECS,
-            allow_missing=True,
+        reco_dict = get_frame_item(
+            frame=frame, key=reco, specs=I3PARTICLE_SPECS, allow_missing=True
         )
 
     # TODO: why is PID here?
@@ -1520,19 +1534,6 @@ def extract_events(
     from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
     from icecube.dataio import I3File  # pylint: disable=no-name-in-module
 
-    # Anything not listed defaults to float32
-    event_dtypes = dict(
-        sourcefile_sha256=np.uint64,
-        index=np.uint32,
-        run_id=np.uint32,
-        sub_run_id=np.uint32,
-        event_id=np.uint32,
-        sub_event_id=np.uint32,
-        state=np.uint32,
-        start_time=np.uint64,
-        stop_time=np.uint64,
-    )
-
     fpath = expand(fpath)
     sha256_hex = sha256(open(fpath, "rb").read()).hexdigest()
     i3file = I3File(fpath, "r")
@@ -1599,9 +1600,12 @@ def extract_events(
         if num_qframes == 0:
             raise ValueError("Found a physics (P) frame but no DAQ (Q) frame")
 
-        i3header = pframe["I3EventHeader"]
-
-        event = OrderedDict()
+        event = get_frame_item(
+            frame=frame,
+            key="I3EventHeader",
+            specs=I3EVENTHEADER_SPECS,
+            allow_missing=False,
+        )
         event["sourcefile_sha256"] = np.uint64(int(sha256_hex[:16], base=16))
         if len(events) > 2 ** 32 - 1:
             raise ValueError(
@@ -1610,18 +1614,6 @@ def extract_events(
                 )
             )
         event["index"] = np.uint32(len(events))
-        event["run_id"] = i3header.run_id
-        event["sub_run_id"] = i3header.sub_run_id
-        event["event_id"] = i3header.event_id
-        event["sub_event_id"] = i3header.sub_event_id
-        # TODO: map "state" string to uint enum value if defined in I3
-        # software? np dtypes don't handle ragged data like strings but I don't
-        # want to invent an encoding of our own if at all possible
-        # event['sub_event_stream'] = sub_event_stream
-        event["state"] = i3header.state
-
-        event["start_time"] = i3header.start_time.utc_daq_time
-        event["end_time"] = i3header.end_time.utc_daq_time
 
         if "TimeShift" in pframe:
             event["TimeShift"] = pframe["TimeShift"].value
@@ -1737,11 +1729,11 @@ def extract_events(
     if triggers:
         mkdir(trigger_hierarchy_dir)
 
-    struct_dtype_spec = []
-    for key in events[0].keys():
-        struct_dtype_spec.append((key, event_dtypes.get(key, np.float32)))
+    event_dtype = []
+    for key, val in events[0].items():
+        event_dtype.append((key, set_explicit_dtype(val).dtype))
 
-    events = np.array([tuple(ev.values()) for ev in events], dtype=struct_dtype_spec)
+    events = np.array([tuple(ev.values()) for ev in events], dtype=event_dtype)
     np.save(join(outdir, "events.npy"), events)
 
     if truth:
