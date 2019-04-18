@@ -16,7 +16,7 @@ __all__ = ["concatenate_recos"]
 from collections import OrderedDict
 from glob import glob
 from os import listdir, walk
-from os.path import abspath, dirname, expanduser, expandvars, isdir, join, splitext
+from os.path import abspath, dirname, expanduser, expandvars, isdir, isfile, join, splitext
 import sys
 
 import numpy as np
@@ -29,7 +29,7 @@ if __name__ == "__main__" and __package__ is None:
 from retro.utils.misc import join_struct_arrays, nsort
 
 
-def concatenate_recos(root_dirs, recos="all"):
+def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
     """Concatenate events, truth, and recos recursively found within `root_dirs`.
 
     Parameters
@@ -70,6 +70,8 @@ def concatenate_recos(root_dirs, recos="all"):
     if isinstance(recos, string_types) and recos != "all":
         recos = [recos]
 
+    sys.stdout.write("`recos` to extract: {}\n".format(recos))
+
     paths_concatenated = []
     all_events = None
     all_truths = None
@@ -84,7 +86,6 @@ def concatenate_recos(root_dirs, recos="all"):
             paths_concatenated.append(dirpath)
 
             events = np.load(join(dirpath, "events.npy"))
-            total_num_events += len(events)
             if all_events is None:
                 all_events = [events]
             else:
@@ -107,9 +108,18 @@ def concatenate_recos(root_dirs, recos="all"):
             if recos == "all":
                 reco_fnames = sorted(listdir(join(dirpath, "recos")))
                 recos = [splitext(reco_fname)[0] for reco_fname in reco_fnames]
+                sys.stdout.write("`recos` specified as 'all'; found {}\n".format(recos))
 
             for reco_name in recos:
-                reco = np.load(join(dirpath, "recos", reco_name + ".npy"))
+                fpath = join(dirpath, "recos", reco_name + ".npy")
+                if not isfile(fpath):
+                    if not allow_missing_recos:
+                        raise IOError('Missing reco "{}" file at path "{}"'.format(reco_name, fpath))
+                    if total_num_events > 0 and reco_name in all_recos:
+                        raise IOError('Reco "{}"')
+                    continue
+                if total_num_events == 0:
+                reco = np.load(fpath)
                 if len(reco) != len(events):
                     raise ValueError(
                         'reco "{}" len = {}, events len = {} in dir "{}"'.format(
@@ -120,6 +130,8 @@ def concatenate_recos(root_dirs, recos="all"):
                     all_recos[reco_name].append(reco)
                 else:
                     all_recos[reco_name] = [reco]
+
+            total_num_events += len(events)
 
     if total_num_events == 0:
         raise ValueError(
@@ -145,7 +157,7 @@ def concatenate_recos(root_dirs, recos="all"):
         recos.append(rvals)
 
     to_join = [events]
-    if truth is not None:
+    if truth:
         to_join.append(truth)
     to_join.extend(recos)
 
