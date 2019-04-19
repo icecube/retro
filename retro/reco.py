@@ -924,7 +924,7 @@ class Reco(object):
                 additional_results.append(pegleg_result)
 
             if self.hypo_handler.scaling_kernel:
-                additional_results.append(scalefactor*SCALING_CASCADE_ENERGY)
+                additional_results.append(scalefactor * SCALING_CASCADE_ENERGY)
 
             result = (
                 tuple(cube[:n_opt_params])
@@ -2068,6 +2068,7 @@ def parse_args(description=__doc__):
         action="store_true",
         help="Whether to save LLHP within 30 LLH of max-LLH to disk",
     )
+
     split_kwargs = init_obj.parse_args(
         dom_tables=True, tdi_tables=True, events=True, parser=parser
     )
