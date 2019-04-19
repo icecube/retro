@@ -124,8 +124,8 @@ fi
 #kernprof -l -v \
 $retro_dir/retro/reco.py \
     --outdir "$outdir" \
-    --method 'crs_prefit' \
-    --method "dn8d" \
+    --method "crs_prefit" \
+    --method "mn8d" \
     \
     --gcd $gcd \
     --dom-tables-kind "$tblkind" \
