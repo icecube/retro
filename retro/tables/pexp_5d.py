@@ -475,7 +475,7 @@ def generate_pexp_and_llh_functions(
 
     if num_tdi_tables == 0:
 
-        @numba_jit(**PL_NUMBA_JIT_KWARGS)
+        @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
         def pexp_(
             sources,
             sources_start,
