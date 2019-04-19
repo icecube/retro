@@ -539,7 +539,10 @@ class Reco(object):
             )
 
             run_info, fit_meta = self.run_dynesty(
-                n_live=250,
+                n_live=100,
+                maxiter=2000,
+                maxcall=10000,
+                dlogz=0.1,
             )
 
             llhp = self.make_llhp(
@@ -1819,12 +1822,14 @@ class Reco(object):
     def run_dynesty(
         self,
         n_live,
+        maxiter,
+        maxcall,
+        dlogz
     ):
         """Setup and run Dynesty on an event.
 
         Parameters
         ----------
-        seed
 
         Returns
         -------
@@ -1855,34 +1860,32 @@ class Reco(object):
             ]
         )
 
+        sampler_kwargs = OrderedDict(
+            [
+                ('maxiter', maxiter),
+                ('maxcall', maxcall),
+                ('dlogz', dlogz),
+
+            ]
+        )
+
         run_info = OrderedDict(
-            [("method", "run_dynesty"), ("kwargs", kwargs), ("dn_kwargs", dn_kwargs)]
+            [("method", "run_dynesty"), ("kwargs", kwargs), ("dn_kwargs", dn_kwargs), ("sampler_kwargs", sampler_kwargs)]
         )
 
         fit_meta = OrderedDict()
         fit_meta["fit_status"] = np.int8(FitStatus.NotSet)
-        tmpdir = mkdtemp()
-        outputfiles_basename = join(tmpdir, "")
-        print(dn_kwargs)
-        try:
-            sampler = dynesty.NestedSampler(
-                loglikelihood=self.loglike,
-                prior_transform=self.prior,
-                method='unif',
-                bound='single',
-                update_interval=1,
-                **dn_kwargs
-            )
-            print('sampler instantiated')
-            sampler.run_nested(
-                                maxiter=5000,
-                                maxcall=30000,
-                                dlogz=0.1,
-                                )
-            #fit_meta = sampler.results
-        finally:
-            rmtree(tmpdir)
-        # TODO: Can MultiNest fail? If so, set status accordingly...
+        sampler = dynesty.NestedSampler(
+            loglikelihood=self.loglike,
+            prior_transform=self.prior,
+            method='unif',
+            bound='single',
+            update_interval=1,
+            **dn_kwargs
+        )
+        print('sampler instantiated')
+        sampler.run_nested(**sampler_kwargs)
+
         fit_meta["fit_status"] = np.int8(FitStatus.OK)
         fit_meta["run_time"] = np.float32(time.time() - t0)
 
