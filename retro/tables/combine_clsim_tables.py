@@ -39,6 +39,7 @@ import sys
 from time import time
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -128,7 +129,7 @@ def combine_clsim_tables(
 
     # Get all input table filepaths, including glob expansion
 
-    if isinstance(table_fpaths, basestring):
+    if isinstance(table_fpaths, string_types):
         table_fpaths = [table_fpaths]
     table_fpaths_tmp = []
     for fpath in table_fpaths:

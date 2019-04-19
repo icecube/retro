@@ -15,7 +15,6 @@ __all__ = [
     'CLSIM_TABLE_METANAME_PROTO',
     'CLSIM_TABLE_METANAME_RE',
     'CLSIM_TABLE_TILE_FNAME_PROTO',
-    'CLSIM_TABLE_TILE_FNAME_RE',
     'CLSIM_TABLE_TILE_METANAME_PROTO',
     'CLSIM_TABLE_TILE_METANAME_RE',
     'interpret_clsim_table_fname',
@@ -45,6 +44,7 @@ import sys
 from time import time
 
 import numpy as np
+from six import string_types
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -55,6 +55,7 @@ from retro.tables.retro_5d_tables import TABLE_NORM_KEYS, get_table_norm
 from retro.utils.misc import (
     expand, force_little_endian, get_decompressd_fobj, hrlist2list, wstderr
 )
+from retro.utils.geom import powerspace
 
 
 MY_CLSIM_TABLE_KEYS = [
@@ -265,7 +266,7 @@ def interpret_clsim_table_fname(fname):
     try:
         info['string'] = int(info['string'])
     except ValueError:
-        assert isinstance(info['string'], basestring)
+        assert isinstance(info['string'], string_types)
         assert info['string'].lower() in ['ic', 'dc']
         info['string'] = info['string'].lower()
 
@@ -308,7 +309,7 @@ def load_clsim_table_minimal(
     fpath : string
         Path to file to be loaded. If the file has extension 'zst', 'zstd', or
         'zstandard', the file will be decompressed using the `python-zstandard`
-        Python library before passing to `pyfits` for interpreting.
+        Python library before passing to `fits` for interpreting.
 
     t_is_residual_time : bool, optional
         Whether time dimension in table represents residual time. If a value is
@@ -372,48 +373,144 @@ def load_clsim_table_minimal(
                 wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
 
     elif isfile(fpath):
-        import pyfits
+        from astropy.io import fits
         fobj = get_decompressd_fobj(fpath)
         pf_table = None
         try:
-            pf_table = pyfits.open(fobj, mode='readonly', memmap=mmap)
+            pf_table = fits.open(fobj, mode='readonly', memmap=mmap)
 
+            header = pf_table[0].header  # pylint: disable=no-member
             table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
-            table['n_photons'] = force_little_endian(
-                pf_table[0].header['_i3_n_photons'] # pylint: disable=no-member
-            )
             table['group_refractive_index'] = force_little_endian(
-                pf_table[0].header['_i3_n_group'] # pylint: disable=no-member
+                header['_i3_n_group']
             )
             table['phase_refractive_index'] = force_little_endian(
-                pf_table[0].header['_i3_n_phase'] # pylint: disable=no-member
+                header['_i3_n_phase']
             )
 
             n_dims = len(table['table_shape'])
-            if n_dims == 5:
-                # Space-time dimensions
-                table['r_bin_edges'] = force_little_endian(
-                    pf_table[1].data # meters # pylint: disable=no-member
-                )
-                table['costheta_bin_edges'] = force_little_endian(
-                    pf_table[2].data # pylint: disable=no-member
-                )
-                table['t_bin_edges'] = force_little_endian(
-                    pf_table[3].data # nanoseconds # pylint: disable=no-member
-                )
 
-                # Photon directionality
-                table['costhetadir_bin_edges'] = force_little_endian(
-                    pf_table[4].data # pylint: disable=no-member
+            new_style = False
+            axnames = [None]*n_dims
+            binning = [None]*n_dims
+            for key in header.keys():
+                if not key.startswith('_i3_ax_'):
+                    continue
+                new_style = True
+                axnum = header[key]
+                axname = key[len('_i3_ax_'):]
+                be0 = header['_i3_{}_min'.format(axname)]
+                be1 = header['_i3_{}_max'.format(axname)]
+                n_bins = header['_i3_{}_n_bins'.format(axname)]
+                power = header.get('_i3_{}_power'.format(axname), 1)
+                bin_edges = force_little_endian(
+                    pf_table[axnum + 1].data # pylint: disable=no-member
                 )
-                table['deltaphidir_bin_edges'] = force_little_endian(
-                    pf_table[5].data # pylint: disable=no-member
-                )
+                assert np.isclose(bin_edges[0], be0), '%f .. %f' % (be0, bin_edges[0])
+                assert np.isclose(bin_edges[-1], be1), '%f .. %f' % (be1, bin_edges[-1])
+                assert len(bin_edges) == n_bins + 1, '%d vs. %d' % (len(bin_edges), n_bins + 1)
+                assert np.allclose(bin_edges, powerspace(
+                    start=be0,
+                    stop=be1,
+                    num=n_bins + 1,
+                    power=power
+                ))
+                axnames[axnum] = axname
+                binning[axnum] = bin_edges
 
-            else:
-                raise NotImplementedError(
-                    '{}-dimensional table not handled'.format(n_dims)
-                )
+            if not new_style:
+                if n_dims == 5:
+                    ## Space-time dimensions
+                    #table['r_bin_edges'] = force_little_endian(
+                    #    pf_table[1].data # meters # pylint: disable=no-member
+                    #)
+                    #table['costheta_bin_edges'] = force_little_endian(
+                    #    pf_table[2].data # pylint: disable=no-member
+                    #)
+                    #table['t_bin_edges'] = force_little_endian(
+                    #    pf_table[3].data # nanoseconds # pylint: disable=no-member
+                    #)
+
+                    ## Photon directionality
+                    #table['costhetadir_bin_edges'] = force_little_endian(
+                    #    pf_table[4].data # pylint: disable=no-member
+                    #)
+                    #table['deltaphidir_bin_edges'] = force_little_endian(
+                    #    pf_table[5].data # pylint: disable=no-member
+                    #)
+                    axnames = ['r', 'costheta', 't', 'costhetadir', 'deltaphidir']
+                elif n_dims == 6:
+                    axnames = ['r', 'costheta', 'phi', 't', 'costhetadir', 'deltaphidir']
+                else:
+                    raise NotImplementedError(
+                        '{}-dimensional table not handled for old-style CLSim'
+                        ' tables'.format(n_dims)
+                    )
+                binning = [force_little_endian(pf_table[i+1].data) for i in range(len(axnames))] # pylint: disable=no-member
+
+            for axnum, (axname, bin_edges) in enumerate(zip(axnames, binning)):
+                assert axname is not None, 'missing axis %d name' % axnum
+                assert bin_edges is not None, 'missing axis %d binning' % axnum
+
+            table['axnames'] = axnames
+            table['binning'] = binning
+
+            for keyroot in (
+                'parity',
+                'zenith',
+                'n_phase',
+                'energy',
+                'efficiency',
+                'n_group',
+                'level',
+                'geometry',
+                'azimuth',
+                'z',
+                'type',
+                'n_photons',
+                't_is_residual_time',
+                'disable_tilt',
+                'disable_anisotropy',
+                'string',
+                'dom',
+                'dom_x',
+                'dom_y',
+                'dom_z',
+                'dom_zenith',
+                'dom_azimuth',
+                'seed',
+                'n_events',
+            ):
+                keyname = '_i3_' + keyroot
+                if keyname in header:
+                    val = force_little_endian(
+                        header[keyname]
+                    )
+                    if keyroot in (
+                        't_is_residual_time',
+                        'disable_tilt',
+                        'disable_anisotropy',
+                    ):
+                        val = bool(val)
+                    table[keyroot] = val
+
+            # Get string values from keys that have a prefix preceded by the
+            # value all in the key (I3 software had issues saving strings as
+            # values in the header "dict" so the workaround was to store the
+            # string value in this way)
+            for infix in (
+                'retro',
+                'gcd_i3_md5',
+                'ice',
+                'angsens',
+                'hash',
+            ):
+                keyroot = '_i3_' + infix + '_'
+                for keyname in header.keys():
+                    if not keyname.startswith(keyroot):
+                        continue
+                    val = keyname[len(keyroot):]
+                    table[infix] = val
 
             table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
 
@@ -458,7 +555,7 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract,
     fpath : string
         Path to file to be loaded. If the file has extension 'zst', 'zstd', or
         'zstandard', the file will be decompressed using the `python-zstandard`
-        Python library before passing to `pyfits` for interpreting.
+        Python library before passing to `fits` for interpreting.
 
     Returns
     -------

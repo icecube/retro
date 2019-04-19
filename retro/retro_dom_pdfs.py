@@ -241,8 +241,8 @@ if __name__ == '__main__':
         this_event_hits_info['charge'] = 1 # any value > 0 should be ok
         this_event_hits_info['event_dom_idx'] = event_dom_idx
 
-        # Note we need to keep a slice of length 1 to be able to update the
-        # contents of the array
+        # Note we need to operate on a slice of length 1 to be able to update
+        # the contents of the existing array
         this_event_dom_info = event_dom_info[event_dom_idx:event_dom_idx+1]
 
         # Copy info from the dom_info array...

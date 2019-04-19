@@ -9,17 +9,17 @@ Reco class for performing reconstructions
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'METHODS',
-    'CRS_STOP_FLAGS',
-    'REPORT_AFTER',
-    'APPEND_FILE',
-    'Reco',
-    'get_multinest_meta',
-    'parse_args',
+    "METHODS",
+    "CRS_STOP_FLAGS",
+    "REPORT_AFTER",
+    "CART_DIMS",
+    "Reco",
+    "get_multinest_meta",
+    "parse_args",
 ]
 
-__author__ = 'J.L. Lanfranchi, P. Eller'
-__license__ = '''Copyright 2017-2018 Justin L. Lanfranchi and Philipp Eller
+__author__ = "J.L. Lanfranchi, P. Eller"
+__license__ = """Copyright 2017-2018 Justin L. Lanfranchi and Philipp Eller
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,62 +31,79 @@ Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
-limitations under the License.'''
+limitations under the License."""
 
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-import os
-from os.path import abspath, dirname, isdir, join
-import pickle
+from os.path import abspath, basename, dirname, isdir, isfile, join
 from shutil import rmtree
 import sys
 from tempfile import mkdtemp
 import time
 
 import numpy as np
-import xarray as xr
+from six import string_types
 
-if __name__ == '__main__' and __package__ is None:
+if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import GarbageInputError, init_obj
-from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T
-from retro.utils.geom import (
-    rotate_points, add_vectors, fill_from_spher, fill_from_cart, reflect
+from retro import __version__, GarbageInputError, init_obj
+from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
+from retro.hypo.discrete_muon_kernels import pegleg_eval
+from retro.priors import (
+    EXT_IC,
+    PRI_COSINE,
+    PRI_TIME_RANGE,
+    PRI_UNIFORM,
+    PRISPEC_OSCNEXT_PREFIT_TIGHT,
+    PRISPEC_OSCNEXT_CRS_MN,
+    Bound,
+    get_prior_func,
 )
+from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T, FitStatus
+from retro.tables.pexp_5d import generate_pexp_and_llh_functions
+from retro.utils.geom import (
+    rotate_points,
+    add_vectors,
+    fill_from_spher,
+    fill_from_cart,
+    reflect,
+)
+from retro.utils.get_arg_names import get_arg_names
 from retro.utils.misc import expand, mkdir, sort_dict
 from retro.utils.stats import estimate_from_llhp
-from retro.priors import get_prior_fun
-from retro.hypo.discrete_muon_kernels import pegleg_eval
-from retro.tables.pexp_5d import generate_pexp_and_llh_functions
-from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 
 
-METHODS = set([
-    "multinest",
-    "crs",
-    "crs_prefit_mn",
-    "nlopt",
-    "scipy",
-    "skopt",
-    "experimental_trackfit",
-    "fast",
-    "test",
-    "truth",
-])
+METHODS = set(
+    [
+        "multinest",
+        "crs",
+        "crs_prefit",
+        "mn8d",
+        "dn8d",
+        "nlopt",
+        "scipy",
+        "skopt",
+        "experimental_trackfit",
+        "fast",
+        "test",
+        "truth",
+    ]
+)
 
 CRS_STOP_FLAGS = {
-    0: 'max iterations reached',
-    1: 'stddev below threshold',
-    2: 'no improvement',
-    3: 'vertex stddev below threshold'
+    0: "max iterations reached",
+    1: "llh stddev below threshold",
+    2: "no improvement",
+    3: "vertex stddev below threshold",
 }
 
 # TODO: make following args to `__init__` or `run`
 REPORT_AFTER = 100
-APPEND_FILE = True
+
+CART_DIMS = ("x", "y", "z", "time")
 
 
 class Reco(object):
@@ -104,13 +121,17 @@ class Reco(object):
         key "outdir".
 
     outdir : string
-        Directory in which to save any generated files
+        Directory in which to save any generated files. Note that recos will be
+        placed in a leaf directory named "recos", which will be created and
+        appended to `outdir` if `outdir` does not already specify a "recos"
+        leaf directory.
 
     save_llhp : bool, optional
         Whether to save llhp (within 30 LLH of max-LLH) to disk; default is
         False
 
     """
+
     def __init__(
         self,
         events_kw,
@@ -119,38 +140,51 @@ class Reco(object):
         outdir,
         save_llhp=False,
         overwrite=False,
+        debug=False,
     ):
-        self.events_kw = events_kw
-        self.dom_tables_kw = dom_tables_kw
-        self.tdi_tables_kw = tdi_tables_kw
-        self.attrs = sort_dict(dict(
-            events_kw=sort_dict(self.events_kw),
-            dom_tables_kw=sort_dict(self.dom_tables_kw),
-            tdi_tables_kw=sort_dict(self.tdi_tables_kw),
-        ))
-        self._get_events = init_obj.get_events(**events_kw)
+        self.debug = bool(debug)
+
+        # We don't want to specify 'recos' so that new recos are automatically
+        # found by `init_obj.get_events` function
+        events_kw.pop("recos", None)
+        self.events_kw = sort_dict(events_kw)
+
+        self.num_events = len(
+            np.load(join(events_kw["events_base"], "events.npy"), mmap_mode="r")
+        )
+
+        self.dom_tables_kw = sort_dict(dom_tables_kw)
+        self.tdi_tables_kw = sort_dict(tdi_tables_kw)
+        self.attrs = OrderedDict(
+            [
+                ("events_kw", self.events_kw),
+                ("dom_tables_kw", self.dom_tables_kw),
+                ("tdi_tables_kw", self.tdi_tables_kw),
+            ]
+        )
+        if basename(outdir.rstrip("/")) != "recos":
+            outdir = join(outdir, "recos")
         self.outdir = outdir
         self.save_llhp = save_llhp
         self.overwrite = overwrite
 
         # Replace None values for `start` and `step` for fewer branches in
         # subsequent logic (i.e., these will always be integers)
-        self.events_start = 0 if events_kw['start'] is None else events_kw['start']
-        self.events_step = 1 if events_kw['step'] is None else events_kw['step']
+        self.events_start = 0 if events_kw["start"] is None else events_kw["start"]
+        self.events_step = 1 if events_kw["step"] is None else events_kw["step"]
         # Nothing we can do about None for `stop` since we don't know how many
         # events there are in total.
-        self.events_stop = events_kw['stop']
+        self.events_stop = events_kw["stop"]
 
         self.slice_prefix = join(
             outdir,
-            'slc{start}:{stop}:{step}.'.format(
+            "slc{start}:{stop}:{step}.".format(
                 start=self.events_start,
-                stop='' if self.events_stop is None else self.events_stop,
+                stop="" if self.events_stop is None else self.events_stop,
                 step=self.events_step,
-            )
+            ),
         )
-        """Slice-notation string to append to *estimate filenames if
-        APPEND_FILE is True"""
+        """Slice-notation string to append to *estimate filenames"""
 
         self.outdir = expand(self.outdir)
         mkdir(self.outdir)
@@ -165,7 +199,7 @@ class Reco(object):
         self.current_event = None
         self.current_event_idx = -1
         self.event_counter = -1
-        self.successful_reco_counter = 0
+        self.successful_reco_counter = {}
         self.hypo_handler = None
         self.prior = None
         self.priors_used = None
@@ -178,11 +212,13 @@ class Reco(object):
         """Iterator over events which sets class variables `event_prefix`,
         `current_event`, `current_event_idx`, and `event_counter` for each
         event retrieved."""
-        for event_idx, event in self._get_events:
-            print('Operating on event: "{}"'.format(event_idx))
-            self.event_prefix = join(self.outdir, 'evt{}.'.format(event_idx))
+        # do initialization here so any new recos are automatically detected
+        events = init_obj.get_events(**self.events_kw)
+        for current_event_idx, event in events:
+            print('Operating on event: "{}"'.format(current_event_idx))
+            self.event_prefix = join(self.outdir, "evt{}.".format(current_event_idx))
             self.current_event = event
-            self.current_event_idx = event_idx
+            self.current_event_idx = current_event_idx
             self.event_counter += 1
             yield self.current_event
 
@@ -200,536 +236,432 @@ class Reco(object):
         self.n_params = self.hypo_handler.n_params
         self.n_opt_params = self.hypo_handler.n_opt_params
 
-    def run(self, method):
-        """Run reconstructions on events.
-
-        This method collects many recipes for performing different kinds of
-        reconstructions.
+    def _reco_event(self, method):
+        """Recipes for performing different kinds of reconstructions.
 
         Parameters
         ----------
-        method : string
-            One of {}
+        method : str
 
-        """.format(sorted(METHODS))
-        if method not in METHODS:
-            raise ValueError(
-                'Unrecognized `method` "{}"; must be one of {}'.format(method, METHODS)
+        """
+        # simple 1-stage recos
+        if method in ("multinest", "test", "truth", "crs", "scipy", "nlopt", "skopt"):
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="pegleg",
+                track_time_step=1.0,
             )
 
-        print('Running "{}" reconstruction...'.format(method))
-        t00 = time.time()
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
 
-        for _ in self.events:
-            try:
-                if method in (
-                    'multinest',
-                    'test',
-                    'truth',
-                    'crs',
-                    'scipy',
-                    'nlopt',
-                    'skopt',
-                ):
-                    t0 = time.time()
-                    self.setup_hypo(
-                        cascade_kernel='scaling_aligned_one_dim',
-                        track_kernel='pegleg',
-                        track_time_step=1.,
-                    )
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
 
-                    self.generate_prior_method(
-                        prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
-                        ])
-                    )
-
-                    param_values = []
-                    log_likelihoods = []
-                    aux_values = []
-                    t_start = []
-                    self.generate_loglike_method(
-                        param_values=param_values,
-                        log_likelihoods=log_likelihoods,
-                        aux_values=aux_values,
-                        t_start=t_start,
-                    )
-
-                    if method == 'test':
-                        run_info = self.run_test(seed=0)
-                    if method == 'truth':
-                        run_info = self.run_with_truth()
-                    elif method == 'crs':
-                        run_info = self.run_crs(
-                            n_live=250,
-                            max_iter=20000,
-                            max_noimprovement=5000,
-                            min_fn_std=0.1,
-                            min_vertex_std=(1, 1, 1, 3),
-                            use_priors=False,
-                            use_sobol=True,
-                            seed=0,
-                        )
-                    elif method == 'multinest':
-                        run_info = self.run_multinest(
-                            importance_sampling=True,
-                            max_modes=1,
-                            const_eff=True,
-                            n_live=160,
-                            evidence_tol=0.5,
-                            sampling_eff=0.3,
-                            max_iter=10000,
-                            seed=0,
-                        )
-                    elif method == 'scipy':
-                        run_info = self.run_scipy(
-                            method='differential_evolution',
-                            eps=0.02
-                        )
-                    elif method == 'nlopt':
-                        run_info = self.run_nlopt()
-                    elif method == 'skopt':
-                        run_info = self.run_skopt()
-
-                    t1 = time.time()
-                    run_info['run_time'] = t1 - t0
-
-                    if self.save_llhp:
-                        llhp_fname = '{}.llhp'.format(method)
-                    else:
-                        llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
-                    self.make_estimate(
-                        llhp=llhp,
-                        remove_priors=True,
-                        run_info=run_info,
-                        fname='{}.estimate'.format(method),
-                    )
-
-                elif method == 'fast':
-                    t0 = time.time()
-                    self.setup_hypo(
-                         cascade_kernel='scaling_aligned_point_ckv',
-                         track_kernel='pegleg',
-                         track_time_step=3.,
-                     )
-
-                    self.generate_prior_method(
-                        prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
-                        ])
-                    )
-
-                    param_values = []
-                    log_likelihoods = []
-                    aux_values = []
-                    t_start = []
-                    self.generate_loglike_method(
-                        param_values=param_values,
-                        log_likelihoods=log_likelihoods,
-                        aux_values=aux_values,
-                        t_start=t_start,
-                    )
-
-                    run_info = self.run_crs(
-                        n_live=160,
-                        max_iter=10000,
-                        max_noimprovement=1000,
-                        min_fn_std=0.5,
-                        min_vertex_std=(5, 5, 5, 15),
-                        use_priors=False,
-                        use_sobol=True,
-                        seed=0,
-                    )
-
-                    t1 = time.time()
-                    run_info['run_time'] = t1 - t0
-
-                    if self.save_llhp:
-                        llhp_fname = '{}.llhp'.format(method)
-                    else:
-                        llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
-                    self.make_estimate(
-                        llhp=llhp,
-                        remove_priors=False,
-                        run_info=run_info,
-                        fname='{}.estimate'.format(method),
-                    )
-
-                elif method == 'crs_prefit_mn':
-                    t0 = time.time()
-
-                    print('--- CRS prefit ---')
-
-                    self.setup_hypo(
-                        cascade_kernel='scaling_aligned_point_ckv',
-                        track_kernel='pegleg',
-                        track_time_step=3.,
-                    )
-
-                    self.generate_prior_method(
-                        prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
-                        ])
-                    )
-
-                    param_values = []
-                    log_likelihoods = []
-                    aux_values = []
-                    prefit_t_start = []
-                    self.generate_loglike_method(
-                        param_values=param_values,
-                        log_likelihoods=log_likelihoods,
-                        aux_values=aux_values,
-                        t_start=prefit_t_start,
-                    )
-
-                    prefit_run_info = self.run_crs(
-                        n_live=160,
-                        max_iter=10000,
-                        max_noimprovement=1000,
-                        min_fn_std=0.5,
-                        min_vertex_std=(5, 5, 5, 15),
-                        use_priors=False,
-                        use_sobol=True,
-                        seed=0,
-                    )
-
-                    t1 = time.time()
-                    prefit_run_info['run_time'] = t1 - t0
-
-                    if self.save_llhp:
-                        llhp_fname = '{}.llhp_prefit'.format(method)
-                    else:
-                        llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
-                    prefit_estimate = self.make_estimate(
-                        llhp=llhp,
-                        remove_priors=False,
-                        run_info=prefit_run_info,
-                        fname='{}.estimate_prefit'.format(method),
-                    )
-
-                    print('--- MultiNest fit including aligned 1D cascade ---')
-
-                    self.setup_hypo(
-                        cascade_kernel='scaling_aligned_one_dim',
-                        track_kernel='pegleg',
-                        track_time_step=1.,
-                    )
-
-                    # Setup prior
-
-                    pft_est = prefit_estimate.sel(kind='mean')
-                    pft_x = float(pft_est.sel(param='x'))
-                    pft_y = float(pft_est.sel(param='y'))
-                    pft_z = float(pft_est.sel(param='z'))
-                    pft_time = float(pft_est.sel(param='time'))
-
-                    self.generate_prior_method(
-                        prior_defs=OrderedDict([
-                            ('x', dict(
-                                kind='cauchy',
-                                loc=pft_x,
-                                scale=15,
-                                low=pft_x - 300,
-                                high=pft_x + 300,
-                            )),
-                            ('y', dict(
-                                kind='cauchy',
-                                loc=pft_y,
-                                scale=15,
-                                low=pft_y - 300,
-                                high=pft_y + 300,
-                            )),
-                            ('z', dict(
-                                kind='cauchy',
-                                loc=pft_z,
-                                scale=10,
-                                low=pft_z - 200,
-                                high=pft_z + 200,
-                            )),
-                            ('time', dict(
-                                kind='cauchy',
-                                loc=pft_time,
-                                scale=40,
-                                low=pft_time - 800,
-                                high=pft_time + 800,
-                            )),
-                        ])
-                    )
-
-                    param_values = []
-                    log_likelihoods = []
-                    aux_values = []
-                    t_start = []
-                    self.generate_loglike_method(
-                        param_values=param_values,
-                        log_likelihoods=log_likelihoods,
-                        aux_values=aux_values,
-                        t_start=t_start,
-                    )
-
-                    run_info = self.run_multinest(
-                        importance_sampling=True,
-                        max_modes=1,
-                        const_eff=True,
-                        n_live=250,
-                        evidence_tol=0.02,
-                        sampling_eff=0.5,
-                        max_iter=10000,
-                        seed=0,
-                    )
-
-                    t2 = time.time()
-                    run_info['run_time'] = t2 - t1
-
-                    if self.save_llhp:
-                        llhp_fname = '{}.llhp'.format(method)
-                    else:
-                        llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
-                    self.make_estimate(
-                        llhp=llhp,
-                        remove_priors=True,
-                        run_info=run_info,
-                        fname='{}.estimate'.format(method),
-                    )
-
-                    #print('--- MN 10d fit ---')
-
-                    #self.setup_hypo(
-                    #    cascade_kernel='scaling_one_dim',
-                    #    track_kernel='pegleg',
-                    #    track_time_step=1.,
-                    #)
-
-                    #self.hypo_handler.fixed_params = OrderedDict()
-                    #self.hypo_handler.fixed_params['x'] = estimate['mean']['x']
-                    #self.hypo_handler.fixed_params['y'] = estimate['mean']['y']
-                    #self.hypo_handler.fixed_params['z'] = estimate['mean']['z']
-                    #self.hypo_handler.fixed_params['time'] = estimate['mean']['time']
-
-                    #param_values = []
-                    #log_likelihoods = []
-
-                    ## Setup prior (none)
-                    #prior_defs = OrderedDict()
-                    #self.generate_prior_method(prior_defs)
-
-                    #self.generate_loglike_method(
-                    #    param_values=param_values,
-                    #    log_likelihoods=log_likelihoods,
-                    #    t_start=t_start,
-                    #)
-
-                    #run_info_10d = self.run_multinest(
-                    #    importance_sampling=True,
-                    #    max_modes=1,
-                    #    const_eff=True,
-                    #    n_live=160,
-                    #    evidence_tol=0.5,
-                    #    sampling_eff=0.3,
-                    #    max_iter=10000,
-                    #    seed=0,
-                    #)
-
-                    #t3 = time.time()
-                    #run_info_10d['run_time'] = t3 - t2
-
-                    #if self.save_llhp:
-                    #    llhp_fname = '{}.llhp_10d'.format(method)
-                    #else:
-                    #    llhp_fname = None
-                    #llhp = self.make_llhp(log_likelihoods, param_values, fname=llhp_fname)
-                    #self.make_estimate(
-                    #    llhp=llhp,
-                    #    remove_priors=True,
-                    #    run_info=run_info_10d,
-                    #    fname='{}.estimate_10d'.format(method),
-                    #)
-
-                elif method == 'experimental_trackfit':
-                    print('--- track-only---')
-                    t0 = time.time()
-                    self.setup_hypo(
-                            cascade_kernel='scaling_aligned_point_ckv',
-                            track_kernel='pegleg', 
-                            track_time_step=3.)
-
-                    self.generate_prior_method(
-                        prior_defs=OrderedDict([
-                            ('x', dict(kind='SPEFit2', extent='tight')),
-                            ('y', dict(kind='SPEFit2', extent='tight')),
-                            ('z', dict(kind='SPEFit2', extent='tight')),
-                            ('time', dict(kind='SPEFit2', extent='tight')),
-                        ])
-                    )
-
-                    param_values = []
-                    log_likelihoods = []
-                    aux_values = []
-                    prefit_t_start = []
-                    self.generate_loglike_method(
-                        param_values=param_values,
-                        log_likelihoods=log_likelihoods,
-                        aux_values=aux_values,
-                        t_start=prefit_t_start,
-                        exp_trackfit=True,
-                    )
-
-                    prefit_run_info = self.run_crs(
-                        n_live=160,
-                        max_iter=10000,
-                        max_noimprovement=1000,
-                        min_fn_std=0.5,
-                        min_vertex_std=(5, 5, 5, 15),
-                        use_priors=False,
-                        use_sobol=True,
-                        seed=0,
-                    )
-
-                    t1 = time.time()
-                    prefit_run_info['run_time'] = t1 - t0
-
-                    if self.save_llhp:
-                        llhp_fname = '{}.llhp_prefit'.format(method)
-                    else:
-                        llhp_fname = None
-                    llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
-                    prefit_estimate = self.make_estimate(
-                        llhp=llhp,
-                        remove_priors=False,
-                        run_info=prefit_run_info,
-                        fname='{}.estimate_prefit'.format(method),
-                    )
-
-
-                    #print('--- hybrid fit ---')
-
-                    #t2 = time.time()
-                    ## track AND cascade to hypo
-                    #self.setup_hypo(
-                    #    cascade_kernel='scaling_aligned_one_dim',
-                    #    #track_kernel='pegleg',
-                    #    track_kernel='table_energy_loss',
-                    #    track_time_step=1.,
-                    #)
-
-                    #pft_est = prefit_estimate.sel(kind='median')
-                    #pft_x = float(pft_est.sel(param='x'))
-                    #pft_y = float(pft_est.sel(param='y'))
-                    #pft_z = float(pft_est.sel(param='z'))
-                    #pft_time = float(pft_est.sel(param='time'))
-                    #pft_track_energy = float(pft_est.sel(param='track_energy'))
-
-                    #self.hypo_handler.fixed_params = OrderedDict([
-                    #    ('track_energy', pft_track_energy)
-                    #])
-
-                    #self.generate_prior_method(
-                    #    prior_defs=OrderedDict([
-                    #        ('x', dict(kind='cauchy', loc=pft_x, scale=12)),
-                    #        ('y', dict(kind='cauchy', loc=pft_y, scale=13)),
-                    #        ('z', dict(kind='cauchy', loc=pft_z, scale=7.5)),
-                    #        ('time', dict(
-                    #            kind='cauchy',
-                    #            loc=pft_time,
-                    #            scale=40,
-                    #            low=pft_time - 2000,
-                    #            high=pft_time + 2000,
-                    #        )),
-                    #    ])
-                    #)
-
-                    #param_values = []
-                    #log_likelihoods = []
-                    #aux_values = []
-                    #t_start = []
-                    #self.generate_loglike_method(
-                    #    param_values=param_values,
-                    #    log_likelihoods=log_likelihoods,
-                    #    aux_values=aux_values,
-                    #    t_start=t_start,
-                    #)
-
-                    #run_info = self.run_crs(
-                    #    n_live=160,
-                    #    max_iter=20000,
-                    #    max_noimprovement=2000,
-                    #    min_fn_std=0.1,
-                    #    min_vertex_std=(5, 5, 5, 15),
-                    #    use_priors=False,
-                    #    use_sobol=True,
-                    #    seed=0,
-                    #)
-
-                    #t3 = time.time()
-                    #run_info['run_time'] = t3 - t2
-
-                    #if self.save_llhp:
-                    #    llhp_fname = '{}.llhp'.format(method)
-                    #else:
-                    #    llhp_fname = None
-                    #llhp = self.make_llhp(log_likelihoods, param_values, aux_values, fname=llhp_fname)
-                    #self.make_estimate(
-                    #    llhp=llhp,
-                    #    remove_priors=False,
-                    #    run_info=run_info,
-                    #    fname='{}.estimate'.format(method),
-                    #)
-                else:
-                    raise ValueError('Unknown `Method` {}'.format(method))
-
-            except GarbageInputError as error:
-                print(
-                    'ERROR: event idx {}: "{}"; ignoring and moving to next event'
-                    .format(self.current_event_idx, error.message)
+            if method == "test":
+                run_info, fit_meta = self.run_test(seed=0)
+            if method == "truth":
+                run_info, fit_meta = self.run_with_truth()
+            elif method == "crs":
+                run_info, fit_meta = self.run_crs(
+                    n_live=250,
+                    max_iter=20000,
+                    max_noimprovement=5000,
+                    min_llh_std=0.1,
+                    min_vertex_std=dict(x=1, y=1, z=1, time=3),
+                    use_priors=False,
+                    use_sobol=True,
+                    seed=0,
                 )
+            elif method == "multinest":
+                run_info, fit_meta = self.run_multinest(
+                    importance_sampling=True,
+                    max_modes=1,
+                    const_eff=True,
+                    n_live=160,
+                    evidence_tol=0.5,
+                    sampling_eff=0.3,
+                    max_iter=10000,
+                    seed=0,
+                )
+            elif method == "scipy":
+                run_info, fit_meta = self.run_scipy(
+                    method="differential_evolution", eps=0.02
+                )
+            elif method == "nlopt":
+                run_info, fit_meta = self.run_nlopt()
+            elif method == "skopt":
+                run_info, fit_meta = self.run_skopt()
 
-            else:
-                self.successful_reco_counter += 1
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=self.save_llhp,
+            )
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
 
-        print('Total script run time is {:.3f} s'.format(time.time() - t00))
+        elif method == "fast":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_point_ckv",
+                track_kernel="pegleg",
+                track_time_step=3.0,
+            )
 
-    def generate_prior_method(self, prior_defs):
-        """Generate the prior transform method `self.prior` and info
-        `self.priors_used` for a given event.
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_crs(
+                n_live=160,
+                max_iter=10000,
+                max_noimprovement=1000,
+                min_llh_std=0.5,
+                min_vertex_std=dict(x=5, y=5, z=5, time=15),
+                use_priors=False,
+                use_sobol=True,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=self.save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=False,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
+
+        elif method == "stopping_atm_muon_crs":
+            self.setup_hypo(
+                track_kernel="stopping_table_energy_loss", track_time_step=3.0
+            )
+
+            self.generate_prior_method(
+                x=dict(kind=PRI_UNIFORM, extents=EXT_IC["x"]),
+                y=dict(kind=PRI_UNIFORM, extents=EXT_IC["y"]),
+                z=dict(kind=PRI_UNIFORM, extents=EXT_IC["z"]),
+                time=dict(kind=PRI_TIME_RANGE),
+                track_zenith=dict(
+                    kind=PRI_COSINE, extents=((0, Bound.ABS), (np.pi / 2, Bound.ABS))
+                ),
+            )
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_crs(
+                n_live=160,
+                max_iter=10000,
+                max_noimprovement=1000,
+                min_llh_std=0.5,
+                min_vertex_std=dict(x=5, y=5, z=4, time=20),
+                use_priors=False,
+                use_sobol=True,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=self.save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=False,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
+
+        elif method == "crs_prefit":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_point_ckv",
+                track_kernel="pegleg",
+                track_time_step=3.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_crs(
+                n_live=160,
+                max_iter=10000,
+                max_noimprovement=1000,
+                min_llh_std=0.5,
+                min_vertex_std=dict(x=5, y=5, z=4, time=20),
+                use_priors=False,
+                use_sobol=True,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=self.save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=False,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
+
+        elif method == "mn8d":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="pegleg",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_CRS_MN)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_multinest(
+                importance_sampling=True,
+                max_modes=1,
+                const_eff=True,
+                n_live=250,
+                evidence_tol=0.02,
+                sampling_eff=0.5,
+                max_iter=10000,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=self.save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
+
+        elif method == "dn8d":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="pegleg",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(return_cube=True, **PRISPEC_OSCNEXT_CRS_MN)
+            #self.generate_prior_method(return_cube=True, **PRISPEC_OSCNEXT_PREFIT_TIGHT)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_dynesty(
+                n_live=100,
+                maxiter=2000,
+                maxcall=10000,
+                dlogz=0.1,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=self.save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
+
+        else:
+            raise ValueError("Unknown `Method` {}".format(method))
+
+    def run(self, methods):
+        """Run reconstruction(s) on events.
 
         Parameters
         ----------
-        prior_defs : dict
+        methods : string or iterable thereof
+            Each must be one of `METHODS`
+
+        """
+        start_time = time.time()
+        if isinstance(methods, string_types):
+            methods = [methods]
+
+        for method in methods:
+            if method not in METHODS:
+                raise ValueError(
+                    'Unrecognized `method` "{}"; must be one of {}'.format(
+                        method, METHODS
+                    )
+                )
+
+        if len(set(methods)) != len(methods):
+            raise ValueError("Same reco specified multiple times")
+
+        print("Running {} reconstruction(s) on all specified events".format(methods))
+
+        self.successful_reco_counter = {method: 0 for method in methods}
+
+        for _ in self.events:
+            for method in methods:
+                estimate_outf = join(self.outdir, "retro_{}.npy".format(method))
+                if isfile(estimate_outf):
+                    estimates = np.load(estimate_outf, mmap_mode="r")
+                    fit_status = estimates[self.current_event_idx]["fit_status"]
+                    if fit_status != FitStatus.NotSet:
+                        print(
+                            'Method "{}" already run on event; skipping'.format(method)
+                        )
+                        continue
+
+                print('Running "{}" reconstruction'.format(method))
+                try:
+                    self._reco_event(method)
+                except GarbageInputError as error:
+                    print(
+                        'ERROR: event idx {}, reco method {}: "{}"; ignoring'
+                        " and moving to next event".format(
+                            self.current_event_idx, method, error
+                        )
+                    )
+                else:
+                    self.successful_reco_counter[method] += 1
+
+        print("Total run time is {:.3f} s".format(time.time() - start_time))
+
+    def generate_prior_method(self, return_cube=False, **kwargs):
+        """Generate the prior transform method `self.prior` and info
+        `self.priors_used` for a given event. Optionally, plots the priors to
+        current working directory if `self.debug` is True.
+
+        Call, e.g., via:
+
+            self.generate_prior_method(
+                x=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-100, Bounds.REL), (100, Bounds.REL))),
+                y=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-100, Bounds.REL), (100, Bounds.REL))),
+                z=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-50, Bounds.REL), (50, Bounds.REL))),
+                time=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-1000, Bounds.REL), (1000, Bounds.REL))),
+                azimuth=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
+                zenith=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
+            )
+
+        Parameters
+        ----------
+        return_cube : bool
+            if true, explicitly return the transformed cube
+        **kwargs
+            Prior definitions; anything unspecified falls back to a default
+            (since all params must have priors, including ranges, for e.g.
+            MultiNest and CRS).
 
         """
         prior_funcs = []
         self.priors_used = OrderedDict()
 
+        miscellany = []
         for dim_num, dim_name in enumerate(self.hypo_handler.opt_param_names):
-            if prior_defs.has_key(dim_name):
-                kwargs = prior_defs[dim_name]
-            else:
-                kwargs = {}
-
-            prior_fun, prior_def = get_prior_fun(
-                dim_num=dim_num,
-                dim_name=dim_name,
-                event=self.current_event,
-                **kwargs
+            spec = kwargs.get(dim_name, {})
+            prior_func, prior_def, misc = get_prior_func(
+                dim_num=dim_num, dim_name=dim_name, event=self.current_event, **spec
             )
-            prior_funcs.append(prior_fun)
+            prior_funcs.append(prior_func)
             self.priors_used[dim_name] = prior_def
+            miscellany.append(misc)
 
-        def prior(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
+        def prior(cube, ndim=None, nparams=None):  # pylint: disable=unused-argument
             """Apply `prior_funcs` to the hypercube to map values from the unit
             hypercube onto values in the physical parameter space.
 
@@ -742,17 +674,66 @@ class Reco(object):
             nparams
 
             """
-            for n, prior_func in enumerate(prior_funcs):
+            for prior_func in prior_funcs:
                 prior_func(cube)
-                #if not np.all(np.isfinite(cube)):
-                #    raise ValueError(
-                #        'application of prior "{}" resulted in non-finite params in `cube`: {}'
-                #        .format(n, cube)
-                #    )
+
+            if return_cube:
+                return cube
 
         self.prior = prior
 
-    def generate_loglike_method(self, param_values, log_likelihoods, aux_values, t_start, exp_trackfit=False):
+        if self.debug:
+            # -- Plot priors and save to png's in current dir -- #
+            import matplotlib as mpl
+
+            mpl.use("agg", warn=False)
+            import matplotlib.pyplot as plt
+
+            n_opt_params = len(self.hypo_handler.opt_param_names)
+            rand = np.random.RandomState(0)
+            cube = rand.rand(n_opt_params, int(1e5))
+            self.prior(cube)
+
+            nx = int(np.ceil(np.sqrt(n_opt_params)))
+            ny = int(np.ceil(n_opt_params / nx))
+            fig, axes = plt.subplots(ny, nx, figsize=(6 * nx, 4 * ny))
+            axit = iter(axes.flat)
+            for dim_num, dim_name in enumerate(self.hypo_handler.opt_param_names):
+                ax = next(axit)
+                ax.hist(cube[dim_num], bins=100)
+                misc = miscellany[dim_num]
+                if "reco_val" in misc:
+                    ylim = ax.get_ylim()
+                    ax.plot([misc["reco_val"]] * 2, ylim, "k--", lw=1)
+                    ax.set_ylim(ylim)
+
+                misc_strs = []
+                if "reco" in misc:
+                    misc_strs.append(misc["reco"])
+                if "reco_val" in misc:
+                    misc_strs.append("{:.2f}".format(misc["reco_val"]))
+                if (
+                    "split_by_reco_param" in misc
+                    and misc["split_by_reco_param"] is not None
+                ):
+                    misc_strs.append(
+                        "split by {} = {:.2f}".format(
+                            misc["split_by_reco_param"], misc["split_val"]
+                        )
+                    )
+                misc_str = ", ".join(misc_strs)
+                ax.set_title(
+                    "{}: {} {}".format(
+                        dim_name, self.priors_used[dim_name][0], misc_str
+                    )
+                )
+            for ax in axit:
+                ax.axis("off")
+            fig.tight_layout()
+            plt_fpath_base = self.event_prefix + "priors"
+            fig.savefig(plt_fpath_base + ".png", dpi=120)
+
+    def generate_loglike_method(self, param_values, log_likelihoods, aux_values, t_start):
         """Generate the LLH callback method `self.loglike` for a given event.
 
         Parameters
@@ -761,9 +742,9 @@ class Reco(object):
         log_likelihoods : list
         aux_values : list
         t_start : list
-            Needs to be a list for start time to be passed by reference and
+            Needs to be a list for `t_start` to be passed by reference (and
             therefore universally accessible within all methods that require
-            knowing the start time
+            knowing `t_start`).
 
         """
         # -- Variables to be captured by `loglike` closure -- #
@@ -773,37 +754,42 @@ class Reco(object):
         n_opt_params = self.hypo_handler.n_opt_params
         fixed_params = self.hypo_handler.fixed_params
         event = self.current_event
-        hits = event['hits']
-        hits_indexer = event['hits_indexer']
+        hits = event["hits"]
+        hits_indexer = event["hits_indexer"]
         hypo_handler = self.hypo_handler
-        pegleg_muon_dt = hypo_handler.pegleg_kernel_kwargs.get('dt')
+        pegleg_muon_dt = hypo_handler.pegleg_kernel_kwargs.get("dt")
         pegleg_muon_const_e_loss = False
         dom_info = self.dom_tables.dom_info
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
-        if 'truth' in event:
-            truth_info = OrderedDict([
-                ('x', event['truth']['x']),
-                ('y', event['truth']['y']),
-                ('z', event['truth']['z']),
-                ('time', event['truth']['time']),
-                ('zenith', np.arccos(event['truth']['coszen'])),
-                ('azimuth', event['truth']['azimuth']),
-                ('track_azimuth', event['truth']['track_azimuth']),
-                ('track_zenith', event['truth']['track_zenith']),
-                ('track_energy', event['truth']['track_energy']),
-            ])
-            try:
-                truth_info['cascade_azimuth'] = event['truth']['total_cascade_azimuth']
-                truth_info['cascade_zenith'] = np.arccos(event['truth']['total_cascade_coszen'])
-                truth_info['cascade_energy'] = event['truth']['total_cascade_energy']
-            except ValueError:
-                truth_info['cascade_energy'] = event['truth']['energy'] - event['truth']['track_energy']
-            truth_info['neutrino_energy'] = event['truth']['energy']
-
+        if "truth" in event:
+            truth = event["truth"]
+            truth_info = OrderedDict(
+                [
+                    ("x", truth["x"]),
+                    ("y", truth["y"]),
+                    ("z", truth["z"]),
+                    ("time", truth["time"]),
+                    ("zenith", truth["zenith"]),
+                    ("azimuth", truth["azimuth"]),
+                    ("track_azimuth", truth["track_azimuth"]),
+                    ("track_zenith", truth["track_zenith"]),
+                    ("track_energy", truth["track_energy"]),
+                    ("energy", truth["energy"]),
+                    ("cascade_energy", truth['total_cascade_energy']),
+                ]
+            )
+            optional = [
+                ("cscd_az", "total_cascade_azimuth"),
+                ("cscd_zen", "total_cascade_zenith"),
+                ("cscd_em_equiv_en", "total_cascade_em_equiv_energy"),
+            ]
+            for label, key in optional:
+                if key in truth:
+                    truth_info[label] = truth[key]
         else:
             truth_info = None
 
-        num_operational_doms = np.sum(dom_info['operational'])
+        num_operational_doms = np.sum(dom_info["operational"])
 
         # Array containing only DOMs operational during the event & info
         # relevant to the hits these DOMs got (if any)
@@ -813,59 +799,76 @@ class Reco(object):
         # pointer back to the index of the DOM in the `event_dom_info` array
         event_hit_info = np.zeros(shape=hits.size, dtype=EVT_HIT_INFO_T)
 
-        # Copy 'time' and '' over directly; add 'event_dom_idx' below
-        event_hit_info[['time', 'charge']] = hits[['time', 'charge']]
+        # Copy 'time' and 'charge' over directly; add 'event_dom_idx' below
+        event_hit_info[["time", "charge"]] = hits[["time", "charge"]]
 
-        copy_fields = ['sd_idx', 'x', 'y', 'z', 'quantum_efficiency', 'noise_rate_per_ns']
+        copy_fields = [
+            "sd_idx",
+            "x",
+            "y",
+            "z",
+            "quantum_efficiency",
+            "noise_rate_per_ns",
+        ]
 
-        print('all noise rate %.5f' % np.nansum(dom_info['noise_rate_per_ns']))
+        print("all noise rate %.5f" % np.nansum(dom_info["noise_rate_per_ns"]))
         print(
-            'DOMs with zero or NaN noise %i' % np.count_nonzero(
-                np.isnan(dom_info['noise_rate_per_ns']) | (dom_info['noise_rate_per_ns'] == 0)
+            "DOMs with zero or NaN noise %i"
+            % np.count_nonzero(
+                np.isnan(dom_info["noise_rate_per_ns"])
+                | (dom_info["noise_rate_per_ns"] == 0)
             )
         )
 
         # Fill `event_{hit,dom}_info` arrays only for operational DOMs
-        for dom_idx, this_dom_info in enumerate(dom_info[dom_info['operational']]):
-            this_event_dom_info = event_dom_info[dom_idx:dom_idx+1]
+        for dom_idx, this_dom_info in enumerate(dom_info[dom_info["operational"]]):
+            this_event_dom_info = event_dom_info[dom_idx : dom_idx + 1]
             this_event_dom_info[copy_fields] = this_dom_info[copy_fields]
-            sd_idx = this_dom_info['sd_idx']
-            this_event_dom_info['table_idx'] = sd_idx_table_indexer[sd_idx]
+            sd_idx = this_dom_info["sd_idx"]
+            this_event_dom_info["table_idx"] = sd_idx_table_indexer[sd_idx]
 
             # Copy any hit info from `hits_indexer` and total charge from
             # `hits` into `event_hit_info` and `event_dom_info` arrays
-            this_hits_indexer = hits_indexer[hits_indexer['sd_idx'] == sd_idx]
+            this_hits_indexer = hits_indexer[hits_indexer["sd_idx"] == sd_idx]
             if len(this_hits_indexer) == 0:
-                this_event_dom_info['hits_start_idx'] = 0
-                this_event_dom_info['hits_stop_idx'] = 0
-                this_event_dom_info['total_observed_charge'] = 0
+                this_event_dom_info["hits_start_idx"] = 0
+                this_event_dom_info["hits_stop_idx"] = 0
+                this_event_dom_info["total_observed_charge"] = 0
                 continue
 
-            start = this_hits_indexer[0]['offset']
-            stop = start + this_hits_indexer[0]['num']
-            event_hit_info[start:stop]['event_dom_idx'] = dom_idx
-            this_event_dom_info['hits_start_idx'] = start
-            this_event_dom_info['hits_stop_idx'] = stop
-            this_event_dom_info['total_observed_charge'] = (
-                np.sum(hits[start:stop]['charge'])
+            start = this_hits_indexer[0]["offset"]
+            stop = start + this_hits_indexer[0]["num"]
+            event_hit_info[start:stop]["event_dom_idx"] = dom_idx
+            this_event_dom_info["hits_start_idx"] = start
+            this_event_dom_info["hits_stop_idx"] = stop
+            this_event_dom_info["total_observed_charge"] = np.sum(
+                hits[start:stop]["charge"]
             )
 
-        print('this evt. noise rate %.5f'%np.sum(event_dom_info['noise_rate_per_ns']))
-        print('DOMs with zero noise: %i'%np.sum(event_dom_info['noise_rate_per_ns'] == 0))
+        print("this evt. noise rate %.5f" % np.sum(event_dom_info["noise_rate_per_ns"]))
+        print(
+            "DOMs with zero noise: %i"
+            % np.sum(event_dom_info["noise_rate_per_ns"] == 0)
+        )
         # settings those to minimum noise
-        noise = event_dom_info['noise_rate_per_ns']
+        noise = event_dom_info["noise_rate_per_ns"]
         mask = noise < 1e-7
         noise[mask] = 1e-7
-        print('this evt. noise rate %.5f'%np.sum(event_dom_info['noise_rate_per_ns']))
-        print('DOMs with zero noise: %i'%np.sum(event_dom_info['noise_rate_per_ns'] == 0))
-        print('min noise: ', np.min(noise))
-        print('mean noise: ', np.mean(noise))
+        print("this evt. noise rate %.5f" % np.sum(event_dom_info["noise_rate_per_ns"]))
+        print(
+            "DOMs with zero noise: %i"
+            % np.sum(event_dom_info["noise_rate_per_ns"] == 0)
+        )
+        print("min noise: ", np.min(noise))
+        print("mean noise: ", np.mean(noise))
 
-        assert np.sum(event_dom_info['quantum_efficiency'] <= 0) == 0, 'negative QE'
-        assert np.sum(event_dom_info['total_observed_charge']) > 0, 'no charge'
-        assert np.isfinite(np.sum(event_dom_info['total_observed_charge'])), 'non-finite charge'
+        assert np.sum(event_dom_info["quantum_efficiency"] <= 0) == 0, "negative QE"
+        assert np.sum(event_dom_info["total_observed_charge"]) > 0, "no charge"
+        assert np.isfinite(
+            np.sum(event_dom_info["total_observed_charge"])
+        ), "non-finite charge"
 
-        def loglike(cube, ndim=None, nparams=None): # pylint: disable=unused-argument
+        def loglike(cube, ndim=None, nparams=None):  # pylint: disable=unused-argument
             """Get log likelihood values.
 
             Defined as a closure to capture particulars of the event and priors
@@ -908,9 +911,8 @@ class Reco(object):
             llh, pegleg_idx, scalefactor = get_llh_retval[:3]
             aux_values.append(get_llh_retval[3:])
 
-            
-            assert np.isfinite(llh), 'LLH not finite'
-            assert llh < 0, 'LLH positive'
+            assert np.isfinite(llh), "LLH not finite: {}".format(llh)
+            assert llh <= 0, "LLH positive: {}".format(llh)
 
             additional_results = []
 
@@ -949,12 +951,12 @@ class Reco(object):
             t1 = time.time()
 
             if n_calls % REPORT_AFTER == 0:
-                print('')
+                print("")
                 if truth_info:
-                    msg = 'truth:                '
+                    msg = "truth:                "
                     for key, val in zip(all_param_names, result):
                         try:
-                            msg += ' %s=%.2f'%(key, truth_info[key])
+                            msg += " %s=%.1f" % (key, truth_info[key])
                         except KeyError:
                             pass
                     print(msg)
@@ -962,40 +964,44 @@ class Reco(object):
                 best_idx = np.argmax(log_likelihoods)
                 best_llh = log_likelihoods[best_idx]
                 best_p = param_values[best_idx]
-                msg = 'best llh = {:.3f} @ '.format(best_llh)
+                msg = "best llh = {:.3f} @ ".format(best_llh)
                 for key, val in zip(all_param_names, best_p):
-                    msg += ' %s=%.2f'%(key, val)
+                    msg += " %s=%.1f" % (key, val)
                 print(msg)
-                msg = 'this llh = {:.3f} @ '.format(llh)
+                msg = "this llh = {:.3f} @ ".format(llh)
                 for key, val in zip(all_param_names, result):
-                    msg += ' %s=%.2f'%(key, val)
+                    msg += " %s=%.1f" % (key, val)
                 print(msg)
-                print('{} LLH computed'.format(n_calls))
-                print('avg time per llh: {:.3f} ms'.format(
-                    (t_now - t_start[0])/n_calls*1000)
+                print("{} LLH computed".format(n_calls))
+                print(
+                    "avg time per llh: {:.3f} ms".format(
+                        (t_now - t_start[0]) / n_calls * 1000
+                    )
                 )
-                print('this llh took:    {:.3f} ms'.format((t1 - t0)*1000))
-                print('')
+                print("this llh took:    {:.3f} ms".format((t1 - t0) * 1000))
+                print("")
 
             return llh
 
         self.loglike = loglike
 
-    def make_llhp(self, log_likelihoods, param_values, aux_values, fname=None):
+    def make_llhp(self, method, log_likelihoods, param_values, aux_values, save):
         """Create a structured numpy array containing the reco information;
         also add derived dimensions, and optionally save to disk.
 
         Parameters
         ----------
+        method : str
+
         log_likelihoods : array
 
         param_values : array
 
         aux_values : array
 
-        fname : str, optional
-            If provided, llhp for the event reco are saved to file at path
-              {self.outdir}/evt{event_idx}.{fname}.npy
+        save : bool
+            If True, llhp for the event reco are saved to file at path
+              {self.outdir}/evt{event_idx}.retro_{method}.llhp.npy
 
         Returns
         -------
@@ -1007,184 +1013,197 @@ class Reco(object):
         dim_names = list(self.hypo_handler.all_param_names)
 
         # add derived quantities
-        derived_dim_names = ['energy', 'azimuth', 'zenith']
-        if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
-            derived_dim_names += ['cascade_zenith', 'cascade_azimuth']
+        derived_dim_names = ["energy", "azimuth", "zenith"]
+        if "cascade_d_zenith" in dim_names and "cascade_d_azimuth" in dim_names:
+            derived_dim_names += ["cascade_zenith", "cascade_azimuth"]
 
         aux_names = ['zero_dllh', 'lower_dllh', 'upper_dllh']
 
         all_dim_names = dim_names + derived_dim_names + aux_names
 
-        llhp_t = np.dtype([(field, np.float32) for field in ['llh'] + all_dim_names])
+        llhp_t = np.dtype([(field, np.float32) for field in ["llh"] + all_dim_names])
 
         # dump
         llhp = np.zeros(shape=len(param_values), dtype=llhp_t)
-        llhp['llh'] = log_likelihoods
+        llhp["llh"] = log_likelihoods
         llhp[dim_names] = param_values
 
         llhp[aux_names] = aux_values
 
         # create derived dimensions
-        if 'energy' in derived_dim_names:
-            if 'track_energy' in dim_names:
-                llhp['energy'] += llhp['track_energy']
-            if 'cascade_energy' in dim_names:
-                llhp['energy'] += llhp['cascade_energy']
+        if "energy" in derived_dim_names:
+            if "track_energy" in dim_names:
+                llhp["energy"] += llhp["track_energy"]
+            if "cascade_energy" in dim_names:
+                llhp["energy"] += llhp["cascade_energy"]
 
-        if 'cascade_d_zenith' in dim_names and 'cascade_d_azimuth' in dim_names:
+        if "cascade_d_zenith" in dim_names and "cascade_d_azimuth" in dim_names:
             # create cascade angles from delta angles
             rotate_points(
-                p_theta=llhp['cascade_d_zenith'],
-                p_phi=llhp['cascade_d_azimuth'],
-                rot_theta=llhp['track_zenith'],
-                rot_phi=llhp['track_azimuth'],
-                q_theta=llhp['cascade_zenith'],
-                q_phi=llhp['cascade_azimuth'],
+                p_theta=llhp["cascade_d_zenith"],
+                p_phi=llhp["cascade_d_azimuth"],
+                rot_theta=llhp["track_zenith"],
+                rot_phi=llhp["track_azimuth"],
+                q_theta=llhp["cascade_zenith"],
+                q_phi=llhp["cascade_azimuth"],
             )
 
-        if 'track_zenith' in all_dim_names and 'track_azimuth' in all_dim_names:
-            if 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
+        if "track_zenith" in all_dim_names and "track_azimuth" in all_dim_names:
+            if "cascade_zenith" in all_dim_names and "cascade_azimuth" in all_dim_names:
                 # this resulting radius we won't need, but need to supply an array to
                 # the function
                 r_out = np.empty(shape=llhp.shape, dtype=np.float32)
                 # combine angles:
                 add_vectors(
-                    r1=llhp['track_energy'],
-                    theta1=llhp['track_zenith'],
-                    phi1=llhp['track_azimuth'],
-                    r2=llhp['cascade_energy'],
-                    theta2=llhp['cascade_zenith'],
-                    phi2=llhp['cascade_azimuth'],
+                    r1=llhp["track_energy"],
+                    theta1=llhp["track_zenith"],
+                    phi1=llhp["track_azimuth"],
+                    r2=llhp["cascade_energy"],
+                    theta2=llhp["cascade_zenith"],
+                    phi2=llhp["cascade_azimuth"],
                     r3=r_out,
-                    theta3=llhp['zenith'],
-                    phi3=llhp['azimuth'],
+                    theta3=llhp["zenith"],
+                    phi3=llhp["azimuth"],
                 )
             else:
                 # in this case there is no cascade angles
-                llhp['zenith'] = llhp['track_zenith']
-                llhp['azimuth'] = llhp['track_azimuth']
+                llhp["zenith"] = llhp["track_zenith"]
+                llhp["azimuth"] = llhp["track_azimuth"]
 
-        elif 'cascade_zenith' in all_dim_names and 'cascade_azimuth' in all_dim_names:
+        elif "cascade_zenith" in all_dim_names and "cascade_azimuth" in all_dim_names:
             # in this case there are no track angles
-            llhp['zenith'] = llhp['cascade_zenith']
-            llhp['azimuth'] = llhp['cascade_azimuth']
+            llhp["zenith"] = llhp["cascade_zenith"]
+            llhp["azimuth"] = llhp["cascade_azimuth"]
 
-        if fname:
+        if save:
+            fname = "retro_{}.llhp".format(method)
             # NOTE: since each array can have different length and numpy
             # doesn't handle "ragged" arrays nicely, forcing each llhp to be
-            # saved to its own file even if APPEND_FILE is True.
-            llhp_outf = '{}{}.npy'.format(self.event_prefix, fname)
-            llh = llhp['llh']
+            # saved to its own file
+            llhp_outf = "{}{}.npy".format(self.event_prefix, fname)
+            llh = llhp["llh"]
             cut_llhp = llhp[llh > np.max(llh) - 30]
             print(
-                'Saving llhp within 30 LLH of max ({} llhp) to "{}"'
-                .format(len(cut_llhp), llhp_outf)
+                'Saving llhp within 30 LLH of max ({} llhp) to "{}"'.format(
+                    len(cut_llhp), llhp_outf
+                )
             )
             np.save(llhp_outf, cut_llhp)
 
         return llhp
 
     def make_estimate(
-        self,
-        llhp,
-        remove_priors,
-        run_info=None,
-        fname=None,
+        self, method, llhp, remove_priors, run_info=None, fit_meta=None, save=False
     ):
-        """Create estimate from llhp and optionally save to disk.
+        """Create estimate from llhp, attach result to `self.current_event`,
+        and optionally save to disk.
 
         Parameters
         ----------
+        method : str
         llhp : length-n_llhp array of dtype llhp_t
         remove_priors : bool
             Remove effect of priors
-        run_info : mapping, optional
-        fname : string, optional
-            * If not provided, estimate is not written to disk.
-            * If provided and APPEND_FILE is True, an `xarray.Dataset` where
-              each contained `xarray.DataArray` is one event's reconstruction
-              (plus run and estimate metadata); the name of each DataArray is
-              the event index, and Reco metadata is stored to `Dataset.attrs`;
-              output file is
-                {outdir}/slc{start}:{stop}:{step}.{fname}.pkl
-            * If provided and APPEND_FILE is False, event and run_info metadata
-              is written as an `xarray.DataArray` containing estimate and
-              metadata to file at
-                {outdir}/evt{event_idx}.{fname}.pkl
+        fit_meta : mapping, optional
+        save : bool
+            If True, estimate is saved to a file at path
+                {self.outdir}/{self.slice_prefix}retro_{method}.estimate.npy
 
         Returns
         -------
-        estimate : xarray.DataArray
+        estimate : numpy struct array
 
         """
-        estimate = estimate_from_llhp(
+        estimate, _ = estimate_from_llhp(
             llhp=llhp,
             treat_dims_independently=False,
             use_prob_weights=True,
             priors_used=self.priors_used if remove_priors else None,
+            meta=fit_meta,
         )
-        attrs = estimate.attrs
-        attrs['event_idx'] = self.current_event_idx
-        attrs['params'] = list(self.hypo_handler.all_param_names)
-        attrs['priors_used'] = self.priors_used
-        if run_info is None:
-            attrs['run_info'] = OrderedDict()
-        else:
-            attrs['run_info'] = run_info
-        estimate.attrs = sort_dict(attrs)
-        estimate.name = self.current_event_idx
-        if not fname:
+
+        # Place reco in current event in case another reco depends on it
+        if "recos" not in self.current_event:
+            self.current_event["recos"] = OrderedDict()
+        self.current_event["recos"]["retro_" + method] = estimate
+
+        if not save:
             return estimate
 
-        if APPEND_FILE:
-            estimate_outf = os.path.join(
-                self.outdir, '{}{}.pkl'.format(self.slice_prefix, fname)
+        # fname = "retro_{}.estimate".format(method)
+        # estimate_outf = join(self.outdir, "{}{}.npy".format(self.slice_prefix, fname))
+        estimate_outf = join(self.outdir, "retro_{}.npy".format(method))
+        if not isfile(estimate_outf):
+            invalid_estimates = np.full(
+                shape=self.num_events, fill_value=np.nan, dtype=estimate.dtype
             )
-            file_exists = os.path.isfile(estimate_outf)
-            if self.successful_reco_counter == 0:
-                if file_exists:
-                    if self.overwrite:
-                        os.remove(estimate_outf)
-                    else:
-                        raise IOError('File already exists at "{}"'.format(estimate_outf))
-                # create new Dataset
-                dataset = xr.Dataset()
-                dataset.attrs = self.attrs
-            else:
-                if not file_exists:
-                    raise IOError(
-                        'Output file with previous events does not exist at "{}"'
-                        .format(estimate_outf)
-                    )
-                dataset = pickle.load(open(estimate_outf, 'rb'))
-            dataset[estimate.name] = estimate
-            pickle.dump(
-                obj=dataset,
-                file=open(estimate_outf, 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL,
-            )
-        else: # save each event reco estimate as its own pickle file
-            estimate_outf = '{}{}.pkl'.format(self.event_prefix, fname)
-            print('Saving estimate to "{}"'.format(estimate_outf))
-            pickle.dump(
-                obj=estimate,
-                file=open(estimate_outf, 'wb'),
-                protocol=pickle.HIGHEST_PROTOCOL,
-            )
+            invalid_estimates["fit_status"] = FitStatus.NotSet
+            np.save(estimate_outf, invalid_estimates)
+
+        estimates = np.load(estimate_outf, mmap_mode="r+")
+        estimates[self.current_event_idx] = estimate
+        del estimates
+
+        ## meta_outf = join(
+        ##    self.outdir, '{}{}.pkl'.format('meta', fname)
+        ## )
+        ## meta_file_exists = isfile(meta_outf)
+        # if self.successful_reco_counter[method] == 0:
+        #    if est_file_exists:
+        #        raise IOError('Est file already exists at "{}"'.format(estimate_outf))
+        #    # if meta_file_exists:
+        #    #    raise IOError('Meta file already exists at "{}"'.format(meta_outf))
+        #    estimates = estimate
+        # else:
+        #    if not est_file_exists:
+        #        raise IOError(
+        #            'Est file with previous events does not exist at "{}"'.format(
+        #                estimate_outf
+        #            )
+        #        )
+        #    # if not meta_file_exists:
+        #    #    raise IOError(
+        #    #        'Metadata file does not exist at "{}"'
+        #    #        .format(meta_outf)
+        #    #    )
+        #    previous_estimates = np.load(estimate_outf)
+        #    estimates = np.concatenate([previous_estimates, estimate])
+
+        #    # TODO: verify meta data hasn't changed?
+        #    # existing_meta = pickle.load(open(meta_outf))
+
+        # np.save(file=estimate_outf, arr=estimates)
+        ## if not meta_file_exists:
+        ##    pickle.dump(
+        ##        obj=meta,
+        ##        file=open(meta_outf, 'wb'),
+        ##        protocol=pickle.HIGHEST_PROTOCOL,
+        ##    )
 
         return estimate
 
     def run_test(self, seed):
         """Random sampling instead of an actual minimizer"""
-        raise NotImplementedError('`run_test` not implemented') # TODO
-        kwargs = sort_dict(dict(seed=seed))
+        raise NotImplementedError("`run_test` not implemented")  # TODO
+        t0 = time.time()
+
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_test)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
+
         rand = np.random.RandomState(seed=seed)
         for i in range(100):
             param_vals = rand.uniform(0, 1, self.n_opt_params)
             self.prior(param_vals)
             llh = self.loglike(param_vals)
-        run_info = sort_dict(dict(method='run_test', kwargs=kwargs))
-        return run_info
+        run_info = OrderedDict([("method", "run_test"), ("kwargs", kwargs)])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
+        return run_info, fit_meta
 
     def run_with_truth(self, rand_dims=None, n_samples=10000, seed=0):
         """Run with all params set to truth except for the dimensions defined,
@@ -1199,22 +1218,21 @@ class Reco(object):
             Number of samples to draw
 
         """
-        raise NotImplementedError('`run_with_truth` not implemented') # TODO
+        raise NotImplementedError("`run_with_truth` not implemented")  # TODO
+        t0 = time.time()
         if rand_dims is None:
             rand_dims = []
 
-        truth = self.current_event['truth']
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_with_truth)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
+
+        truth = self.current_event["truth"]
         true_params = np.zeros(self.n_opt_params)
 
         for i, name in enumerate(self.hypo_handler.opt_param_names):
-            if name in ('x', 'y', 'z', 'time'):
-                true_params[i] = truth[name]
-            elif name == 'track_zenith':
-                true_params[i] = np.arccos(truth['coszen'])
-            elif name == 'track_azimuth':
-                true_params[i] = truth['azimuth']
-            else:
-                raise NotImplementedError()
+            name = name.replace("cascade_", "total_cascade_")
+            true_params[i] = truth[name]
 
         rand = np.random.RandomState(seed=seed)
         if len(rand_dims) > 1:
@@ -1228,15 +1246,22 @@ class Reco(object):
         else:
             llh = self.loglike(true_params)
 
-        run_info = sort_dict(dict(method='run_with_truth', kwargs=kwargs))
-        return run_info
+        run_info = OrderedDict([("method", "run_with_truth"), ("kwargs", kwargs)])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
+
+        return run_info, fit_meta
 
     def run_crs(
         self,
         n_live,
         max_iter,
         max_noimprovement,
-        min_fn_std,
+        min_llh_std,
         min_vertex_std,
         use_priors,
         use_sobol,
@@ -1259,16 +1284,23 @@ class Reco(object):
             Maximum iterations
         max_noimprovement : int
             Maximum iterations with no improvement of best point
-        min_fn_std : float
-            Break if stddev of function values across all livepoints drops
-            below this threshold
-        min_vertex_std : sequence
-            Break condition on stddev of vertex
+        min_llh_std : float
+            Break if stddev of llh values across all livepoints drops below
+            this threshold
+        min_vertex_std : mapping
+            Break condition on stddev of Cartesian dimension(s) (x, y, z, and
+            time). Keys are dimension names and values are the standard
+            deviations for each dimension. All specified dimensions must drop
+            below the specified stddevs for this break condition to be met.
         use_priors : bool
             Use priors during minimization; if `False`, priors are only used
-            for sampling the initial distributions
+            for sampling the initial distributions. Even if set to `True`,
+            angles (azimuth and zenith) do not use priors while operating (only
+            for generating the initial distribution)
         use_sobol : bool
-            Use a Sobol sequence instead of numpy pseudo-random numbers
+            Use a Sobol sequence instead of numpy pseudo-random numbers. Seems
+            to do slightly better (but only small differences observed in tests
+            so far)
         seed : int
             Random seed
 
@@ -1290,17 +1322,7 @@ class Reco(object):
         """
         if use_sobol:
             from sobol import i4_sobol
-
-        kwargs = sort_dict(dict(
-            n_live=n_live,
-            max_iter=max_iter,
-            max_noimprovement=max_noimprovement,
-            min_fn_std=min_fn_std,
-            min_vertex_std=min_vertex_std,
-            use_priors=use_priors,
-            use_sobol=use_sobol,
-            seed=seed,
-        ))
+        t0 = time.time()
 
         rand = np.random.RandomState(seed=seed)
 
@@ -1310,22 +1332,53 @@ class Reco(object):
 
         # figure out which variables are Cartesian and which spherical
         opt_param_names = self.hypo_handler.opt_param_names
-        cart_param_names = set(opt_param_names) & set(['time', 'x', 'y', 'z'])
+        cart_param_names = set(opt_param_names) & set(CART_DIMS)
         n_cart = len(cart_param_names)
         assert set(opt_param_names[:n_cart]) == cart_param_names
-        n_spher_param_pairs = int((n_opt_params - n_cart)/2)
+        n_spher_param_pairs = int((n_opt_params - n_cart) / 2)
         for sph_pair_idx in range(n_spher_param_pairs):
-            az_param = opt_param_names[n_cart + sph_pair_idx*2]
-            zen_param = opt_param_names[n_cart + sph_pair_idx*2 + 1]
-            assert 'az' in az_param, '"{}" not azimuth param'.format(az_param)
-            assert 'zen' in zen_param, '"{}" not zenith param'.format(zen_param)
+            az_param = opt_param_names[n_cart + sph_pair_idx * 2]
+            zen_param = opt_param_names[n_cart + sph_pair_idx * 2 + 1]
+            assert "az" in az_param, '"{}" not azimuth param'.format(az_param)
+            assert "zen" in zen_param, '"{}" not zenith param'.format(zen_param)
+
+        for dim in min_vertex_std.keys():
+            if dim not in opt_param_names:
+                raise ValueError('dim "{}" not being optimized'.format(dim))
+            if dim not in cart_param_names:
+                raise NotImplementedError(
+                    'dim "{}" stddev not computed, as stddev currently only'
+                    " computed for Cartesian parameters".format(dim)
+                )
+
+        # set standard reordering so subsequent calls with different input
+        # ordering will create identical metadata
+        min_vertex_std = OrderedDict(
+            [(d, min_vertex_std[d]) for d in opt_param_names if d in min_vertex_std]
+        )
+
+        # storage for info about stddev, whether met, and when met
+        vertex_std = np.full(
+            shape=1,
+            fill_value=np.nan,
+            dtype=[(d, np.float32) for d in min_vertex_std.keys()],
+        )
+        vertex_std_met = OrderedDict([(d, False) for d in min_vertex_std.keys()])
+        vertex_std_met_at_iter = np.full(
+            shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()]
+        )
+
+        # Record kwargs user supplied (after translation & standardization)
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_crs)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
 
         # setup arrays to store points
         s_cart = np.zeros(shape=(n_live, n_cart))
         s_spher = np.zeros(shape=(n_live, n_spher_param_pairs), dtype=SPHER_T)
-        fx = np.zeros(shape=(n_live,))
+        llh = np.zeros(shape=(n_live,))
 
-        def fun(x):
+        def func(x):
             """Callable for minimizer"""
             if use_priors:
                 param_vals = np.zeros_like(x)
@@ -1346,32 +1399,45 @@ class Reco(object):
             # TODO: make proper
             x = np.empty(shape=n_opt_params)
             x[:n_cart] = x_cart
-            x[n_cart+1::2] = x_spher['zen']
-            x[n_cart::2] = x_spher['az']
+            x[n_cart + 1 :: 2] = x_spher["zen"]
+            x[n_cart::2] = x_spher["az"]
             return x
 
         # generate initial population
         for i in range(n_live):
+            # Sobol seems to do slightly better than pseudo-random numbers
             if use_sobol:
-                # sobol seems to do slightly better
-                x, _ = i4_sobol(n_opt_params, i+1)
+                # Note we start at seed=1 since for n_live=1 this puts the
+                # first point in the middle of the range for all params (0.5),
+                # while seed=0 produces all zeros (the most extreme point
+                # possible, which will bias the distribution away from more
+                # likely values).
+                x, _ = i4_sobol(
+                    dim_num=n_opt_params,  # number of dimensions
+                    seed=i + 1,  # Sobol sequence number
+                )
             else:
                 x = rand.uniform(0, 1, n_opt_params)
+
+            # Apply prior xforms to `param_vals` (contents are overwritten)
             param_vals = np.copy(x)
             self.prior(param_vals)
-            # always transform angles!
+
+            # Always use prior-xformed angles
             x[n_cart:] = param_vals[n_cart:]
+
+            # Only use xformed Cart params if NOT using priors during operation
             if not use_priors:
                 x[:n_cart] = param_vals[:n_cart]
 
-            # break up into cartesiand and spherical coordinates
+            # Break up into Cartesian and spherical coordinates
             s_cart[i] = x[:n_cart]
-            s_spher[i]['zen'] = x[n_cart+1::2]
-            s_spher[i]['az'] = x[n_cart::2]
+            s_spher[i]["zen"] = x[n_cart + 1 :: 2]
+            s_spher[i]["az"] = x[n_cart::2]
             fill_from_spher(s_spher[i])
-            fx[i] = fun(x)
+            llh[i] = func(x)
 
-        best_llh = np.min(fx)
+        best_llh = np.min(llh)
         no_improvement_counter = -1
 
         # optional bookkeeping
@@ -1381,16 +1447,28 @@ class Reco(object):
         stopping_flag = 0
 
         # minimizer loop
-        iter_num = 0
         for iter_num in range(max_iter):
             if iter_num % REPORT_AFTER == 0:
                 print(
-                    'simplex: %i, mutation: %i, failed: %i'
+                    "simplex: %i, mutation: %i, failed: %i"
                     % (num_simplex_successes, num_mutation_successes, num_failures)
                 )
 
+            # compute value for break condition 1
+            llh_std = np.std(llh)
+
+            # compute value for break condition 3
+            for dim, cond in min_vertex_std.items():
+                vertex_std[dim] = std = np.std(s_cart[:, opt_param_names.index(dim)])
+                vertex_std_met[dim] = met = std < cond
+                if met:
+                    if vertex_std_met_at_iter[dim] == -1:
+                        vertex_std_met_at_iter[dim] = iter_num
+                else:
+                    vertex_std_met_at_iter[dim] = -1
+
             # break condition 1
-            if np.std(fx) < min_fn_std:
+            if llh_std < min_llh_std:
                 stopping_flag = 1
                 break
 
@@ -1400,18 +1478,11 @@ class Reco(object):
                 break
 
             # break condition 3
-            done = []
-            stds = []
-            for dim, cond in zip(('x', 'y', 'z', 'time'), min_vertex_std):
-                if dim in opt_param_names:
-                    std = np.std(s_cart[:, opt_param_names.index(dim)])
-                    stds.append(std)
-                    done.append(std < cond)
-            if len(done) > 0 and all(done):
+            if len(min_vertex_std) > 0 and all(vertex_std_met.values()):
                 stopping_flag = 3
                 break
 
-            new_best_llh = np.min(fx)
+            new_best_llh = np.min(llh)
 
             if new_best_llh < best_llh:
                 best_llh = new_best_llh
@@ -1419,8 +1490,8 @@ class Reco(object):
             else:
                 no_improvement_counter += 1
 
-            worst_idx = np.argmax(fx)
-            best_idx = np.argmin(fx)
+            worst_idx = np.argmax(llh)
+            best_idx = np.argmin(llh)
 
             # choose n_opt_params random points but not best
             choice = rand.choice(n_live - 1, n_opt_params, replace=False)
@@ -1428,22 +1499,22 @@ class Reco(object):
 
             # Cartesian centroid
             centroid_cart = (
-                (np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx]) / n_opt_params
-            )
+                np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx]
+            ) / n_opt_params
 
             # reflect point
-            new_x_cart = 2*centroid_cart - s_cart[choice[-1]]
+            new_x_cart = 2 * centroid_cart - s_cart[choice[-1]]
 
             # spherical centroid
             centroid_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
-            centroid_spher['x'] = (
-                np.sum(s_spher['x'][choice[:-1]], axis=0) + s_spher['x'][best_idx]
+            centroid_spher["x"] = (
+                np.sum(s_spher["x"][choice[:-1]], axis=0) + s_spher["x"][best_idx]
             ) / n_opt_params
-            centroid_spher['y'] = (
-                np.sum(s_spher['y'][choice[:-1]], axis=0) + s_spher['y'][best_idx]
+            centroid_spher["y"] = (
+                np.sum(s_spher["y"][choice[:-1]], axis=0) + s_spher["y"][best_idx]
             ) / n_opt_params
-            centroid_spher['z'] = (
-                np.sum(s_spher['z'][choice[:-1]], axis=0) + s_spher['z'][best_idx]
+            centroid_spher["z"] = (
+                np.sum(s_spher["z"][choice[:-1]], axis=0) + s_spher["z"][best_idx]
             ) / n_opt_params
             fill_from_cart(centroid_spher)
 
@@ -1457,13 +1528,13 @@ class Reco(object):
                 outside = False
 
             if not outside:
-                new_fx = fun(create_x(new_x_cart, new_x_spher))
+                new_llh = func(create_x(new_x_cart, new_x_spher))
 
-                if new_fx < fx[worst_idx]:
+                if new_llh < llh[worst_idx]:
                     # found better point
                     s_cart[worst_idx] = new_x_cart
                     s_spher[worst_idx] = new_x_spher
-                    fx[worst_idx] = new_fx
+                    llh[worst_idx] = new_llh
                     num_simplex_successes += 1
                     continue
 
@@ -1478,12 +1549,11 @@ class Reco(object):
             new_x_spher2 = np.zeros_like(new_x_spher)
 
             # now do a combination of best and reflected point with weight w
-            for dim in ('x', 'y', 'z'):
+            for dim in ("x", "y", "z"):
                 w = rand.uniform(0, 1, n_spher_param_pairs)
-                new_x_spher2[dim] = (
-                    (1 - w) * s_spher[best_idx][dim]
-                    + w * reflected_new_x_spher[dim]
-                )
+                new_x_spher2[dim] = (1 - w) * s_spher[best_idx][
+                    dim
+                ] + w * reflected_new_x_spher[dim]
             fill_from_cart(new_x_spher2)
 
             if use_priors:
@@ -1492,13 +1562,13 @@ class Reco(object):
                 outside = False
 
             if not outside:
-                new_fx = fun(create_x(new_x_cart2, new_x_spher2))
+                new_llh = func(create_x(new_x_cart2, new_x_spher2))
 
-                if new_fx < fx[worst_idx]:
+                if new_llh < llh[worst_idx]:
                     # found better point
                     s_cart[worst_idx] = new_x_cart2
                     s_spher[worst_idx] = new_x_spher2
-                    fx[worst_idx] = new_fx
+                    llh[worst_idx] = new_llh
                     num_mutation_successes += 1
                     continue
 
@@ -1508,91 +1578,121 @@ class Reco(object):
 
         print(CRS_STOP_FLAGS[stopping_flag])
 
-        fit_meta = sort_dict(dict(
-            stopping_flag=stopping_flag,
-            stopping_message=CRS_STOP_FLAGS[stopping_flag],
-            num_simplex_successes=num_simplex_successes,
-            num_mutation_successes=num_mutation_successes,
-            num_failures=num_failures,
-            iterations=iter_num,
-        ))
+        run_info = OrderedDict(
+            [
+                ("method", "run_crs"),
+                ("method_description", "CRS2spherical+lm+sampling"),
+                ("kwargs", kwargs),
+            ]
+        )
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("iterations", np.uint32(iter_num)),
+                ("stopping_flag", np.int8(stopping_flag)),
+                ("llh_std", np.float32(llh_std)),
+                ("no_improvement_counter", np.uint32(no_improvement_counter)),
+                ("vertex_std", vertex_std),
+                ("vertex_std_met_at_iter", vertex_std_met_at_iter),
+                ("num_simplex_successes", np.uint32(num_simplex_successes)),
+                ("num_mutation_successes", np.uint32(num_mutation_successes)),
+                ("num_failures", np.uint32(num_failures)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
 
-        run_info = sort_dict(dict(
-            method='run_crs',
-            method_description='CRS2spherical+lm+sampling',
-            kwargs=kwargs,
-            fit_meta=fit_meta,
-        ))
-        return run_info
+        return run_info, fit_meta
 
     def run_scipy(self, method, eps):
+        """Use an optimizer from scipy"""
         from scipy import optimize
 
-        kwargs = sort_dict(dict(
-            method=method,
-            eps=eps,
-        ))
+        t0 = time.time()
+
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_scipy)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
 
         # initial guess
         x0 = 0.5 * np.ones(shape=self.n_opt_params)
 
-        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
+        def func(x, *args):  # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
             self.prior(param_vals)
             llh = self.loglike(param_vals)
             del param_vals
             return -llh
 
-        bounds = [(eps, 1 - eps)]*self.n_opt_params
+        bounds = [(eps, 1 - eps)] * self.n_opt_params
         settings = OrderedDict()
-        settings['eps'] = eps
+        settings["eps"] = eps
 
-        if method == 'differential_evolution':
-            optimize.differential_evolution(fun, bounds=bounds, popsize=100)
+        if method == "differential_evolution":
+            optimize.differential_evolution(func, bounds=bounds, popsize=100)
         else:
-            optimize.minimize(fun, x0, method=method, bounds=bounds, options=settings)
+            optimize.minimize(func, x0, method=method, bounds=bounds, options=settings)
 
-        run_info = sort_dict(dict(method='run_scipy', kwargs=kwargs))
-        return run_info
+        run_info = OrderedDict([("method", "run_scipy"), ("kwargs", kwargs)])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
+
+        return run_info, fit_meta
 
     def run_skopt(self):
-        from skopt import gp_minimize #, forest_minimize
+        """Use an optimizer from scikit-optimize"""
+        from skopt import gp_minimize  # , forest_minimize
+
+        t0 = time.time()
 
         # initial guess
         x0 = 0.5 * np.ones(shape=self.n_opt_params)
 
-        def fun(x, *args): # pylint: disable=unused-argument, missing-docstring
+        def func(x, *args):  # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
             self.prior(param_vals)
             llh = self.loglike(param_vals)
             del param_vals
             return -llh
 
-        bounds = [(0, 1)]*self.n_opt_params
-        settings = sort_dict(dict(
-            acq_func='EI',      # acquisition function
-            n_calls=1000,       # number of evaluations of f
-            n_random_starts=5,  # number of random initialization
-        ))
+        bounds = [(0, 1)] * self.n_opt_params
+        settings = OrderedDict(
+            [
+                ("acq_func", "EI"),  # acquisition function
+                ("n_calls", 1000),  # number of evaluations of f
+                ("n_random_starts", 5),  # number of random initialization
+            ]
+        )
 
         _ = gp_minimize(
-            fun,                # function to minimize
-            bounds,             # bounds on each dimension of x
+            func,  # function to minimize
+            bounds,  # bounds on each dimension of x
             x0=list(x0),
             **settings
         )
 
-        run_info = sort_dict(dict(method='run_skopt', settings=settings))
-        return run_info
+        run_info = OrderedDict([("method", "run_skopt"), ("settings", settings)])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
+
+        return run_info, fit_meta
 
     def run_nlopt(self):
+        """Use an optimizer from nlopt"""
         import nlopt
 
-        def fun(x, grad): # pylint: disable=unused-argument, missing-docstring
+        t0 = time.time()
+
+        def func(x, grad):  # pylint: disable=unused-argument, missing-docstring
             param_vals = np.copy(x)
-            #print(param_vals)
             self.prior(param_vals)
-            #print(param_vals)
             llh = self.loglike(param_vals)
             del param_vals
             return -llh
@@ -1603,10 +1703,10 @@ class Reco(object):
 
         # for angles make bigger
         for i, name in enumerate(self.hypo_handler.opt_param_names):
-            if 'azimuth' in name:
+            if "azimuth" in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
-            if 'zenith' in name:
+            if "zenith" in name:
                 lower_bounds[i] = -0.5
                 upper_bounds[i] = 1.5
 
@@ -1616,24 +1716,24 @@ class Reco(object):
         # stepsize
         dx = np.zeros(shape=self.n_opt_params)
         for i in range(self.n_opt_params):
-            if 'azimuth' in self.hypo_handler.opt_param_names[i]:
+            if "azimuth" in self.hypo_handler.opt_param_names[i]:
                 dx[i] = 0.001
-            elif 'zenith' in self.hypo_handler.opt_param_names[i]:
+            elif "zenith" in self.hypo_handler.opt_param_names[i]:
                 dx[i] = 0.001
-            elif self.hypo_handler.opt_param_names[i] in ('x', 'y'):
+            elif self.hypo_handler.opt_param_names[i] in ("x", "y"):
                 dx[i] = 0.005
-            elif self.hypo_handler.opt_param_names[i] == 'z':
+            elif self.hypo_handler.opt_param_names[i] == "z":
                 dx[i] = 0.002
-            elif self.hypo_handler.opt_param_names[i] == 'time':
+            elif self.hypo_handler.opt_param_names[i] == "time":
                 dx[i] = 0.01
 
         # seed from several angles
-        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        # opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
         opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.LN_PRAXIS, self.n_opt_params)
-        opt.set_lower_bounds([0.]*self.n_opt_params)
-        opt.set_upper_bounds([1.]*self.n_opt_params)
-        opt.set_min_objective(fun)
+        # opt = nlopt.opt(nlopt.LN_PRAXIS, self.n_opt_params)
+        opt.set_lower_bounds([0.0] * self.n_opt_params)
+        opt.set_upper_bounds([1.0] * self.n_opt_params)
+        opt.set_min_objective(func)
         opt.set_ftol_abs(0.1)
 
         # initial guess
@@ -1646,82 +1746,166 @@ class Reco(object):
                 x0 = 0.5 * np.ones(shape=self.n_opt_params)
 
                 for i in range(self.n_opt_params):
-                    if 'az' in self.hypo_handler.opt_param_names[i]:
+                    if "az" in self.hypo_handler.opt_param_names[i]:
                         x0[i] = az
-                    elif 'zen' in self.hypo_handler.opt_param_names[i]:
+                    elif "zen" in self.hypo_handler.opt_param_names[i]:
                         x0[i] = zen
-                x = opt.optimize(x0) # pylint: disable=unused-variable
+                x = opt.optimize(x0)  # pylint: disable=unused-variable
 
-        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        #local_opt.set_lower_bounds([0.]*self.n_opt_params)
-        #local_opt.set_upper_bounds([1.]*self.n_opt_params)
-        #local_opt.set_min_objective(fun)
+        # local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        # local_opt.set_lower_bounds([0.]*self.n_opt_params)
+        # local_opt.set_upper_bounds([1.]*self.n_opt_params)
+        # local_opt.set_min_objective(func)
         ##local_opt.set_ftol_abs(0.5)
         ##local_opt.set_ftol_abs(100)
         ##local_opt.set_xtol_rel(10)
-        #local_opt.set_ftol_abs(1)
+        # local_opt.set_ftol_abs(1)
         # global
-        #opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
-        #opt.set_lower_bounds([0.]*self.n_opt_params)
-        #opt.set_upper_bounds([1.]*self.n_opt_params)
-        #opt.set_min_objective(fun)
-        #opt.set_local_optimizer(local_opt)
-        #opt.set_ftol_abs(10)
-        #opt.set_xtol_rel(1)
-        #opt.set_maxeval(1111)
+        # opt = nlopt.opt(nlopt.G_MLSL, self.n_opt_params)
+        # opt.set_lower_bounds([0.]*self.n_opt_params)
+        # opt.set_upper_bounds([1.]*self.n_opt_params)
+        # opt.set_min_objective(func)
+        # opt.set_local_optimizer(local_opt)
+        # opt.set_ftol_abs(10)
+        # opt.set_xtol_rel(1)
+        # opt.set_maxeval(1111)
 
-        #opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_params)
-        #opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        # opt = nlopt.opt(nlopt.GN_ESCH, self.n_opt_params)
+        # opt = nlopt.opt(nlopt.GN_ISRES, self.n_opt_params)
+        # opt = nlopt.opt(nlopt.GN_CRS2_LM, self.n_opt_params)
+        # opt = nlopt.opt(nlopt.GN_DIRECT_L_RAND_NOSCAL, self.n_opt_params)
+        # opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
 
-        #opt.set_lower_bounds(lower_bounds)
-        #opt.set_upper_bounds(upper_bounds)
-        #opt.set_min_objective(fun)
-        #opt.set_ftol_abs(0.1)
-        #opt.set_population([x0])
-        #opt.set_initial_step(dx)
+        # opt.set_lower_bounds(lower_bounds)
+        # opt.set_upper_bounds(upper_bounds)
+        # opt.set_min_objective(func)
+        # opt.set_ftol_abs(0.1)
+        # opt.set_population([x0])
+        # opt.set_initial_step(dx)
 
-        #local_opt.set_maxeval(10)
+        # local_opt.set_maxeval(10)
 
-        #x = opt.optimize(x0) # pylint: disable=unused-variable
+        # x = opt.optimize(x0) # pylint: disable=unused-variable
 
         # polish it up
-        #print('***************** polishing ******************')
+        # print('***************** polishing ******************')
 
-        #dx = np.ones(shape=self.n_opt_params) * 0.001
-        #dx[0] = 0.1
-        #dx[1] = 0.1
+        # dx = np.ones(shape=self.n_opt_params) * 0.001
+        # dx[0] = 0.1
+        # dx[1] = 0.1
 
-        #local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
-        #lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
-        #upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
-        #lower_bounds[0] = 0
-        #lower_bounds[1] = 0
-        #upper_bounds[0] = 0
-        #upper_bounds[1] = 0
+        # local_opt = nlopt.opt(nlopt.LN_NELDERMEAD, self.n_opt_params)
+        # lower_bounds = np.clip(np.copy(x) - 0.1, 0, 1)
+        # upper_bounds = np.clip(np.copy(x) + 0.1, 0, 1)
+        # lower_bounds[0] = 0
+        # lower_bounds[1] = 0
+        # upper_bounds[0] = 0
+        # upper_bounds[1] = 0
 
-        #local_opt.set_lower_bounds(lower_bounds)
-        #local_opt.set_upper_bounds(upper_bounds)
-        #local_opt.set_min_objective(fun)
-        #local_opt.set_ftol_abs(0.1)
-        #local_opt.set_initial_step(dx)
-        #x = opt.optimize(x)
+        # local_opt.set_lower_bounds(lower_bounds)
+        # local_opt.set_upper_bounds(upper_bounds)
+        # local_opt.set_min_objective(func)
+        # local_opt.set_ftol_abs(0.1)
+        # local_opt.set_initial_step(dx)
+        # x = opt.optimize(x)
 
-        settings = sort_dict(dict(
-            method=opt.get_algorithm_name(),
-            ftol_abs=opt.get_ftol_abs(),
-            ftol_rel=opt.get_ftol_rel(),
-            xtol_abs=opt.get_xtol_abs(),
-            xtol_rel=opt.get_xtol_rel(),
-            maxeval=opt.get_maxeval(),
-            maxtime=opt.get_maxtime(),
-            stopval=opt.get_stopval(),
-        ))
+        settings = OrderedDict(
+            [
+                ("method", opt.get_algorithm_name()),
+                ("ftol_abs", opt.get_ftol_abs()),
+                ("ftol_rel", opt.get_ftol_rel()),
+                ("xtol_abs", opt.get_xtol_abs()),
+                ("xtol_rel", opt.get_xtol_rel()),
+                ("maxeval", opt.get_maxeval()),
+                ("maxtime", opt.get_maxtime()),
+                ("stopval", opt.get_stopval()),
+            ]
+        )
 
-        run_info = sort_dict(dict(method='run_nlopt', settings=settings))
-        return run_info
+        run_info = OrderedDict([("method", "run_nlopt"), ("settings", settings)])
+        fit_meta = OrderedDict(
+            [
+                ("fit_status", np.int8(FitStatus.OK)),
+                ("run_time", np.float32(time.time() - t0)),
+            ]
+        )
+
+        return run_info, fit_meta
+
+    def run_dynesty(
+        self,
+        n_live,
+        maxiter,
+        maxcall,
+        dlogz
+    ):
+        """Setup and run Dynesty on an event.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        run_info : OrderedDict
+            Metadata dict containing dynesty settings used and extra info returned by
+            dynesty
+
+        fit_meta : OrderedDict
+
+        """
+        import dynesty
+
+        t0 = time.time()
+
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_dynesty)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
+
+
+        dn_kwargs = OrderedDict(
+            [
+                ("ndim", self.n_opt_params),
+                ('nlive', n_live),
+                (
+                    "periodic",
+                    [i for i,p in enumerate(self.hypo_handler.all_param_names) if 'az' in p.lower()],
+                ),
+            ]
+        )
+
+        sampler_kwargs = OrderedDict(
+            [
+                ('maxiter', maxiter),
+                ('maxcall', maxcall),
+                ('dlogz', dlogz),
+
+            ]
+        )
+
+        run_info = OrderedDict(
+            [("method", "run_dynesty"), ("kwargs", kwargs), ("dn_kwargs", dn_kwargs), ("sampler_kwargs", sampler_kwargs)]
+        )
+
+        fit_meta = OrderedDict()
+        fit_meta["fit_status"] = np.int8(FitStatus.NotSet)
+        sampler = dynesty.NestedSampler(
+            loglikelihood=self.loglike,
+            prior_transform=self.prior,
+            method='unif',
+            bound='single',
+            update_interval=1,
+            **dn_kwargs
+        )
+        print('sampler instantiated')
+        sampler.run_nested(**sampler_kwargs)
+
+        fit_meta["fit_status"] = np.int8(FitStatus.OK)
+        fit_meta["run_time"] = np.float32(time.time() - t0)
+
+        print(fit_meta)
+
+        return run_info, fit_meta
+
 
     def run_multinest(
         self,
@@ -1760,48 +1944,51 @@ class Reco(object):
             Metadata dict containing MultiNest settings used and extra info returned by
             MultiNest
 
+        fit_meta : OrderedDict
+
         """
         # Import pymultinest here; it's a less common dependency, so other
-        # functions / constants in this module will still be import-able w/o it.
+        # functions/constants in this module will still be import-able w/o it.
         import pymultinest
 
-        kwargs = sort_dict(dict(
-            importance_sampling=importance_sampling,
-            max_modes=max_modes,
-            const_eff=const_eff,
-            n_live=n_live,
-            evidence_tol=evidence_tol,
-            sampling_eff=sampling_eff,
-            max_iter=max_iter,
-            seed=seed,
-        ))
+        t0 = time.time()
 
-        mn_kwargs = sort_dict(dict(
-            n_dims=self.n_opt_params,
-            n_params=self.n_params,
-            n_clustering_params=self.n_opt_params,
-            wrapped_params=[
-                'az' in p.lower() for p in self.hypo_handler.all_param_names
-            ],
-            importance_nested_sampling=importance_sampling,
-            multimodal=max_modes > 1,
-            const_efficiency_mode=const_eff,
-            n_live_points=n_live,
-            evidence_tolerance=evidence_tol,
-            sampling_efficiency=sampling_eff,
-            null_log_evidence=-1e90,
-            max_modes=max_modes,
-            mode_tolerance=-1e90,
-            seed=seed,
-            log_zero=-1e100,
-            max_iter=max_iter,
-        ))
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_multinest)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
 
-        print('Runing MultiNest...')
+        mn_kwargs = OrderedDict(
+            [
+                ("n_dims", self.n_opt_params),
+                ("n_params", self.n_params),
+                ("n_clustering_params", self.n_opt_params),
+                (
+                    "wrapped_params",
+                    ["az" in p.lower() for p in self.hypo_handler.all_param_names],
+                ),
+                ("importance_nested_sampling", importance_sampling),
+                ("multimodal", max_modes > 1),
+                ("const_efficiency_mode", const_eff),
+                ("n_live_points", n_live),
+                ("evidence_tolerance", evidence_tol),
+                ("sampling_efficiency", sampling_eff),
+                ("null_log_evidence", -1e90),
+                ("max_modes", max_modes),
+                ("mode_tolerance", -1e90),
+                ("seed", seed),
+                ("log_zero", -1e100),
+                ("max_iter", max_iter),
+            ]
+        )
 
-        fit_meta = {}
+        run_info = OrderedDict(
+            [("method", "run_multinest"), ("kwargs", kwargs), ("mn_kwargs", mn_kwargs)]
+        )
+
+        fit_meta = OrderedDict()
+        fit_meta["fit_status"] = np.int8(FitStatus.NotSet)
         tmpdir = mkdtemp()
-        outputfiles_basename = join(tmpdir, '')
+        outputfiles_basename = join(tmpdir, "")
         try:
             pymultinest.run(
                 LogLikelihood=self.loglike,
@@ -1816,14 +2003,11 @@ class Reco(object):
             fit_meta = get_multinest_meta(outputfiles_basename=outputfiles_basename)
         finally:
             rmtree(tmpdir)
+        # TODO: Can MultiNest fail? If so, set status accordingly...
+        fit_meta["fit_status"] = np.int8(FitStatus.OK)
+        fit_meta["run_time"] = np.float32(time.time() - t0)
 
-        run_info = sort_dict(dict(
-            method='run_multinest',
-            kwargs=kwargs,
-            mn_kwargs=mn_kwargs,
-            fit_meta=sort_dict(fit_meta),
-        ))
-        return run_info
+        return run_info, fit_meta
 
 
 def get_multinest_meta(outputfiles_basename):
@@ -1842,28 +2026,30 @@ def get_multinest_meta(outputfiles_basename):
     """
     fit_meta = OrderedDict()
     if isdir(outputfiles_basename):
-        stats_fpath = join(outputfiles_basename, 'stats.dat')
+        stats_fpath = join(outputfiles_basename, "stats.dat")
     else:
-        stats_fpath = outputfiles_basename + 'stats.dat'
+        stats_fpath = outputfiles_basename + "stats.dat"
 
-    with open(stats_fpath, 'r') as stats_f:
+    with open(stats_fpath, "r") as stats_f:
         stats = stats_f.readlines()
 
     logZ, logZ_err = None, None
     ins_logZ, ins_logZ_err = None, None
 
     for line in stats:
-        if logZ is None and line.startswith('Nested Sampling Global Log-Evidence'):
-            logZ, logZ_err = [float(x) for x in line.split(':')[1].split('+/-')]
-        elif ins_logZ is None and line.startswith('Nested Importance Sampling Global Log-Evidence'):
-            ins_logZ, ins_logZ_err = [float(x) for x in line.split(':')[1].split('+/-')]
+        if logZ is None and line.startswith("Nested Sampling Global Log-Evidence"):
+            logZ, logZ_err = [float(x) for x in line.split(":")[1].split("+/-")]
+        elif ins_logZ is None and line.startswith(
+            "Nested Importance Sampling Global Log-Evidence"
+        ):
+            ins_logZ, ins_logZ_err = [float(x) for x in line.split(":")[1].split("+/-")]
 
     if logZ is not None:
-        fit_meta['logZ'] = logZ
-        fit_meta['logZ_err'] = logZ_err
+        fit_meta["logZ"] = np.float32(logZ)
+        fit_meta["logZ_err"] = np.float32(logZ_err)
     if ins_logZ is not None:
-        fit_meta['ins_logZ'] = ins_logZ
-        fit_meta['ins_logZ_err'] = ins_logZ_err
+        fit_meta["ins_logZ"] = np.float32(ins_logZ)
+        fit_meta["ins_logZ_err"] = np.float32(ins_logZ_err)
 
     return fit_meta
 
@@ -1881,16 +2067,19 @@ def parse_args(description=__doc__):
     """
     parser = ArgumentParser(description=description)
 
+    parser.add_argument("--outdir", required=True)
     parser.add_argument(
-        '--outdir', required=True
+        "--method",
+        required=True,
+        choices=METHODS,
+        action="append",
+        help="""Method(s) to use for performing reconstructions. Repeat to run
+        multiple methods""",
     )
     parser.add_argument(
-        '--method', required=True, choices=METHODS,
-        help='Method to use for performing reconstructions'
-    )
-    parser.add_argument(
-        '--save-llhp', action='store_true',
-        help='Whether to save LLHP within 30 LLH of max-LLH to disk'
+        "--save-llhp",
+        action="store_true",
+        help="Whether to save LLHP within 30 LLH of max-LLH to disk",
     )
     parser.add_argument(
         '--overwrite', action='store_true',
@@ -1903,11 +2092,11 @@ def parse_args(description=__doc__):
     return split_kwargs
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # pylint: disable=invalid-name
     kwargs = parse_args()
-    other_kw = kwargs.pop('other_kw')
-    method = other_kw.pop('method')
+    other_kw = kwargs.pop("other_kw")
+    method = other_kw.pop("method")
     kwargs.update(other_kw)
     my_reco = Reco(**kwargs)
-    my_reco.run(method=method)
+    my_reco.run(methods=method)

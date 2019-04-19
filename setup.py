@@ -7,8 +7,10 @@ Installation script for the Retro project
 from __future__ import absolute_import
 
 from setuptools import setup, Extension, find_packages
+
 from Cython.Build import cythonize
 import numpy as np
+import versioneer
 
 
 EXT_MODULES = [
@@ -32,6 +34,8 @@ setup(
     author_email='pde3@psu.edu',
     url='https://github.com/philippeller/retro',
     license='Apache 2.0',
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
     python_requires='>=2.7, <3.0',
     setup_requires=[
         'pip>=1.8',
@@ -40,13 +44,15 @@ setup(
         'numpy>=1.11'
     ],
     install_requires=[
+        'astropy',
         'enum34',
+        'funcsigs',
         'matplotlib>=2.0',
         'numba>=0.37',
-        'pyfits',
+        'pymultinest',
         'scipy>=0.17',
         'sobol',
-        'xarray',
+        'dynesty',
     ],
     packages=find_packages(),
     include_dirs=[np.get_include()],
