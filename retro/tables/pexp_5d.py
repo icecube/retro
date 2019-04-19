@@ -42,6 +42,8 @@ import math
 from os.path import abspath, dirname
 import sys
 
+from numba import prange
+
 import numpy as np
 from scipy import stats
 
@@ -49,7 +51,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
+from retro import DFLT_NUMBA_JIT_KWARGS, PL_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 from retro.utils.geom import generate_digitizer
 from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
