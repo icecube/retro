@@ -1307,7 +1307,6 @@ def generate_pexp_and_llh_functions(
             delta LLH of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
         """
-
         if TRACK_TYPE == TrackType.CONST:
             num_pegleg_sources = len(pegleg_sources)
             num_pegleg_steps = 1 + int(num_pegleg_sources / pegleg_stepsize)
