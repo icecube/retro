@@ -139,7 +139,6 @@ class Reco(object):
         tdi_tables_kw,
         outdir,
         save_llhp=False,
-        overwrite=False,
         debug=False,
     ):
         self.debug = bool(debug)
@@ -166,7 +165,6 @@ class Reco(object):
             outdir = join(outdir, "recos")
         self.outdir = outdir
         self.save_llhp = save_llhp
-        self.overwrite = overwrite
 
         # Replace None values for `start` and `step` for fewer branches in
         # subsequent logic (i.e., these will always be integers)
@@ -2069,10 +2067,6 @@ def parse_args(description=__doc__):
         "--save-llhp",
         action="store_true",
         help="Whether to save LLHP within 30 LLH of max-LLH to disk",
-    )
-    parser.add_argument(
-        '--overwrite', action='store_true',
-        help='Whether to overwrite existing file'
     )
     split_kwargs = init_obj.parse_args(
         dom_tables=True, tdi_tables=True, events=True, parser=parser
