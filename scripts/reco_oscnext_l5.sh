@@ -142,8 +142,7 @@ $retro_dir/retro/reco.py \
     --pulses "SplitInIcePulses" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SplitInIcePulses" \
+    --truth \
     --angsens-model "9"
-#    --truth \
-#    --overwrite
 
 wait

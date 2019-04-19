@@ -1,6 +1,6 @@
-mc=129002 
+mc=149002 
 mkdir -p /gpfs/scratch/pde3/retro/log/
-for dir in {000000..000000}
+for dir in {000009..000011}
 do
     for sidx in {0..99}
     do

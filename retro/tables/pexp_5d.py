@@ -958,14 +958,7 @@ def generate_pexp_and_llh_functions(
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
             epsilon = 1e-2
             done = False
-            
-            first_e = 0.1/SCALING_CASCADE_ENERGY
-            last_e = MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY
-
-            first = np.log(first_e)
-            last = np.log(last_e)
-
-            #first = 0.
+            first = 0.
             first_grad = get_grad_neg_llh_wrt_scalefactor(np.exp(first))
             if first_grad > 0 or abs(first_grad) < epsilon:
                 scalefactor = first
@@ -983,7 +976,7 @@ def generate_pexp_and_llh_functions(
                     iters += 1
                     test = (first + last)/2.
                     scalefactor = test
-                    test_grad = get_grad_neg_llh_wrt_scalefactor(np.exp(test))
+                    test_grad = get_grad_neg_llh_wrt_scalefactor(test)
                     #print('test :', test)
                     #print('test_grad :',test_grad)
                     if abs(test_grad) < epsilon:
@@ -994,8 +987,6 @@ def generate_pexp_and_llh_functions(
                         last = test
             #print('found :',scalefactor)
             #print('\n')
-
-            scalefactor = np.exp(scalefactor)
 
         # -- Calculate llh at the optimal `scalefactor` found -- #
 
