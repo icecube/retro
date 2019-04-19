@@ -917,27 +917,16 @@ class Reco(object):
             additional_results = []
 
             if self.hypo_handler.pegleg_kernel:
-                if exp_trackfit:
-                    pegleg_result = pegleg_eval(
-                        pegleg_idx=pegleg_idx,
-                        dt=pegleg_muon_dt,
-                        const_e_loss=True,
-                    )
-                    additional_results.append(pegleg_result)
-                else:
-                    pegleg_result = pegleg_eval(
-                        pegleg_idx=pegleg_idx,
-                        dt=pegleg_muon_dt,
-                        const_e_loss=pegleg_muon_const_e_loss,
-                        mmc=True,
-                    )
-                    additional_results.append(pegleg_result)
+                pegleg_result = pegleg_eval(
+                    pegleg_idx=pegleg_idx,
+                    dt=pegleg_muon_dt,
+                    const_e_loss=pegleg_muon_const_e_loss,
+                    mmc=True,
+                )
+                additional_results.append(pegleg_result)
 
             if self.hypo_handler.scaling_kernel:
-                if exp_trackfit:
-                    additional_results.append(pegleg_result * (scalefactor-1.))
-                else:
-                    additional_results.append(scalefactor*SCALING_CASCADE_ENERGY)
+                additional_results.append(scalefactor*SCALING_CASCADE_ENERGY)
 
             result = (
                 tuple(cube[:n_opt_params])
