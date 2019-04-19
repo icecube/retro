@@ -85,7 +85,7 @@ PEGLEG_SPACING = StepSpacing.LINEAR
 """Pegleg adds segments either linearly (same number of segments independent of energy)
 or logarithmically (more segments are added the longer the track"""
 
-TRACK_TYPE = TrackType.STOCHASTIC
+TRACK_TYPE = TrackType.CONST
 """`CONST` is the standard treatement, `STOCHASTIC` performs conjugate gradient minimization"""
 
 PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
@@ -503,6 +503,10 @@ def generate_pexp_and_llh_functions(
 
                 for op_dom_idx in range(num_operational_doms):
                     dom_info = event_dom_info[op_dom_idx]
+                    dom_tbl_idx = dom_info['table_idx']
+                    dom_qe = dom_info['quantum_efficiency']
+                    dom_hits_start_idx = dom_info['hits_start_idx']
+                    dom_hits_stop_idx = dom_info['hits_stop_idx']
 
                     dx = src['x'] - dom_info['x']
                     dy = src['y'] - dom_info['y']
@@ -514,11 +518,6 @@ def generate_pexp_and_llh_functions(
                     # first thing to check if this DOM is out of range and we can skip it
                     if rsquared > rsquared_max:
                         continue
-
-                    dom_tbl_idx = dom_info['table_idx']
-                    dom_qe = dom_info['quantum_efficiency']
-                    dom_hits_start_idx = dom_info['hits_start_idx']
-                    dom_hits_stop_idx = dom_info['hits_stop_idx']
 
                     r = max(MACHINE_EPS, math.sqrt(rsquared))
                     r_bin_idx = digitize_r(r)
@@ -959,7 +958,7 @@ def generate_pexp_and_llh_functions(
             epsilon = 1e-2
             done = False
             first = 0.
-            first_grad = get_grad_neg_llh_wrt_scalefactor(np.exp(first))
+            first_grad = get_grad_neg_llh_wrt_scalefactor(first)
             if first_grad > 0 or abs(first_grad) < epsilon:
                 scalefactor = first
                 done = True
