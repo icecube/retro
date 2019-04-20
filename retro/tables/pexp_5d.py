@@ -42,8 +42,6 @@ import math
 from os.path import abspath, dirname
 import sys
 
-from numba import prange
-
 import numpy as np
 from scipy import stats
 
@@ -51,7 +49,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import DFLT_NUMBA_JIT_KWARGS, PL_NUMBA_JIT_KWARGS, numba_jit
+from retro import DFLT_NUMBA_JIT_KWARGS, numba_jit
 from retro.const import SPEED_OF_LIGHT_M_PER_NS, SRC_OMNI, SRC_CKV_BETA1
 from retro.utils.geom import generate_digitizer
 from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
@@ -816,7 +814,8 @@ def generate_pexp_and_llh_functions(
 
         """
         # Note: defining as closure is faster than as external function
-        if SCALE_FACTOR_MINIMIZER is Minimizer.GRADIENT_DESCENT or SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
+        if SCALE_FACTOR_MINIMIZER in (Minimizer.GRADIENT_DESCENT, Minimizer.BINARY_SEARCH):
+
             def get_grad_neg_llh_wrt_scalefactor(scalefactor):
                 """Compute the gradient of -LLH with respect to `scalefactor`.
 
@@ -890,71 +889,10 @@ def generate_pexp_and_llh_functions(
                 print('exceeded gradient descent iteration limit!')
                 print('arrived at ', scalefactor)
             #print('\n')
-            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
-
-        elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
-
-            def get_newton_step(scalefactor):
-                """Compute the step for the newton method for the `scalefactor`
-
-                the step is defined as -f'/f'' where f is the LLH(scalefactor)
-
-                Parameters
-                ----------
-                scalefactor : float
-
-                Returns
-                -------
-                step : float
-
-                """
-
-                # Time- and DOM-independent part of grad(-LLH)
-                numerator = nominal_scaling_t_indep_exp
-                denominator = 0
-
-                # Time-dependent part of grad(-LLH) (i.e., at hit times)
-                for hit_idx, hit_info in enumerate(event_hit_info):
-                    s = (hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
-                        / (
-                            event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
-                            + scalefactor * nominal_scaling_hit_exp[hit_idx]
-                            + nonscaling_hit_exp[hit_idx]
-                          )
-                    )
-                    numerator -= s
-                    denominator += s**2
-
-                if denominator == 0:
-                    return -1
-                return numerator/denominator
-
-            scalefactor = initial_scalefactor
-            iters = 0 # iteration counter
-            epsilon = 1e-2
-            max_iter = 100
-            while True:
-                step = get_newton_step(scalefactor)
-                if step == -1:
-                    scalefactor = 0
-                    break
-                if scalefactor < epsilon and step > 0:
-                    break
-                scalefactor -= step
-                #print(scalefactor)
-                scalefactor = max(scalefactor, 0)
-                iters += 1
-                if abs(step) < epsilon or iters >= max_iter:
-                    break
-
-            #print('arrived at ',scalefactor, 'in iters = ', iters)
-            #if iters >= max_iter:
-            #    print('exceeded gradient descent iteration limit!')
-            #    print('arrived at ',scalefactor)
-            #print('\n')
-            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
+            scalefactor = max(0., min(MAX_CASCADE_ENERGY / SCALING_CASCADE_ENERGY, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
+
             epsilon = 1e-2
             done = False
             first = 0.
@@ -987,6 +925,69 @@ def generate_pexp_and_llh_functions(
             #print('found :',scalefactor)
             #print('\n')
 
+        elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
+
+            def get_newton_step(scalefactor):
+                """Compute the step for the newton method for the `scalefactor`
+
+                the step is defined as -f'/f'' where f is the LLH(scalefactor)
+
+                Parameters
+                ----------
+                scalefactor : float
+
+                Returns
+                -------
+                step : float
+
+                """
+
+                # Time- and DOM-independent part of grad(-LLH)
+                numerator = nominal_scaling_t_indep_exp
+                denominator = 0
+
+                # Time-dependent part of grad(-LLH) (i.e., at hit times)
+                for hit_idx, hit_info in enumerate(event_hit_info):
+                    s = (
+                        hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                        / (
+                            event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                            + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                            + nonscaling_hit_exp[hit_idx]
+                        )
+                    )
+                    numerator -= s
+                    denominator += s**2
+
+                if denominator == 0:
+                    return -1
+                return numerator / denominator
+
+            scalefactor = initial_scalefactor
+            iters = 0 # iteration counter
+            epsilon = 1e-2
+            max_iter = 100
+            while True:
+                step = get_newton_step(scalefactor)
+                if step == -1:
+                    scalefactor = 0
+                    break
+                if scalefactor < epsilon and step > 0:
+                    break
+                scalefactor -= step
+                #print(scalefactor)
+                scalefactor = max(scalefactor, 0)
+                iters += 1
+                if abs(step) < epsilon or iters >= max_iter:
+                    break
+
+            #print('arrived at ',scalefactor, 'in iters = ', iters)
+            #if iters >= max_iter:
+            #    print('exceeded gradient descent iteration limit!')
+            #    print('arrived at ',scalefactor)
+            #print('\n')
+            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
+
         # -- Calculate llh at the optimal `scalefactor` found -- #
 
         # Time- and DOM-independent part of LLH
@@ -1004,14 +1005,13 @@ def generate_pexp_and_llh_functions(
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def grad(
-            sfs,
-            event_dom_info,
-            event_hit_info,
-            nominal_scaling_hit_exps,
-            nominal_scaling_t_indep_exps,
-            idx,
-            ):
-
+        sfs,
+        event_dom_info,
+        event_hit_info,
+        nominal_scaling_hit_exps,
+        nominal_scaling_t_indep_exps,
+        idx,
+    ):
         """same as get_grad_neg_llh_wrt_scalefactor, just otput as array"""
         g = np.zeros(shape=(idx,))
         #g = np.zeros(1)
@@ -1020,20 +1020,22 @@ def generate_pexp_and_llh_functions(
 
         # Time-dependent part of grad(-LLH) (i.e., at hit times)
         for hit_idx, hit_info in enumerate(event_hit_info):
-            norm = event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns'] + np.sum(sfs[:idx] * nominal_scaling_hit_exps[:idx,hit_idx])
-            g -= (hit_info['charge'] * nominal_scaling_hit_exps[:idx,hit_idx]
-                  / norm)
+            norm = (
+                event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                + np.sum(sfs[:idx] * nominal_scaling_hit_exps[:idx,hit_idx])
+            )
+            g -= hit_info['charge'] * nominal_scaling_hit_exps[:idx,hit_idx] / norm
         return g
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def fun(
-            sfs,
-            event_dom_info,
-            event_hit_info,
-            nominal_scaling_hit_exps,
-            nominal_scaling_t_indep_exps,
-            idx,
-            ):
+        sfs,
+        event_dom_info,
+        event_hit_info,
+        nominal_scaling_hit_exps,
+        nominal_scaling_t_indep_exps,
+        idx,
+    ):
         """llh function"""
         # Time- and DOM-independent part of LLH
         llh = - np.sum(sfs[:idx] * nominal_scaling_t_indep_exps[:idx])
@@ -1122,85 +1124,97 @@ def generate_pexp_and_llh_functions(
             LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
             OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
             SOFTWARE.
-            
+
             """
             delta = 1e-4
             deriv = np.dot(g,h)
 
-            p0[p0<1] = 1.
-            e0 = fun(p0,
+            p0[p0 < 1] = 1.
+            e0 = fun(
+                p0,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
                 nominal_scaling_t_indep_exps,
-                idx)
+                idx,
+            )
 
             p1 = p0 + a0 * h
-            p1[p1<1] = 1.
-            e1 = fun(p1,
+            p1[p1 < 1] = 1.
+            e1 = fun(
+                p1,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
                 nominal_scaling_t_indep_exps,
-                idx)
+                idx,
+            )
 
             if e1 < e0 + delta * a0 * deriv:
                 return a0
 
             a1 = -deriv * a0**2 / (2. * (e1 - e0 - deriv * a0))
             p2 = p0 + a1 * h
-            p2[p2<1] = 1.
-            e2 = fun(p2,
+            p2[p2 < 1] = 1.
+            e2 = fun(
+                p2,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
                 nominal_scaling_t_indep_exps,
-                idx)
+                idx,
+            )
 
             if e2 < e0 + delta * a1 * deriv:
                 return a1
 
             aa = 1. / (a0**2 * a1**2 * (a1 - a0)) * (a0**2 * (e2 - e0 - deriv * a1) - a1**2 * (e1 - e0 - deriv * a0))
             bb = 1. / (a0**2 * a1**2 * (a1 - a0)) * (-a0**3 * (e2 - e0 - deriv * a1) + a1**3 * (e1 - e0 - deriv * a0))
-            a2 = -bb + math.sqrt(bb**2 - 3. * aa * deriv) / (3. * aa);
+            a2 = -bb + math.sqrt(bb**2 - 3. * aa * deriv) / (3. * aa)
             if a2 < 0:
                 a2 = a1 / 2.
             p3 = p0 + a2 * h
-            p3[p3<1] = 1.
-            e3 = fun(p3,
+            p3[p3 < 1] = 1.
+            e3 = fun(
+                p3,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
                 nominal_scaling_t_indep_exps,
-                idx)
+                idx,
+            )
 
             if e3 < e0 + delta * a2 * deriv:
                 return a2
 
-            return 0.    
+            return 0.
 
-        """conjugate gradient optimization"""
+        # -- Conjugate gradient optimization -- #
 
-        iter = 0
-        g = grad(scalefacots,
+        iter_num = 0
+        g = grad(
+            scalefacots,
             event_dom_info,
             event_hit_info,
             nominal_scaling_hit_exps,
             nominal_scaling_t_indep_exps,
-            idx)
-        llh_old = fun(scalefacots,
+            idx,
+        )
+        llh_old = fun(
+            scalefacots,
             event_dom_info,
             event_hit_info,
             nominal_scaling_hit_exps,
             nominal_scaling_t_indep_exps,
-            idx)
+            idx,
+        )
         norm_g = np.linalg.norm(g)
         if norm_g == 0:
             return -llh_old
         h = -g / norm_g
         maxlinesearch = 2.0
 
-        while(iter < 300):
+        while iter_num < 300:
             p0 = np.copy(scalefacots[:idx])
             A = line_search_interpolation(g, h, maxlinesearch, p0)
 
@@ -1209,19 +1223,22 @@ def generate_pexp_and_llh_functions(
             scalefacots[:idx] += A * h[:idx]
             scalefacots[scalefacots < 1] = 1.
 
-            g1 = grad(scalefacots,
+            g1 = grad(
+                scalefacots,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
                 nominal_scaling_t_indep_exps,
-                idx)
+                idx,
+            )
             llh_new = fun(
                 scalefacots,
                 event_dom_info,
                 event_hit_info,
                 nominal_scaling_hit_exps,
                 nominal_scaling_t_indep_exps,
-                idx)
+                idx,
+            )
 
             if np.fabs(llh_new - llh_old) < 1e-3:
                 break
@@ -1231,18 +1248,18 @@ def generate_pexp_and_llh_functions(
             # check angle between two vectors
             norm = np.linalg.norm(g1) * np.linalg.norm(h)
             if norm > 0:
-                angle = np.arccos(np.dot(-g1,h) / norm)
+                angle = np.arccos(np.dot(-g1, h) / norm)
 
                 if angle > (math.pi / 4.):
                     oldg = np.copy(g)
                     g = np.copy(g1)
-                    beta = np.dot(g,g - oldg) / np.dot(oldg,oldg)
+                    beta = np.dot(g, g - oldg) / np.dot(oldg, oldg)
                     h = -g + beta * h
 
-            iter +=1 
+            iter_num += 1
 
         #print(scalefacots)
-        #print(iter)
+        #print(iter_num)
         return -llh_new
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
@@ -1457,8 +1474,6 @@ def generate_pexp_and_llh_functions(
                 llhs[pegleg_step] = llh
                 all_scalefactors[pegleg_step] = scalefactor
 
-                #print(pegleg_step, llh, scalefactor)
-
                 if llh > best_llh:
                     best_llh = llh
                     pegleg_max_llh_step = pegleg_step
@@ -1483,9 +1498,9 @@ def generate_pexp_and_llh_functions(
                 llhs[pegleg_max_llh_step],
                 pegleg_max_llh_step * pegleg_stepsize,
                 all_scalefactors[pegleg_max_llh_step],
-                llhs[pegleg_max_llh_step] - llhs[0], 
+                llhs[pegleg_max_llh_step] - llhs[0],
                 llhs[pegleg_max_llh_step] - llhs[lower_idx],
-                llhs[pegleg_max_llh_step] - llhs[upper_idx], 
+                llhs[pegleg_max_llh_step] - llhs[upper_idx],
             )
 
         else:
@@ -1501,7 +1516,6 @@ def generate_pexp_and_llh_functions(
 
             llhs = np.full(shape=n_opt_segments, fill_value=-np.inf, dtype=np.float64)
             mean_scalefactor = np.zeros(shape=n_opt_segments)
-
 
             best_llh = -np.inf
             getting_worse_counter = 0
@@ -1525,7 +1539,6 @@ def generate_pexp_and_llh_functions(
                     tdi_tables=tdi_tables,
                 )
 
-
                 llh = get_optimal_scalefactors(
                     event_dom_info=event_dom_info,
                     event_hit_info=event_hit_info,
@@ -1533,7 +1546,7 @@ def generate_pexp_and_llh_functions(
                     nominal_scaling_t_indep_exps=nominal_scaling_t_indep_exps,
                     scalefacots=scalefacots,
                     idx=n+1,
-                    )
+                )
 
                 llhs[n] = llh
                 mean_scalefactor[n] = np.sum(scalefacots[:n+1])/(n+1)
@@ -1542,17 +1555,15 @@ def generate_pexp_and_llh_functions(
                     best_llh = llh
                     getting_worse_counter = 0
                 else:
-                    getting_worse_counter +=1
+                    getting_worse_counter += 1
                 if getting_worse_counter == 3:
                     break
-                
+
                 #print(n, llh, scalefacots[:n+1])
 
             #print(n, np.sum(scalefacots[:n+1])/n)
 
             best_idx = n - getting_worse_counter
-
-
 
             return (
                 llhs[best_idx],
@@ -1560,7 +1571,8 @@ def generate_pexp_and_llh_functions(
                 mean_scalefactor[best_idx],
                 0.,
                 0.,
-                0.,)
+                0.,
+            )
 
 
     # -- Define pexp and get_llh closures, baking-in the tables -- #
