@@ -39,7 +39,7 @@ __all__ = [
     'RE_LEADING_INVALID',
     'make_valid_python_name',
     'join_struct_arrays',
-    'nsort',
+    'nsort_key_func',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -894,43 +894,26 @@ def join_struct_arrays(arrays):
     return joint.ravel().view(dtype)
 
 
-def nsort(l, reverse=False):
-    """Sort a sequence of strings containing integer number fields by the
-    value of those numbers, rather than by simple alpha order. Useful
-    for sorting e.g. version strings, etc..
+NSORT_RE = re.compile(r'(\d+)')
+
+def nsort_key_func(s):
+    """Use as the `key` argument to the `sorted` function or `sort` method.
 
     Code adapted from nedbatchelder.com/blog/200712/human_sorting.html#comments
-
-    Parameters
-    ----------
-    l : sequence of strings
-        Sequence of strings to be sorted.
-
-    reverse : bool, optional
-        Whether to reverse the sort order (True => descending order)
-
-    Returns
-    -------
-    sorted_l : list of strings
-        Sorted strings
 
     Examples
     --------
     >>> l = ['f1.10.0.txt', 'f1.01.2.txt', 'f1.1.1.txt', 'f9.txt', 'f10.txt']
-    >>> nsort(l)
+    >>> sorted(l, key=nsort_key_func)
     ['f1.1.1.txt', 'f1.01.2.txt', 'f1.10.0.txt', 'f9.txt', 'f10.txt']
 
     """
-    nsort_re = re.compile(r'(\d+)')
-    def _field_splitter(s):
-        spl = nsort_re.split(s)
-        key = []
-        for non_number, number in zip(spl[::2], spl[1::2]):
-            key.append(non_number)
-            key.append(int(number))
-        return tuple(key)
-
-    return sorted(l, key=_field_splitter, reverse=reverse)
+    spl = NSORT_RE.split(s)
+    key = []
+    for non_number, number in zip(spl[::2], spl[1::2]):
+        key.append(non_number)
+        key.append(int(number))
+    return key
 
 
 if __name__ == '__main__':
