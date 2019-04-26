@@ -1329,9 +1329,7 @@ class Reco(object):
         use_sobol,
         seed,
     ):
-        """Implementation of the CRS2 algorithm, adapted to work with spherical
-        coordinates (correct centroid calculation, reflection, and mutation).
-
+        """
         At the moment Cartesian (standard) parameters and spherical parameters
         are assumed to have particular names (i.e., spherical coordinates start
         with "az" and "zen"). Furthermore, all Cartesian coordinates must come
@@ -1369,20 +1367,10 @@ class Reco(object):
         Returns
         -------
         run_info : OrderedDict
-
-        Notes
-        -----
-        CRS2 [1] is a variant of controlled random search (CRS, a global
-        optimizer) with faster convergence than CRS.
-
-        Refrences
-        ---------
-        .. [1] P. Kaelo, M.M. Ali, "Some variants of the controlled random
-           search algorithm for global optimization," J. Optim. Theory Appl.,
-           130 (2) (2006), pp. 253-264.
-
         """
         t0 = time.time()
+
+        from spherical_opt.spherical_opt import spherical_opt
 
         if use_sobol:
             from sobol import i4_sobol
@@ -1401,92 +1389,25 @@ class Reco(object):
                 ("kwargs", kwargs),
             ]
         )
+        
+        spherical_pairs = []
+        cstd = []
+        for p in self.hypo_handler.opt_param_names:
+            if 'azimuth' in p:
+                p_zen = p.replace('azimuth', 'zenith')
+                assert p_zen in self.hypo_handler.all_param_names, 'Mising dimesnion %s in %s'%(p_zen, self.hypo_handler.all_param_names)
+                spherical_pairs.append([self.hypo_handler.all_param_names.index(p), self.hypo_handler.all_param_names.index(p_zen)])
+            elif not 'zenith' in p:
+                if p in min_vertex_std.keys():
+                    cstd.append(min_vertex_std[p])
+                else:
+                    cstd.append(-1)
 
-        n_opt_params = self.n_opt_params
-        # absolute minimum number of points necessary
-        assert n_live > n_opt_params + 1
-
-        # figure out which variables are Cartesian and which spherical
-        opt_param_names = self.hypo_handler.opt_param_names
-        cart_param_names = set(opt_param_names) & set(CART_DIMS)
-        n_cart = len(cart_param_names)
-        assert set(opt_param_names[:n_cart]) == cart_param_names
-        n_spher_param_pairs = int((n_opt_params - n_cart) / 2)
-        for sph_pair_idx in range(n_spher_param_pairs):
-            az_param = opt_param_names[n_cart + sph_pair_idx * 2]
-            zen_param = opt_param_names[n_cart + sph_pair_idx * 2 + 1]
-            assert "az" in az_param, '"{}" not azimuth param'.format(az_param)
-            assert "zen" in zen_param, '"{}" not zenith param'.format(zen_param)
-
-        for dim in min_vertex_std.keys():
-            if dim not in opt_param_names:
-                raise ValueError('dim "{}" not being optimized'.format(dim))
-            if dim not in cart_param_names:
-                raise NotImplementedError(
-                    'dim "{}" stddev not computed, as stddev currently only'
-                    " computed for Cartesian parameters".format(dim)
-                )
-
-        # set standard reordering so subsequent calls with different input
-        # ordering will create identical metadata
-        min_vertex_std = OrderedDict(
-            [(d, min_vertex_std[d]) for d in opt_param_names if d in min_vertex_std]
-        )
-
-        # storage for info about stddev, whether met, and when met; defaults
-        # should indicate failure if not explicitly set elsewhere
-        vertex_std = np.full(
-            shape=1,
-            fill_value=np.nan,
-            dtype=[(d, np.float32) for d in min_vertex_std.keys()],
-        )
-        vertex_std_met = OrderedDict([(d, False) for d in min_vertex_std.keys()])
-        vertex_std_met_at_iter = np.full(
-            shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()]
-        )
-
-        # default values (in case of failure and these don't get set elsewhere,
-        # then these values will be returned)
-        fit_status = FitStatus.GeneralFailure
-        iter_num = 0
-        stopping_flag = 0
-        llh_std = np.nan
-        no_improvement_counter = 0
-        num_simplex_successes = 0
-        num_mutation_successes = 0
-        num_failures = 0
-
-        # setup arrays to store points
-        s_cart = np.zeros(shape=(n_live, n_cart))
-        s_spher = np.zeros(shape=(n_live, n_spher_param_pairs), dtype=SPHER_T)
-        llh = np.zeros(shape=(n_live,))
-
-        def func(x):
-            """Callable for minimizer"""
-            if use_priors:
-                param_vals = np.zeros_like(x)
-                param_vals[:n_cart] = x[:n_cart]
-                self.prior(param_vals)
-                param_vals[n_cart:] = x[n_cart:]
-            else:
-                param_vals = x
-            llh = self.loglike(param_vals)
-            if np.isnan(llh):
-                raise ValueError("llh is nan; params are {}".format(param_vals))
-            if np.any(np.isnan(param_vals)):
-                raise ValueError("params are nan: {}".format(param_vals))
-            return -llh
-
-        def create_x(x_cart, x_spher):
-            """Patch Cartesian and spherical coordinates into one array"""
-            # TODO: make proper
-            x = np.empty(shape=n_opt_params)
-            x[:n_cart] = x_cart
-            x[n_cart + 1 :: 2] = x_spher["zen"]
-            x[n_cart::2] = x_spher["az"]
-            return x
 
         try:
+
+            initial_points = []
+
             # generate initial population
             for i in range(n_live):
                 # Sobol seems to do slightly better than pseudo-random numbers
@@ -1497,172 +1418,32 @@ class Reco(object):
                     # possible, which will bias the distribution away from more
                     # likely values).
                     x, _ = i4_sobol(
-                        dim_num=n_opt_params,  # number of dimensions
+                        dim_num=self.n_opt_params,  # number of dimensions
                         seed=i + 1,  # Sobol sequence number
                     )
                 else:
-                    x = rand.uniform(0, 1, n_opt_params)
+                    x = rand.uniform(0, 1, self.n_opt_params)
 
                 # Apply prior xforms to `param_vals` (contents are overwritten)
-                param_vals = np.copy(x)
-                self.prior(param_vals)
 
-                # Always use prior-xformed angles
-                x[n_cart:] = param_vals[n_cart:]
+                self.prior(x)
+                initial_points.append(x)
 
-                # Only use xformed Cart params if NOT using priors during operation
-                if not use_priors:
-                    x[:n_cart] = param_vals[:n_cart]
+            initial_points = np.vstack(initial_points)
+            print(initial_points.shape)
+            print(cstd)
 
-                # Break up into Cartesian and spherical coordinates
-                s_cart[i] = x[:n_cart]
-                s_spher[i]["zen"] = x[n_cart + 1 :: 2]
-                s_spher[i]["az"] = x[n_cart::2]
-                fill_from_spher(s_spher[i])
-                llh[i] = func(x)
 
-            best_llh = np.min(llh)
-            no_improvement_counter = -1
+            fit = spherical_opt(func=self.loglike, 
+                                method='CRS2',
+                                initial_points=initial_points,
+                                spherical_indices=spherical_pairs,
+                                max_iter=max_iter,
+                                max_noimprovement=max_noimprovement,
+                                fstd=min_llh_std,
+                                cstd=cstd,
+                                )
 
-            # optional bookkeeping
-            num_simplex_successes = 0
-            num_mutation_successes = 0
-            num_failures = 0
-            stopping_flag = 0
-
-            # minimizer loop
-            for iter_num in range(max_iter):
-                if iter_num % REPORT_AFTER == 0:
-                    print(
-                        "simplex: %i, mutation: %i, failed: %i"
-                        % (num_simplex_successes, num_mutation_successes, num_failures)
-                    )
-
-                # compute value for break condition 1
-                llh_std = np.std(llh)
-
-                # compute value for break condition 3
-                for dim, cond in min_vertex_std.items():
-                    vertex_std[dim] = std = np.std(
-                        s_cart[:, opt_param_names.index(dim)]
-                    )
-                    vertex_std_met[dim] = met = std < cond
-                    if met:
-                        if vertex_std_met_at_iter[dim] == -1:
-                            vertex_std_met_at_iter[dim] = iter_num
-                    else:
-                        vertex_std_met_at_iter[dim] = -1
-
-                # break condition 1
-                if llh_std < min_llh_std:
-                    stopping_flag = 1
-                    break
-
-                # break condition 2
-                if no_improvement_counter > max_noimprovement:
-                    stopping_flag = 2
-                    break
-
-                # break condition 3
-                if len(min_vertex_std) > 0 and all(vertex_std_met.values()):
-                    stopping_flag = 3
-                    break
-
-                new_best_llh = np.min(llh)
-
-                if new_best_llh < best_llh:
-                    best_llh = new_best_llh
-                    no_improvement_counter = 0
-                else:
-                    no_improvement_counter += 1
-
-                worst_idx = np.argmax(llh)
-                best_idx = np.argmin(llh)
-
-                # choose n_opt_params random points but not best
-                choice = rand.choice(n_live - 1, n_opt_params, replace=False)
-                choice[choice >= best_idx] += 1
-
-                # Cartesian centroid
-                centroid_cart = (
-                    np.sum(s_cart[choice[:-1]], axis=0) + s_cart[best_idx]
-                ) / n_opt_params
-
-                # reflect point
-                new_x_cart = 2 * centroid_cart - s_cart[choice[-1]]
-
-                # spherical centroid
-                centroid_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
-                centroid_spher["x"] = (
-                    np.sum(s_spher["x"][choice[:-1]], axis=0) + s_spher["x"][best_idx]
-                ) / n_opt_params
-                centroid_spher["y"] = (
-                    np.sum(s_spher["y"][choice[:-1]], axis=0) + s_spher["y"][best_idx]
-                ) / n_opt_params
-                centroid_spher["z"] = (
-                    np.sum(s_spher["z"][choice[:-1]], axis=0) + s_spher["z"][best_idx]
-                ) / n_opt_params
-                fill_from_cart(centroid_spher)
-
-                # reflect point
-                new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
-                reflect(s_spher[choice[-1]], centroid_spher, new_x_spher)
-
-                if use_priors:
-                    outside = np.any(new_x_cart < 0) or np.any(new_x_cart > 1)
-                else:
-                    outside = False
-
-                if not outside:
-                    new_llh = func(create_x(new_x_cart, new_x_spher))
-
-                    if new_llh < llh[worst_idx]:
-                        # found better point
-                        s_cart[worst_idx] = new_x_cart
-                        s_spher[worst_idx] = new_x_spher
-                        llh[worst_idx] = new_llh
-                        num_simplex_successes += 1
-                        continue
-
-                # mutation
-                w = rand.uniform(0, 1, n_cart)
-                new_x_cart2 = (1 + w) * s_cart[best_idx] - w * new_x_cart
-
-                # first reflect at best point
-                reflected_new_x_spher = np.zeros(n_spher_param_pairs, dtype=SPHER_T)
-                reflect(new_x_spher, s_spher[best_idx], reflected_new_x_spher)
-
-                new_x_spher2 = np.zeros_like(new_x_spher)
-
-                # now do a combination of best and reflected point with weight w
-                for dim in ("x", "y", "z"):
-                    w = rand.uniform(0, 1, n_spher_param_pairs)
-                    new_x_spher2[dim] = (1 - w) * s_spher[best_idx][
-                        dim
-                    ] + w * reflected_new_x_spher[dim]
-                fill_from_cart(new_x_spher2)
-
-                if use_priors:
-                    outside = np.any(new_x_cart2 < 0) or np.any(new_x_cart2 > 1)
-                else:
-                    outside = False
-
-                if not outside:
-                    new_llh = func(create_x(new_x_cart2, new_x_spher2))
-
-                    if new_llh < llh[worst_idx]:
-                        # found better point
-                        s_cart[worst_idx] = new_x_cart2
-                        s_spher[worst_idx] = new_x_spher2
-                        llh[worst_idx] = new_llh
-                        num_mutation_successes += 1
-                        continue
-
-                # if we get here no method was successful in replacing worst
-                # point -> start over
-                num_failures += 1
-
-            print(CRS_STOP_FLAGS[stopping_flag])
             fit_status = FitStatus.OK
 
         except KeyboardInterrupt:

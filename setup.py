@@ -53,6 +53,7 @@ setup(
         'scipy>=0.17',
         'sobol',
         'dynesty',
+        'spherical_opt @ git+https://github.com/philippeller/spherical_opt.git',
     ],
     packages=find_packages(),
     include_dirs=[np.get_include()],
