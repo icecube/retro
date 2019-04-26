@@ -398,7 +398,7 @@ def pegleg_eval(pegleg_idx, dt, const_e_loss, mmc=False):
     """
     length = pegleg_idx * dt * SPEED_OF_LIGHT_M_PER_NS
     if const_e_loss:
-        return length * TRACK_M_PER_GEV
+        return length / TRACK_M_PER_GEV
     elif mmc:
         # values from MMC paper Table 4
         a = 0.268

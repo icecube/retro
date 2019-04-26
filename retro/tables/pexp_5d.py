@@ -61,6 +61,10 @@ class Minimizer(enum.IntEnum):
     NEWTON = 1
     BINARY_SEARCH = 2
 
+class TrackType(enum.IntEnum):
+    """How to treat track energy depositions"""
+    CONST = 0
+    STOCHASTIC = 1
 
 class StepSpacing(enum.IntEnum):
     """Pegleg step spacing"""
@@ -78,6 +82,9 @@ SCALE_FACTOR_MINIMIZER = Minimizer.BINARY_SEARCH
 PEGLEG_SPACING = StepSpacing.LINEAR
 """Pegleg adds segments either linearly (same number of segments independent of energy)
 or logarithmically (more segments are added the longer the track"""
+
+TRACK_TYPE = TrackType.CONST
+"""`CONST` is the standard treatement, `STOCHASTIC` performs conjugate gradient minimization"""
 
 PEGLEG_BEST_DELTA_LLH_THRESHOLD = 0.1
 """For Pegleg `LLHChoice` that require a range of LLH and average (mean, median, etc.),
@@ -506,6 +513,7 @@ def generate_pexp_and_llh_functions(
                     rhosquared = max(MACHINE_EPS, dx**2 + dy**2)
                     rsquared = rhosquared + dz**2
 
+                    # first thing to check if this DOM is out of range and we can skip it
                     if rsquared > rsquared_max:
                         continue
 
@@ -806,76 +814,43 @@ def generate_pexp_and_llh_functions(
 
         """
         # Note: defining as closure is faster than as external function
-        def get_grad_neg_llh_wrt_scalefactor(scalefactor):
-            """Compute the gradient of -LLH with respect to `scalefactor`.
+        if SCALE_FACTOR_MINIMIZER in (Minimizer.GRADIENT_DESCENT, Minimizer.BINARY_SEARCH):
 
-            Typically we use `scalefactor` with cascade energy, .. ::
+            def get_grad_neg_llh_wrt_scalefactor(scalefactor):
+                """Compute the gradient of -LLH with respect to `scalefactor`.
 
-                cascade_energy = scalefactor * nominal_cascade_energy
+                Typically we use `scalefactor` with cascade energy, .. ::
 
-            so the gradient is proportional to cascade energy by a factor of
-            `nominal_cascade_energy`.
+                    cascade_energy = scalefactor * nominal_cascade_energy
 
-            Parameters
-            ----------
-            scalefactor : float
+                so the gradient is proportional to cascade energy by a factor of
+                `nominal_cascade_energy`.
 
-            Returns
-            -------
-            grad_neg_llh : float
+                Parameters
+                ----------
+                scalefactor : float
 
-            """
+                Returns
+                -------
+                grad_neg_llh : float
 
-            # Time- and DOM-independent part of grad(-LLH)
-            grad_neg_llh = nominal_scaling_t_indep_exp
+                """
 
-            # Time-dependent part of grad(-LLH) (i.e., at hit times)
-            for hit_idx, hit_info in enumerate(event_hit_info):
-                grad_neg_llh -= (
-                    hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
-                    / (
-                        event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
-                        + scalefactor * nominal_scaling_hit_exp[hit_idx]
-                        + nonscaling_hit_exp[hit_idx]
+                # Time- and DOM-independent part of grad(-LLH)
+                grad_neg_llh = nominal_scaling_t_indep_exp
+
+                # Time-dependent part of grad(-LLH) (i.e., at hit times)
+                for hit_idx, hit_info in enumerate(event_hit_info):
+                    grad_neg_llh -= (
+                        hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                        / (
+                            event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                            + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                            + nonscaling_hit_exp[hit_idx]
+                        )
                     )
-                )
 
-            return grad_neg_llh
-
-        def get_newton_step(scalefactor):
-            """Compute the step for the newton method for the `scalefactor`
-
-            the step is defined as -f'/f'' where f is the LLH(scalefactor)
-
-            Parameters
-            ----------
-            scalefactor : float
-
-            Returns
-            -------
-            step : float
-
-            """
-
-            # Time- and DOM-independent part of grad(-LLH)
-            numerator = nominal_scaling_t_indep_exp
-            denominator = 0
-
-            # Time-dependent part of grad(-LLH) (i.e., at hit times)
-            for hit_idx, hit_info in enumerate(event_hit_info):
-                s = (hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
-                    / (
-                        event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
-                        + scalefactor * nominal_scaling_hit_exp[hit_idx]
-                        + nonscaling_hit_exp[hit_idx]
-                      )
-                )
-                numerator -= s
-                denominator += s**2
-
-            if denominator == 0:
-                return -1
-            return numerator/denominator
+                return grad_neg_llh
 
         if SCALE_FACTOR_MINIMIZER is Minimizer.GRADIENT_DESCENT:
             # See, e.g., https://en.wikipedia.org/wiki/Gradient_descent#Python
@@ -914,35 +889,10 @@ def generate_pexp_and_llh_functions(
                 print('exceeded gradient descent iteration limit!')
                 print('arrived at ', scalefactor)
             #print('\n')
-            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
-
-        elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
-            scalefactor = initial_scalefactor
-            iters = 0 # iteration counter
-            epsilon = 1e-2
-            max_iter = 100
-            while True:
-                step = get_newton_step(scalefactor)
-                if step == -1:
-                    scalefactor = 0
-                    break
-                if scalefactor < epsilon and step > 0:
-                    break
-                scalefactor -= step
-                #print(scalefactor)
-                scalefactor = max(scalefactor, 0)
-                iters += 1
-                if abs(step) < epsilon or iters >= max_iter:
-                    break
-
-            #print('arrived at ',scalefactor, 'in iters = ', iters)
-            #if iters >= max_iter:
-            #    print('exceeded gradient descent iteration limit!')
-            #    print('arrived at ',scalefactor)
-            #print('\n')
-            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
+            scalefactor = max(0., min(MAX_CASCADE_ENERGY / SCALING_CASCADE_ENERGY, scalefactor))
 
         elif SCALE_FACTOR_MINIMIZER is Minimizer.BINARY_SEARCH:
+
             epsilon = 1e-2
             done = False
             first = 0.
@@ -975,6 +925,69 @@ def generate_pexp_and_llh_functions(
             #print('found :',scalefactor)
             #print('\n')
 
+        elif SCALE_FACTOR_MINIMIZER is Minimizer.NEWTON:
+
+            def get_newton_step(scalefactor):
+                """Compute the step for the newton method for the `scalefactor`
+
+                the step is defined as -f'/f'' where f is the LLH(scalefactor)
+
+                Parameters
+                ----------
+                scalefactor : float
+
+                Returns
+                -------
+                step : float
+
+                """
+
+                # Time- and DOM-independent part of grad(-LLH)
+                numerator = nominal_scaling_t_indep_exp
+                denominator = 0
+
+                # Time-dependent part of grad(-LLH) (i.e., at hit times)
+                for hit_idx, hit_info in enumerate(event_hit_info):
+                    s = (
+                        hit_info['charge'] * nominal_scaling_hit_exp[hit_idx]
+                        / (
+                            event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                            + scalefactor * nominal_scaling_hit_exp[hit_idx]
+                            + nonscaling_hit_exp[hit_idx]
+                        )
+                    )
+                    numerator -= s
+                    denominator += s**2
+
+                if denominator == 0:
+                    return -1
+                return numerator / denominator
+
+            scalefactor = initial_scalefactor
+            iters = 0 # iteration counter
+            epsilon = 1e-2
+            max_iter = 100
+            while True:
+                step = get_newton_step(scalefactor)
+                if step == -1:
+                    scalefactor = 0
+                    break
+                if scalefactor < epsilon and step > 0:
+                    break
+                scalefactor -= step
+                #print(scalefactor)
+                scalefactor = max(scalefactor, 0)
+                iters += 1
+                if abs(step) < epsilon or iters >= max_iter:
+                    break
+
+            #print('arrived at ',scalefactor, 'in iters = ', iters)
+            #if iters >= max_iter:
+            #    print('exceeded gradient descent iteration limit!')
+            #    print('arrived at ',scalefactor)
+            #print('\n')
+            scalefactor = max(0., min(MAX_CASCADE_ENERGY/SCALING_CASCADE_ENERGY, scalefactor))
+
         # -- Calculate llh at the optimal `scalefactor` found -- #
 
         # Time- and DOM-independent part of LLH
@@ -989,6 +1002,265 @@ def generate_pexp_and_llh_functions(
             )
 
         return scalefactor, llh
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def grad(
+        sfs,
+        event_dom_info,
+        event_hit_info,
+        nominal_scaling_hit_exps,
+        nominal_scaling_t_indep_exps,
+        idx,
+    ):
+        """same as get_grad_neg_llh_wrt_scalefactor, just otput as array"""
+        g = np.zeros(shape=(idx,))
+        #g = np.zeros(1)
+        # Time- and DOM-independent part of grad(-LLH)
+        g += nominal_scaling_t_indep_exps[:idx]
+
+        # Time-dependent part of grad(-LLH) (i.e., at hit times)
+        for hit_idx, hit_info in enumerate(event_hit_info):
+            norm = (
+                event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                + np.sum(sfs[:idx] * nominal_scaling_hit_exps[:idx,hit_idx])
+            )
+            g -= hit_info['charge'] * nominal_scaling_hit_exps[:idx,hit_idx] / norm
+        return g
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def fun(
+        sfs,
+        event_dom_info,
+        event_hit_info,
+        nominal_scaling_hit_exps,
+        nominal_scaling_t_indep_exps,
+        idx,
+    ):
+        """llh function"""
+        # Time- and DOM-independent part of LLH
+        llh = - np.sum(sfs[:idx] * nominal_scaling_t_indep_exps[:idx])
+
+        # Time-dependent part of LLH (i.e., at hit times)
+        for hit_idx, hit_info in enumerate(event_hit_info):
+            llh += hit_info['charge'] * math.log(
+                event_dom_info[hit_info['event_dom_idx']]['noise_rate_per_ns']
+                + np.sum(sfs[:idx] * nominal_scaling_hit_exps[:idx,hit_idx])
+            )
+        return -llh
+
+    @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
+    def get_optimal_scalefactors(
+        event_dom_info,
+        event_hit_info,
+        nominal_scaling_hit_exps,
+        nominal_scaling_t_indep_exps,
+        scalefacots,
+        idx,
+    ):
+        """Find optimal (highest-likelihood) `scalefacots` for n scaling sources.
+
+        Parameters:
+        -----------
+        event_dom_info : array of dtype EVT_DOM_INFO_T
+            containing all relevant event per DOM info
+        event_hit_info : array of dtype EVT_HIT_INFO_T
+        nominal_scaling_hit_exps : shape (n_sources, n_hits, 2) array of dtype float
+            Detected-charge-rate expectation at each hit time due to scaling sources at
+            nominal values (i.e., with `scalefactor = 1`); this quantity is
+            lambda_d^s(t_{k_d}) in `likelihood_function_derivation.ipynb`
+        nominal_scaling_t_indep_exps : shape (n_sources, )
+            Total charge expected across the detector due to nominal scaling sources
+            (Lambda^s in `likelihood_function_derivation.ipynb`)
+        scalefacots : shape (n_sources)
+            Starting point for minimizer
+        idx : int
+            up to which index to consider sources and scalefacors
+
+        Returns
+        -------
+        llh
+
+        """
+
+
+        def line_search_interpolation(g, h, a0, p0):
+            """perform line search using interpolation strategy
+
+            Parameters:
+            -----------
+            g : array
+                gradient vector
+            h : array
+                search vector
+            a0 : float
+                starting distance
+            p : array
+                starting position
+
+            Returns:
+            --------
+            float, optimal a value
+
+            Original License:
+            -------
+            MIT License
+
+            Copyright (c) 2018 Ivo Filot
+
+            Permission is hereby granted, free of charge, to any person obtaining a copy
+            of this software and associated documentation files (the "Software"), to deal
+            in the Software without restriction, including without limitation the rights
+            to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+            copies of the Software, and to permit persons to whom the Software is
+            furnished to do so, subject to the following conditions:
+
+            The above copyright notice and this permission notice shall be included in all
+            copies or substantial portions of the Software.
+
+            THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+            IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+            FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+            AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+            LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+            OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+            SOFTWARE.
+
+            """
+            delta = 1e-4
+            deriv = np.dot(g,h)
+
+            p0[p0 < 1] = 1.
+            e0 = fun(
+                p0,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps,
+                idx,
+            )
+
+            p1 = p0 + a0 * h
+            p1[p1 < 1] = 1.
+            e1 = fun(
+                p1,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps,
+                idx,
+            )
+
+            if e1 < e0 + delta * a0 * deriv:
+                return a0
+
+            a1 = -deriv * a0**2 / (2. * (e1 - e0 - deriv * a0))
+            p2 = p0 + a1 * h
+            p2[p2 < 1] = 1.
+            e2 = fun(
+                p2,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps,
+                idx,
+            )
+
+            if e2 < e0 + delta * a1 * deriv:
+                return a1
+
+            aa = 1. / (a0**2 * a1**2 * (a1 - a0)) * (a0**2 * (e2 - e0 - deriv * a1) - a1**2 * (e1 - e0 - deriv * a0))
+            bb = 1. / (a0**2 * a1**2 * (a1 - a0)) * (-a0**3 * (e2 - e0 - deriv * a1) + a1**3 * (e1 - e0 - deriv * a0))
+            a2 = -bb + math.sqrt(bb**2 - 3. * aa * deriv) / (3. * aa)
+            if a2 < 0:
+                a2 = a1 / 2.
+            p3 = p0 + a2 * h
+            p3[p3 < 1] = 1.
+            e3 = fun(
+                p3,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps,
+                idx,
+            )
+
+            if e3 < e0 + delta * a2 * deriv:
+                return a2
+
+            return 0.
+
+        # -- Conjugate gradient optimization -- #
+
+        iter_num = 0
+        g = grad(
+            scalefacots,
+            event_dom_info,
+            event_hit_info,
+            nominal_scaling_hit_exps,
+            nominal_scaling_t_indep_exps,
+            idx,
+        )
+        llh_old = fun(
+            scalefacots,
+            event_dom_info,
+            event_hit_info,
+            nominal_scaling_hit_exps,
+            nominal_scaling_t_indep_exps,
+            idx,
+        )
+        norm_g = np.linalg.norm(g)
+        if norm_g == 0:
+            return -llh_old
+        h = -g / norm_g
+        maxlinesearch = 2.0
+
+        while iter_num < 300:
+            p0 = np.copy(scalefacots[:idx])
+            A = line_search_interpolation(g, h, maxlinesearch, p0)
+
+            #for s in range(len(scalefacots)):
+            #    scalefacots[s] += A * h[s]
+            scalefacots[:idx] += A * h[:idx]
+            scalefacots[scalefacots < 1] = 1.
+
+            g1 = grad(
+                scalefacots,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps,
+                idx,
+            )
+            llh_new = fun(
+                scalefacots,
+                event_dom_info,
+                event_hit_info,
+                nominal_scaling_hit_exps,
+                nominal_scaling_t_indep_exps,
+                idx,
+            )
+
+            if np.fabs(llh_new - llh_old) < 1e-3:
+                break
+
+            llh_old = llh_new
+
+            # check angle between two vectors
+            norm = np.linalg.norm(g1) * np.linalg.norm(h)
+            if norm > 0:
+                angle = np.arccos(np.dot(-g1, h) / norm)
+
+                if angle > (math.pi / 4.):
+                    oldg = np.copy(g)
+                    g = np.copy(g1)
+                    beta = np.dot(g, g - oldg) / np.dot(oldg, oldg)
+                    h = -g + beta * h
+
+            iter_num += 1
+
+        #print(scalefacots)
+        #print(iter_num)
+        return -llh_new
 
     @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
     def get_llh_(
@@ -1052,133 +1324,54 @@ def generate_pexp_and_llh_functions(
             delta LLH of best fit pegleg LLH to LLH `PEGLEG_BREAK_COUNTER` track steps after best LLH
 
         """
-        num_pegleg_sources = len(pegleg_sources)
-        num_pegleg_steps = 1 + int(num_pegleg_sources / pegleg_stepsize)
-        num_scaling_sources = len(scaling_sources)
-        num_hits = len(event_hit_info)
-
-        if num_scaling_sources > 0:
-            # -- Storage for exp due to nominal (`scalefactor = 1`) scaling sources -- #
-            nominal_scaling_t_indep_exp = 0.
-            nominal_scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
-
-            nominal_scaling_t_indep_exp += pexp_(
-                sources=scaling_sources,
-                sources_start=0,
-                sources_stop=num_scaling_sources,
-                event_dom_info=event_dom_info,
-                event_hit_info=event_hit_info,
-                hit_exp=nominal_scaling_hit_exp,
-                dom_tables=dom_tables,
-                dom_table_norms=dom_table_norms,
-                t_indep_dom_tables=t_indep_dom_tables,
-                t_indep_dom_table_norms=t_indep_dom_table_norms,
-                tdi_tables=tdi_tables,
-            )
-
-        # -- Storage for exp due to generic + pegleg (non-scaling) sources -- #
-
-        nonscaling_t_indep_exp = 0.
-        nonscaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
-
-        # Expectations for generic-only sources (i.e. pegleg=0 at this point)
-        if len(generic_sources) > 0:
-            nonscaling_t_indep_exp += pexp_(
-                sources=generic_sources,
-                sources_start=0,
-                sources_stop=len(generic_sources),
-                event_dom_info=event_dom_info,
-                event_hit_info=event_hit_info,
-                hit_exp=nonscaling_hit_exp,
-                dom_tables=dom_tables,
-                dom_table_norms=dom_table_norms,
-                t_indep_dom_tables=t_indep_dom_tables,
-                t_indep_dom_table_norms=t_indep_dom_table_norms,
-                tdi_tables=tdi_tables,
-            )
-
-        if num_scaling_sources > 0:
-            # Compute initial scalefactor & LLH for generic-only (no pegleg) sources
-            scalefactor, llh = get_optimal_scalefactor(
-                event_dom_info=event_dom_info,
-                event_hit_info=event_hit_info,
-                nonscaling_hit_exp=nonscaling_hit_exp,
-                nonscaling_t_indep_exp=nonscaling_t_indep_exp,
-                nominal_scaling_hit_exp=nominal_scaling_hit_exp,
-                nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
-                initial_scalefactor=10.,
-            )
-        else:
-            scalefactor = 0
-            llh = simple_llh(
-                event_dom_info=event_dom_info,
-                event_hit_info=event_hit_info,
-                nonscaling_hit_exp=nonscaling_hit_exp,
-                nonscaling_t_indep_exp=nonscaling_t_indep_exp,
-            )
-
-        if num_pegleg_sources == 0:
-            # in this case we're done
-            return (
-                llh,
-                0, # pegleg_stop_idx = 0: no pegleg sources
-                scalefactor,
-                0.,
-                0.,
-                0.,
-            )
-
-        # -- Pegleg loop -- #
-        if PEGLEG_SPACING is StepSpacing.LOG:
-            raise NotImplementedError(
-                'Only ``PEGLEG_SPACING = StepSpacing.LINEAR`` is implemented'
-            )
-            #logstep = np.log(num_pegleg_sources) / 300
-            #x = -1e-8
-            #logspace = np.zeros(shape=301, dtype=np.int32)
-            #for i in range(len(logspace)):
-            #    logspace[i] = np.int32(np.exp(x))
-            #    x+= logstep
-            #pegleg_steps = np.unique(logspace)
-            #assert pegleg_steps[0] == 0
-            #n_pegleg_steps = len(pegleg_steps)
-
-        # -- Loop initialization -- #
-
-        num_llhs = num_pegleg_steps + 1
-        llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
-        llhs[0] = llh
-
-        scalefactors = np.zeros(shape=num_llhs, dtype=np.float64)
-        scalefactors[0] = scalefactor
-
-        best_llh = llh
-        previous_llh = best_llh - 100
-        pegleg_max_llh_step = 0
-        getting_worse_counter = 0
-
-        for pegleg_step in range(1, num_pegleg_steps):
-            pegleg_stop_idx = pegleg_step * pegleg_stepsize
-            pegleg_start_idx = pegleg_stop_idx - pegleg_stepsize
-
-            # Add to expectations by including another "batch" or segment of pegleg
-            # sources
-            nonscaling_t_indep_exp += pexp_(
-                sources=pegleg_sources,
-                sources_start=pegleg_start_idx,
-                sources_stop=pegleg_stop_idx,
-                event_dom_info=event_dom_info,
-                event_hit_info=event_hit_info,
-                hit_exp=nonscaling_hit_exp,
-                dom_tables=dom_tables,
-                dom_table_norms=dom_table_norms,
-                t_indep_dom_tables=t_indep_dom_tables,
-                t_indep_dom_table_norms=t_indep_dom_table_norms,
-                tdi_tables=tdi_tables,
-            )
+        if TRACK_TYPE == TrackType.CONST:
+            num_pegleg_sources = len(pegleg_sources)
+            num_pegleg_steps = 1 + int(num_pegleg_sources / pegleg_stepsize)
+            num_scaling_sources = len(scaling_sources)
+            num_hits = len(event_hit_info)
 
             if num_scaling_sources > 0:
-                # Find optimal scalefactor at this pegleg step
+                # -- Storage for exp due to nominal (`scalefactor = 1`) scaling sources -- #
+                nominal_scaling_t_indep_exp = 0.
+                nominal_scaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
+
+                nominal_scaling_t_indep_exp += pexp_(
+                    sources=scaling_sources,
+                    sources_start=0,
+                    sources_stop=num_scaling_sources,
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    hit_exp=nominal_scaling_hit_exp,
+                    dom_tables=dom_tables,
+                    dom_table_norms=dom_table_norms,
+                    t_indep_dom_tables=t_indep_dom_tables,
+                    t_indep_dom_table_norms=t_indep_dom_table_norms,
+                    tdi_tables=tdi_tables,
+                )
+
+            # -- Storage for exp due to generic + pegleg (non-scaling) sources -- #
+
+            nonscaling_t_indep_exp = 0.
+            nonscaling_hit_exp = np.zeros(shape=num_hits, dtype=np.float64)
+
+            # Expectations for generic-only sources (i.e. pegleg=0 at this point)
+            if len(generic_sources) > 0:
+                nonscaling_t_indep_exp += pexp_(
+                    sources=generic_sources,
+                    sources_start=0,
+                    sources_stop=len(generic_sources),
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    hit_exp=nonscaling_hit_exp,
+                    dom_tables=dom_tables,
+                    dom_table_norms=dom_table_norms,
+                    t_indep_dom_tables=t_indep_dom_tables,
+                    t_indep_dom_table_norms=t_indep_dom_table_norms,
+                    tdi_tables=tdi_tables,
+                )
+
+            if num_scaling_sources > 0:
+                # Compute initial scalefactor & LLH for generic-only (no pegleg) sources
                 scalefactor, llh = get_optimal_scalefactor(
                     event_dom_info=event_dom_info,
                     event_hit_info=event_hit_info,
@@ -1186,7 +1379,7 @@ def generate_pexp_and_llh_functions(
                     nonscaling_t_indep_exp=nonscaling_t_indep_exp,
                     nominal_scaling_hit_exp=nominal_scaling_hit_exp,
                     nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
-                    initial_scalefactor=scalefactor,
+                    initial_scalefactor=10.,
                 )
             else:
                 scalefactor = 0
@@ -1197,38 +1390,189 @@ def generate_pexp_and_llh_functions(
                     nonscaling_t_indep_exp=nonscaling_t_indep_exp,
                 )
 
-            # Store this pegleg step's llh and best scalefactor
-            llhs[pegleg_step] = llh
-            scalefactors[pegleg_step] = scalefactor
+            if num_pegleg_sources == 0:
+                # in this case we're done
+                return (
+                    llh,
+                    0, # pegleg_stop_idx = 0: no pegleg sources
+                    scalefactor,
+                    0.,
+                    0.,
+                    0.,
+                )
 
-            if llh > best_llh:
-                best_llh = llh
-                pegleg_max_llh_step = pegleg_step
-                getting_worse_counter = 0
-            elif llh < previous_llh:
-                getting_worse_counter += 1
-            else:
-                getting_worse_counter -= 1
-            previous_llh = llh
+            # -- Pegleg loop -- #
+            if PEGLEG_SPACING is StepSpacing.LOG:
+                raise NotImplementedError(
+                    'Only ``PEGLEG_SPACING = StepSpacing.LINEAR`` is implemented'
+                )
+                #logstep = np.log(num_pegleg_sources) / 300
+                #x = -1e-8
+                #logspace = np.zeros(shape=301, dtype=np.int32)
+                #for i in range(len(logspace)):
+                #    logspace[i] = np.int32(np.exp(x))
+                #    x+= logstep
+                #pegleg_steps = np.unique(logspace)
+                #assert pegleg_steps[0] == 0
+                #n_pegleg_steps = len(pegleg_steps)
 
-            # break condition
-            if getting_worse_counter > PEGLEG_BREAK_COUNTER:
-                #for idx in range(pegleg_idx+1,n_pegleg_steps):
-                #    # fill up with bad llhs. just to make sure they're not used
-                #    llhs[idx] = best_llh - 100
-                #print('break at step ',pegleg_idx)
-                break
+            # -- Loop initialization -- #
 
-        lower_idx = max(0, pegleg_max_llh_step - PEGLEG_BREAK_COUNTER)
-        upper_idx = min(num_llhs, pegleg_max_llh_step + PEGLEG_BREAK_COUNTER)
-        return (
-            llhs[pegleg_max_llh_step],
-            pegleg_max_llh_step * pegleg_stepsize,
-            scalefactors[pegleg_max_llh_step],
-            llhs[pegleg_max_llh_step] - llhs[0], 
-            llhs[pegleg_max_llh_step] - llhs[lower_idx],
-            llhs[pegleg_max_llh_step] - llhs[upper_idx], 
-        )
+            num_llhs = num_pegleg_steps + 1
+            llhs = np.full(shape=num_llhs, fill_value=-np.inf, dtype=np.float64)
+            llhs[0] = llh
+
+            all_scalefactors = np.zeros(shape=num_llhs, dtype=np.float64)
+            all_scalefactors[0] = scalefactor
+
+            best_llh = llh
+            previous_llh = best_llh - 100
+            pegleg_max_llh_step = 0
+            getting_worse_counter = 0
+
+            for pegleg_step in range(1, num_pegleg_steps):
+                pegleg_stop_idx = pegleg_step * pegleg_stepsize
+                pegleg_start_idx = pegleg_stop_idx - pegleg_stepsize
+
+                # Add to expectations by including another "batch" or segment of pegleg
+                # sources
+                nonscaling_t_indep_exp += pexp_(
+                    sources=pegleg_sources,
+                    sources_start=pegleg_start_idx,
+                    sources_stop=pegleg_stop_idx,
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    hit_exp=nonscaling_hit_exp,
+                    dom_tables=dom_tables,
+                    dom_table_norms=dom_table_norms,
+                    t_indep_dom_tables=t_indep_dom_tables,
+                    t_indep_dom_table_norms=t_indep_dom_table_norms,
+                    tdi_tables=tdi_tables,
+                )
+
+                if num_scaling_sources > 0:
+                    # Find optimal scalefactor at this pegleg step
+                    scalefactor, llh = get_optimal_scalefactor(
+                        event_dom_info=event_dom_info,
+                        event_hit_info=event_hit_info,
+                        nonscaling_hit_exp=nonscaling_hit_exp,
+                        nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+                        nominal_scaling_hit_exp=nominal_scaling_hit_exp,
+                        nominal_scaling_t_indep_exp=nominal_scaling_t_indep_exp,
+                        initial_scalefactor=scalefactor,
+                    )
+                else:
+                    scalefactor = 0
+                    llh = simple_llh(
+                        event_dom_info=event_dom_info,
+                        event_hit_info=event_hit_info,
+                        nonscaling_hit_exp=nonscaling_hit_exp,
+                        nonscaling_t_indep_exp=nonscaling_t_indep_exp,
+                    )
+
+                # Store this pegleg step's llh and best scalefactor
+                llhs[pegleg_step] = llh
+                all_scalefactors[pegleg_step] = scalefactor
+
+                if llh > best_llh:
+                    best_llh = llh
+                    pegleg_max_llh_step = pegleg_step
+                    getting_worse_counter = 0
+                elif llh < previous_llh:
+                    getting_worse_counter += 1
+                else:
+                    getting_worse_counter -= 1
+                previous_llh = llh
+
+                # break condition
+                if getting_worse_counter > PEGLEG_BREAK_COUNTER:
+                    #for idx in range(pegleg_idx+1,n_pegleg_steps):
+                    #    # fill up with bad llhs. just to make sure they're not used
+                    #    llhs[idx] = best_llh - 100
+                    #print('break at step ',pegleg_idx)
+                    break
+
+            lower_idx = max(0, pegleg_max_llh_step - PEGLEG_BREAK_COUNTER)
+            upper_idx = min(num_llhs, pegleg_max_llh_step + PEGLEG_BREAK_COUNTER)
+            return (
+                llhs[pegleg_max_llh_step],
+                pegleg_max_llh_step * pegleg_stepsize,
+                all_scalefactors[pegleg_max_llh_step],
+                llhs[pegleg_max_llh_step] - llhs[0],
+                llhs[pegleg_max_llh_step] - llhs[lower_idx],
+                llhs[pegleg_max_llh_step] - llhs[upper_idx],
+            )
+
+        else:
+            # let's do CGD
+            num_hits = len(event_hit_info)
+
+            n_opt_segments = 100
+
+            nominal_scaling_t_indep_exps = np.zeros(n_opt_segments, dtype=np.float64)
+            nominal_scaling_hit_exps = np.zeros(shape=(n_opt_segments, num_hits), dtype=np.float64)
+
+            scalefacots = np.zeros(shape=(n_opt_segments,))
+
+            llhs = np.full(shape=n_opt_segments, fill_value=-np.inf, dtype=np.float64)
+            mean_scalefactor = np.zeros(shape=n_opt_segments)
+
+            best_llh = -np.inf
+            getting_worse_counter = 0
+            sources_per_segment = 3
+
+            for n in range(n_opt_segments):
+                # fill up exps
+                start = sources_per_segment*n
+                stop = sources_per_segment*(n+1)
+                nominal_scaling_t_indep_exps[n] = pexp_(
+                    sources=pegleg_sources,
+                    sources_start=start,
+                    sources_stop=stop,
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    hit_exp=nominal_scaling_hit_exps[n],
+                    dom_tables=dom_tables,
+                    dom_table_norms=dom_table_norms,
+                    t_indep_dom_tables=t_indep_dom_tables,
+                    t_indep_dom_table_norms=t_indep_dom_table_norms,
+                    tdi_tables=tdi_tables,
+                )
+
+                llh = get_optimal_scalefactors(
+                    event_dom_info=event_dom_info,
+                    event_hit_info=event_hit_info,
+                    nominal_scaling_hit_exps=nominal_scaling_hit_exps,
+                    nominal_scaling_t_indep_exps=nominal_scaling_t_indep_exps,
+                    scalefacots=scalefacots,
+                    idx=n+1,
+                )
+
+                llhs[n] = llh
+                mean_scalefactor[n] = np.sum(scalefacots[:n+1])/(n+1)
+
+                if llh > best_llh:
+                    best_llh = llh
+                    getting_worse_counter = 0
+                else:
+                    getting_worse_counter += 1
+                if getting_worse_counter == 3:
+                    break
+
+                #print(n, llh, scalefacots[:n+1])
+
+            #print(n, np.sum(scalefacots[:n+1])/n)
+
+            best_idx = n - getting_worse_counter
+
+            return (
+                llhs[best_idx],
+                sources_per_segment*best_idx,
+                mean_scalefactor[best_idx],
+                0.,
+                0.,
+                0.,
+            )
 
 
     # -- Define pexp and get_llh closures, baking-in the tables -- #

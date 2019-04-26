@@ -86,6 +86,7 @@ METHODS = set(
         "crs_prefit",
         "mn8d",
         "stopping_atm_muon_crs",
+        "dn8d",
         "nlopt",
         "scipy",
         "skopt",
@@ -519,6 +520,52 @@ class Reco(object):
                 save=True,
             )
 
+        elif method == "dn8d":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="pegleg",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(return_cube=True, **PRISPEC_OSCNEXT_CRS_MN)
+            #self.generate_prior_method(return_cube=True, **PRISPEC_OSCNEXT_PREFIT_TIGHT)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_dynesty(
+                n_live=100,
+                maxiter=2000,
+                maxcall=10000,
+                dlogz=0.1,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=self.save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=True,
+            )
+
         else:
             raise ValueError("Unknown `Method` {}".format(method))
 
@@ -628,7 +675,7 @@ class Reco(object):
 
         print("Total run time is {:.3f} s".format(time.time() - start_time))
 
-    def generate_prior_method(self, **kwargs):
+    def generate_prior_method(self, return_cube=False, **kwargs):
         """Generate the prior transform method `self.prior` and info
         `self.priors_used` for a given event. Optionally, plots the priors to
         current working directory if `self.debug` is True.
@@ -646,6 +693,8 @@ class Reco(object):
 
         Parameters
         ----------
+        return_cube : bool
+            if true, explicitly return the transformed cube
         **kwargs
             Prior definitions; anything unspecified falls back to a default
             (since all params must have priors, including ranges, for e.g.
@@ -680,6 +729,9 @@ class Reco(object):
             """
             for prior_func in prior_funcs:
                 prior_func(cube)
+
+            if return_cube:
+                return cube
 
         self.prior = prior
 
@@ -771,13 +823,14 @@ class Reco(object):
                     ("x", truth["x"]),
                     ("y", truth["y"]),
                     ("z", truth["z"]),
-                    ("t", truth["time"]),
-                    ("zen", truth["zenith"]),
-                    ("az", truth["azimuth"]),
-                    ("trk_az", truth["track_azimuth"]),
-                    ("trk_zen", truth["track_zenith"]),
-                    ("trk_en", truth["track_energy"]),
-                    ("en", truth["energy"]),
+                    ("time", truth["time"]),
+                    ("zenith", truth["zenith"]),
+                    ("azimuth", truth["azimuth"]),
+                    ("track_azimuth", truth["track_azimuth"]),
+                    ("track_zenith", truth["track_zenith"]),
+                    ("track_energy", truth["track_energy"]),
+                    ("energy", truth["energy"]),
+                    ("cascade_energy", truth['total_cascade_energy']),
                 ]
             )
             optional = [
@@ -1896,6 +1949,81 @@ class Reco(object):
         )
 
         return run_info, fit_meta
+
+    def run_dynesty(
+        self,
+        n_live,
+        maxiter,
+        maxcall,
+        dlogz
+    ):
+        """Setup and run Dynesty on an event.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        run_info : OrderedDict
+            Metadata dict containing dynesty settings used and extra info returned by
+            dynesty
+
+        fit_meta : OrderedDict
+
+        """
+        import dynesty
+
+        t0 = time.time()
+
+        kwargs = OrderedDict()
+        for arg_name in get_arg_names(self.run_dynesty)[1:]:
+            kwargs[arg_name] = locals()[arg_name]
+
+
+        dn_kwargs = OrderedDict(
+            [
+                ("ndim", self.n_opt_params),
+                ('nlive', n_live),
+                (
+                    "periodic",
+                    [i for i,p in enumerate(self.hypo_handler.all_param_names) if 'az' in p.lower()],
+                ),
+            ]
+        )
+
+        sampler_kwargs = OrderedDict(
+            [
+                ('maxiter', maxiter),
+                ('maxcall', maxcall),
+                ('dlogz', dlogz),
+
+            ]
+        )
+
+        run_info = OrderedDict(
+            [("method", "run_dynesty"), ("kwargs", kwargs), ("dn_kwargs", dn_kwargs), ("sampler_kwargs", sampler_kwargs)]
+        )
+
+        fit_meta = OrderedDict()
+        fit_meta["fit_status"] = np.int8(FitStatus.NotSet)
+        sampler = dynesty.NestedSampler(
+            loglikelihood=self.loglike,
+            prior_transform=self.prior,
+            method='unif',
+            bound='single',
+            update_interval=1,
+            **dn_kwargs
+        )
+        print('sampler instantiated')
+        sampler.run_nested(**sampler_kwargs)
+
+        fit_meta["fit_status"] = np.int8(FitStatus.OK)
+        fit_meta["run_time"] = np.float32(time.time() - t0)
+
+        print(fit_meta)
+
+        return run_info, fit_meta
+
 
     def run_multinest(
         self,
