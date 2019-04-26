@@ -469,6 +469,8 @@ def extract_reco(frame, reco):
                 allow_missing=True,
             )
         )
+        reco_dict["PLMN_timing"] = np.float64(frame["PLMN_timing"].value)
+        reco_dict["MO_timing"] = np.float64(frame["MO_timing"].value)
         reco_dict["Neutrino"] = dict2struct(
             get_frame_item(
                 frame=frame, key=reco, specs=I3PARTICLE_SPECS, allow_missing=True
@@ -496,6 +498,24 @@ def extract_reco(frame, reco):
                 key=reco + "Track",
                 specs=I3PARTICLE_SPECS,
                 allow_missing=True,
+            )
+        )
+
+    elif reco.startswith("Monopod_"):
+        from icecube import millipede  # pylint: disable=unused-variable
+
+        reco_dict = OrderedDict()
+        reco_dict["fit_params"] = dict2struct(
+            get_frame_item(
+                frame=frame,
+                key=reco + "FitParams",
+                specs=MILLIPEDE_FIT_PARAMS_SPECS,
+                allow_missing=True,
+            )
+        )
+        reco_dict["Neutrino"] = dict2struct(
+            get_frame_item(
+                frame=frame, key=reco, specs=I3PARTICLE_SPECS, allow_missing=True
             )
         )
 

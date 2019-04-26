@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, invalid-name
+# pylint: disable=wrong-import-position
 
 
 """
@@ -11,7 +11,12 @@ Recursively search for and aggregate "slc*.{reco}.npy" reco files into a single
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ["concatenate_recos"]
+__all__ = [
+    "EVENT_ID_FIELDS",
+    "get_common_mask",
+    "get_common_events",
+    "concatenate_recos",
+]
 
 from argparse import ArgumentParser
 from collections import OrderedDict
@@ -31,12 +36,121 @@ import sys
 
 import numpy as np
 from six import string_types
+import numba
 
 if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.utils.misc import join_struct_arrays, nsort_key_func
+
+
+EVENT_ID_FIELDS = [
+    "run_id",
+    "sub_run_id",
+    "event_id",
+    "sub_event_id",
+    "start_time",
+    "end_time",
+]
+"""Note that "start_time" and "end_time" are only necessary because poeple are
+inconsiderate assholes, overwriting the *_id fields and making them no longer
+unique (at least in MC)"""
+
+
+@numba.jit(
+    nopython=True,
+    nogil=True,
+    parallel=True,
+    fastmath=True,
+    error_model="numpy",
+    cache=True,
+)
+def get_common_mask(event_ids, common_ids):
+    """Create a mask for events IDs that are found in common set of event IDs.
+
+    Parameters
+    ----------
+    event_ids, common_ids : numpy.arrays
+        Arrays dtypes must contain `EVENT_ID_FIELDS` (and with sub-dtypes as
+        found in the equality comparison in the below code).
+
+    Returns
+    -------
+    common_mask : numpy.array of dtype numpy.bool8
+
+    """
+    common_mask = np.empty(shape=event_ids.shape, dtype=np.bool8)
+    for idx in numba.prange(len(event_ids)):  # pylint: disable=not-an-iterable
+        event_id = event_ids[idx]
+        event_id_is_common = False
+        for common_id in common_ids:
+            if (
+                event_id["run_id"] == common_id["run_id"]
+                and event_id["sub_run_id"] == common_id["sub_run_id"]
+                and event_id["event_id"] == common_id["event_id"]
+                and event_id["sub_event_id"] == common_id["sub_event_id"]
+                and event_id["start_time"]["utc_year"]
+                == common_id["start_time"]["utc_year"]
+                and event_id["start_time"]["utc_daq_time"]
+                == common_id["start_time"]["utc_daq_time"]
+                and event_id["end_time"]["utc_year"]
+                == common_id["end_time"]["utc_year"]
+                and event_id["end_time"]["utc_daq_time"]
+                == common_id["end_time"]["utc_daq_time"]
+            ):
+                event_id_is_common = True
+                break
+        common_mask[idx] = event_id_is_common
+    return common_mask
+
+
+def get_common_events(arrays):
+    """Get only those events from each array that are common to all arrays.
+
+    Parameters
+    ----------
+    arrays : sequence of numpy.array
+
+    Returns
+    -------
+    common_arrays : list of numpy.array
+
+    """
+    all_ids = []
+    ids_dtype = None
+    for array in arrays:
+        ids = array[EVENT_ID_FIELDS]
+        all_ids.append(ids)
+        ids_dtype = ids.dtype
+
+    all_ids_sets = [set(ids.tolist()) for ids in all_ids]
+
+    # Enforce that IDs must be unique
+    for array_num, (array, ids_set) in enumerate(zip(arrays, all_ids_sets)):
+        if len(ids_set) != len(array):
+            raise ValueError(
+                "array {}: IDs are not unique! (len(ids) = {}) != (len(array) = {})".format(
+                    array_num, len(ids_set), len(array)
+                )
+            )
+
+    common_ids = np.array(sorted(set.intersection(*all_ids_sets)), dtype=ids_dtype)
+    print("Number of events common to all arrays:", len(common_ids))
+
+    common = []
+    for array_num, (array, ids) in enumerate(zip(arrays, all_ids)):
+        common_mask = get_common_mask(event_ids=ids, common_ids=common_ids)
+        selected = array[common_mask]
+        if len(selected) != len(common_ids):
+            raise ValueError(
+                "array {}: (len(selected) = {}) != (len(common_ids) = {})".format(
+                    array_num, len(selected), len(common_ids)
+                )
+            )
+        common.append(np.sort(selected, order=EVENT_ID_FIELDS))
+
+    return common
 
 
 def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
@@ -106,10 +220,12 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
                 all_events = [events]
                 events_dtype = events.dtype
             else:
-                if not events.dtype == events_dtype:
-                    print("events.dtype should be:", events_dtype)
-                    print("events.dtype found    :", events.dtype)
-                    raise TypeError()
+                if events.dtype != events_dtype:
+                    raise TypeError(
+                        "events.dtype should be\n{}but dtype found is\n{}".format(
+                            events_dtype, events.dtype
+                        )
+                    )
                 all_events.append(events)
 
             if "truth.npy" in files:
@@ -141,7 +257,9 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
                             )
                         )
                     if total_num_events > 0 and reco_name in all_recos:
-                        raise IOError('Reco "{}"')
+                        raise IOError(
+                            'Reco "{}" missing from dir "{}"'.format(reco_name, dirpath)
+                        )
                     continue
                 reco = np.load(fpath)
                 if len(reco) != len(events):
@@ -172,9 +290,6 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
     # Create a single array with all extracted info; first-level dtype names
     # are all dtype names from `events` plus "truth" and the names of each reco
 
-    print(type(all_events))
-    print(type(all_events[0]))
-    print((all_events[0].dtype))
     events = np.concatenate(all_events)
     if all_truths is not None:
         truth = np.concatenate(all_truths)
@@ -218,7 +333,7 @@ def main():
     """Script interface to `concatenate_recos_and_save` function"""
     parser = ArgumentParser(
         description="""Concatenate events, truth, and reco(s) from one or more
-        directories (searching recursively) into a single numpy array""",
+        directories (searching recursively) into a single numpy array"""
     )
     parser.add_argument(
         "-d",
