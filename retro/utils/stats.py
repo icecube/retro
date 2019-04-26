@@ -233,12 +233,12 @@ def estimate_from_llhp(
     remove_priors = bool(priors_used)
 
     names = list(llhp.dtype.names)
-    for name in ('llh', 'track_energy', 'cascade_energy'):
-        if name not in names:
-            raise ValueError(
-                '"{}" not a field in `llhp.dtype.names` = {}'
-                .format(name, names)
-            )
+    #for name in ('llh', 'track_energy', 'cascade_energy'):
+    #    if name not in names:
+    #        raise ValueError(
+    #            '"{}" not a field in `llhp.dtype.names` = {}'
+    #            .format(name, names)
+    #        )
 
     params = copy(names)
     params.remove('llh')

@@ -49,6 +49,7 @@ if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import FitStatus
+from retro.utils.misc import nsort_key_func
 
 
 def merge_recos(sourcedirs, destdir, recos, overwrite=False):
@@ -73,7 +74,8 @@ def merge_recos(sourcedirs, destdir, recos, overwrite=False):
 
     reco_filenames = ["{}.npy".format(reco) for reco in recos]
 
-    for dirpath, _, filenames in walk(ref_sourcedir):
+    for dirpath, dirs, filenames in walk(ref_sourcedir):
+        dirs.sort(key=nsort_key_func)
         is_recodir = False
         if basename(dirpath) == "recos":
             for filename in filenames:

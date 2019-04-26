@@ -85,9 +85,7 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro.muon_hypo import generate_gms_table_converters
 from retro.retro_types import FitStatus
-
-
-muon_energy_to_length, _, _ = generate_gms_table_converters()
+from retro.utils.misc import nsort_key_func
 
 
 DEFAULT_I3PARTICLE_ATTRS = {
@@ -112,7 +110,7 @@ NEUTRINO_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Primary)
 
 TRACK_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
 TRACK_ATTRS["length"] = dict(
-    fields="energy", func=muon_energy_to_length, units=I3Units.m
+    fields="energy", func=generate_gms_table_converters()[0], units=I3Units.m
 )
 
 CASCADE_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
@@ -452,7 +450,8 @@ def retro_recos_to_i3files(
 
     # -- Walk directories and match (events, recos) to i3 paths -- #
 
-    for events_dirpath, _, filenames in walk(eventsdir):
+    for events_dirpath, dirs, filenames in walk(eventsdir):
+        dirs.sort(key=nsort_key_func)
         if "events.npy" not in filenames:
             continue
 
@@ -476,7 +475,10 @@ def retro_recos_to_i3files(
 
         eventsdir_basename = basename(events_dirpath)
         i3filedir = join(i3dir, relpath(dirname(events_dirpath), start=eventsdir))
-        i3filepaths = sorted(glob(join(i3filedir, "{}.i3*".format(eventsdir_basename))))
+        i3filepaths = sorted(
+            glob(join(i3filedir, "{}.i3*".format(eventsdir_basename))),
+            key=nsort_key_func,
+        )
         if not i3filepaths:
             raise IOError(
                 'No matching i3 file "{}.i3*" in directory "{}"'.format(

@@ -323,8 +323,7 @@ def load_clsim_table_minimal(
         generating the table.
 
     mmap : bool, optional
-        Whether to memory map the table (if it's stored in a directory
-        containing .npy files).
+        Whether to memory map the table
 
     Returns
     -------

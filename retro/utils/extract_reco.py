@@ -97,9 +97,10 @@ def extract_reco(reco, recodir, eventsdir=None):
         if not isfile(reco_filepath):
             continue
 
-        events = np.load(join(events_dirpath, "events.npy"))
+        events_filepath = join(events_dirpath, "events.npy")
+        events = np.load(events_filepath)
         recos = np.load(reco_filepath)
-        assert len(events) == len(recos)
+        assert len(events) == len(recos), '#events {} != #recos {}; events at "{}", recos at "{}"'.format(len(events), len(recos), events_filepath, reco_filepath)
 
         # Truth may or may not be present
         truth_filepath = join(events_dirpath, "truth.npy")

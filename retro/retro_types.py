@@ -461,6 +461,7 @@ class FitStatus(enum.IntEnum):
     # pylint: disable=invalid-name
     NotSet = -1
     OK = 0
+    PositiveLLH = 1  # NOT present in IceCube / icetray software
     GeneralFailure = 10
     InsufficientHits = 20
     FailedToConverge = 30
@@ -623,8 +624,22 @@ SRC_T = np.dtype([
 doesn't care what dir_* fields are)"""
 
 
+NEUTRINO_T = np.dtype([
+    ('pdg_encoding', np.int32),
+    ('time', np.float32),
+    ('x', np.float32),
+    ('y', np.float32),
+    ('z', np.float32),
+    ('zenith', np.float32),
+    ('coszen', np.float32),
+    ('azimuth', np.float32),
+    ('directionality', np.float32),
+    ('energy', np.float32),
+    ('length', np.float32),
+])
+
 TRACK_T = np.dtype([
-    ('pdg', np.int32),
+    ('pdg_encoding', np.int32),
     ('time', np.float32),
     ('x', np.float32),
     ('y', np.float32),
@@ -640,16 +655,16 @@ TRACK_T = np.dtype([
 ])
 
 INVALID_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
-INVALID_TRACK['pdg'] = ParticleType.unknown
+INVALID_TRACK['pdg_encoding'] = ParticleType.unknown
 
 NO_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
-NO_TRACK['pdg'] = ParticleType.unknown
+NO_TRACK['pdg_encoding'] = ParticleType.unknown
 NO_TRACK['energy'] = 0
 NO_TRACK['vis_em_equiv_stochastic_loss'] = 0
 
 
 CASCADE_T = np.dtype([
-    ('pdg', np.int32),
+    ('pdg_encoding', np.int32),
     ('time', np.float32),
     ('x', np.float32),
     ('y', np.float32),
@@ -665,10 +680,10 @@ CASCADE_T = np.dtype([
 ])
 
 INVALID_CASCADE = np.full(shape=1, fill_value=np.nan, dtype=CASCADE_T)
-INVALID_CASCADE['pdg'] = ParticleType.unknown
+INVALID_CASCADE['pdg_encoding'] = ParticleType.unknown
 
 NO_CASCADE = np.full(shape=1, fill_value=np.nan, dtype=CASCADE_T)
-NO_CASCADE['pdg'] = ParticleType.unknown
+NO_CASCADE['pdg_encoding'] = ParticleType.unknown
 NO_CASCADE['energy'] = 0
 NO_CASCADE['em_equiv_energy'] = 0
 NO_CASCADE['hadr_equiv_energy'] = 0
