@@ -29,7 +29,6 @@ __all__ = [
     'SD_INDEXER_T',
     'HITS_SUMMARY_T',
     'EVT_HIT_INFO_T',
-    'SPHER_T',
     'ParticleType',
     'ParticleShape',
     'FitStatus',
@@ -229,20 +228,6 @@ EVT_HIT_INFO_T = np.dtype([
     ('charge', np.float32),
     ('event_dom_idx', np.uint32),
 ])
-
-SPHER_T = np.dtype([
-    ('zen', np.float32),
-    ('az', np.float32),
-    ('x', np.float32),
-    ('y', np.float32),
-    ('z', np.float32),
-    ('sinzen', np.float32),
-    ('coszen', np.float32),
-    ('sinaz', np.float32),
-    ('cosaz', np.float32),
-])
-"""type to store spherical coordinates and handy quantities"""
-
 
 class InteractionType(enum.IntEnum):
     """Neutrino interactions are either charged current (cc) or neutral current
