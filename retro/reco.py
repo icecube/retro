@@ -1403,6 +1403,8 @@ class Reco(object):
                 else:
                     cstd.append(-1)
 
+        def func(x):
+            return -self.loglike(x)
 
         try:
 
@@ -1430,11 +1432,8 @@ class Reco(object):
                 initial_points.append(x)
 
             initial_points = np.vstack(initial_points)
-            print(initial_points.shape)
-            print(cstd)
 
-
-            fit = spherical_opt(func=self.loglike, 
+            fit = spherical_opt(func=func, 
                                 method='CRS2',
                                 initial_points=initial_points,
                                 spherical_indices=spherical_pairs,
@@ -1444,7 +1443,12 @@ class Reco(object):
                                 cstd=cstd,
                                 )
 
+
             fit_status = FitStatus.OK
+            stopping_flag = fit['stopping_flag']
+            iter_num = fit['nit']
+            print(stopping_flag)
+
 
         except KeyboardInterrupt:
             raise
@@ -1457,13 +1461,6 @@ class Reco(object):
                 ("fit_status", np.int8(fit_status)),
                 ("iterations", np.uint32(iter_num)),
                 ("stopping_flag", np.int8(stopping_flag)),
-                ("llh_std", np.float32(llh_std)),
-                ("no_improvement_counter", np.uint32(no_improvement_counter)),
-                ("vertex_std", vertex_std),  # already typed
-                ("vertex_std_met_at_iter", vertex_std_met_at_iter),  # already typed
-                ("num_simplex_successes", np.uint32(num_simplex_successes)),
-                ("num_mutation_successes", np.uint32(num_mutation_successes)),
-                ("num_failures", np.uint32(num_failures)),
                 ("run_time", np.float32(time.time() - t0)),
             ]
         )
