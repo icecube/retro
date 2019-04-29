@@ -275,7 +275,6 @@ class Reco(object):
                     max_noimprovement=5000,
                     min_llh_std=0.1,
                     min_vertex_std=dict(x=1, y=1, z=1, time=3),
-                    use_priors=False,
                     use_sobol=True,
                     seed=0,
                 )
@@ -342,7 +341,6 @@ class Reco(object):
                 max_noimprovement=1000,
                 min_llh_std=0.5,
                 min_vertex_std=dict(x=5, y=5, z=5, time=15),
-                use_priors=False,
                 use_sobol=True,
                 seed=0,
             )
@@ -397,7 +395,6 @@ class Reco(object):
                 max_noimprovement=1000,
                 min_llh_std=0.,
                 min_vertex_std=dict(x=5, y=5, z=4, time=20),
-                use_priors=False,
                 use_sobol=True,
                 seed=0,
             )
@@ -446,7 +443,6 @@ class Reco(object):
                 max_noimprovement=1000,
                 min_llh_std=0.5,
                 min_vertex_std=dict(x=5, y=5, z=4, time=20),
-                use_priors=False,
                 use_sobol=True,
                 seed=0,
             )
@@ -1322,7 +1318,6 @@ class Reco(object):
         max_noimprovement,
         min_llh_std,
         min_vertex_std,
-        use_priors,
         use_sobol,
         seed,
     ):
@@ -1349,11 +1344,6 @@ class Reco(object):
             time). Keys are dimension names and values are the standard
             deviations for each dimension. All specified dimensions must drop
             below the specified stddevs for this break condition to be met.
-        use_priors : bool
-            Use priors during minimization; if `False`, priors are only used
-            for sampling the initial distributions. Even if set to `True`,
-            angles (azimuth and zenith) do not use priors while operating (only
-            for generating the initial distribution)
         use_sobol : bool
             Use a Sobol sequence instead of numpy pseudo-random numbers. Seems
             to do slightly better (but only small differences observed in tests
