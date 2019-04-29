@@ -63,14 +63,11 @@ from retro.priors import (
     Bound,
     get_prior_func,
 )
-from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, SPHER_T, FitStatus
+from retro.retro_types import EVT_DOM_INFO_T, EVT_HIT_INFO_T, FitStatus
 from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.utils.geom import (
     rotate_points,
     add_vectors,
-    fill_from_spher,
-    fill_from_cart,
-    reflect,
 )
 from retro.utils.get_arg_names import get_arg_names
 from retro.utils.misc import expand, mkdir, sort_dict
@@ -1370,7 +1367,7 @@ class Reco(object):
         """
         t0 = time.time()
 
-        from spherical_opt.spherical_opt import spherical_opt
+        from spherical_opt import spherical_opt
 
         if use_sobol:
             from sobol import i4_sobol
@@ -1441,13 +1438,32 @@ class Reco(object):
                                 max_noimprovement=max_noimprovement,
                                 fstd=min_llh_std,
                                 cstd=cstd,
+                                meta=True
                                 )
 
 
             fit_status = FitStatus.OK
             stopping_flag = fit['stopping_flag']
             iter_num = fit['nit']
-            print(stopping_flag)
+
+            vertex_std = np.full(
+                shape=1,	
+                fill_value=np.nan,	
+                dtype=[(d, np.float32) for d in min_vertex_std.keys()],	
+            )	
+            vertex_std_met_at_iter = np.full(	
+                shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()]	
+            )
+
+            idx = 0
+            for p in self.hypo_handler.opt_param_names:
+                if not 'zenith' in p or 'azimuth' in p:
+                    if p in min_vertex_std.keys():
+                        vertex_std[p] = fit['meta']['cstd'][idx]
+                        vertex_std_met_at_iter[p] = fit['meta']['cstd_met_at_iter'][idx]
+                    else:
+                        cstd.append(-1)
+                    idx += 1
 
 
         except KeyboardInterrupt:
@@ -1461,6 +1477,13 @@ class Reco(object):
                 ("fit_status", np.int8(fit_status)),
                 ("iterations", np.uint32(iter_num)),
                 ("stopping_flag", np.int8(stopping_flag)),
+                ("llh_std", np.float32(fit['meta']['fstd'])),
+                ("no_improvement_counter", np.uint32(fit['meta']['no_improvement_counter'])),
+                ('vertex_std', vertex_std),
+                ('vertex_std_met_at_iter', vertex_std_met_at_iter),
+                ("num_simplex_successes", np.uint32(fit['meta']['num_simplex_successes'])),
+                ("num_mutation_successes", np.uint32(fit['meta']['num_mutation_successes'])),
+                ('num_failures', np.uint32(fit['meta']['num_failures'])),
                 ("run_time", np.float32(time.time() - t0)),
             ]
         )
