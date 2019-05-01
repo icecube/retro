@@ -496,7 +496,7 @@ def generate_clsim_table(
     coordinate_system : string in {"spherical", "cartesian"}
         If spherical, base coordinate system is .. ::
 
-            (r, theta, phi, t, costhetadir, absdeltaphidir)
+            (r, theta, phi, t, costhetadir, (optionally abs)deltaphidir)
 
         If Cartesian, base coordinate system is .. ::
 
@@ -570,9 +570,10 @@ def generate_clsim_table(
           system) is binned regularly in cosine-zenith space, with
           `n_costhetadir_bins` spanning from `costhetadir_min` to
           `costhetadir_max`
-        * Photon directionality azimuth angle, assumed to be symmetric about
-          line from DOM to the center of the bin, so is binned as an absolute
-          value, i.e., from 0 to pi radians.
+        * Photon directionality azimuth angle; sometimes assumed to be
+          symmetric about line from DOM to the center of the bin, so is binned
+          as an absolute value, i.e., from 0 to pi radians. Otherwise, binned
+          from -np.pi to +np.pi
 
     The following are forced upon the above binning specifications (and
     remaining parameters are specified as arguments to the function)
@@ -616,13 +617,12 @@ def generate_clsim_table(
     #        .format(n_bins, n_bins / 2**32)
     #    )
 
-    # For now, hole ice model is hard-coded in our CLSim branch to "9"
-    # (i.e., as.9, aka new25)
-    assert angular_sensitivity == '9'
-
     ice_model = ice_model.strip()
     angular_sensitivity = angular_sensitivity.strip()
-    assert angular_sensitivity in ['9', 'new25']
+    # For now, hole ice model is hard-coded in our CLSim branch; see
+    #   clsim/private/clsim/I3CLSimLightSourceToStepConverterFlasher.cxx
+    # in the branch you're using to check that this is correct
+    assert angular_sensitivity == 'flasher_p1_0.30_p2_-1'
 
     gcd_info = extract_gcd(gcd)
 
@@ -640,9 +640,12 @@ def generate_clsim_table(
         binning['t_min'] = 0 # ns
         binning['r_min'] = 0 # meters
         costheta_min, costheta_max = -1.0, 1.0
-        phi_min, phi_max = -np.pi, np.pi # rad
+        # See
+        #   clsim/resources/kernels/spherical_coordinates.c.cl
+        # in the branch you're using to check that the following are correct
+        phi_min, phi_max = 0.3054326190990078, 6.588617926278594 # -np.pi, np.pi # rad
         binning['costhetadir_min'], binning['costhetadir_max'] = -1.0, 1.0
-        binning['deltaphidir_min'], binning['deltaphidir_max'] = 0.0, np.pi # rad
+        binning['deltaphidir_min'], binning['deltaphidir_max'] = -3.1808625617596658, 3.1023227454199205
 
         if binning['n_r_bins'] > 0:
             assert isinstance(binning['r_power'], Integral) and binning['r_power'] > 0
