@@ -4,8 +4,8 @@
 
 
 """
-Recursively search for and aggregate "slc*.{reco}.npy" reco files into a single
-"{reco}.npy" file (one file per leaf directory)
+Recursively search for events, truth, and recos .npy files, and aggregate into
+a single numpy array.
 """
 
 

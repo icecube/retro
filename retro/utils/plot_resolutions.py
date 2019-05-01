@@ -101,13 +101,19 @@ def get_pval(array, param):
 def get_nu_flavints_mask(array, flavints):
     if isinstance(flavints, string_types):
         flavints = [flavints]
-    flavints = list(flavints)
+    flavints = list(deepcopy(flavints))
     if "nuall_nc" in flavints:
         flavints.remove("nuall_nc")
         flavints.extend(["nu{}_nc".format(n) for n in ["e", "mu", "tau"]])
     if "nuallbar_nc" in flavints:
         flavints.remove("nuallbar_nc")
         flavints.extend(["nu{}bar_nc".format(n) for n in ["e", "mu", "tau"]])
+    if "nuall_cc" in flavints:
+        flavints.remove("nuall_cc")
+        flavints.extend(["nu{}_cc".format(n) for n in ["e", "mu", "tau"]])
+    if "nuallbar_cc" in flavints:
+        flavints.remove("nuallbar_cc")
+        flavints.extend(["nu{}bar_cc".format(n) for n in ["e", "mu", "tau"]])
 
     pdgs = array["truth"]["pdg_encoding"]
     int_types = array["truth"]["InteractionType"]
@@ -115,29 +121,43 @@ def get_nu_flavints_mask(array, flavints):
     mask = np.zeros(array.shape, dtype=np.bool)
     if "nue_cc" in flavints:
         mask |= (pdgs == 12) & (int_types == 1)
+        flavints.remove("nue_cc")
     if "nuebar_cc" in flavints:
         mask |= (pdgs == -12) & (int_types == 1)
+        flavints.remove("nuebar_cc")
     if "numu_cc" in flavints:
         mask |= (pdgs == 14) & (int_types == 1)
+        flavints.remove("numu_cc")
     if "numubar_cc" in flavints:
         mask |= (pdgs == -14) & (int_types == 1)
+        flavints.remove("numubar_cc")
     if "nutau_cc" in flavints:
         mask |= (pdgs == 16) & (int_types == 1)
+        flavints.remove("nutau_cc")
     if "nutaubar_cc" in flavints:
         mask |= (pdgs == -16) & (int_types == 1)
+        flavints.remove("nutaubar_cc")
 
     if "nue_nc" in flavints:
         mask |= (pdgs == 12) & (int_types == 2)
+        flavints.remove("nue_nc")
     if "nuebar_nc" in flavints:
         mask |= (pdgs == -12) & (int_types == 2)
+        flavints.remove("nuebar_nc")
     if "numu_nc" in flavints:
         mask |= (pdgs == 14) & (int_types == 2)
+        flavints.remove("numu_nc")
     if "numubar_nc" in flavints:
         mask |= (pdgs == -14) & (int_types == 2)
+        flavints.remove("numubar_nc")
     if "nutau_nc" in flavints:
         mask |= (pdgs == 16) & (int_types == 2)
+        flavints.remove("nutau_nc")
     if "nutaubar_nc" in flavints:
         mask |= (pdgs == -16) & (int_types == 2)
+        flavints.remove("nutaubar_nc")
+
+    assert len(flavints) == 0, str(flavints)
 
     return mask
 
