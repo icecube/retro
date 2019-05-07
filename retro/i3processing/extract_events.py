@@ -59,7 +59,6 @@ from argparse import ArgumentParser
 from collections import OrderedDict, Sequence
 from copy import deepcopy
 from hashlib import sha256
-import numbers
 from os.path import abspath, basename, dirname, join
 import pickle
 import re
@@ -90,7 +89,7 @@ from retro.retro_types import (
     INVALID_CASCADE,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
-from retro.utils.misc import expand, mkdir
+from retro.utils.misc import expand, mkdir, set_explicit_dtype
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
 
@@ -337,49 +336,6 @@ def dict2struct(d):
         dt_spec[key] = val.dtype
     array = np.array(tuple(d.values()), dtype=dt_spec.items())
     return array
-
-
-def set_explicit_dtype(x):
-    """Force `x` to have a numpy type if it doesn't already have one.
-
-    Parameters
-    ----------
-    x : numpy-typed object, bool, integer, float
-        If not numpy-typed, type is attempted to be inferred. Currently only
-        bool, int, and float are supported, where bool is converted to
-        np.bool8, integer is converted to np.int64, and float is converted to
-        np.float64. This ensures that full precision for all but the most
-        extreme cases is maintained for inferred types.
-
-    Returns
-    -------
-    x : numpy-typed object
-
-    Raises
-    ------
-    TypeError
-        In case the type of `x` is not already set or is not a valid inferred
-        type. As type inference can yield different results for different
-        inputs, rather than deal with everything, explicitly failing helps to
-        avoid inferring the different instances of the same object differently
-        (which will cause a failure later on when trying to concatenate the
-        types in a larger array).
-
-    """
-    if hasattr(x, "dtype"):
-        return x
-
-    # bools are numbers.Integral, so test for bool first
-    if isinstance(x, bool):
-        return np.bool8(x)
-
-    if isinstance(x, numbers.Integral):
-        return np.int64(x)
-
-    if isinstance(x, numbers.Number):
-        return np.float64(x)
-
-    raise TypeError("Type of argument is invalid: {}".format(type(x)))
 
 
 def get_frame_item(frame, key, specs, allow_missing):

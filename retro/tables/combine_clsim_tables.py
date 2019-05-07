@@ -72,6 +72,11 @@ SUM_KEYS = [
 ALL_KEYS = VALIDATE_KEYS + SUM_KEYS + ['t_indep_table']
 """All keys expected to be in tables"""
 
+NO_WRITE_KEYS = [
+    'underflow',
+    'overflow',
+]
+
 
 def combine_clsim_tables(
     table_fpaths,
@@ -171,15 +176,15 @@ def combine_clsim_tables(
             mmap=True,
         )
 
+        missing_keys = sorted(set(SUM_KEYS + VALIDATE_KEYS).difference(table.keys()))
+        if missing_keys:
+            raise ValueError(
+                'Table is missing expected keys {}'.format(missing_keys)
+            )
+
         if combined_table is None:
             combined_table = table
             continue
-
-        if set(table.keys()) != set(SUM_KEYS + VALIDATE_KEYS):
-            raise ValueError(
-                'Table keys {} do not match expected keys {}'
-                .format(sorted(table.keys()), sorted(SUM_KEYS + VALIDATE_KEYS))
-            )
 
         for key in VALIDATE_KEYS:
             if not np.array_equal(table[key], combined_table[key]):

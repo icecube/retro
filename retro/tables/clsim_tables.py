@@ -53,7 +53,12 @@ if __name__ == '__main__' and __package__ is None:
 from retro import DEBUG
 from retro.tables.retro_5d_tables import TABLE_NORM_KEYS, get_table_norm
 from retro.utils.misc import (
-    expand, force_little_endian, get_decompressd_fobj, hrlist2list, wstderr
+    expand,
+    force_little_endian,
+    get_decompressd_fobj,
+    hrlist2list,
+    set_explicit_dtype,
+    wstderr,
 )
 from retro.utils.geom import powerspace
 
@@ -380,11 +385,11 @@ def load_clsim_table_minimal(
 
             header = pf_table[0].header  # pylint: disable=no-member
             table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
-            table['group_refractive_index'] = force_little_endian(
-                header['_i3_n_group']
+            table['group_refractive_index'] = set_explicit_dtype(
+                force_little_endian(header['_i3_n_group'])
             )
-            table['phase_refractive_index'] = force_little_endian(
-                header['_i3_n_phase']
+            table['phase_refractive_index'] = set_explicit_dtype(
+                force_little_endian(header['_i3_n_phase'])
             )
 
             n_dims = len(table['table_shape'])
@@ -451,7 +456,7 @@ def load_clsim_table_minimal(
                 assert axname is not None, 'missing axis %d name' % axnum
                 assert bin_edges is not None, 'missing axis %d binning' % axnum
 
-            table['axnames'] = axnames
+            table['axnames'] = np.array(axnames, dtype=np.string0)
             table['binning'] = binning
 
             for keyroot in (
@@ -482,15 +487,15 @@ def load_clsim_table_minimal(
             ):
                 keyname = '_i3_' + keyroot
                 if keyname in header:
-                    val = force_little_endian(
-                        header[keyname]
-                    )
+                    val = force_little_endian(header[keyname])
                     if keyroot in (
                         't_is_residual_time',
                         'disable_tilt',
                         'disable_anisotropy',
                     ):
-                        val = bool(val)
+                        val = np.bool8(val)
+                    else:
+                        val = set_explicit_dtype(val)
                     table[keyroot] = val
 
             # Get string values from keys that have a prefix preceded by the
@@ -509,7 +514,7 @@ def load_clsim_table_minimal(
                     if not keyname.startswith(keyroot):
                         continue
                     val = keyname[len(keyroot):]
-                    table[infix] = val
+                    table[infix] = np.string0(val)
 
             table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
 

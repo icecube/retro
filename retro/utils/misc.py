@@ -40,6 +40,7 @@ __all__ = [
     'make_valid_python_name',
     'join_struct_arrays',
     'nsort_key_func',
+    'set_explicit_dtype',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -61,7 +62,7 @@ import base64
 from collections import Iterable, OrderedDict, Mapping, Sequence
 import errno
 import hashlib
-from numbers import Number
+from numbers import Integral, Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
 import pickle
@@ -912,6 +913,49 @@ def nsort_key_func(s):
         key.append(non_number)
         key.append(int(number))
     return key
+
+
+def set_explicit_dtype(x):
+    """Force `x` to have a numpy type if it doesn't already have one.
+
+    Parameters
+    ----------
+    x : numpy-typed object, bool, integer, float
+        If not numpy-typed, type is attempted to be inferred. Currently only
+        bool, int, and float are supported, where bool is converted to
+        np.bool8, integer is converted to np.int64, and float is converted to
+        np.float64. This ensures that full precision for all but the most
+        extreme cases is maintained for inferred types.
+
+    Returns
+    -------
+    x : numpy-typed object
+
+    Raises
+    ------
+    TypeError
+        In case the type of `x` is not already set or is not a valid inferred
+        type. As type inference can yield different results for different
+        inputs, rather than deal with everything, explicitly failing helps to
+        avoid inferring the different instances of the same object differently
+        (which will cause a failure later on when trying to concatenate the
+        types in a larger array).
+
+    """
+    if hasattr(x, "dtype"):
+        return x
+
+    # bools are numbers.Integral, so test for bool first
+    if isinstance(x, bool):
+        return np.bool8(x)
+
+    if isinstance(x, Integral):
+        return np.int64(x)
+
+    if isinstance(x, Number):
+        return np.float64(x)
+
+    raise TypeError("Type of argument is invalid: {}".format(type(x)))
 
 
 if __name__ == '__main__':
