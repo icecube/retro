@@ -9,11 +9,11 @@ Combine multiple Retro CLSim tables into a single table.
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'VALIDATE_KEYS',
     'SUM_KEYS',
-    'ALL_KEYS',
-    'combine_clsim_tables',
-    'parse_args',
+    'NO_VALIDATE_KEYS',
+    'NO_WRITE_KEYS',
+    'combine_tables',
+    'main',
 ]
 
 __author__ = 'J.L. Lanfranchi'
@@ -49,43 +49,31 @@ from retro.utils.misc import COMPR_EXTENSIONS, expand, mkdir, wstderr
 from retro.tables.clsim_tables import load_clsim_table_minimal
 
 
-VALIDATE_KEYS = [
-    'table_shape',
-    'group_refractive_index',
-    'phase_refractive_index',
-    'r_bin_edges',
-    'costheta_bin_edges',
-    't_bin_edges',
-    'costhetadir_bin_edges',
-    'deltaphidir_bin_edges',
-    't_is_residual_time',
-    'step_length',
-] # yapf: disable
-"""Values corresponding to these keys must match in all loaded tables"""
-
-SUM_KEYS = [
-    'n_photons',
-    'table',
-] # yapf: disable
+SUM_KEYS = ('n_photons', 'table', 'ckv_table', 't_indep_table', 't_indep_ckv_table')
 """Sum together values corresponding to these keys in all tables"""
 
-ALL_KEYS = VALIDATE_KEYS + SUM_KEYS + ['t_indep_table']
-"""All keys expected to be in tables"""
+NO_VALIDATE_KEYS = SUM_KEYS + (
+    'ckv_template_map',
+    'omkeys',
+    'pca_reduced_table',
+    'source_tables',
+    'templates',
+    'template_chi2s',
+    'source_tables',
+)
 
-NO_WRITE_KEYS = [
+NO_WRITE_KEYS = (
     'underflow',
     'overflow',
-]
+    'ckv_template_map',
+    'pca_reduced_table',
+    'templates',
+    'template_chi2s',
+)
 
 
-def combine_clsim_tables(
-    table_fpaths,
-    t_is_residual_time=None,
-    outdir=None,
-    overwrite=False,
-    step_length=1.0
-):
-    """Combine multiple CLSim-produced tables together into a single table.
+def combine_tables(table_fpaths, outdir=None, overwrite=False):
+    """Combine multiple tables together into a single table.
 
     All tables specified must have the same binnings defined. Tables should
     also be produced using different random seeds (if all else besides
@@ -98,13 +86,6 @@ def combine_clsim_tables(
     table_fpaths : string or iterable thereof
         Each string is glob-expanded
 
-    t_is_residual_time : bool, optional
-        Whether time dimension in table represents residual time. If a value is
-        passed and it doesn't match the key of the same name in the table, a
-        ValueError will be raised. If a value is passed and the key does not
-        exist in the table, this key will be added. If a value is not passed,
-        no modification to the loaded table will be made.
-
     outdir : string, optional
         Directory to which to save the combined table; if not specified, the
         resulting table will be returned but not saved to disk.
@@ -113,17 +94,6 @@ def combine_clsim_tables(
         Overwrite an existing table. If a table is found at the output path and
         `overwrite` is False, the function simply returns without raising an
         exception.
-
-    step_length : float > 0 in units of meters
-        Needed for computing the normalization to apply to the `table` in order
-        to generate the `t_indep_table` (if the latter doesn't already exist).
-        Note that normalization constants due to `n_photons`,
-        `quantum_efficiency`, and `angular_acceptance_fract` as well as
-        normalization depending (only) upon radial bin (i.e 1/r^2 geometric
-        factor) are _not_ applied to the tables. The _only_ normalization
-        applied (and _only_ to `t_indep_table`) is the multiple-counting factor
-        that is a function of `step_length` and whichever of the time or radial
-        bin dimensions is smaller.
 
     Returns
     -------
@@ -146,79 +116,103 @@ def combine_clsim_tables(
         .format(len(table_fpaths), '\n  '.join(table_fpaths))
     )
 
-    # Formulate output filenames and check if they exist
+    # Create the output directory
 
-    output_fpaths = None
     if outdir is not None:
         outdir = expand(outdir)
         mkdir(outdir)
-        output_fpaths = OrderedDict(
-            ((k, join(outdir, k + '.npy')) for k in ALL_KEYS)
-        )
-        output_fpaths['source_tables'] = join(outdir, 'source_tables.txt')
-        if not overwrite:
-            for fpath in output_fpaths.values():
-                if isfile(fpath):
-                    raise IOError('File {} exists'.format(fpath))
-        wstderr(
-            'Output files will be written to:\n  {}\n'
-            .format('\n  '.join(output_fpaths.values()))
-        )
 
     # Combine the tables
 
     combined_table = None
+    table_keys = None
+    source_tables = np.empty(shape=0, dtype=np.string0)
     for fpath in table_fpaths:
-        table = load_clsim_table_minimal(
-            fpath,
-            t_is_residual_time=t_is_residual_time,
-            step_length=step_length,
-            mmap=True,
-        )
+        table = load_clsim_table_minimal(fpath, mmap=True)
 
-        missing_keys = sorted(set(SUM_KEYS + VALIDATE_KEYS).difference(table.keys()))
-        if missing_keys:
-            raise ValueError(
-                'Table is missing expected keys {}'.format(missing_keys)
-            )
+        base = basename(fpath)
+        rootname, ext = splitext(base)
+        if ext.lstrip('.') in COMPR_EXTENSIONS:
+            base = rootname
+        if 'source_tables' not in table:
+            table['source_tables'] = np.array([base], dtype=np.string0)
 
         if combined_table is None:
             combined_table = table
+            table_keys = set(table.keys())
+
+            # Formulate output file paths and check if they exist (do on first
+            # table to avoid finding out we are going to overwrite a file
+            # before loading all the source tables)
+            if outdir is not None:
+                output_fpaths = OrderedDict(
+                    ((k, join(outdir, k + '.npy')) for k in sorted(table_keys))
+                )
+                if not overwrite:
+                    for fp in output_fpaths.values():
+                        if isfile(fp):
+                            raise IOError('File at {} already exists'.format(fp))
+                wstderr(
+                    'Output files will be written to:\n  {}\n'.format(
+                        '\n  '.join(output_fpaths.values())
+                    )
+                )
+
             continue
 
-        for key in VALIDATE_KEYS:
+        # Make sure keys are the same
+
+        new_table_keys = set(table.keys())
+        missing_keys = sorted(
+            table_keys
+            .difference(new_table_keys)
+            .difference(NO_VALIDATE_KEYS)
+        )
+        additional_keys = sorted(
+            new_table_keys
+            .difference(table_keys)
+            .difference(NO_VALIDATE_KEYS)
+        )
+        if missing_keys or additional_keys:
+            raise ValueError(
+                'Table is missing keys {} and/or has additional keys {}'.format(
+                    missing_keys, additional_keys
+                )
+            )
+
+        # Validate keys that should be equal
+
+        for key in table_keys:
+            if key in NO_VALIDATE_KEYS:
+                continue
             if not np.array_equal(table[key], combined_table[key]):
                 raise ValueError('Unequal {} in file {}'.format(key, fpath))
+
+        # Add values from keys that should be summed
 
         for key in SUM_KEYS:
             combined_table[key] += table[key]
 
-        del table
+        # Concatenate and sort new source table(s) in source_tables array
 
-    ## Force quantum_efficiency and angular_acceptance_fract to 1 (these should
-    ## be handled by the user at the time the table is used to represent a
-    ## particular or subgroup of DOMs)
-    #t_indep_table, _ = generate_time_indep_tables(
-    #    table=table,
-    #    quantum_efficiency=1,
-    #    angular_acceptance_fract=1
-    #)
-    #table['t_indep_table'] = t_indep_table
+        combined_table['source_tables'] = np.sort(
+            np.concatenate([combined_table['source_tables'], table['source_tables']])
+        )
+
+        # Make sure to clear table from memory since these can be quite large
+
+        del table
 
     # Save the data to npy files on disk (in a sub-directory for all of this
     # table's files)
     if outdir is not None:
-        basenames = []
+        source_tables = []
         for fpath in table_fpaths:
-            base = basename(fpath)
-            rootname, ext = splitext(base)
-            if ext.lstrip('.') in COMPR_EXTENSIONS:
-                base = rootname
-            basenames.append(base)
+            source_tables.append(base)
 
         wstderr('Writing files:\n')
 
-        for key in ALL_KEYS:
+        for key in table_keys:
             if key == 't_indep_table' and key not in combined_table:
                 continue
             fpath = output_fpaths[key]
@@ -227,27 +221,16 @@ def combine_clsim_tables(
             np.save(fpath, combined_table[key])
             wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
 
-        fpath = output_fpaths['source_tables']
-        wstderr('  {} ...'.format(fpath))
-        t0 = time()
-        with open(fpath, 'w') as fobj:
-            fobj.write('\n'.join(sorted(basenames)))
-        wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
-
     wstderr(
-        'Total time to combine tables: {} s\n'
-        .format(np.round(time() - t_start, 3))
+        'Total time to combine tables: {} s\n'.format(np.round(time() - t_start, 3))
     )
 
     return combined_table
 
 
-def parse_args(description=__doc__):
-    """Parse command line args.
-
-    Returns
-    -------
-    args : Namespace
+def main(description=__doc__):
+    """Script interface to `combine_tables`, parsing command line args
+    and passing to that function.
 
     """
     parser = ArgumentParser(description=description)
@@ -257,16 +240,17 @@ def parse_args(description=__doc__):
         glob-expanded.'''
     )
     parser.add_argument(
-        '--t-is-residual-time', action='store_true',
-        help='''Whether time dimension represents residual time'''
-    )
-    parser.add_argument(
         '--outdir', required=True,
         help='''Directory to which to save the combined table. Defaults to same
         directory as the first file path specified by --table-fpaths.'''
     )
-    return parser.parse_args()
+    parser.add_argument(
+        '--overwrite', action='store_true',
+        help='''Overwrite existing table key(s) if they exist in output directory.'''
+    )
+    args = parser.parse_args()
+    combine_tables(**vars(args))
 
 
 if __name__ == '__main__':
-    combine_clsim_tables(**vars(parse_args()))
+    main()
