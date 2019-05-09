@@ -59,6 +59,7 @@ from argparse import ArgumentParser
 from collections import OrderedDict, Sequence
 from copy import deepcopy
 from hashlib import sha256
+import numbers
 from os.path import abspath, basename, dirname, join
 import pickle
 import re
