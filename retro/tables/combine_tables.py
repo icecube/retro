@@ -33,6 +33,7 @@ limitations under the License.'''
 
 from argparse import ArgumentParser
 from collections import OrderedDict
+from copy import deepcopy
 from glob import glob
 from os.path import abspath, basename, dirname, isfile, join, splitext
 import sys
@@ -45,7 +46,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import COMPR_EXTENSIONS, expand, mkdir, wstderr
+from retro.utils.misc import COMPR_EXTENSIONS, expand, mkdir, nsort_key_func, wstderr
 from retro.tables.clsim_tables import load_clsim_table_minimal
 
 
@@ -60,11 +61,33 @@ NO_VALIDATE_KEYS = SUM_KEYS + (
     'templates',
     'template_chi2s',
     'source_tables',
+    'seed',
+    'string',
+    'dom',
+    'dom_x',
+    'dom_y',
+    'dom_z',
+    'dom_azimuth',
+    'dom_zenith',
+    'z',
+    'azimuth',
+    'zenith',
 )
 
 NO_WRITE_KEYS = (
     'underflow',
     'overflow',
+    'seed',
+    'string',
+    'dom',
+    'dom_x',
+    'dom_y',
+    'dom_z',
+    'dom_azimuth',
+    'dom_zenith',
+    'z',
+    'azimuth',
+    'zenith',
     'ckv_template_map',
     'pca_reduced_table',
     'templates',
@@ -104,16 +127,23 @@ def combine_tables(table_fpaths, outdir=None, overwrite=False):
 
     # Get all input table filepaths, including glob expansion
 
+    orig_table_fpaths = deepcopy(table_fpaths)
     if isinstance(table_fpaths, string_types):
         table_fpaths = [table_fpaths]
     table_fpaths_tmp = []
     for fpath in table_fpaths:
         table_fpaths_tmp.extend(glob(expand(fpath)))
-    table_fpaths = sorted(table_fpaths_tmp)
+    table_fpaths = sorted(table_fpaths_tmp, key=nsort_key_func)
+
+    if not table_fpaths:
+        raise ValueError(
+            "Found no tables given `table_fpaths` = {}".format(orig_table_fpaths)
+        )
 
     wstderr(
-        'Found {} tables to combine:\n  {}\n'
-        .format(len(table_fpaths), '\n  '.join(table_fpaths))
+        'Found {} tables to combine:\n  {}\n'.format(
+            len(table_fpaths), '\n  '.join(table_fpaths)
+        )
     )
 
     # Create the output directory
@@ -126,7 +156,6 @@ def combine_tables(table_fpaths, outdir=None, overwrite=False):
 
     combined_table = None
     table_keys = None
-    source_tables = np.empty(shape=0, dtype=np.string0)
     for fpath in table_fpaths:
         table = load_clsim_table_minimal(fpath, mmap=True)
 
@@ -146,12 +175,17 @@ def combine_tables(table_fpaths, outdir=None, overwrite=False):
             # before loading all the source tables)
             if outdir is not None:
                 output_fpaths = OrderedDict(
-                    ((k, join(outdir, k + '.npy')) for k in sorted(table_keys))
+                    (
+                        (k, join(outdir, k + '.npy'))
+                        for k in sorted(table_keys.difference(NO_WRITE_KEYS))
+                    )
                 )
                 if not overwrite:
                     for fp in output_fpaths.values():
                         if isfile(fp):
-                            raise IOError('File at {} already exists'.format(fp))
+                            raise IOError(
+                                'File at {} already exists, NOT overwriting'.format(fp)
+                            )
                 wstderr(
                     'Output files will be written to:\n  {}\n'.format(
                         '\n  '.join(output_fpaths.values())
@@ -182,15 +216,15 @@ def combine_tables(table_fpaths, outdir=None, overwrite=False):
 
         # Validate keys that should be equal
 
-        for key in table_keys:
-            if key in NO_VALIDATE_KEYS:
-                continue
+        for key in sorted(table_keys.difference(NO_VALIDATE_KEYS)):
             if not np.array_equal(table[key], combined_table[key]):
-                raise ValueError('Unequal {} in file {}'.format(key, fpath))
+                raise ValueError('Unequal "{}" in file {}'.format(key, fpath))
 
         # Add values from keys that should be summed
 
         for key in SUM_KEYS:
+            if key not in table:
+                continue
             combined_table[key] += table[key]
 
         # Concatenate and sort new source table(s) in source_tables array
@@ -206,20 +240,15 @@ def combine_tables(table_fpaths, outdir=None, overwrite=False):
     # Save the data to npy files on disk (in a sub-directory for all of this
     # table's files)
     if outdir is not None:
-        source_tables = []
-        for fpath in table_fpaths:
-            source_tables.append(base)
-
         wstderr('Writing files:\n')
 
-        for key in table_keys:
-            if key == 't_indep_table' and key not in combined_table:
-                continue
+        len_longest_fpath = np.max([len(p) for p in output_fpaths.values()])
+        for key in sorted(table_keys.difference(NO_WRITE_KEYS)):
             fpath = output_fpaths[key]
-            wstderr('  {} ...'.format(fpath))
+            wstderr('  {} ...'.format(fpath.ljust(len_longest_fpath)))
             t0 = time()
             np.save(fpath, combined_table[key])
-            wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3, 3)))
+            wstderr(' ({:12.3f} s)\n'.format(time() - t0))
 
     wstderr(
         'Total time to combine tables: {} s\n'.format(np.round(time() - t_start, 3))
