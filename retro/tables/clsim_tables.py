@@ -549,7 +549,8 @@ def load_clsim_table_minimal(
                     val = keyname[len(keyroot):]
                     table[infix] = np.string0(val)
 
-            table['table'] = force_little_endian(pf_table[0].data)  # pylint: disable=no-member
+            slicer = (slice(1, -1),) * n_dims
+            table['table'] = force_little_endian(pf_table[0].data[slicer])  # pylint: disable=no-member
 
             wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
 
