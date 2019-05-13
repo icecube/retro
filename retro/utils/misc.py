@@ -79,7 +79,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const
+from retro import const, load_pickle
 
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
@@ -107,9 +107,10 @@ class LazyLoader(object):
         self._is_loaded = False
 
     def _load_data(self):
-        sdata = open(self.datasource).read()
-        self._sha256 = hashlib.sha256(sdata).hexdigest()
-        self._data = pickle.loads(sdata)
+        #sdata = open(self.datasource).read()
+        with open(self.datasource, 'rb') as f:
+            self._sha256 = hashlib.sha256(f.read()).hexdigest()
+        self._data = load_pickle(self.datasource)
 
     @property
     def datasource(self):
