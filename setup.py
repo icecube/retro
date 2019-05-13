@@ -36,7 +36,7 @@ setup(
     license='Apache 2.0',
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
-    python_requires='>=2.7, <3.0',
+    python_requires='>=2.7',
     setup_requires=[
         'pip>=1.8',
         'setuptools>18.5',
@@ -52,6 +52,7 @@ setup(
         'pymultinest',
         'scipy>=0.17',
         'sobol',
+        'sobol_seq',
         'dynesty',
         'spherical_opt @ git+https://github.com/philippeller/spherical_opt.git',
     ],
