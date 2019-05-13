@@ -107,7 +107,6 @@ class LazyLoader(object):
         self._is_loaded = False
 
     def _load_data(self):
-        #sdata = open(self.datasource).read()
         with open(self.datasource, 'rb') as f:
             self._sha256 = hashlib.sha256(f.read()).hexdigest()
         self._data = load_pickle(self.datasource)
