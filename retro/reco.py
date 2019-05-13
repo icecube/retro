@@ -1357,7 +1357,7 @@ class Reco(object):
         """
         t0 = time.time()
 
-        from spherical_opt import spherical_opt
+        from spherical_opt.spherical_opt import spherical_opt
 
         if use_sobol:
             from sobol import i4_sobol
