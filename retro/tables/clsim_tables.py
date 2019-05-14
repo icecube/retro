@@ -38,7 +38,8 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import OrderedDict
-from os.path import abspath, basename, dirname, isdir, isfile, join
+from os import listdir
+from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
 import re
 import sys
 from time import time
@@ -352,12 +353,7 @@ def interpret_clsim_table_fname(fname):
     return ordered_info
 
 
-def load_clsim_table_minimal(
-    fpath,
-    t_is_residual_time=None,
-    step_length=None,
-    mmap=False
-):
+def load_clsim_table_minimal(fpath, mmap=False, include_overflow=False):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Similar to the `load_clsim_table` function but the full table, including
@@ -371,34 +367,15 @@ def load_clsim_table_minimal(
         'zstandard', the file will be decompressed using the `python-zstandard`
         Python library before passing to `fits` for interpreting.
 
-    t_is_residual_time : bool, optional
-        Whether time dimension in table represents residual time. If a value is
-        passed and it doesn't match the key of the same name in the table, a
-        ValueError will be raised. If a value is passed and the key does not
-        exist in the table, this key will be added. If a value is not passed,
-        no modification to the loaded table will be made.
-
-    step_length : float, optional
-        Step length parameter used during tabulation of photons while
-        generating the table.
-
     mmap : bool, optional
         Whether to memory map the table
+
+    include_overflow : bool, optional
+        By default, overflow bins (if present) are removed
 
     Returns
     -------
     table : OrderedDict
-        Items include
-        - 'table_shape' : tuple of int
-        - 'table' : np.ndarray
-        - 't_indep_table' : np.ndarray (if available)
-        - 'n_photons' :
-        - 'phase_refractive_index' :
-        - 'r_bin_edges' :
-        - 'costheta_bin_edges' :
-        - 't_bin_edges' :
-        - 'costhetadir_bin_edges' :
-        - 'deltaphidir_bin_edges' :
 
     """
     t0 = time()
@@ -549,7 +526,10 @@ def load_clsim_table_minimal(
                     val = keyname[len(keyroot):]
                     table[infix] = np.string0(val)
 
-            slicer = (slice(1, -1),) * n_dims
+            if include_overflow:
+                slicer = (slice(None),) * n_dims
+            else:
+                slicer = (slice(1, -1),) * n_dims
             table['table'] = force_little_endian(pf_table[0].data[slicer])  # pylint: disable=no-member
 
             wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
@@ -567,17 +547,11 @@ def load_clsim_table_minimal(
     else: # fpath is neither dir nor file
         raise ValueError('Table does not exist at path "{}"'.format(fpath))
 
-    if step_length is not None:
-        if 'step_length' in table:
-            assert step_length == table['step_length']
-        else:
-            table['step_length'] = step_length
+    if 'step_length' not in table:
+        table['step_length'] = 1
 
-    if t_is_residual_time is not None:
-        if 't_is_residual_time' in table:
-            assert t_is_residual_time == table['t_is_residual_time']
-        else:
-            table['t_is_residual_time'] = np.bool8(t_is_residual_time)
+    if 't_is_residual_time' not in table:
+        table['t_is_residual_time'] = True
 
     if DEBUG:
         wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
@@ -585,7 +559,7 @@ def load_clsim_table_minimal(
     return table
 
 
-def load_clsim_table(fpath, step_length, angular_acceptance_fract, quantum_efficiency):
+def load_clsim_table(fpath, angular_acceptance_fract, quantum_efficiency):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Parameters
@@ -617,7 +591,9 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract, quantum_effic
     """
     table = OrderedDict()
 
-    table = load_clsim_table_minimal(fpath=fpath, step_length=step_length)
+    assert isfile(fpath)
+
+    table = load_clsim_table_minimal(fpath=fpath, include_overflow=True)
     if 'is_normed' not in table:
         table['is_normed'] = False
     is_normed = table['is_normed']
@@ -625,7 +601,7 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract, quantum_effic
         table['table_norm'] = get_table_norm(
             angular_acceptance_fract=angular_acceptance_fract,
             quantum_efficiency=quantum_efficiency,
-            step_length=step_length,
+            step_length=table['step_length'],
             **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
         )
         table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
