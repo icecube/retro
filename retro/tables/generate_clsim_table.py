@@ -643,9 +643,9 @@ def generate_clsim_table(
         # See
         #   clsim/resources/kernels/spherical_coordinates.c.cl
         # in the branch you're using to check that the following are correct
-        phi_min, phi_max = 0.3054326190990078, 6.588617926278594 # -np.pi, np.pi # rad
+        phi_min, phi_max = 3.0543261909900776e-01, 6.5886179262785944e+00 # -np.pi, np.pi # rad
         binning['costhetadir_min'], binning['costhetadir_max'] = -1.0, 1.0
-        binning['deltaphidir_min'], binning['deltaphidir_max'] = -3.1808625617596658, 3.1023227454199205
+        binning['deltaphidir_min'], binning['deltaphidir_max'] = -3.1808625617596658e+00, 3.1023227454199205e+00 #-3.1808625617596658, 3.1023227454199205
 
         if binning['n_r_bins'] > 0:
             assert isinstance(binning['r_power'], Integral) and binning['r_power'] > 0
