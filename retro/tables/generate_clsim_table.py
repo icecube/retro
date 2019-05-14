@@ -171,6 +171,7 @@ def unpin_threads(delay=60):
     instances of the tabulator on a single machine will compete for core 0.
     Reset thread affinity after *delay* seconds to prevent this from happening.
     """
+    # pylint: disable=missing-docstring
     def which(program):
         def is_exe(fpath):
             return exists(fpath) and access(fpath, X_OK)
@@ -636,16 +637,29 @@ def generate_clsim_table(
     axes = OrderedDict()
     binning_kw = OrderedDict()
 
+    # Note that the actual binning in CLSim is performed using float32, so we
+    # first "truncate" all values to that precision. However, the `LinearAxis`
+    # function requires Python floats (which are 64 bits), so we have to
+    # convert all values to to `float` when passing as kwargs to `LinearAxis`
+    # (and presumably the values will be re-truncated to float32 within the
+    # CLsim code somewhere). Hopefully following this procedure, the values
+    # actually used within CLSim are what we want...? CLSim is stupid.
+    ftype = np.float32
+
     if coordinate_system == 'spherical':
         binning['t_min'] = 0 # ns
         binning['r_min'] = 0 # meters
-        costheta_min, costheta_max = -1.0, 1.0
+        costheta_min = ftype(-1.0)
+        costheta_max = ftype(1.0)
         # See
         #   clsim/resources/kernels/spherical_coordinates.c.cl
         # in the branch you're using to check that the following are correct
-        phi_min, phi_max = 3.0543261909900776e-01, 6.5886179262785944e+00 # -np.pi, np.pi # rad
-        binning['costhetadir_min'], binning['costhetadir_max'] = -1.0, 1.0
-        binning['deltaphidir_min'], binning['deltaphidir_max'] = -3.1808625617596658e+00, 3.1023227454199205e+00 #-3.1808625617596658, 3.1023227454199205
+        phi_min = ftype(3.0543261766433716e-01)
+        phi_max = ftype(6.5886182785034180e+00)
+        binning['costhetadir_min'] = ftype(-1.0)
+        binning['costhetadir_max'] = ftype(1.0)
+        binning['deltaphidir_min'] = ftype(-3.1808626651763916e+00)
+        binning['deltaphidir_max'] = ftype(3.1023228168487549e+00)
 
         if binning['n_r_bins'] > 0:
             assert isinstance(binning['r_power'], Integral) and binning['r_power'] > 0
@@ -720,9 +734,9 @@ def generate_clsim_table(
             binning_kw['deltaphidir'] = deltaphidir_binning_kw
 
     elif coordinate_system == 'cartesian':
-        binning['t_min'] = 0 # ns
-        binning['costhetadir_min'], binning['costhetadir_max'] = -1.0, 1.0
-        binning['phidir_min'], binning['phidir_max'] = -np.pi, np.pi # rad
+        binning['t_min'] = ftype(0) # ns
+        binning['costhetadir_min'], binning['costhetadir_max'] = ftype(-1.0), ftype(1.0)
+        binning['phidir_min'], binning['phidir_max'] = ftype(-np.pi), ftype(np.pi) # rad
 
         if binning['n_x_bins'] > 0:
             x_binning_kw = OrderedDict([
