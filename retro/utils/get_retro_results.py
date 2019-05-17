@@ -130,6 +130,8 @@ SIMPLE_ERR_PARAMS = (
     #'cascade_azimuth',
 )
 
+VALID_POINT_ESTIMATORS = ("mean", "median")
+
 
 def wstderr(s):
     """Write string `s` to stderr and flush immediately"""
@@ -148,6 +150,7 @@ def extract_from_leaf_dir(
     eventdir,
     flavdir,
     filenum,
+    point_estimator,
     infos=None,
     recompute_estimate=False,
 ):
@@ -160,6 +163,8 @@ def extract_from_leaf_dir(
     eventdir : string
     flavdir : string
     filenum : string
+    point_estimator : string
+        Must be one of `VALID_POINT_ESTIMATORS`
     infos : mapping, optional
     recompute_estimate : bool, optional
 
@@ -171,6 +176,11 @@ def extract_from_leaf_dir(
     if infos is None:
         infos = {}
     wstdout('{} '.format(filenum))
+
+    if point_estimator not in VALID_POINT_ESTIMATORS:
+        raise ValueError(
+            "Point estimator must be one of {}".format(VALID_POINT_ESTIMATORS)
+        )
 
     tru_npy_f = join(eventdir, 'truth.npy')
     if isfile(tru_npy_f):
@@ -204,8 +214,7 @@ def extract_from_leaf_dir(
 
         kinds = estimates['kind'].values
         params = estimates['param'].values
-        mean_index = int(np.argwhere(kinds == 'mean'))
-        median_index = int(np.argwhere(kinds == 'median'))
+        point_est_index = int(np.argwhere(kinds == point_estimator))
         lower_index = int(np.argwhere(kinds == 'lower_bound'))
         upper_index = int(np.argwhere(kinds == 'upper_bound'))
 
@@ -229,7 +238,7 @@ def extract_from_leaf_dir(
                 llhp = np.load(llhp_fpath)
 
                 # TODO: record what method is & step so we can re-create estimates;
-                # following only applies to "crs_prefit_mn"
+                # following only applies to "crs_prefit"
                 if is_prefit:
                     new_estimate = estimate_from_llhp(
                         llhp=llhp,
@@ -304,7 +313,7 @@ def extract_from_leaf_dir(
                     info[pfx + key] = fit_meta[key]
 
                 for param_index, param in enumerate(params):
-                    info[pfx + param] = est[median_index, param_index]
+                    info[pfx + param] = est[point_est_index, param_index]
                     lb = est[lower_index, param_index]
                     ub = est[upper_index, param_index]
                     width = ub - lb
@@ -443,8 +452,9 @@ def augment_info(info):
 
 def get_retro_results(
     outdir,
-    recos_basedir,
-    events_basedir,
+    recos_root,
+    events_root,
+    point_estimator="median",
     recompute_estimate=False,
     overwrite=False,
     procs=None,
@@ -456,8 +466,10 @@ def get_retro_results(
     Parameters
     ----------
     outdir : string
-    recos_basedir : string
-    events_basedir : string
+    recos_root : string
+    events_root : string
+    point_estimator : string, optional
+        Must be one of `VALID_POINT_ESTIMATORS`. Set to "median" by default.
     recompute_estimate : bool, optional
     overwrite : bool, optional
     procs : int > 0 or None
@@ -476,6 +488,11 @@ def get_retro_results(
     if not overwrite and isfile(outfile_path):
         raise IOError('Output file path already exists at "{}"'.format(outfile_path))
 
+    if point_estimator not in VALID_POINT_ESTIMATORS:
+        raise ValueError(
+            "Point estimator must be one of {}".format(VALID_POINT_ESTIMATORS)
+        )
+
     assert procs is None or procs >= 1
 
     if procs is None or procs > 1:
@@ -483,7 +500,7 @@ def get_retro_results(
 
     # Walk directory hierarchy
     results = []
-    for reco_dirpath, _, files in walk(recos_basedir, followlinks=True):
+    for reco_dirpath, _, files in walk(recos_root, followlinks=True):
         is_leafdir = False
         for f in files:
             if f[-3:] == 'pkl' and f[:3] in ('slc', 'evt'):
@@ -492,9 +509,9 @@ def get_retro_results(
         if not is_leafdir:
             continue
 
-        rel_dirpath = relpath(path=reco_dirpath, start=recos_basedir)
-        if events_basedir is not None:
-            event_dirpath = join(events_basedir, rel_dirpath)
+        rel_dirpath = relpath(path=reco_dirpath, start=recos_root)
+        if events_root is not None:
+            event_dirpath = join(events_root, rel_dirpath)
             if not isdir(event_dirpath):
                 raise IOError('Event directory does not exist: "{}"'
                               .format(event_dirpath))
@@ -509,6 +526,7 @@ def get_retro_results(
             flavdir=flavdir,
             filenum=filenum,
             recompute_estimate=recompute_estimate,
+            point_estimator=point_estimator,
         )
         if procs > 1:
             results.append(pool.apply_async(extract_from_leaf_dir, (), kwargs))
@@ -549,14 +567,20 @@ def main():
         help='''Directory in which to save the `all_events` DataFrame'''
     )
     parser.add_argument(
-        '--recos-basedir', required=True,
-        help='''Path to base directory containing Retro reconstruction
+        '--recos-root', required=True,
+        help='''Path to root directory containing Retro reconstruction
         information'''
     )
     parser.add_argument(
-        '--events-basedir', required=True,
-        help='''Path to base directory containing source events that were
+        '--events-root', required=True,
+        help='''Path to root directory containing source events that were
         reconstructed'''
+    )
+    parser.add_argument(
+        '--point-estimator', default="median", choices=VALID_POINT_ESTIMATORS,
+        help='''Choose from among the methods used for making point estimates
+        from posterior distributions. (These have already been computed, but
+        one must be chosen to be "the" point estimate.)'''
     )
     parser.add_argument(
         '--recompute-estimate', action='store_true',

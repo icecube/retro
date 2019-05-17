@@ -163,7 +163,12 @@ def load_pickle(path):
     obj
 
     """
-    with open(expanduser(expandvars(path)), 'rb') as fobj:
-        if PY2:
-            return pickle.load(fobj)
-        return pickle.load(fobj, encoding='latin1')
+    expanded_path = expanduser(expandvars(path))
+    try:
+        with open(expanded_path, 'rb') as fobj:
+            if PY2:
+                return pickle.load(fobj)
+            return pickle.load(fobj, encoding='latin1')
+    except:
+        sys.stderr.write('Failed to load pickle at path "{}"\n'.format(expanded_path))
+        raise
