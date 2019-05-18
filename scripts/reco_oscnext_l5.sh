@@ -4,16 +4,28 @@ timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 scripts_dir="$( dirname $0 )"
 retro_dir="$( dirname $scripts_dir )"
-events_root="$1"
-START="$2"
-STEP="$3"
-outdir="$4"
-
-mkdir -p "$outdir"
+START="$1"
+shift
+STEP="$1"
+shift
+events_root="$*"
 
 # -- Tables -- #
 
-if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
+case $HOSTNAME in
+    schwyz)
+        myhostname=ET ;;
+    uri)
+        myhostname=ET ;;
+    unterwalden)
+        myhostname=ET ;;
+    luzern)
+        myhostname=ET ;;
+    *)
+        myhostname=$HOSTNAME ;;
+esac
+
+if [ "$myhostname" = "ET" ] ; then
     conda activate
     tdi0=""
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
@@ -123,9 +135,7 @@ fi
 #python -m cProfile  \
 #kernprof -l -v \
 $retro_dir/retro/reco.py \
-    --outdir "$outdir" \
-    --method "crs_prefit" \
-    --method "mn8d" \
+    --method crs_prefit \
     \
     --gcd $gcd \
     --dom-tables-kind "$tblkind" \
@@ -135,14 +145,12 @@ $retro_dir/retro/reco.py \
     $tdi0 \
     $tdi1 \
     \
-    --events-root "$events_root" \
+    --events-root $events_root \
     --start "$START" \
     --step $STEP \
     \
     --pulses "SplitInIcePulses" \
     --triggers "I3TriggerHierarchy" \
-    --hits "pulses/SplitInIcePulses" \
-    --truth \
-    --angsens-model "9"
+    --hits "pulses/SplitInIcePulses"
 
 wait

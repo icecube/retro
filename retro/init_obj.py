@@ -356,7 +356,7 @@ def get_events(
     start=None,
     stop=None,
     step=None,
-    truth=True,
+    truth=None,
     photons=None,
     pulses=None,
     recos=None,
@@ -402,7 +402,7 @@ def get_events(
         be used as hits (such that the time window can be computed). Default is
         to not extract any trigger hierarchies.
 
-    angsens_model : string
+    angsens_model : string, optional
         Required if `photons` specifies any photon series to extract, as this angular
         sensitivity model is applied to the photons to arrive at expectation for
         detected photons (though without taking into account any further details of the
@@ -435,6 +435,24 @@ def get_events(
 
     slice_kw = dict(start=start, stop=stop, step=step)
 
+    if truth is not None and not isinstance(truth, bool):
+        raise TypeError("`truth` is invalid type: {}".format(type(truth)))
+
+    if photons is not None and not isinstance(photons, (string_types, Iterable)):
+        raise TypeError("`photons` is invalid type: {}".format(type(photons)))
+
+    if pulses is not None and not isinstance(pulses, (string_types, Iterable)):
+        raise TypeError("`pulses` is invalid type: {}".format(type(pulses)))
+
+    if recos is not None and not isinstance(recos, (string_types, Iterable)):
+        raise TypeError("`recos` is invalid type: {}".format(type(recos)))
+
+    if triggers is not None and not isinstance(triggers, (string_types, Iterable)):
+        raise TypeError("`triggers` is invalid type: {}".format(type(triggers)))
+
+    if hits is not None and not isinstance(hits, string_types):
+        raise TypeError("`hits` is invalid type: {}".format(type(hits)))
+
     for events_root in events_roots:
         if not (isdir(events_root) and isfile(join(events_root, 'events.npy'))):
             raise ValueError(
@@ -461,84 +479,100 @@ def get_events(
         event_indices_iter = iter(event_indices)
         file_iterator_tree['header'] = iter(headers)
 
+        # -- Translate args with defaults / find dynamically-specified things -- #
+
         if truth is None:
-            truth = isfile(join(events_root, 'truth.npy'))
+            truth_ = isfile(join(events_root, 'truth.npy'))
+        else:
+            truth_ = truth
 
         if photons is None:
             dpath = join(events_root, 'photons')
             if isdir(dpath):
-                photons = [splitext(d)[0] for d in listdir(dpath)]
+                photons_ = [splitext(d)[0] for d in listdir(dpath)]
             else:
-                photons = False
-        elif isinstance(photons, str):
-            photons = [photons]
+                photons_ = False
+        elif isinstance(photons, string_types):
+            photons_ = [photons]
+        else:
+            photons_ = photons
 
         if pulses is None:
             dpath = join(events_root, 'pulses')
             if isdir(dpath):
-                pulses = [splitext(d)[0] for d in listdir(dpath) if 'TimeRange' not in d]
+                pulses_ = [splitext(d)[0] for d in listdir(dpath) if 'TimeRange' not in d]
             else:
-                pulses = False
-        elif isinstance(pulses, str):
-            pulses = [pulses]
+                pulses_ = False
+        elif isinstance(pulses, string_types):
+            pulses_ = [pulses]
+        else:
+            pulses_ = list(pulses)
 
         if recos is None:
             dpath = join(events_root, 'recos')
             if isdir(dpath):
                 # TODO: make check a regex including colons, etc. so we don't
                 # accidentally exclude a valid reco that starts with "slc"
-                recos = []
+                recos_ = []
                 for fname in listdir(dpath):
                     if fname[:3] in ("slc", "evt"):
                         continue
                     fbase = splitext(fname)[0]
                     if fbase.endswith(".llhp"):
                         continue
-                    recos.append(fbase)
+                    recos_.append(fbase)
             else:
-                recos = False
-        elif isinstance(recos, str):
-            recos = [recos]
+                recos_ = False
+        elif isinstance(recos, string_types):
+            recos_ = [recos]
+        else:
+            recos_ = list(recos)
 
         if triggers is None:
             dpath = join(events_root, 'triggers')
             if isdir(dpath):
-                triggers = [splitext(d)[0] for d in listdir(dpath)]
+                triggers_ = [splitext(d)[0] for d in listdir(dpath)]
             else:
-                triggers = False
-        elif isinstance(triggers, str):
-            triggers = [triggers]
+                triggers_ = False
+        elif isinstance(triggers, string_types):
+            triggers_ = [triggers]
+        else:
+            triggers_ = list(triggers)
 
+        # Note that `hits_` must be defined after `pulses_` and `photons_`
+        # since `hits_` is one of these
         if hits is None:
-            if pulses and len(pulses) == 1:
-                hits = ['pulses', pulses[0]]
-            elif photons and len(photons) == 1:
-                hits = ['photons', photons[0]]
-            else:
-                hits = False
-        elif isinstance(hits, str):
-            hits = hits.split('/')
+            if pulses_ is not None and len(pulses_) == 1:
+                hits_ = ['pulses', pulses_[0]]
+            elif photons_ is not None and len(photons_) == 1:
+                hits_ = ['photons', photons_[0]]
+        elif isinstance(hits, string_types):
+            hits_ = hits.split('/')
+        else:
+            raise TypeError("{}".format(type(hits)))
 
-        if truth:
+        # -- Populate the file iterator tree -- #
+
+        if truth_:
             num_truths, _, truths = iterate_file(
                 fpath=join(events_root, 'truth.npy'), **slice_kw
             )
             assert num_truths == num_events
             file_iterator_tree['truth'] = iter(truths)
 
-        if photons:
-            photons = sorted(photons)
+        if photons_:
+            photons_ = sorted(photons_)
             file_iterator_tree['photons'] = iterators = OrderedDict()
-            for photon_series in photons:
+            for photon_series in photons_:
                 num_phs, _, photon_serieses = iterate_file(
                     fpath=join(events_root, 'photons', photon_series + '.pkl'), **slice_kw
                 )
                 assert num_phs == num_events
                 iterators[photon_series] = iter(photon_serieses)
 
-        if pulses:
+        if pulses_:
             file_iterator_tree['pulses'] = iterators = OrderedDict()
-            for pulse_series in sorted(pulses):
+            for pulse_series in sorted(pulses_):
                 num_ps, _, pulse_serieses = iterate_file(
                     fpath=join(events_root, 'pulses', pulse_series + '.pkl'), **slice_kw
                 )
@@ -556,25 +590,25 @@ def get_events(
                 assert num_tr == num_events
                 iterators[pulse_series + 'TimeRange'] = iter(time_ranges)
 
-        if recos:
+        if recos_:
             file_iterator_tree['recos'] = iterators = OrderedDict()
-            for reco in sorted(recos):
+            for reco in sorted(recos_):
                 num_recoses, _, recoses = iterate_file(
                     fpath=join(events_root, 'recos', reco + '.npy'), **slice_kw
                 )
                 assert num_recoses == num_events
                 iterators[reco] = iter(recoses)
 
-        if triggers:
+        if triggers_:
             file_iterator_tree['triggers'] = iterators = OrderedDict()
-            for trigger_hier in sorted(triggers):
+            for trigger_hier in sorted(triggers_):
                 num_th, _, trigger_hiers = iterate_file(
                     fpath=join(events_root, 'triggers', trigger_hier + '.pkl'), **slice_kw
                 )
                 assert num_th == num_events
                 iterators[trigger_hier] = iter(trigger_hiers)
 
-        if hits and hits[0] == 'photons':
+        if hits_ is not None and hits_[0] == 'photons':
             angsens_model, _ = load_angsens_model(angsens_model)
         else:
             angsens_model = None
@@ -585,11 +619,11 @@ def get_events(
             except StopIteration:
                 break
 
-            if hits:
-                hits_, hits_indexer, hits_summary = get_hits(
-                    event=event, path=hits, angsens_model=angsens_model
+            if hits_ is not None:
+                hits_array, hits_indexer, hits_summary = get_hits(
+                    event=event, path=hits_, angsens_model=angsens_model
                 )
-                event['hits'] = hits_
+                event['hits'] = hits_array
                 event['hits_indexer'] = hits_indexer
                 event['hits_summary'] = hits_summary
 
@@ -661,7 +695,15 @@ def get_path(event, path):
         path = [path]
     node = event
     for subpath in path:
-        node = getitem(node, subpath)
+        try:
+            node = getitem(node, subpath)
+        except:
+            sys.stderr.write(
+                "node = {} type = {}, subpath = {} type = {}\n".format(
+                    node, type(node), subpath, type(subpath)
+                )
+            )
+            raise
     return node
 
 
@@ -906,7 +948,7 @@ def parse_args(
 
     if dom_tables or events:
         parser.add_argument(
-            '--angsens-model', required=True,
+            '--angsens-model',
             choices='nominal  h1-100cm  h2-50cm  h3-30cm 9'.split(),
             help='''Angular sensitivity model; only necessary if loading tables
             or photon hits.'''
@@ -1036,33 +1078,33 @@ def parse_args(
             None, i.e., take every event from `start` through `stop - 1`.'''
         )
         group.add_argument(
-            '--photons', action='append',
-            help='''Photon series name. Repeat --photons to specify multiple
-            photon series.'''
+            '--photons', nargs='+',
+            help='''Photon series name(s).''',
         )
         group.add_argument(
-            '--pulses', action='append',
+            '--pulses', nargs='+',
             help='''Name of pulse series to extract. Repeat --pulses to specify
-            multiple pulse series.'''
+            multiple pulse series.''',
         )
         group.add_argument(
             '--truth', action='store_true',
-            help='''Whether to extract Monte Carlo truth information.'''
+            help='''Require extraction of Monte Carlo truth information (if not
+            specified, truth will still be loaded if "truth.npy" file is
+            found).''',
         )
         group.add_argument(
-            '--recos', action='append',
+            '--recos', nargs='+',
             help='''Name of reconstruction to extract. Repeat --reco to extract
-            multiple reconstructions.'''
+            multiple reconstructions.''',
         )
         group.add_argument(
-            '--triggers', action='append',
-            help='''Name of reconstruction to extract. Repeat --reco to extract
-            multiple reconstructions.'''
+            '--triggers', nargs='+',
+            help='''Name(s) of reconstruction(s) to extract.''',
         )
         group.add_argument(
             '--hits', default=None,
             help='''Path to item to use as "hits", e.g.
-            "pulses/OfflinePulses".'''
+            "pulses/OfflinePulses".''',
         )
 
     args = parser.parse_args()

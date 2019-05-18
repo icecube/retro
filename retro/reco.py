@@ -36,7 +36,7 @@ limitations under the License."""
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from os.path import abspath, basename, dirname, isdir, isfile, join
+from os.path import abspath, dirname, isdir, isfile, join
 from shutil import rmtree
 import sys
 from tempfile import mkdtemp
@@ -1169,7 +1169,7 @@ class Reco(object):
         self.event["recos"]["retro_" + method] = estimate
 
         estimate_outf = join(
-            basename(self.event.meta["events_root"]),
+            self.event.meta["events_root"],
             "recos",
             "retro_{}.npy".format(method),
         )
@@ -1182,14 +1182,14 @@ class Reco(object):
                 del estimates
         else:
             estimates = np.full(
-                shape=self.event["num_events"],
+                shape=self.event.meta["num_events"],
                 fill_value=np.nan,
                 dtype=estimate.dtype,
             )
             # Filling with nan doesn't set correct "fit_status"
             estimates["fit_status"] = FitStatus.NotSet
             estimates[self.event.meta["event_idx"]] = estimate
-            np.save(estimate_outf, invalid_estimates)
+            np.save(estimate_outf, estimates)
 
         ## meta_outf = join(
         ##    self.outdir, '{}{}.pkl'.format('meta', fname)
