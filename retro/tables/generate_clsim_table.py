@@ -647,8 +647,8 @@ def generate_clsim_table(
     ftype = np.float32
 
     if coordinate_system == 'spherical':
-        binning['t_min'] = 0 # ns
-        binning['r_min'] = 0 # meters
+        binning['t_min'] = ftype(0) # ns
+        binning['r_min'] = ftype(0) # meters
         costheta_min = ftype(-1.0)
         costheta_max = ftype(1.0)
         # See
