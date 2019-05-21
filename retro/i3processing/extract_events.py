@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating
+# pylint: disable=wrong-import-position
 
 """
 Extract information on events from an i3 file needed for running Retro Reco.
@@ -59,8 +59,8 @@ from argparse import ArgumentParser
 from collections import OrderedDict, Sequence
 from copy import deepcopy
 from hashlib import sha256
-import numbers
-from os.path import abspath, basename, dirname, join
+from os import listdir
+from os.path import abspath, basename, dirname, exists, join
 import pickle
 import re
 import sys
@@ -377,7 +377,7 @@ def get_frame_item(frame, key, specs, allow_missing):
 
                 # Assume it's an attribute if the string does not explicitly
                 # define attribute (".") or item ("[") access syntax
-                if not path[0] in (".", "["):
+                if path[0] not in (".", "["):
                     path = "." + path
                 value = eval("obj" + path)  # pylint: disable=eval-used
                 values.append(value)
@@ -1438,6 +1438,7 @@ def extract_metadata_from_frame(frame):
 
 def extract_events(
     fpath,
+    external_gcd=False,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
@@ -1451,6 +1452,10 @@ def extract_events(
     ----------
     fpath : str
         Path to I3 file
+
+    external_gcd : bool
+        Load a GCD file to be found in the same directory as the data file
+        (e.g., use this option for actual data run files)
 
     outdir : str, optional
         Directory in which to place generated files
@@ -1509,11 +1514,31 @@ def extract_events(
         simclasses,
     )
     from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
-    from icecube.dataio import I3File  # pylint: disable=no-name-in-module
+    from icecube.dataio import I3FrameSequence  # pylint: disable=no-name-in-module
 
     fpath = expand(fpath)
     sha256_hex = sha256(open(fpath, "rb").read()).hexdigest()
-    i3file = I3File(fpath, "r")
+
+    fpaths = [fpath]
+
+    if external_gcd:
+        fdir = dirname(fpath)
+        #print(listdir(fdir))
+        gcd_fnames = [
+            f for f in listdir(fdir)
+            if "gcd" in f.lower() and ".i3" in f.lower() and exists(join(fdir, f))
+        ]
+        if len(gcd_fnames) == 0:
+            raise ValueError('No GCD file found in directory "{}"'.format(fdir))
+        if len(gcd_fnames) > 1:
+            raise ValueError(
+                'More than one GCD files found in directory "{}": {}'.format(
+                    fdir, gcd_fnames
+                )
+            )
+        fpaths.insert(0, join(fdir, gcd_fnames[0]))
+
+    i3file_iterator = I3FrameSequence(fpaths)
 
     events = []
     truths = []
@@ -1535,7 +1560,7 @@ def extract_events(
         trigger_hierarchies[name] = []
 
     def process_frame_buffer(frame_buffer):
-        """Get event information from an set of frames that, together, should
+        """Get event information from a set of frames that, together, should
         completely describe a single event.
 
         Information gathered about the event is added to the (pre-existing)
@@ -1637,11 +1662,11 @@ def extract_events(
 
     frame_buffer = []
     frame_counter = 0
-    while i3file.more():
+    while i3file_iterator.more():
         try:
             frame = None
             try:
-                frame = i3file.pop_frame()
+                frame = i3file_iterator.pop_frame()
             except:
                 sys.stderr.write("Failed to pop frame #{}\n".format(frame_counter + 1))
                 raise
@@ -1751,6 +1776,12 @@ def parse_args(description=__doc__):
     """Parse command line args"""
     parser = ArgumentParser(description=description)
     parser.add_argument("--fpath", required=True, help="""Path to i3 file""")
+    parser.add_argument(
+        "--external-gcd",
+        action="store_true",
+        help="""Load the GCD file in the same directory as the data i3 file
+        first (used e.g. for data runs)""",
+    )
     parser.add_argument("--outdir")
     parser.add_argument(
         "--photons",
