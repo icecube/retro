@@ -45,7 +45,7 @@ function runit () {
 if [ -n "$root_dir" ] ; then
     find "$root_dir" -name "oscNext*.i3*" | sort -V | while read full_i3_filepath ; do
         while (( $( jobs -r | wc -l ) >= $num_subprocs )) ; do
-            sleep 1
+            sleep 0.2
         done
         runit "$full_i3_filepath"
     done

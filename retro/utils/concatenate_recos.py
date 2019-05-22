@@ -216,14 +216,18 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
             paths_concatenated.append(dirpath)
 
             events = np.load(join(dirpath, "events.npy"))
+            if len(events) == 0:
+                continue
+
             if all_events is None:
                 all_events = [events]
                 events_dtype = events.dtype
             else:
                 if events.dtype != events_dtype:
                     raise TypeError(
-                        "events.dtype should be\n{}but dtype found is\n{}".format(
-                            events_dtype, events.dtype
+                        '"{}": events.dtype should be\n{}\nbut dtype found'
+                        "is\n{}".format(
+                            dirpath, events_dtype, events.dtype
                         )
                     )
                 all_events.append(events)
