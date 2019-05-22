@@ -633,18 +633,13 @@ def extract_pulses(frame, pulse_series_name):
 
     pulse_series = frame[pulse_series_name]
 
-    time_range_name = None
-    if pulse_series_name + "TimeRange" in frame:
-        time_range_name = pulse_series_name + "TimeRange"
-    elif "UncleanedInIcePulsesTimeRange" in frame:
-        # TODO: use WaveformRange instead?
-        time_range_name = "UncleanedInIcePulsesTimeRange"
+    time_range_name = pulse_series_name + "TimeRange"
 
-    if time_range_name is not None:
+    if time_range_name in frame:
         i3_time_range = frame[time_range_name]
         time_range = i3_time_range.start, i3_time_range.stop
     else:
-        time_range = None
+        time_range = np.nan, np.nan
 
     if isinstance(pulse_series, I3RecoPulseSeriesMapMask):
         pulse_series = pulse_series.apply(frame)
@@ -1550,6 +1545,7 @@ def extract_events(
     pulses_d = OrderedDict()
     for name in pulses:
         pulses_d[name] = []
+        pulses_d[name + "TimeRange"] = []
 
     recos_d = OrderedDict()
     for name in recos:
@@ -1636,11 +1632,7 @@ def extract_events(
         for pulse_series_name in pulses:
             pulses_list, time_range = extract_pulses(pframe, pulse_series_name)
             pulses_d[pulse_series_name].append(pulses_list)
-            tr_key = pulse_series_name + "TimeRange"
-            if time_range is not None:
-                if tr_key not in pulses_d:
-                    pulses_d[tr_key] = []
-                pulses_d[tr_key].append(time_range)
+            pulses_d[pulse_series_name + "TimeRange"].append(time_range)
 
         for reco_name in recos:
             recos_d[reco_name].append(extract_reco(pframe, reco_name))
@@ -1696,9 +1688,10 @@ def extract_events(
     # resulting array)
     for pulse_series_name in pulses:
         tr_key = pulse_series_name + "TimeRange"
-        if tr_key not in pulses_d:
-            continue
-        if len(pulses_d[pulse_series_name]) != len(pulses_d[tr_key]):
+        if (
+            tr_key in pulses_d
+            and len(pulses_d[pulse_series_name]) != len(pulses_d[tr_key])
+        ):
             raise ValueError(
                 "{} present in some frames but not present in other frames".format(
                     tr_key
@@ -1715,7 +1708,6 @@ def extract_events(
         for key, val in trigger_hierarchies.items():
             assert not val, "'{}': {}".format(name, val)
         sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(fpath))
-        return
 
     photon_series_dir = join(outdir, "photons")
     pulse_series_dir = join(outdir, "pulses")
@@ -1731,9 +1723,12 @@ def extract_events(
     if triggers:
         mkdir(trigger_hierarchy_dir)
 
-    event_dtype = []
-    for key, val in events[0].items():
-        event_dtype.append((key, set_explicit_dtype(val).dtype))
+    event_dtype = None
+    if events:
+        for key, val in events[0].items():
+            if event_dtype is None:
+                event_dtype = []
+            event_dtype.append((key, set_explicit_dtype(val).dtype))
 
     events = np.array([tuple(ev.values()) for ev in events], dtype=event_dtype)
     np.save(join(outdir, "events.npy"), events)
@@ -1754,12 +1749,11 @@ def extract_events(
             open(join(pulse_series_dir, name + ".pkl"), "wb"),
             protocol=pickle.HIGHEST_PROTOCOL,
         )
-        key = name + "TimeRange"
-        if key in pulses_d and pulses_d[key]:
-            np.save(
-                join(pulse_series_dir, key + ".npy"),
-                np.array(pulses_d[key], dtype=np.float32),
-            )
+        tr_key = name + "TimeRange"
+        np.save(
+            join(pulse_series_dir, tr_key + ".npy"),
+            np.array(pulses_d[tr_key], dtype=np.float32),
+        )
 
     for name in recos:
         np.save(join(recos_dir, name + ".npy"), np.array(recos_d[name]))
