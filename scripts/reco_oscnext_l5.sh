@@ -130,7 +130,7 @@ fi
 #   --angsens-model 9
 # or
 #   --angsens-model h2-50cm
-# etc. (note that tables for now are hard-coded to be generated using "9")
+# etc.
 
 #python -m cProfile  \
 #kernprof -l -v \
@@ -146,8 +146,8 @@ $retro_dir/retro/reco.py \
     $tdi1 \
     \
     --events-root $events_root \
-    --start "$START" \
-    --step $STEP \
+    --agg-start "$START" \
+    --agg-step $STEP \
     \
     --pulses "SplitInIcePulses" \
     --triggers "I3TriggerHierarchy" \
