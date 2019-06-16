@@ -52,7 +52,7 @@ __all__ = [
     "extract_truth",
     "extract_metadata_from_frame",
     "extract_events",
-    "parse_args",
+    "main",
 ]
 
 from argparse import ArgumentParser
@@ -1433,7 +1433,7 @@ def extract_metadata_from_frame(frame):
 
 def extract_events(
     fpath,
-    external_gcd=False,
+    external_gcd=None,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
@@ -1448,9 +1448,14 @@ def extract_events(
     fpath : str
         Path to I3 file
 
-    external_gcd : bool
-        Load a GCD file to be found in the same directory as the data file
-        (e.g., use this option for actual data run files)
+    external_gcd : bool, optional
+        If `True`, force loading a (single) GCD file to be found in the same
+        directory as the data file(s) (e.g., use this option for actual data
+        run files). If `None` (the default), a single GCD file in the same
+        directory is automatically loaded but if no file is found, no error
+        results. If `False`, then no GCD file in the same directory is loaded,
+        even if one is present. If `True` or `None` and multiple GCD files are
+        found, a ValueError is raised.
 
     outdir : str, optional
         Directory in which to place generated files
@@ -1516,22 +1521,25 @@ def extract_events(
 
     fpaths = [fpath]
 
-    if external_gcd:
+    if external_gcd is True or external_gcd is None:
         fdir = dirname(fpath)
-        #print(listdir(fdir))
         gcd_fnames = [
-            f for f in listdir(fdir)
+            f
+            for f in listdir(fdir)
             if "gcd" in f.lower() and ".i3" in f.lower() and exists(join(fdir, f))
         ]
-        if len(gcd_fnames) == 0:
+        if len(gcd_fnames) == 1:
+            fpaths.insert(0, join(fdir, gcd_fnames[0]))
+        elif (
+            external_gcd is True and len(gcd_fnames) == 0
+        ):  # pylint: disable=len-as-condition
             raise ValueError('No GCD file found in directory "{}"'.format(fdir))
-        if len(gcd_fnames) > 1:
+        elif len(gcd_fnames) > 1:
             raise ValueError(
                 'More than one GCD files found in directory "{}": {}'.format(
                     fdir, gcd_fnames
                 )
             )
-        fpaths.insert(0, join(fdir, gcd_fnames[0]))
 
     i3file_iterator = I3FrameSequence(fpaths)
 
@@ -1688,9 +1696,8 @@ def extract_events(
     # resulting array)
     for pulse_series_name in pulses:
         tr_key = pulse_series_name + "TimeRange"
-        if (
-            tr_key in pulses_d
-            and len(pulses_d[pulse_series_name]) != len(pulses_d[tr_key])
+        if tr_key in pulses_d and len(pulses_d[pulse_series_name]) != len(
+            pulses_d[tr_key]
         ):
             raise ValueError(
                 "{} present in some frames but not present in other frames".format(
@@ -1766,15 +1773,16 @@ def extract_events(
         )
 
 
-def parse_args(description=__doc__):
-    """Parse command line args"""
+def main(description=__doc__):
+    """Script interface to `extract_events` function: Parse command line args
+    and call function."""
     parser = ArgumentParser(description=description)
     parser.add_argument("--fpath", required=True, help="""Path to i3 file""")
     parser.add_argument(
-        "--external-gcd",
+        "--ignore-external-gcd",
         action="store_true",
-        help="""Load the GCD file in the same directory as the data i3 file
-        first (used e.g. for data runs)""",
+        help="""Force _ignoring_ any GCD file(s) in the same directory as the
+        i3 file being extracted.""",
     )
     parser.add_argument("--outdir")
     parser.add_argument(
@@ -1802,8 +1810,12 @@ def parse_args(description=__doc__):
         help="""Trigger hierarchy names to extract from each event""",
     )
     parser.add_argument("--truth", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    kwargs = vars(args)
+    if kwargs.pop("ignore_external_gcd"):
+        kwargs["external_gcd"] = False
+    extract_events(**kwargs)
 
 
 if __name__ == "__main__":
-    extract_events(**vars(parse_args()))
+    main()
