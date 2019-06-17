@@ -406,15 +406,10 @@ def load_clsim_table_minimal(fpath, mmap=False, include_overflow=False):
             t1 = time()
             val = np.load(abs_fpath, mmap_mode=mmap_mode)
 
-            # Pull small things into memory so we don't have too many file
-            # handles open due to memory mapping
-            if mmap and val.size < 1e2:
-                if val.shape == ():
-                    val = val.dtype.type(val)
-                else:
-                    tmp_val = val
-                    val = np.empty(shape=tmp_val.shape, dtype=tmp_val.dtype)
-                    val[:] = tmp_val[:]
+            # Pull "small" things (less than 10 MiB) into memory so we don't
+            # have too many file handles open due to memory mapping
+            if mmap and val.nbytes < 10 * 1024**2:
+                val = np.copy(val)
 
             table[key] = val
 
@@ -465,24 +460,6 @@ def load_clsim_table_minimal(fpath, mmap=False, include_overflow=False):
 
             if not new_style:
                 if n_dims == 5:
-                    ## Space-time dimensions
-                    #table['r_bin_edges'] = force_little_endian(
-                    #    pf_table[1].data # meters # pylint: disable=no-member
-                    #)
-                    #table['costheta_bin_edges'] = force_little_endian(
-                    #    pf_table[2].data # pylint: disable=no-member
-                    #)
-                    #table['t_bin_edges'] = force_little_endian(
-                    #    pf_table[3].data # nanoseconds # pylint: disable=no-member
-                    #)
-
-                    ## Photon directionality
-                    #table['costhetadir_bin_edges'] = force_little_endian(
-                    #    pf_table[4].data # pylint: disable=no-member
-                    #)
-                    #table['deltaphidir_bin_edges'] = force_little_endian(
-                    #    pf_table[5].data # pylint: disable=no-member
-                    #)
                     axnames = ['r', 'costheta', 't', 'costhetadir', 'deltaphidir']
                 elif n_dims == 6:
                     axnames = ['r', 'costheta', 'phi', 't', 'costhetadir', 'deltaphidir']
