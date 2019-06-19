@@ -383,11 +383,11 @@ def get_events(
         Arguments passed to ``slice`` for only retrieving select events from
         the source.
 
-    agg_start : int >= 0 or None, optional
+    agg_start : None or int with 0 <= agg_start <= agg_stop, optional
 
-    agg_stop : int > agg_start >= 0 or None, optional
+    agg_stop : None or int with 0 <= agg_start <= agg_stop, optional
 
-    agg_step : int >= 1 or None, optional
+    agg_step : None or int >= 1, optional
 
     truth : bool, optional
         Whether to extract Monte Carlo truth information from the file (only
