@@ -26,8 +26,7 @@ case $HOSTNAME in
 esac
 
 if [ "$myhostname" = "ET" ] ; then
-    conda activate
-    tdi0=""
+    conda activate tdi0=""
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_on"
     tdi1=""
@@ -43,36 +42,6 @@ if [ "$myhostname" = "ET" ] ; then
     #proto="/home/icecube/retro/tables/large_5d_notilt_combined/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
     #tmpl_lib="--template-library /home/icecube/retro/tables/large_5d_notilt_combined/ckv_dir_templates.npy"
     #tblkind="ckv_templ_compr"
-
-    # -- Lea tables: 80 clusters, uncompressed -- #
-
-    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    #tmpl_lib=""
-    #tblkind="ckv_uncompr"
-
-    # -- Lea tables: 80 clusters, template compressed -- #
-
-    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    #tblkind="ckv_templ_compr"
-
-    # -- Lea tables: 80 clusters plus string 81 DOMs 29-60 are single-DOM tables (not clustered w/ other DOMs) -- #
-
-    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80+str81_29-60/cl{cluster_idx}"
-    #tmpl_lib=""
-    #tblkind="ckv_uncompr"
-
-    # -- Lea tables: 1 table used for all DOMs (cluster 0 from above) -- #
-
-    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_1/cl{cluster_idx}"
-    #tmpl_lib="--template-library /data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    #tblkind="ckv_templ_compr"
-
-    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; uncompressed (low stats) -- #
-
-    #proto="/data/icecube/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60/cl{cluster_idx}"
-    #tmpl_lib=""
-    #tblkind="ckv_uncompr"
 
     # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; uncompressed (high stats) -- #
 
@@ -93,12 +62,6 @@ else
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /gpfs/group/dfc13/default/retro/tables/tdi_table_873a6a13_tilt_on_anisotropy_on"
     tdi1=""
-
-    # -- Lea tables: 80 clusters, template compressed -- #
-
-    #proto="/gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/cl{cluster_idx}"
-    #tmpl_lib="--template-library /gpfs/group/dfc13/xv/retro/tables/tilt_on_anisotropy_on_noazimuth_80/ckv_dir_templates.npy"
-    #tblkind="ckv_templ_compr"
 
     # -- Mie tables: separate, template compressed -- #
 

@@ -34,7 +34,6 @@ function runit () {
     echo "Extracting from file / to dir: \"$full_i3_filepath\" -->  \"$outdir\""
     outdir=$( echo "$full_i3_filepath" | sed 's/\.i3.*//' )
     "$mydir"/../retro/i3processing/extract_events.py \
-        --external-gcd \
         --triggers I3TriggerHierarchy \
         --pulses SplitInIcePulses \
         --recos LineFit_DC L5_SPEFit11 \
