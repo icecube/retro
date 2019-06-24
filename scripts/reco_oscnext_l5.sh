@@ -26,7 +26,8 @@ case $HOSTNAME in
 esac
 
 if [ "$myhostname" = "ET" ] ; then
-    conda activate tdi0=""
+    conda activate
+    tdi0=""
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_off"
     #tdi0="--tdi /data/icecube/retro/tables/tdi/tdi_table_873a6a13_tilt_on_anisotropy_on"
     tdi1=""
