@@ -148,7 +148,7 @@ def deltaphidir_to_absdeltaphidir(input_file, output_file):
     for output_bin_idx, input_bin_idx, overlap_fract in mapping:
         output_slicer[dim_num] = output_bin_idx
         input_slicer[dim_num] = input_bin_idx
-        output_table[output_slicer] += input_table[input_slicer]
+        output_table[output_slicer] += overlap_fract * input_table[input_slicer]
 
     # Save the binning to the output directory
     np.save(join(output_dir, "binning.npy"), output_binning)
