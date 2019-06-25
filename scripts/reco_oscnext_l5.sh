@@ -100,6 +100,7 @@ fi
 #kernprof -l -v \
 $retro_dir/retro/reco.py \
     --method crs_prefit \
+    --filter 'event["L5_oscNext_bool"]' \
     \
     --gcd $gcd \
     --dom-tables-kind "$tblkind" \

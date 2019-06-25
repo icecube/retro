@@ -73,7 +73,7 @@ from retro.utils.geom import (
     reflect,
 )
 from retro.utils.get_arg_names import get_arg_names
-from retro.utils.misc import expand, mkdir, sort_dict
+from retro.utils.misc import sort_dict
 from retro.utils.stats import estimate_from_llhp
 
 
@@ -122,6 +122,8 @@ class Reco(object):
     ----------
     events_kw, dom_tables_kw, tdi_tables_kw : mappings
         As returned by `retro.init_obj.parse_args`
+
+    debug : bool
 
     """
 
@@ -571,7 +573,14 @@ class Reco(object):
             )
         )
 
-    def run(self, methods, redo_failed=False, redo_all=False, save_llhp=False):
+    def run(
+        self,
+        methods,
+        redo_failed=False,
+        redo_all=False,
+        save_llhp=False,
+        filter=None,  # pylint: disable=redefined-builtin
+    ):
         """Run reconstruction(s) on events.
 
         Parameters
@@ -595,6 +604,14 @@ class Reco(object):
             LLH range of the max LLH (this takes up a lot of disk space and
             creats a lot of files; use with caution if running jobs en masse)
 
+        filter : str or None
+            Filter to apply for selecting events to reconstruct. String is
+            passed through `eval` and must produce a scalar value interpretable
+            via `bool(eval(filter))`. Current event is accessible via the name
+            `event` and numpy is named `np`. E.g. .. ::
+
+                filter="event['header']['L5_oscNext_bool']"
+
         """
         start_time = time.time()
         if isinstance(methods, string_types):
@@ -611,11 +628,24 @@ class Reco(object):
         if len(set(methods)) != len(methods):
             raise ValueError("Same reco specified multiple times")
 
+        if filter is not None:
+            assert isinstance(filter, string_types)
+            filter = filter.strip()
+            print("filter: '{}'".format(filter))
+
         print("Running {} reconstruction(s) on all specified events".format(methods))
 
         self.successful_reco_counter = OrderedDict([(method, 0) for method in methods])
 
-        for _ in self.events:
+        for event in self.events:  # pylint: disable=unused-variable
+            if filter and not eval(filter):  # pylint: disable=eval-used
+                print(
+                    "filter evaluates to False; skipping event #{} (index {})".format(
+                        self.event_counter, event.meta["event_idx"]
+                    )
+                )
+                continue
+
             for method in methods:
                 estimate_outf = join(
                     self.event.meta["events_root"],
@@ -668,10 +698,26 @@ class Reco(object):
         Call, e.g., via:
 
             self.generate_prior_method(
-                x=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-100, Bounds.REL), (100, Bounds.REL))),
-                y=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-100, Bounds.REL), (100, Bounds.REL))),
-                z=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-50, Bounds.REL), (50, Bounds.REL))),
-                time=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT, extents=((-1000, Bounds.REL), (1000, Bounds.REL))),
+                x=dict(
+                    kind=PRI_OSCNEXT_L5_V1_PREFIT,
+                    extents=((-100, Bounds.REL),
+                    (100, Bounds.REL)),
+                ),
+                y=dict(
+                    kind=PRI_OSCNEXT_L5_V1_PREFIT,
+                    extents=((-100, Bounds.REL),
+                    (100, Bounds.REL)),
+                ),
+                z=dict(
+                    kind=PRI_OSCNEXT_L5_V1_PREFIT,
+                    extents=((-50, Bounds.REL),
+                    (50, Bounds.REL)),
+                ),
+                time=dict(
+                    kind=PRI_OSCNEXT_L5_V1_PREFIT,
+                    extents=((-1000, Bounds.REL),
+                    (1000, Bounds.REL)),
+                ),
                 azimuth=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
                 zenith=dict(kind=PRI_OSCNEXT_L5_V1_PREFIT),
             )
@@ -699,7 +745,7 @@ class Reco(object):
             self.priors_used[dim_name] = prior_def
             miscellany.append(misc)
 
-        def prior(cube, ndim=None, nparams=None):  # pylint: disable=unused-argument
+        def prior(cube, ndim=None, nparams=None):  # pylint: disable=unused-argument, inconsistent-return-statements
             """Apply `prior_funcs` to the hypercube to map values from the unit
             hypercube onto values in the physical parameter space.
 
@@ -2218,6 +2264,15 @@ def main(description=__doc__):
         "--save-llhp",
         action="store_true",
         help="Whether to save LLHP within 30 LLH of max-LLH to disk",
+    )
+    parser.add_argument(
+        "--filter",
+        default=None,
+        help="""Filter to apply for selecting events to reconstruct. String is
+        passed through `eval` and must produce a scalar value interpretable via
+        `bool(eval(filter))`. Current event is accessible via the name `event`
+        and numpy is named `np`. E.g.,
+        --filter='event["header"]["L5_oscNext_bool"]'"""
     )
 
     split_kwargs = init_obj.parse_args(
