@@ -31,14 +31,17 @@ mydir=$( dirname "$0" )
 
 function runit () {
     full_i3_filepath="$1"
-    echo "Extracting from file / to dir: \"$full_i3_filepath\" -->  \"$outdir\""
+    echo "Extracting from file --> to dir: \"$full_i3_filepath\" -->  \"$outdir\""
     outdir=$( echo "$full_i3_filepath" | sed 's/\.i3.*//' )
     "$mydir"/../retro/i3processing/extract_events.py \
+        --fpath "$full_i3_filepath" \
+        --additional-keys "L5_oscNext_bool" \
+        --outdir "$outdir" \
+        --truth \
         --triggers I3TriggerHierarchy \
         --pulses SplitInIcePulses \
         --recos LineFit_DC L5_SPEFit11 \
-        --fpath "$full_i3_filepath" \
-        --outdir "$outdir" &
+        &
 }
 
 if [ -n "$root_dir" ] ; then

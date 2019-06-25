@@ -56,7 +56,7 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict, Sequence
+from collections import Iterable, OrderedDict, Sequence
 from copy import deepcopy
 from hashlib import sha256
 from os import listdir
@@ -1440,6 +1440,7 @@ def extract_events(
     recos=tuple(),
     triggers=tuple(),
     truth=False,
+    additional_keys=None,
 ):
     """Extract event information from an i3 file.
 
@@ -1475,6 +1476,8 @@ def extract_events(
     truth : bool
         Whether or not Monte Carlo truth for the event should be extracted for
         each event
+
+    additional_keys : str, iterable thereof, or None
 
     Returns
     -------
@@ -1520,6 +1523,14 @@ def extract_events(
     sha256_hex = sha256(open(fpath, "rb").read()).hexdigest()
 
     fpaths = [fpath]
+
+    if additional_keys is None:
+        additional_keys = tuple()
+    elif isinstance(additional_keys, string_types):
+        additional_keys = (additional_keys,)
+    else:
+        assert isinstance(additional_keys, Iterable)
+        additional_keys = tuple(additional_keys)
 
     if external_gcd is True or external_gcd is None:
         fdir = dirname(fpath)
@@ -1631,6 +1642,9 @@ def extract_events(
                 sys.stderr.write("Failed to get truth from frame buffer")
                 raise
             truths.append(event_truth)
+
+        for frame_key in additional_keys:
+            event[frame_key] = pframe[frame_key].value
 
         events.append(event)
 
@@ -1810,6 +1824,12 @@ def main(description=__doc__):
         help="""Trigger hierarchy names to extract from each event""",
     )
     parser.add_argument("--truth", action="store_true")
+    parser.add_argument(
+        "--additional-keys",
+        default=None,
+        nargs="+",
+        help="Additional keys to extract from event I3 frame",
+    )
     args = parser.parse_args()
     kwargs = vars(args)
     if kwargs.pop("ignore_external_gcd"):
