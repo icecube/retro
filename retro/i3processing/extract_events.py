@@ -41,6 +41,9 @@ __all__ = [
     "I3PARTICLE_SPECS",
     "MissingPhysicsFrameError",
     "extract_file_metadata",
+    "dict2struct",
+    "get_frame_item",
+    "extract_gcd",
     "extract_reco",
     "extract_trigger_hierarchy",
     "extract_pulses",
@@ -88,6 +91,8 @@ from retro.retro_types import (
     CASCADE_T,
     NO_CASCADE,
     INVALID_CASCADE,
+    OMGEO_T,
+    OMType,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
 from retro.utils.misc import expand, mkdir, set_explicit_dtype
@@ -278,6 +283,13 @@ MILLIPEDE_FIT_PARAMS_SPECS = OrderedDict(
 )
 """See millipede/private/millipede/converter/MillipedeFitParamsConverter.cxx"""
 
+I3GEOMETRY_TIME_SPECS = OrderedDict(
+    [
+        ("start_time", dict(paths=("start_time.utc_year", "start_time.utc_daq_time"), dtype=I3TIME_T)),
+        ("end_time", dict(paths=("end_time.utc_year", "end_time.utc_daq_time"), dtype=I3TIME_T)),
+    ]
+)
+
 
 class MissingPhysicsFrameError(Exception):
     pass
@@ -408,6 +420,70 @@ def get_frame_item(frame, key, specs, allow_missing):
         out_d[output_name] = value
 
     return out_d
+
+
+def extract_gcd(frame):
+    # Get start & end times using standard functions
+    out_d = get_frame_item(
+        frame,
+        key="I3Geometry",
+        specs=I3GEOMETRY_TIME_SPECS,
+        allow_missing=False,
+    )
+
+    # Get omgeo, which is not convertible using `get_frame_item`
+    omgeo_frame_obj = frame["I3Geometry"].omgeo
+    i3calibration = frame["I3Calibration"]
+    dom_cal = i3calibration.dom_cal
+    bad_doms_list = frame["BadDomsList"]
+
+    omgeo = np.empty(shape=len(omgeo_frame_obj), dtype=OMGEO_T)
+    for i, omkey in enumerate(sorted(omgeo_frame_obj.keys())):
+        geo = omgeo[omkey]
+        cal = dom_cal[omkey]
+        major, minor, rev = [np.uint8(x) for x in cal.dom_cal_version.split(".")]
+
+        omgeo[i]["omkey"]["string"] = omkey.string
+        omgeo[i]["omkey"]["dom"] = omkey.om
+        omgeo[i]["omtype"] = OMType(int(geo.omtype))
+        omgeo[i]["area"] = geo.area
+        omgeo[i]["position"]["x"] = geo.position.x
+        omgeo[i]["position"]["y"] = geo.position.y
+        omgeo[i]["position"]["z"] = geo.position.z
+        omgeo[i]["direction"]["azimuth"] = geo.direction.azimuth
+        omgeo[i]["direction"]["zenith"] = geo.direction.zenith
+        omgeo[i]["is_bad_dom"] = omkey in bad_doms_list
+        omgeo[i]["dom_cal_version"]["major"] = major
+        omgeo[i]["dom_cal_version"]["minor"] = minor
+        omgeo[i]["dom_cal_version"]["rev"] = rev
+        omgeo[i]["relative_dom_eff"] = cal.relative_dom_eff
+        omgeo[i]["dom_noise_rate"] = cal.dom_noise_rate
+        omgeo[i]["temperature"] = cal.temperature
+
+    out_d["omgeo"] = omgeo
+
+    #DETECTOR_STATUS_T = np.dtype(
+    #    [
+    #        ('daq_configuration_name', 'sps-IC86-mitigatedHVs-V175'),
+    #        ('dom_status', <icecube.dataclasses.Map_OMKey_I3DOMStatus at 0x7efe5fc9a7c0>),
+    #        ('end_time', I3Time(2011,116672520000000000L)),
+    #        ('start_time', I3Time(2011,116382900000000000L)),
+    #        ('trigger_status',
+    #         <icecube.dataclasses.Map_TriggerKey_I3TriggerStatus at 0x7efe5fc9a670>),
+    #    ]
+    #)
+
+    dom_status = np.empty(
+        shape=len(frame["I3DetectorStatus"].dom_status),
+        dtype=DOM_STATUS_T,
+    )
+    dom_status_frame_obj = frame["I3DetectorStatus"].dom_status
+    for i, omkey in enumerate(sorted(dom_status_frame_obj.keys())):
+        ds = dom_status_frame_obj[omkey]
+        dom_status[i]["omkey"]["string"] = omkey.string
+        dom_status[i]["omkey"]["dom"] = omkey.om
+
+    detector_status_t
 
 
 def extract_reco(frame, reco):
@@ -1557,6 +1633,8 @@ def extract_events(
     events = []
     truths = []
 
+    gcd_info = OrderedDict()
+
     photons_d = OrderedDict()
     for name in photons:
         photons_d[name] = []
@@ -1587,6 +1665,7 @@ def extract_events(
 
         Out
         ---
+        gcd_info : OrderedDict
         events : list
         photons_d : OrderedDict
         pulses_d : OrderedDict

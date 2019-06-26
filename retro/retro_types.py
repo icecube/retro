@@ -21,6 +21,9 @@ __all__ = [
     'TimePolCoord',
     'TimeSphCoord',
     'OMKEY_T',
+    'I3POSITION_T',
+    'I3DIRECTION_T',
+    'OMGEO_T',
     'DOM_INFO_T',
     'EVT_DOM_INFO_T',
     'PULSE_T',
@@ -39,7 +42,13 @@ __all__ = [
     'TriggerSourceID',
     'TriggerSubtypeID',
     'ExtractionError',
+    'OMType',
+    'CableType',
+    'DOMGain',
+    'TrigMode',
+    'LCMode',
     'TRIGGER_T',
+    'TRIGGER_KEY_T',
     'SRC_T',
     'TRACK_T',
     'INVALID_TRACK',
@@ -153,6 +162,75 @@ OMKEY_T = np.dtype(
     [
         ('string', np.uint16),
         ('dom', np.uint16),
+    ]
+)
+
+I3POSITION_T = np.dtype(
+    [
+        ('x', np.float64),
+        ('y', np.float64),
+        ('z', np.float64),
+    ]
+)
+
+I3DIRECTION_T = np.dtype(
+    [
+        ('azimuth', np.float64),
+        ('zenith', np.float64),
+    ]
+)
+
+DOM_CAL_VERSION_T = np.dtype(
+    [
+        ('major', np.uint8),
+        ('minor', np.uint8),
+        ('rev', np.uint8),
+    ]
+)
+
+OMGEO_T = np.dtype(
+    [
+        ('omkey', OMKEY_T),
+        ('omtype', np.uint8),
+        ('area', np.float64),
+        ('position', I3POSITION_T),
+        ('direction', I3DIRECTION_T),
+        ('is_bad_dom', np.bool8),
+        ('dom_cal_version', DOM_CAL_VERSION_T),
+        ('relative_dom_eff', np.float64),
+        ('dom_noise_rate', np.float64),  # per ns
+        ('temperature', np.float64),  # kelvin
+    ]
+)
+
+DOM_STATUS_T = np.dtype(
+    [
+        ('cable_type', np.int8),  # icecube.dataclasses.CableType
+        ('dac_fadc_ref', np.float64),
+        ('dac_trigger_bias_0', np.float64),
+        ('dac_trigger_bias_1', np.float64),
+        ('delta_compress', np.bool8),  # icecube.dataclasses.OnOff
+        ('dom_gain_type', np.int8),  # icecube.dataclasses.DOMGain
+        ('fe_pedestal', np.float64),
+        # (???) ('identity', <bound method I3DOMStatus.identity of <icecube.dataclasses.I3DOMStatus object at 0x7efe5f927410>>),
+        ('lc_mode', np.int8),  # icecube.dataclasses.LCMode
+        ('lc_span', np.uint32),
+        ('lc_window_post', np.float64),
+        ('lc_window_pre', np.float64),
+        ('mpe_threshold', np.float64),
+        ('n_bins_atwd_0', np.uint32),
+        ('n_bins_atwd_1', np.uint32),
+        ('n_bins_atwd_2', np.uint32),
+        ('n_bins_atwd_3', np.uint32),
+        ('n_bins_fadc', np.uint32),
+        ('pmt_hv', np.float64),
+        ('slc_active', np.bool8),
+        ('spe_threshold', np.float64),
+        ('status_atwd_a', np.bool8),  # icecube.dataclasses.OnOff
+        ('status_atwd_b', np.bool8),  # icecube.dataclasses.OnOff
+        ('status_fadc', np.bool8),  # icecube.dataclasses.OnOff
+        ('trig_mode', np.int8),  # icecube.dataclasses.TrigMode
+        ('tx_mode', np.int8),  # icecube.dataclasses.LCMode
     ]
 )
 
@@ -596,6 +674,67 @@ class ExtractionError(enum.IntEnum):
     NU_NC_OUTOING_NU_MISSING = 2
 
 
+class OMType(enum.IntEnum):
+    """`OMType` enum
+
+    Note this currently requires only uint8, i.e., [0, 255], for storage.
+
+    Scraped from dataclasses/public/dataclasses/geometry/I3OMGeo.h, 2019-06-26
+    SVN rev 167541
+    """
+    # pylint: disable=invalid-name
+    UnknownType = 0
+    AMANDA = 10
+    IceCube = 20
+    IceTop = 30
+    Scintillator = 40
+    IceAct = 50
+    # OMType > 100 are Gen2 R&D optical modules
+    PDOM = 110
+    DEgg = 120
+    mDOM = 130
+    WOM = 140
+    FOM = 150
+
+
+class CableType(enum.IntEnum):
+    """icecube.dataclasses.CableType"""
+    # pylint: disable=invalid-name
+    UnknownCableType = -1
+    Terminated = 0
+    Unterminated = 1
+
+
+class DOMGain(enum.IntEnum):
+    """icecube.dataclasses.DOMGain"""
+    # pylint: disable=invalid-name
+    UnknownGainType = -1
+    High = 0
+    Low = 1
+
+class TrigMode(enum.IntEnum):
+    """icecube.dataclasses.TrigMode"""
+    # pylint: disable=invalid-name
+    UnknownTrigMode = -1
+    TestPattern = 0
+    CPU = 1
+    SPE = 2
+    Flasher = 3
+    MPE = 4
+
+
+class LCMode(enum.IntEnum):
+    """icecube.dataclasses.LCMode"""
+    # pylint: disable=invalid-name
+    UnknownLCMode = -1
+    LCOff = 0
+    UpOrDown = 1
+    Up = 2
+    Down = 3
+    UpAndDown = 4
+    SoftLC = 5
+
+
 TRIGGER_T = np.dtype([
     ('type', np.uint8),
     ('subtype', np.uint8),
@@ -605,6 +744,17 @@ TRIGGER_T = np.dtype([
     ('time', np.float32),
     ('length', np.float32)
 ])
+
+
+TRIGGER_KEY_T = np.dtype(
+    [
+        ('type', np.uint8),
+        ('subtype', np.uint8),
+        ('source', np.uint8),
+        ('config_id', np.int32),
+    ]
+)
+"""icecube.dataclasses.TriggerKey"""
 
 
 SRC_T = np.dtype([
@@ -638,6 +788,7 @@ NEUTRINO_T = np.dtype([
     ('length', np.float32),
 ])
 
+
 TRACK_T = np.dtype([
     ('pdg_encoding', np.int32),
     ('time', np.float32),
@@ -653,6 +804,7 @@ TRACK_T = np.dtype([
     ('stochastic_loss', np.float32),
     ('vis_em_equiv_stochastic_loss', np.float32),
 ])
+
 
 INVALID_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
 INVALID_TRACK['pdg_encoding'] = ParticleType.unknown
