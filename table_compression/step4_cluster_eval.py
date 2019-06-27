@@ -25,10 +25,11 @@ args = parser.parse_args()
 # load the latest, greates kmeans centroids
 centroids = np.load(args.centroids)
 centroids = np.nan_to_num(centroids)
+#centroids = centroids[:, np.newaxis]
+#print 'centroids shape: ', centroids.shape
+#print 'first centroid: ', centroids[0]
 k_means = KMeans(centroids.shape[0])
 k_means.cluster_centers_ = centroids
-#with open('kmeans_4000_clusters.pkl', 'rb') as f:
-#    k_means = pickle.load(f)
 
 print 'table cluster %s'%(args.cluster_idx)
 
