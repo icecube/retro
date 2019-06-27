@@ -10,7 +10,6 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     '__version__',
-    'GarbageInputError',
     'MissingOrInvalidPrefitError',
     'NUMBA_AVAIL',
     'numba_jit',
@@ -64,11 +63,6 @@ from ._version import get_versions
 
 __version__ = get_versions()['version']
 del get_versions
-
-
-class GarbageInputError(ValueError):
-    """Input value is bad"""
-    pass
 
 
 class MissingOrInvalidPrefitError(ValueError):
