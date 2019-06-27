@@ -422,10 +422,10 @@ def get_frame_item(frame, key, specs, allow_missing):
     return out_d
 
 
-def extract_gcd(frame):
+def extract_gcd(g_frame, c_frame, d_frame):
     # Get start & end times using standard functions
     out_d = get_frame_item(
-        frame,
+        g_frame,
         key="I3Geometry",
         specs=I3GEOMETRY_TIME_SPECS,
         allow_missing=False,
@@ -462,17 +462,6 @@ def extract_gcd(frame):
 
     out_d["omgeo"] = omgeo
 
-    #DETECTOR_STATUS_T = np.dtype(
-    #    [
-    #        ('daq_configuration_name', 'sps-IC86-mitigatedHVs-V175'),
-    #        ('dom_status', <icecube.dataclasses.Map_OMKey_I3DOMStatus at 0x7efe5fc9a7c0>),
-    #        ('end_time', I3Time(2011,116672520000000000L)),
-    #        ('start_time', I3Time(2011,116382900000000000L)),
-    #        ('trigger_status',
-    #         <icecube.dataclasses.Map_TriggerKey_I3TriggerStatus at 0x7efe5fc9a670>),
-    #    ]
-    #)
-
     dom_status = np.empty(
         shape=len(frame["I3DetectorStatus"].dom_status),
         dtype=DOM_STATUS_T,
@@ -483,7 +472,27 @@ def extract_gcd(frame):
         dom_status[i]["omkey"]["string"] = omkey.string
         dom_status[i]["omkey"]["dom"] = omkey.om
 
-    detector_status_t
+    out_d["I3DetectorStatus"] = detector_status
+    #detector_status_t
+
+    trigger_status_frame_obj = frame["I3DetectorStatus"].trigger_status
+    for trigger_key_fobj, trigger_status in trigger_status_frame_obj.items():
+        trigger_key = np.empty(shape=1, dtype=TRIGGER_KEY_T)
+        trigger_key["source"] = TriggerSourceID(trigger_key_fobj.source)
+        trigger_key["type"] = TriggerTypeID(trigger_key_fobj.type)
+        trigger_key["subtype"] = TriggerSubtypeID(trigger_key_fobj.subtype)
+        trigger_key["config_id"] = TriggerConfigID(trigger_key_fobj.config_id)
+
+    #DETECTOR_STATUS_T = np.dtype(
+    #    [
+    #        ('daq_configuration_name', 'sps-IC86-mitigatedHVs-V175'),
+    #        ('dom_status', <icecube.dataclasses.Map_OMKey_I3DOMStatus at 0x7efe5fc9a7c0>),
+    #        ('end_time', I3Time(2011,116672520000000000L)),
+    #        ('start_time', I3Time(2011,116382900000000000L)),
+    #        ('trigger_status',
+    #         <icecube.dataclasses.Map_TriggerKey_I3TriggerStatus at 0x7efe5fc9a670>),
+    #    ]
+    #)
 
 
 def extract_reco(frame, reco):

@@ -205,6 +205,7 @@ OMGEO_T = np.dtype(
 
 DOM_STATUS_T = np.dtype(
     [
+        ('omkey', OMKEY_T),
         ('cable_type', np.int8),  # icecube.dataclasses.CableType
         ('dac_fadc_ref', np.float64),
         ('dac_trigger_bias_0', np.float64),
@@ -712,6 +713,7 @@ class DOMGain(enum.IntEnum):
     High = 0
     Low = 1
 
+
 class TrigMode(enum.IntEnum):
     """icecube.dataclasses.TrigMode"""
     # pylint: disable=invalid-name
@@ -748,9 +750,9 @@ TRIGGER_T = np.dtype([
 
 TRIGGER_KEY_T = np.dtype(
     [
+        ('source', np.uint8),
         ('type', np.uint8),
         ('subtype', np.uint8),
-        ('source', np.uint8),
         ('config_id', np.int32),
     ]
 )
