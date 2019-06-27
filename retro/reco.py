@@ -50,7 +50,7 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import __version__, GarbageInputError, init_obj
+from retro import __version__, GarbageInputError, MissingOrInvalidPrefitError, init_obj
 from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 from retro.priors import (
@@ -678,7 +678,7 @@ class Reco(object):
                 print('Running "{}" reconstruction'.format(method))
                 try:
                     self._reco_event(method=method, save_llhp=save_llhp)
-                except GarbageInputError as error:
+                except (GarbageInputError, MissingOrInvalidPrefitError) as error:
                     print(
                         'ERROR: event idx {}, reco method {}: "{}"; ignoring'
                         " and moving to next event".format(

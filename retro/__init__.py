@@ -11,6 +11,7 @@ from __future__ import absolute_import, division, print_function
 __all__ = [
     '__version__',
     'GarbageInputError',
+    'MissingOrInvalidPrefitError',
     'NUMBA_AVAIL',
     'numba_jit',
     'RETRO_DIR',
@@ -67,6 +68,11 @@ del get_versions
 
 class GarbageInputError(ValueError):
     """Input value is bad"""
+    pass
+
+
+class MissingOrInvalidPrefitError(ValueError):
+    """Prefit / seed fit missing or invalid"""
     pass
 
 
