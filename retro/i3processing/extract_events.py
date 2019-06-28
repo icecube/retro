@@ -43,7 +43,9 @@ __all__ = [
     "extract_file_metadata",
     "dict2struct",
     "get_frame_item",
-    "extract_gcd",
+    "extract_i3geometry",
+    "extract_i3calibration",
+    "extract_i3detectorstatus",
     "extract_reco",
     "extract_trigger_hierarchy",
     "extract_pulses",
@@ -79,20 +81,29 @@ from retro.retro_types import (
     PHOTON_T,
     PULSE_T,
     TRIGGER_T,
+    I3DOMCALIBRATION_T,
+    I3DOMSTATUS_T,
+    I3OMGEO_T,
+    I3TRIGGERREADOUTCONFIG_T,
+    OMKEY_T,
+    TRIGGERKEY_T,
+    TRACK_T,
+    CASCADE_T,
     ParticleType,
     ParticleShape,
     InteractionType,
     LocationType,
     FitStatus,
     ExtractionError,
-    TRACK_T,
     NO_TRACK,
     INVALID_TRACK,
-    CASCADE_T,
     NO_CASCADE,
     INVALID_CASCADE,
-    OMGEO_T,
     OMType,
+    TriggerSourceID,
+    TriggerTypeID,
+    TriggerSubtypeID,
+    TriggerConfigID,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
 from retro.utils.misc import expand, mkdir, set_explicit_dtype
@@ -283,10 +294,18 @@ MILLIPEDE_FIT_PARAMS_SPECS = OrderedDict(
 )
 """See millipede/private/millipede/converter/MillipedeFitParamsConverter.cxx"""
 
-I3GEOMETRY_TIME_SPECS = OrderedDict(
+I3TIME_SPECS = OrderedDict(
     [
-        ("start_time", dict(paths=("start_time.utc_year", "start_time.utc_daq_time"), dtype=I3TIME_T)),
-        ("end_time", dict(paths=("end_time.utc_year", "end_time.utc_daq_time"), dtype=I3TIME_T)),
+        (
+            "start_time",
+            dict(
+                paths=("start_time.utc_year", "start_time.utc_daq_time"), dtype=I3TIME_T
+            ),
+        ),
+        (
+            "end_time",
+            dict(paths=("end_time.utc_year", "end_time.utc_daq_time"), dtype=I3TIME_T),
+        ),
     ]
 )
 
@@ -422,29 +441,41 @@ def get_frame_item(frame, key, specs, allow_missing):
     return out_d
 
 
-def extract_gcd(g_frame, c_frame, d_frame):
-    # Get start & end times using standard functions
+def extract_i3geometry(frame):
+    """Extract I3Geometry object from frame.
+
+    Note that for now, the `stationgeo` attribute of the I3Geometry frame
+    object is omitted.
+
+    Parameters
+    ----------
+    frame : icecube.icetray.I3Frame
+        Must contain key "I3Geometry" whose value is an
+        ``icecube.dataclasses.I3Geometry`` object
+
+    Returns
+    -------
+    out_d : OrderedDict
+        Keys are the properties (excluding stationgeo) of the I3Geometry frame:
+        "start_time", "end_time", and "omgeo". Values are Numpy arrays of
+        structured dtypes containing (most) of the info from each.
+
+    """
+    # Get `start_time` & `end_time` using standard functions
     out_d = get_frame_item(
-        g_frame,
-        key="I3Geometry",
-        specs=I3GEOMETRY_TIME_SPECS,
-        allow_missing=False,
+        frame, key="I3Geometry", specs=I3TIME_SPECS, allow_missing=False
     )
 
-    # Get omgeo, which is not convertible using `get_frame_item`
+    # Get omgeo, which is not simply extractable using `get_frame_item` func
     omgeo_frame_obj = frame["I3Geometry"].omgeo
-    i3calibration = frame["I3Calibration"]
-    dom_cal = i3calibration.dom_cal
-    bad_doms_list = frame["BadDomsList"]
+    omgeo = np.empty(shape=len(omgeo_frame_obj), dtype=I3OMGEO_T)
 
-    omgeo = np.empty(shape=len(omgeo_frame_obj), dtype=OMGEO_T)
     for i, omkey in enumerate(sorted(omgeo_frame_obj.keys())):
         geo = omgeo[omkey]
-        cal = dom_cal[omkey]
-        major, minor, rev = [np.uint8(x) for x in cal.dom_cal_version.split(".")]
 
         omgeo[i]["omkey"]["string"] = omkey.string
-        omgeo[i]["omkey"]["dom"] = omkey.om
+        omgeo[i]["omkey"]["om"] = omkey.om
+        omgeo[i]["omkey"]["pmt"] = omkey.pmt
         omgeo[i]["omtype"] = OMType(int(geo.omtype))
         omgeo[i]["area"] = geo.area
         omgeo[i]["position"]["x"] = geo.position.x
@@ -452,47 +483,137 @@ def extract_gcd(g_frame, c_frame, d_frame):
         omgeo[i]["position"]["z"] = geo.position.z
         omgeo[i]["direction"]["azimuth"] = geo.direction.azimuth
         omgeo[i]["direction"]["zenith"] = geo.direction.zenith
-        omgeo[i]["is_bad_dom"] = omkey in bad_doms_list
-        omgeo[i]["dom_cal_version"]["major"] = major
-        omgeo[i]["dom_cal_version"]["minor"] = minor
-        omgeo[i]["dom_cal_version"]["rev"] = rev
-        omgeo[i]["relative_dom_eff"] = cal.relative_dom_eff
-        omgeo[i]["dom_noise_rate"] = cal.dom_noise_rate
-        omgeo[i]["temperature"] = cal.temperature
 
     out_d["omgeo"] = omgeo
 
+    # TODO: extract stationgeo
+
+    return dict2struct(out_d)
+
+
+def extract_i3calibration(frame):
+    """Extract I3Calibration object from frame.
+
+    Note that for now, the `vem_cal` attribute of the I3Calibration frame
+    object is omitted.
+
+    Parameters
+    ----------
+    frame : icecube.icetray.I3Frame
+        Must contain key "I3Calibration", whose value is an
+        ``icecube.dataclasses.I3Calibration`` object
+
+    Returns
+    -------
+    out_d : OrderedDict
+        Keys are the properties (excluding vem_cal) of the I3Calibration
+        frame: "start_time", "end_time", and "dom_cal". Values are Numpy arrays
+        of structured dtypes containing (some) of the info from each.
+
+    """
+    # Get `start_time` & `end_time` using standard functions
+    out_d = get_frame_item(
+        frame, key="I3Calibration", specs=I3TIME_SPECS, allow_missing=False
+    )
+
+    i3calibration = frame["I3Calibration"]
+    dom_cal_frame_obj = i3calibration.dom_cal
+    dom_cal = np.empty(shape=len(dom_cal_frame_obj), dtype=I3DOMCALIBRATION_T)
+
+    for i, omkey in enumerate(sorted(dom_cal_frame_obj.keys())):
+        cal = dom_cal_frame_obj[omkey]
+        major, minor, rev = [np.uint8(x) for x in cal.dom_cal_version.split(".")]
+
+        dom_cal[i]["omkey"]["string"] = omkey.string
+        dom_cal[i]["omkey"]["om"] = omkey.om
+        dom_cal[i]["omkey"]["pmt"] = omkey.pmt
+        dom_cal[i]["dom_cal_version"]["major"] = major
+        dom_cal[i]["dom_cal_version"]["minor"] = minor
+        dom_cal[i]["dom_cal_version"]["rev"] = rev
+        dom_cal[i]["relative_dom_eff"] = cal.relative_dom_eff
+        dom_cal[i]["dom_noise_rate"] = cal.dom_noise_rate
+        dom_cal[i]["temperature"] = cal.temperature
+
+
+def extract_i3detectorstatus(frame):
+    # Get `start_time` & `end_time` using standard functions
+    out_d = get_frame_item(
+        frame, key="I3DetectorStatus", specs=I3TIME_SPECS, allow_missing=False
+    )
+
+    # DETECTOR_STATUS_T = np.dtype(
+    #    [
+    #        ('start_time', I3Time(2011,116382900000000000L)),
+    #        ('end_time', I3Time(2011,116672520000000000L)),
+    #        ('daq_configuration_name', 'sps-IC86-mitigatedHVs-V175'),
+    #        ('dom_status', <icecube.dataclasses.Map_OMKey_I3DOMStatus>),
+    #        ('trigger_status', <icecube.dataclasses.Map_TriggerKey_I3TriggerStatus>),
+    #    ]
+    # )
+
+    i3_detector_status = frame["I3DetectorStatus"]
+
     dom_status = np.empty(
-        shape=len(frame["I3DetectorStatus"].dom_status),
-        dtype=DOM_STATUS_T,
+        shape=len(frame["I3DetectorStatus"].dom_status), dtype=I3DOMSTATUS_T
     )
     dom_status_frame_obj = frame["I3DetectorStatus"].dom_status
     for i, omkey in enumerate(sorted(dom_status_frame_obj.keys())):
         ds = dom_status_frame_obj[omkey]
         dom_status[i]["omkey"]["string"] = omkey.string
-        dom_status[i]["omkey"]["dom"] = omkey.om
+        dom_status[i]["omkey"]["om"] = omkey.om
+        dom_status[i]["omkey"]["pmt"] = omkey.pmt
 
-    out_d["I3DetectorStatus"] = detector_status
-    #detector_status_t
+    trigger_status_frame_obj = i3_detector_status.trigger_status
+    trigger_status = OrderedDict()
+    for trigger_num, (trigger_key_fobj, trigger_status_fobj) in enumerate(
+        trigger_status_frame_obj.items()
+    ):
+        this_trigger_config = OrderedDict()
 
-    trigger_status_frame_obj = frame["I3DetectorStatus"].trigger_status
-    for trigger_key_fobj, trigger_status in trigger_status_frame_obj.items():
-        trigger_key = np.empty(shape=1, dtype=TRIGGER_KEY_T)
+        trigger_key = np.empty(shape=1, dtype=TRIGGERKEY_T)
         trigger_key["source"] = TriggerSourceID(trigger_key_fobj.source)
         trigger_key["type"] = TriggerTypeID(trigger_key_fobj.type)
         trigger_key["subtype"] = TriggerSubtypeID(trigger_key_fobj.subtype)
         trigger_key["config_id"] = TriggerConfigID(trigger_key_fobj.config_id)
 
-    #DETECTOR_STATUS_T = np.dtype(
-    #    [
-    #        ('daq_configuration_name', 'sps-IC86-mitigatedHVs-V175'),
-    #        ('dom_status', <icecube.dataclasses.Map_OMKey_I3DOMStatus at 0x7efe5fc9a7c0>),
-    #        ('end_time', I3Time(2011,116672520000000000L)),
-    #        ('start_time', I3Time(2011,116382900000000000L)),
-    #        ('trigger_status',
-    #         <icecube.dataclasses.Map_TriggerKey_I3TriggerStatus at 0x7efe5fc9a670>),
-    #    ]
-    #)
+        this_trigger_config["trigger_key"] = trigger_key
+
+        readout_settings = OrderedDict()
+        for subdet, settings in trigger_status_frame_obj.readout_settings.items():
+            trigger_readout_config = np.empty(shape=1, dtype=I3TRIGGERREADOUTCONFIG_T)
+            trigger_readout_config[0][
+                "readout_time_minus"
+            ] = settings.readout_time_minus
+            trigger_readout_config[0]["readout_time_plus"] = settings.readout_time_plus
+            trigger_readout_config[0][
+                "readout_time_offset"
+            ] = settings.readout_time_offset
+            readout_settings[str(subdet)] = trigger_readout_config
+
+        this_trigger_config["readout_settings"] = dict2struct(readout_settings)
+
+        trigger_status[trigger_num] = dict2struct(this_trigger_config)
+
+    i3_detector_status["trigger_status"] = dict2struct(trigger_status)
+    i3_detector_status["daq_configuration_name"] = np.string0(
+        i3_detector_status.daq_configuration_name
+    )
+
+    out_d["I3DetectorStatus"] = dict2struct(i3_detector_status)
+
+
+def extract_baddomslists(frame):
+    out_d = OrderedDict()
+    for key, bad_doms_list_obj in frame.items():
+        if "baddomslist" not in key.lower():
+            continue
+        bad_doms = np.empty(shape=len(bad_doms_list_obj), dtype=OMKEY_T)
+        for i, omkey in enumerate(sorted(bad_doms_list_obj.keys())):
+            bad_doms[i]["string"] = omkey.string
+            bad_doms[i]["om"] = omkey.om
+            bad_doms[i]["pmt"] = omkey.pmt
+        out_d[key] = bad_doms
+    return out_d
 
 
 def extract_reco(frame, reco):

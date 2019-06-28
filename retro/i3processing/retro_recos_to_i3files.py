@@ -413,20 +413,30 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
 
 
 def retro_recos_to_i3files(
-    recos, eventsdir, point_estimator, i3dir=None, overwrite=False
+    eventsdir, point_estimator, recos=None, i3dir=None, overwrite=False
 ):
     """
 
     Parameters
     ----------
-    recos : str or iterable thereof
     eventsdir : str
     point_estimator : str in {"mean", "median", "max"}
+    recos : str or iterable thereof, optional
+        If not specified, all "retro_*" recos found will be populated
     i3dir : str, optional
         If None or not specified, defaults to `eventsdir`
     overwrite : bool
 
     """
+    eventsdir = abspath(expanduser(expandvars(eventsdir)))
+    # If the leaf reco/events/truth dir "recos" was specified, must go one up
+    # to find events/truth
+    if basename(eventsdir) == "recos":
+        eventsdir = dirname(eventsdir)
+
+    if recos is None:
+        recos = [splitext(n)[0] for n in glob(join(eventsdir, "recos", "retro_*.npy"))]
+
     if isinstance(recos, string_types):
         recos = [recos]
     else:
@@ -436,12 +446,6 @@ def retro_recos_to_i3files(
             raise ValueError(
                 'Can only populate "retro_*" recos; "{}" is invalid'.format(reco)
             )
-
-    eventsdir = abspath(expanduser(expandvars(eventsdir)))
-    # If the leaf reco/events/truth dir "recos" was specified, must go one up
-    # to find events/truth
-    if basename(eventsdir) == "recos":
-        eventsdir = dirname(eventsdir)
 
     if i3dir is None:
         i3dir = eventsdir

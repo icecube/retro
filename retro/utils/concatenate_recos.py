@@ -19,7 +19,7 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict
+from collections import Iterable, OrderedDict
 from glob import glob
 from os import listdir, walk
 from os.path import (
@@ -42,7 +42,7 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import join_struct_arrays, nsort_key_func
+from retro.utils.misc import expand, join_struct_arrays, mkdir, nsort_key_func
 
 
 EVENT_ID_FIELDS = [
@@ -192,7 +192,8 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
         else:
             expected_reco_names = [recos]
     else:
-        expected_reco_names = recos
+        assert isinstance(recos, Iterable)
+        expected_reco_names = list(recos)
 
     if expected_reco_names:
         for reco_name in expected_reco_names:
@@ -382,8 +383,13 @@ def concatenate_recos_and_save(outfile, **kwargs):
         Arguments passed to `concatenate_recos`
 
     """
+    outfile = expand(outfile)
     out_array = concatenate_recos(**kwargs)
+    outdir = dirname(outfile)
+    if not isdir(outdir):
+        mkdir(outdir)
     np.save(outfile, out_array)
+    sys.stdout.write('Saved concatenated array to "{}"\n'.format(outfile))
 
 
 def main():
@@ -402,6 +408,7 @@ def main():
     )
     parser.add_argument(
         "--recos",
+        nargs="+",
         default=None,
         help="""Specify reco names to retrieve, or specify "all" to retrieve
         all recos present (at least those found in the first events/recos

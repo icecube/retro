@@ -23,8 +23,9 @@ __all__ = [
     'OMKEY_T',
     'I3POSITION_T',
     'I3DIRECTION_T',
-    'OMGEO_T',
-    'DOM_INFO_T',
+    'I3OMGEO_T',
+    'I3DOMCALIBRATION_T',
+    'DOMINFO_T',
     'EVT_DOM_INFO_T',
     'PULSE_T',
     'PHOTON_T',
@@ -48,7 +49,8 @@ __all__ = [
     'TrigMode',
     'LCMode',
     'TRIGGER_T',
-    'TRIGGER_KEY_T',
+    'TRIGGERKEY_T',
+    'I3TRIGGERREADOUTCONFIG_T',
     'SRC_T',
     'TRACK_T',
     'INVALID_TRACK',
@@ -160,8 +162,9 @@ TimeSphCoord = namedtuple( # pylint: disable=invalid-name
 
 OMKEY_T = np.dtype(
     [
-        ('string', np.uint16),
-        ('dom', np.uint16),
+        ('string', np.int32),
+        ('om', np.uint32),
+        ('pmt', np.uint8),
     ]
 )
 
@@ -188,22 +191,56 @@ DOM_CAL_VERSION_T = np.dtype(
     ]
 )
 
-OMGEO_T = np.dtype(
+I3OMGEO_T = np.dtype(
     [
         ('omkey', OMKEY_T),
         ('omtype', np.uint8),
         ('area', np.float64),
         ('position', I3POSITION_T),
         ('direction', I3DIRECTION_T),
-        ('is_bad_dom', np.bool8),
-        ('dom_cal_version', DOM_CAL_VERSION_T),
-        ('relative_dom_eff', np.float64),
-        ('dom_noise_rate', np.float64),  # per ns
-        ('temperature', np.float64),  # kelvin
     ]
 )
 
-DOM_STATUS_T = np.dtype(
+
+I3DOMCALIBRATION_T = np.dtype(
+    [
+        ('omkey', OMKEY_T),
+        #('atwd_beacon_baseline', <icecube.dataclasses._atwd_beacon_baseline_proxy>),
+        #('atwd_bin_calib_slope', <icecube.dataclasses._atwd_bin_calib_slope_proxy>),
+        #('atwd_delta_t', <icecube.dataclasses._atwd_gain_proxy>),
+        #('atwd_freq_fit', <icecube.dataclasses._atwd_freq_fit_proxy>),
+        #('atwd_gain', <icecube.dataclasses._atwd_gain_proxy>),
+        #('combined_spe_charge_distribution', <icecube.dataclasses.SPEChargeDistribution>),
+        ('dom_cal_version', DOM_CAL_VERSION_T),
+        ('dom_noise_decay_rate', np.float64),
+        ('dom_noise_rate', np.float64),  # 1/ns
+        ('dom_noise_scintillation_hits', np.float64),
+        ('dom_noise_scintillation_mean', np.float64),
+        ('dom_noise_scintillation_sigma', np.float64),
+        ('dom_noise_thermal_rate', np.float64),
+        #('fadc_baseline_fit', <icecube.dataclasses.LinearFit>),
+        ('fadc_beacon_baseline', np.float64),
+        ('fadc_delta_t', np.float64),
+        ('fadc_gain', np.float64),
+        ('front_end_impedance', np.float64),
+        #('hv_gain_fit', <icecube.dataclasses.LinearFit>),
+        ('is_mean_atwd_charge_valid', np.bool8),
+        ('is_mean_fadc_charge_valid', np.bool8),
+        ('mean_atwd_charge', np.float64),
+        ('mean_fadc_charge', np.float64),
+        #('mpe_disc_calib', <icecube.dataclasses.LinearFit>),
+        #('pmt_disc_calib', <icecube.dataclasses.LinearFit>),
+        ('relative_dom_eff', np.float64),
+        #('spe_disc_calib', <icecube.dataclasses.LinearFit>),
+        #('tau_parameters', <icecube.dataclasses.TauParam>),
+        ('temperature', np.float64),  # Kelvin
+        ('toroid_type', np.uint8),  # icecube.dataclasses.ToroidType.NEW_TOROID),
+        #('transit_time', <icecube.dataclasses.LinearFit>),
+    ]
+)
+
+
+I3DOMSTATUS_T = np.dtype(
     [
         ('omkey', OMKEY_T),
         ('cable_type', np.int8),  # icecube.dataclasses.CableType
@@ -213,7 +250,7 @@ DOM_STATUS_T = np.dtype(
         ('delta_compress', np.bool8),  # icecube.dataclasses.OnOff
         ('dom_gain_type', np.int8),  # icecube.dataclasses.DOMGain
         ('fe_pedestal', np.float64),
-        # (???) ('identity', <bound method I3DOMStatus.identity of <icecube.dataclasses.I3DOMStatus object at 0x7efe5f927410>>),
+        # ('identity', <bound method I3DOMStatus.identity>) ... ???,
         ('lc_mode', np.int8),  # icecube.dataclasses.LCMode
         ('lc_span', np.uint32),
         ('lc_window_post', np.float64),
@@ -235,7 +272,7 @@ DOM_STATUS_T = np.dtype(
     ]
 )
 
-DOM_INFO_T = np.dtype(
+DOMINFO_T = np.dtype(
     [
         ('sd_idx', np.uint32),
         ('operational', np.bool),
@@ -737,6 +774,13 @@ class LCMode(enum.IntEnum):
     SoftLC = 5
 
 
+class ToroidType(enum.IntEnum):
+    """icecube.dataclasses.ToroidType"""
+    # pylint: disable=invalid-name
+    OLD_TOROID = 0
+    NEW_TOROID = 1
+
+
 TRIGGER_T = np.dtype([
     ('type', np.uint8),
     ('subtype', np.uint8),
@@ -748,7 +792,7 @@ TRIGGER_T = np.dtype([
 ])
 
 
-TRIGGER_KEY_T = np.dtype(
+TRIGGERKEY_T = np.dtype(
     [
         ('source', np.uint8),
         ('type', np.uint8),
@@ -757,6 +801,16 @@ TRIGGER_KEY_T = np.dtype(
     ]
 )
 """icecube.dataclasses.TriggerKey"""
+
+
+I3TRIGGERREADOUTCONFIG_T = np.dtype(
+    [
+        ('readout_time_minus', np.float64),
+        ('readout_time_plus', np.float64),
+        ('readout_time_offset', np.float64),
+    ]
+)
+"""icecube.dataclasses.I3TriggerReadoutConfig"""
 
 
 SRC_T = np.dtype([
