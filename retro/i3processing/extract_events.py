@@ -534,6 +534,10 @@ def extract_i3calibration(frame):
         dom_cal[i]["dom_noise_rate"] = cal.dom_noise_rate
         dom_cal[i]["temperature"] = cal.temperature
 
+    out_d["dom_cal"] = dom_cal
+
+    return dict2struct(out_d)
+
 
 def extract_i3detectorstatus(frame):
     # Get `start_time` & `end_time` using standard functions
@@ -553,16 +557,41 @@ def extract_i3detectorstatus(frame):
 
     i3_detector_status = frame["I3DetectorStatus"]
 
-    dom_status = np.empty(
-        shape=len(frame["I3DetectorStatus"].dom_status), dtype=I3DOMSTATUS_T
-    )
-    dom_status_frame_obj = frame["I3DetectorStatus"].dom_status
+    dom_status_frame_obj = i3_detector_status.dom_status
+    dom_status = np.empty(shape=len(dom_status_frame_obj), dtype=I3DOMSTATUS_T)
     for i, omkey in enumerate(sorted(dom_status_frame_obj.keys())):
-        ds = dom_status_frame_obj[omkey]
+        this_dom_status = dom_status_frame_obj[omkey]
         dom_status[i]["omkey"]["string"] = omkey.string
         dom_status[i]["omkey"]["om"] = omkey.om
         dom_status[i]["omkey"]["pmt"] = omkey.pmt
+        dom_status[i]["cable_type"] = CableType(this_dom_status.cable_type)
+        dom_status[i]["dac_fadc_ref"] = this_dom_status.dac_fadc_ref
+        dom_status[i]["dac_trigger_bias_0"] = this_dom_status.dac_trigger_bias_0
+        dom_status[i]["dac_trigger_bias_1"] = this_dom_status.dac_trigger_bias_1
+        dom_status[i]["delta_compress"] = OnOff(this_dom_status.delta_compress)
+        dom_status[i]["dom_gain_type"] = DOMGain(this_dom_status.dom_gain_type)
+        dom_status[i]["fe_pedestal"] = this_dom_status.fe_pedestal
+        dom_status[i]["lc_mode"] = LCMode(this_dom_status.lc_mode)
+        dom_status[i]["lc_span"] = this_dom_status.lc_span
+        dom_status[i]["lc_window_post"] = this_dom_status.lc_window_post
+        dom_status[i]["lc_window_pre"] = this_dom_status.lc_window_pre
+        dom_status[i]["mpe_threshold"] = this_dom_status.mpe_threshold
+        dom_status[i]["n_bins_atwd_0"] = this_dom_status.n_bins_atwd_0
+        dom_status[i]["n_bins_atwd_1"] = this_dom_status.n_bins_atwd_1
+        dom_status[i]["n_bins_atwd_2"] = this_dom_status.n_bins_atwd_2
+        dom_status[i]["n_bins_atwd_3"] = this_dom_status.n_bins_atwd_3
+        dom_status[i]["n_bins_fadc"] = this_dom_status.n_bins_fadc
+        dom_status[i]["pmt_hv"] = this_dom_status.pmt_hv
+        dom_status[i]["slc_active"] = this_dom_status.slc_active
+        dom_status[i]["spe_threshold"] = this_dom_status.spe_threshold
+        dom_status[i]["status_atwd_a"] = OnOff(this_dom_status.status_atwd_a)
+        dom_status[i]["status_atwd_b"] = OnOff(this_dom_status.status_atwd_b)
+        dom_status[i]["status_fadc"] = OnOff(this_dom_status.status_fadc)
+        dom_status[i]["trig_mode"] = TrigMode(this_dom_status.trig_mode)
+        dom_status[i]["tx_mode"] = LCMode(this_dom_status.tx_mode)
 
+    # Trigger status does not have uniform sub-fields across all types, so
+    # build up dict keyed by str(trigger index)
     trigger_status_frame_obj = i3_detector_status.trigger_status
     trigger_status = OrderedDict()
     for trigger_num, (trigger_key_fobj, trigger_status_fobj) in enumerate(
@@ -600,6 +629,8 @@ def extract_i3detectorstatus(frame):
     )
 
     out_d["I3DetectorStatus"] = dict2struct(i3_detector_status)
+
+    return dict2struct(out_d)
 
 
 def extract_baddomslists(frame):
