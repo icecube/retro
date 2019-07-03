@@ -194,6 +194,10 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
     else:
         assert isinstance(recos, Iterable)
         expected_reco_names = list(recos)
+        for reco in expected_reco_names:
+            if reco == "all":
+                assert len(expected_reco_names) == 1
+                expected_reco_names = None
 
     if expected_reco_names:
         for reco_name in expected_reco_names:
@@ -224,6 +228,10 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
 
             this_events = np.load(join(dirpath, "events.npy"))
             if len(this_events) == 0:
+                paths_with_empty_events_file.append(dirpath)
+                continue
+
+            if np.count_nonzero(this_events["L5_oscNext_bool"]) == 0:
                 paths_with_empty_events_file.append(dirpath)
                 continue
 
@@ -333,6 +341,21 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
 
         all_events_to_process.append(this_events)
         all_dirs_concatenated.append(dirpath)
+
+    print(
+        "Paths with empty events files: {:d}, paths with non-empty events"
+        " files: {:d}, total: {:d}".format(
+            len(paths_with_empty_events_file),
+            len(paths_with_nonempty_events_file),
+            len(paths_with_empty_events_file) + len(paths_with_nonempty_events_file),
+        )
+    )
+    print(
+        "Paths with non-empty events files skipped due to missing reco(s):"
+        " {:d}".format(
+            len(paths_with_nonempty_events_file) - len(all_dirs_concatenated)
+        )
+    )
 
     if len(all_events_to_process) == 0:
         raise ValueError(
