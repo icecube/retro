@@ -48,6 +48,7 @@ __all__ = [
     'DOMGain',
     'TrigMode',
     'LCMode',
+    'ToroidType',
     'TRIGGER_T',
     'TRIGGERKEY_T',
     'I3TRIGGERREADOUTCONFIG_T',
@@ -247,7 +248,7 @@ I3DOMSTATUS_T = np.dtype(
         ('dac_fadc_ref', np.float64),
         ('dac_trigger_bias_0', np.float64),
         ('dac_trigger_bias_1', np.float64),
-        ('delta_compress', np.bool8),  # icecube.dataclasses.OnOff
+        ('delta_compress', np.int8),  # icecube.dataclasses.OnOff
         ('dom_gain_type', np.int8),  # icecube.dataclasses.DOMGain
         ('fe_pedestal', np.float64),
         # ('identity', <bound method I3DOMStatus.identity>) ... ???,
@@ -264,9 +265,9 @@ I3DOMSTATUS_T = np.dtype(
         ('pmt_hv', np.float64),
         ('slc_active', np.bool8),
         ('spe_threshold', np.float64),
-        ('status_atwd_a', np.bool8),  # icecube.dataclasses.OnOff
-        ('status_atwd_b', np.bool8),  # icecube.dataclasses.OnOff
-        ('status_fadc', np.bool8),  # icecube.dataclasses.OnOff
+        ('status_atwd_a', np.int8),  # icecube.dataclasses.OnOff
+        ('status_atwd_b', np.int8),  # icecube.dataclasses.OnOff
+        ('status_fadc', np.int8),  # icecube.dataclasses.OnOff
         ('trig_mode', np.int8),  # icecube.dataclasses.TrigMode
         ('tx_mode', np.int8),  # icecube.dataclasses.LCMode
     ]
@@ -369,6 +370,18 @@ class InteractionType(enum.IntEnum):
     undefined = 0
     CC = 1
     NC = 2
+
+
+class OnOff(enum.IntEnum):
+    """enum OnOff from public/dataclasses/status/I3DOMStatus.h
+
+    Representable by np.int8.
+
+    """
+    # pylint: disable=invalid-name
+    Unknown = -1
+    Off = 0
+    On = 1
 
 
 class ParticleType(enum.IntEnum):

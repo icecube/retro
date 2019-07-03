@@ -43,9 +43,10 @@ __all__ = [
     "extract_file_metadata",
     "dict2struct",
     "get_frame_item",
-    "extract_i3geometry",
-    "extract_i3calibration",
-    "extract_i3detectorstatus",
+    "extract_i3_geometry",
+    "extract_i3_calibration",
+    "extract_i3_detector_status",
+    "extract_bad_doms_lists",
     "extract_reco",
     "extract_trigger_hierarchy",
     "extract_pulses",
@@ -89,11 +90,17 @@ from retro.retro_types import (
     TRIGGERKEY_T,
     TRACK_T,
     CASCADE_T,
-    ParticleType,
-    ParticleShape,
+    CableType,
+    DOMGain,
+    FitStatus,
     InteractionType,
     LocationType,
-    FitStatus,
+    LCMode,
+    OnOff,
+    ParticleType,
+    ParticleShape,
+    ToroidType,
+    TrigMode,
     ExtractionError,
     NO_TRACK,
     INVALID_TRACK,
@@ -441,7 +448,7 @@ def get_frame_item(frame, key, specs, allow_missing):
     return out_d
 
 
-def extract_i3geometry(frame):
+def extract_i3_geometry(frame):
     """Extract I3Geometry object from frame.
 
     Note that for now, the `stationgeo` attribute of the I3Geometry frame
@@ -455,23 +462,23 @@ def extract_i3geometry(frame):
 
     Returns
     -------
-    out_d : OrderedDict
+    geometry : OrderedDict
         Keys are the properties (excluding stationgeo) of the I3Geometry frame:
         "start_time", "end_time", and "omgeo". Values are Numpy arrays of
         structured dtypes containing (most) of the info from each.
 
     """
     # Get `start_time` & `end_time` using standard functions
-    out_d = get_frame_item(
+    geometry = get_frame_item(
         frame, key="I3Geometry", specs=I3TIME_SPECS, allow_missing=False
     )
 
     # Get omgeo, which is not simply extractable using `get_frame_item` func
     omgeo_frame_obj = frame["I3Geometry"].omgeo
-    omgeo = np.empty(shape=len(omgeo_frame_obj), dtype=I3OMGEO_T)
 
+    omgeo = np.empty(shape=len(omgeo_frame_obj), dtype=I3OMGEO_T)
     for i, omkey in enumerate(sorted(omgeo_frame_obj.keys())):
-        geo = omgeo[omkey]
+        geo = omgeo_frame_obj[omkey]
 
         omgeo[i]["omkey"]["string"] = omkey.string
         omgeo[i]["omkey"]["om"] = omkey.om
@@ -484,14 +491,14 @@ def extract_i3geometry(frame):
         omgeo[i]["direction"]["azimuth"] = geo.direction.azimuth
         omgeo[i]["direction"]["zenith"] = geo.direction.zenith
 
-    out_d["omgeo"] = omgeo
+    geometry["omgeo"] = omgeo
 
     # TODO: extract stationgeo
 
-    return dict2struct(out_d)
+    return geometry
 
 
-def extract_i3calibration(frame):
+def extract_i3_calibration(frame):
     """Extract I3Calibration object from frame.
 
     Note that for now, the `vem_cal` attribute of the I3Calibration frame
@@ -505,21 +512,21 @@ def extract_i3calibration(frame):
 
     Returns
     -------
-    out_d : OrderedDict
+    calibration : OrderedDict
         Keys are the properties (excluding vem_cal) of the I3Calibration
         frame: "start_time", "end_time", and "dom_cal". Values are Numpy arrays
         of structured dtypes containing (some) of the info from each.
 
     """
     # Get `start_time` & `end_time` using standard functions
-    out_d = get_frame_item(
+    calibration = get_frame_item(
         frame, key="I3Calibration", specs=I3TIME_SPECS, allow_missing=False
     )
 
-    i3calibration = frame["I3Calibration"]
-    dom_cal_frame_obj = i3calibration.dom_cal
-    dom_cal = np.empty(shape=len(dom_cal_frame_obj), dtype=I3DOMCALIBRATION_T)
+    i3_calibration_frame_obj = frame["I3Calibration"]
+    dom_cal_frame_obj = i3_calibration_frame_obj.dom_cal
 
+    dom_cal = np.empty(shape=len(dom_cal_frame_obj), dtype=I3DOMCALIBRATION_T)
     for i, omkey in enumerate(sorted(dom_cal_frame_obj.keys())):
         cal = dom_cal_frame_obj[omkey]
         major, minor, rev = [np.uint8(x) for x in cal.dom_cal_version.split(".")]
@@ -530,18 +537,45 @@ def extract_i3calibration(frame):
         dom_cal[i]["dom_cal_version"]["major"] = major
         dom_cal[i]["dom_cal_version"]["minor"] = minor
         dom_cal[i]["dom_cal_version"]["rev"] = rev
-        dom_cal[i]["relative_dom_eff"] = cal.relative_dom_eff
+        dom_cal[i]["dom_noise_decay_rate"] = cal.dom_noise_decay_rate
         dom_cal[i]["dom_noise_rate"] = cal.dom_noise_rate
+        dom_cal[i]["dom_noise_scintillation_hits"] = cal.dom_noise_scintillation_hits
+        dom_cal[i]["dom_noise_scintillation_mean"] = cal.dom_noise_scintillation_mean
+        dom_cal[i]["dom_noise_scintillation_sigma"] = cal.dom_noise_scintillation_sigma
+        dom_cal[i]["dom_noise_thermal_rate"] = cal.dom_noise_thermal_rate
+        dom_cal[i]["fadc_beacon_baseline"] = cal.fadc_beacon_baseline
+        dom_cal[i]["fadc_delta_t"] = cal.fadc_delta_t
+        dom_cal[i]["fadc_gain"] = cal.fadc_gain
+        dom_cal[i]["front_end_impedance"] = cal.front_end_impedance
+        dom_cal[i]["is_mean_atwd_charge_valid"] = cal.is_mean_atwd_charge_valid
+        dom_cal[i]["is_mean_fadc_charge_valid"] = cal.is_mean_fadc_charge_valid
+        dom_cal[i]["mean_atwd_charge"] = cal.mean_atwd_charge
+        dom_cal[i]["mean_fadc_charge"] = cal.mean_fadc_charge
+        dom_cal[i]["relative_dom_eff"] = cal.relative_dom_eff
         dom_cal[i]["temperature"] = cal.temperature
+        dom_cal[i]["toroid_type"] = ToroidType(cal.toroid_type)
 
-    out_d["dom_cal"] = dom_cal
+    calibration["dom_cal"] = dom_cal
 
-    return dict2struct(out_d)
+    return calibration
 
 
-def extract_i3detectorstatus(frame):
+def extract_i3_detector_status(frame):
+    """
+    Parameters
+    ----------
+    frame : icecube.icetray.I3Frame
+        Must contain key "I3DetectorStatus", whose value is an
+        ``icecube.dataclasses.I3DetectorStatus`` object
+
+    Returns
+    -------
+    detector_status : OrderedDict
+        Roughly equivalent Numpy representation of I3DetectorStatus frame object
+
+    """
     # Get `start_time` & `end_time` using standard functions
-    out_d = get_frame_item(
+    detector_status = get_frame_item(
         frame, key="I3DetectorStatus", specs=I3TIME_SPECS, allow_missing=False
     )
 
@@ -555,9 +589,9 @@ def extract_i3detectorstatus(frame):
     #    ]
     # )
 
-    i3_detector_status = frame["I3DetectorStatus"]
+    i3_detector_status_frame_obj = frame["I3DetectorStatus"]
 
-    dom_status_frame_obj = i3_detector_status.dom_status
+    dom_status_frame_obj = i3_detector_status_frame_obj.dom_status
     dom_status = np.empty(shape=len(dom_status_frame_obj), dtype=I3DOMSTATUS_T)
     for i, omkey in enumerate(sorted(dom_status_frame_obj.keys())):
         this_dom_status = dom_status_frame_obj[omkey]
@@ -590,9 +624,11 @@ def extract_i3detectorstatus(frame):
         dom_status[i]["trig_mode"] = TrigMode(this_dom_status.trig_mode)
         dom_status[i]["tx_mode"] = LCMode(this_dom_status.tx_mode)
 
+    detector_status["dom_status"] = dom_status
+
     # Trigger status does not have uniform sub-fields across all types, so
     # build up dict keyed by str(trigger index)
-    trigger_status_frame_obj = i3_detector_status.trigger_status
+    trigger_status_frame_obj = i3_detector_status_frame_obj.trigger_status
     trigger_status = OrderedDict()
     for trigger_num, (trigger_key_fobj, trigger_status_fobj) in enumerate(
         trigger_status_frame_obj.items()
@@ -608,7 +644,7 @@ def extract_i3detectorstatus(frame):
         this_trigger_config["trigger_key"] = trigger_key
 
         readout_settings = OrderedDict()
-        for subdet, settings in trigger_status_frame_obj.readout_settings.items():
+        for subdet, settings in trigger_status_fobj.readout_settings.items():
             trigger_readout_config = np.empty(shape=1, dtype=I3TRIGGERREADOUTCONFIG_T)
             trigger_readout_config[0][
                 "readout_time_minus"
@@ -623,28 +659,42 @@ def extract_i3detectorstatus(frame):
 
         trigger_status[trigger_num] = dict2struct(this_trigger_config)
 
-    i3_detector_status["trigger_status"] = dict2struct(trigger_status)
-    i3_detector_status["daq_configuration_name"] = np.string0(
-        i3_detector_status.daq_configuration_name
+    detector_status["trigger_status"] = (trigger_status)
+    detector_status["daq_configuration_name"] = np.string0(
+        i3_detector_status_frame_obj.daq_configuration_name
     )
 
-    out_d["I3DetectorStatus"] = dict2struct(i3_detector_status)
-
-    return dict2struct(out_d)
+    return detector_status
 
 
-def extract_baddomslists(frame):
-    out_d = OrderedDict()
+def extract_bad_doms_lists(frame):
+    """Extract frame objects named "*BadDomsList*", each of which must be a
+    ``icecube.dataclasses.I3VectorOMKey``.
+
+    Parameters
+    ----------
+    frame : icecube.icetray.I3Frame
+        Must contain key(s) "*BadDomsList*" (case insensitive), each of which
+        whose values are ``icecube.dataclasses.I3VectorOMKey`` objects
+
+    Returns
+    -------
+    bad_doms_lists : OrderedDict
+        Keys are names of frame objects, values are Numpy arrays with dtype
+        `retro.retro_types.OMKEY_T`
+
+    """
+    bad_doms_lists = OrderedDict()
     for key, bad_doms_list_obj in frame.items():
         if "baddomslist" not in key.lower():
             continue
         bad_doms = np.empty(shape=len(bad_doms_list_obj), dtype=OMKEY_T)
-        for i, omkey in enumerate(sorted(bad_doms_list_obj.keys())):
+        for i, omkey in enumerate(bad_doms_list_obj):
             bad_doms[i]["string"] = omkey.string
             bad_doms[i]["om"] = omkey.om
             bad_doms[i]["pmt"] = omkey.pmt
-        out_d[key] = bad_doms
-    return out_d
+        bad_doms_lists[key] = bad_doms
+    return bad_doms_lists
 
 
 def extract_reco(frame, reco):
@@ -1578,8 +1628,6 @@ def extract_truth(frame):
     primary = mctree.primaries[0]
     primary_pdg = primary.pdg_encoding
 
-    # TODO: deal with charged leptons e.g. for CORSIKA/MuonGun
-
     event_truth["pdg_encoding"] = primary_pdg
     event_truth["time"] = primary.time
     event_truth["x"] = primary.pos.x
@@ -1606,7 +1654,7 @@ def extract_truth(frame):
             nu=primary, mctree=mctree, frame=frame, event_truth=event_truth
         )
 
-    elif primary_pdg == ParticleType.unknown:
+    elif primary_pdg == ParticleType.unknown:  # This (can) indicate a muon
         # TODO: how to handle muon bundles?
 
         secondaries = mctree.get_daughters(primary)
@@ -1617,8 +1665,9 @@ def extract_truth(frame):
                 muon = secondaries[0]
             else:
                 raise NotImplementedError(
-                    "Unknown primary with {} secondary not implemented".format(
-                        ParticleType(secondary_pdg)
+                    "primary of type {} and secondary of type {} not"
+                    "implemented".format(
+                        ParticleType.unknown, ParticleType(secondary_pdg)
                     )
                 )
         else:
@@ -1778,9 +1827,7 @@ def extract_events(
         ]
         if len(gcd_fnames) == 1:
             fpaths.insert(0, join(fdir, gcd_fnames[0]))
-        elif (
-            external_gcd is True and len(gcd_fnames) == 0
-        ):  # pylint: disable=len-as-condition
+        elif external_gcd is True and len(gcd_fnames) == 0:
             raise ValueError('No GCD file found in directory "{}"'.format(fdir))
         elif len(gcd_fnames) > 1:
             raise ValueError(
@@ -1935,6 +1982,12 @@ def extract_events(
                 process_frame_buffer(frame_buffer)
             elif frame.Stop == I3Frame.DAQ:
                 frame_buffer = frame_buffer[-1:]
+            elif frame.Stop == I3Frame.Geometry:
+                geometry = extract_i3_geometry(frame)
+            elif frame.Stop == I3Frame.Calibration:
+                calibration = extract_i3_calibration(frame)
+            elif frame.Stop == I3Frame.DetectorStatus:
+                detector_status = extract_i3_detector_status(frame)
 
         except Exception as err:
             sys.stderr.write(
