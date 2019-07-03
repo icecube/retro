@@ -50,7 +50,7 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import __version__, GarbageInputError, init_obj
+from retro import __version__, MissingOrInvalidPrefitError, init_obj
 from retro.hypo.discrete_cascade_kernels import SCALING_CASCADE_ENERGY
 from retro.hypo.discrete_muon_kernels import pegleg_eval
 from retro.priors import (
@@ -653,7 +653,7 @@ class Reco(object):
                     "retro_{}.npy".format(method),
                 )
                 if isfile(estimate_outf):
-                    estimates = np.load(estimate_outf, mmap_mode="r")
+                    estimates = np.load(estimate_outf, mmap_mode="r+")
                     fit_status = estimates[self.event.meta["event_idx"]]["fit_status"]
                     if fit_status != FitStatus.NotSet:
                         if redo_all:
@@ -678,13 +678,23 @@ class Reco(object):
                 print('Running "{}" reconstruction'.format(method))
                 try:
                     self._reco_event(method=method, save_llhp=save_llhp)
-                except GarbageInputError as error:
+                except MissingOrInvalidPrefitError as error:
                     print(
                         'ERROR: event idx {}, reco method {}: "{}"; ignoring'
                         " and moving to next event".format(
                             self.event.meta["event_idx"], method, error
                         )
                     )
+
+                    # TODO: if file doesn't exist yet (no successful estimate
+                    # prior to this one in the file), the fit_status cannot be
+                    # set for this event... but might be set elsewhere... so
+                    # this fit status is useless
+
+                    #if isfile(estimate_outf):
+                    #    estimates[self.event.meta["event_idx"]]["fit_status"] = (
+                    #        FitStatus.MissingSeed
+                    #    )
                 else:
                     self.successful_reco_counter[method] += 1
 
@@ -1698,6 +1708,10 @@ class Reco(object):
         except KeyboardInterrupt:
             raise
 
+        except MissingOrInvalidPrefitError:
+            fit_status = FitStatus.MissingSeed
+            self._print_non_fatal_exception(method=run_info["method"])
+
         except Exception:
             self._print_non_fatal_exception(method=run_info["method"])
 
@@ -1758,6 +1772,10 @@ class Reco(object):
         except KeyboardInterrupt:
             raise
 
+        except MissingOrInvalidPrefitError:
+            fit_status = FitStatus.MissingSeed
+            self._print_non_fatal_exception(method=run_info["method"])
+
         except Exception:
             self._print_non_fatal_exception(method=run_info["method"])
 
@@ -1809,6 +1827,10 @@ class Reco(object):
 
         except KeyboardInterrupt:
             raise
+
+        except MissingOrInvalidPrefitError:
+            fit_status = FitStatus.MissingSeed
+            self._print_non_fatal_exception(method=run_info["method"])
 
         except Exception:
             self._print_non_fatal_exception(method=run_info["method"])
@@ -1960,6 +1982,10 @@ class Reco(object):
 
         except KeyboardInterrupt:
             raise
+
+        except MissingOrInvalidPrefitError:
+            fit_status = FitStatus.MissingSeed
+            self._print_non_fatal_exception(method=run_info["method"])
 
         except Exception:
             self._print_non_fatal_exception(method=run_info["method"])
@@ -2157,6 +2183,10 @@ class Reco(object):
 
         except KeyboardInterrupt:
             raise
+
+        except MissingOrInvalidPrefitError:
+            fit_status = FitStatus.MissingSeed
+            self._print_non_fatal_exception(method=run_info["method"])
 
         except Exception:
             self._print_non_fatal_exception(method=run_info["method"])
