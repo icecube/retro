@@ -41,6 +41,7 @@ __all__ = [
     'join_struct_arrays',
     'nsort_key_func',
     'set_explicit_dtype',
+    'dict2struct',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -950,12 +951,39 @@ def set_explicit_dtype(x):
         return np.bool8(x)
 
     if isinstance(x, Integral):
-        return np.int64(x)
+        x_new = np.int64(x)
+        assert x_new == x
+        return x_new
 
     if isinstance(x, Number):
-        return np.float64(x)
+        x_new = np.float64(x)
+        assert x_new == x
+        return x_new
 
     raise TypeError("Type of argument is invalid: {}".format(type(x)))
+
+
+def dict2struct(d):
+    """Convert a dict with string keys and numpy-typed values into a numpy
+    array with struct dtype.
+
+    Parameters
+    ----------
+    d : OrderedMapping
+        The dict's keys are the names of the fields (strings) and the dict's
+        values are numpy-typed objects.
+
+    Returns
+    -------
+    array : numpy.array of struct dtype
+
+    """
+    dt_spec = OrderedDict()
+    for key, val in d.items():
+        d[key] = typed_val = set_explicit_dtype(val)
+        dt_spec[key] = typed_val.dtype
+    array = np.array(tuple(d.values()), dtype=dt_spec.items())
+    return array
 
 
 if __name__ == '__main__':

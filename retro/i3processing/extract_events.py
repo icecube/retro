@@ -41,7 +41,6 @@ __all__ = [
     "I3PARTICLE_SPECS",
     "MissingPhysicsFrameError",
     "extract_file_metadata",
-    "dict2struct",
     "get_frame_item",
     "extract_i3_geometry",
     "extract_i3_calibration",
@@ -62,7 +61,7 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import Iterable, OrderedDict, Sequence
+from collections import Iterable, Mapping, OrderedDict, Sequence
 from copy import deepcopy
 from hashlib import sha256
 from os import listdir
@@ -113,7 +112,7 @@ from retro.retro_types import (
     TriggerConfigID,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
-from retro.utils.misc import expand, mkdir, set_explicit_dtype
+from retro.utils.misc import expand, mkdir, set_explicit_dtype, dict2struct
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
 
@@ -318,6 +317,10 @@ I3TIME_SPECS = OrderedDict(
 
 
 class MissingPhysicsFrameError(Exception):
+    """Processing a frame buffer via the `process_frame_buffer` closure
+    (function) defined within ::func::`extract_events` requires a physics
+    frame."""
+
     pass
 
 
@@ -353,28 +356,6 @@ def extract_file_metadata(fname):
     )
 
     return file_info
-
-
-def dict2struct(d):
-    """Convert a dict with string keys and typed values into a numpy array with
-    struct dtype.
-
-    Parameters
-    ----------
-    d : OrderedMapping
-        The dict's keys are the names of the fields (strings) and the dict's
-        values are numpy-typed objects.
-
-    Returns
-    -------
-    array : numpy.array of struct dtype
-
-    """
-    dt_spec = OrderedDict()
-    for key, val in d.items():
-        dt_spec[key] = val.dtype
-    array = np.array(tuple(d.values()), dtype=dt_spec.items())
-    return array
 
 
 def get_frame_item(frame, key, specs, allow_missing):
@@ -659,7 +640,7 @@ def extract_i3_detector_status(frame):
 
         trigger_status[trigger_num] = dict2struct(this_trigger_config)
 
-    detector_status["trigger_status"] = (trigger_status)
+    detector_status["trigger_status"] = trigger_status
     detector_status["daq_configuration_name"] = np.string0(
         i3_detector_status_frame_obj.daq_configuration_name
     )
@@ -1643,11 +1624,11 @@ def extract_truth(frame):
     # something else?
 
     # Extract per-event info from I3MCWeightDict
-    mcwd = frame["I3MCWeightDict"]
-    for key in sorted(mcwd.keys()):
+    i3_mcwd = frame["I3MCWeightDict"]
+    for key in sorted(i3_mcwd.keys()):
         if key in event_truth:
             raise ValueError("key '{}' already in event_truth".format(key))
-        event_truth[key] = mcwd[key]
+        event_truth[key] = i3_mcwd[key]
 
     if primary_pdg in NEUTRINOS:
         particles_to_record = process_true_neutrino(
@@ -1873,12 +1854,14 @@ def extract_events(
 
         Out
         ---
-        gcd_info : OrderedDict
         events : list
         photons_d : OrderedDict
         pulses_d : OrderedDict
         recos_d : OrderedDict
         trigger_hierarchies : OrderedDict
+        gcd_info : OrderedDict
+            Populated outside of this function, but this information is thus
+            made available to this function.
 
         """
         num_qframes = 0
@@ -1983,11 +1966,15 @@ def extract_events(
             elif frame.Stop == I3Frame.DAQ:
                 frame_buffer = frame_buffer[-1:]
             elif frame.Stop == I3Frame.Geometry:
-                geometry = extract_i3_geometry(frame)
+                frame_buffer.pop()
+                gcd_info["I3Geometry"] = extract_i3_geometry(frame)
             elif frame.Stop == I3Frame.Calibration:
-                calibration = extract_i3_calibration(frame)
+                frame_buffer.pop()
+                gcd_info["I3Calibration"] = extract_i3_calibration(frame)
             elif frame.Stop == I3Frame.DetectorStatus:
-                detector_status = extract_i3_detector_status(frame)
+                frame_buffer.pop()
+                gcd_info["I3DetectorStatus"] = extract_i3_detector_status(frame)
+                gcd_info.update(extract_bad_doms_lists(frame))
 
         except Exception as err:
             sys.stderr.write(
@@ -2023,11 +2010,14 @@ def extract_events(
             assert not val, "'{}': {}".format(name, val)
         sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(fpath))
 
+    gcd_dir = join(outdir, "gcd")
     photon_series_dir = join(outdir, "photons")
     pulse_series_dir = join(outdir, "pulses")
     recos_dir = join(outdir, "recos")
     trigger_hierarchy_dir = join(outdir, "triggers")
 
+    if gcd_info:
+        mkdir(gcd_dir)
     if photons:
         mkdir(photon_series_dir)
     if pulses:
@@ -2046,6 +2036,13 @@ def extract_events(
 
     events = np.array([tuple(ev.values()) for ev in events], dtype=event_dtype)
     np.save(join(outdir, "events.npy"), events)
+
+    for key, val in gcd_info.items():
+        if isinstance(val, Mapping):
+            np.savez_compressed(join(gcd_dir, key + ".npz"), **val)
+        else:
+            assert isinstance(val, np.ndarray)
+            np.save(join(gcd_dir, key + ".npy"), val)
 
     if truth:
         np.save(join(outdir, "truth.npy"), np.array(truths))

@@ -596,6 +596,29 @@ def load_clsim_table(fpath, angular_acceptance_fract, quantum_efficiency):
     wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
 
     wstderr('    slicing and summarizing underflow and overflow...')
+    is_normed = table['is_normed']
+    if not is_normed:
+        table['table_norm'] = get_table_norm(
+            angular_acceptance_fract=angular_acceptance_fract,
+            quantum_efficiency=quantum_efficiency,
+            step_length=table['step_length'],
+            **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
+        )
+        table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
+
+    wstderr('Interpreting table...\n')
+    t0 = time()
+    n_dims = len(table['table_shape'])
+
+    # Cut off first and last bin in each dimension (underflow and
+    # overflow bins)
+    slice_wo_overflow = (slice(1, -1),) * n_dims
+    wstderr('    slicing to remove underflow/overflow bins...')
+    t0 = time()
+    table_wo_overflow = table['table'][slice_wo_overflow]
+    wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
+
+    wstderr('    slicing and summarizing underflow and overflow...')
     t0 = time()
     underflow, overflow = [], []
     for n in range(n_dims):
