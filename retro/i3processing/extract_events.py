@@ -1700,7 +1700,7 @@ def extract_metadata_from_frame(frame):
 
 def extract_events(
     fpath,
-    external_gcd=None,
+    external_gcd,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
@@ -1716,10 +1716,10 @@ def extract_events(
     fpath : str
         Path to I3 file
 
-    external_gcd : bool, optional
+    external_gcd : str, bool, or None; optional
         If `True`, force loading a (single) GCD file to be found in the same
         directory as the data file(s) (e.g., use this option for actual data
-        run files). If `None` (the default), a single GCD file in the same
+        run files). If a string, it shold specify the path to the GCD file to load. If `False` or `None` (the default), a single GCD file in the same
         directory is automatically loaded but if no file is found, no error
         results. If `False`, then no GCD file in the same directory is loaded,
         even if one is present. If `True` or `None` and multiple GCD files are
@@ -2081,14 +2081,32 @@ def main(description=__doc__):
     """Script interface to `extract_events` function: Parse command line args
     and call function."""
     parser = ArgumentParser(description=description)
-    parser.add_argument("--fpath", required=True, help="""Path to i3 file""")
     parser.add_argument(
-        "--ignore-external-gcd",
-        action="store_true",
-        help="""Force _ignoring_ any GCD file(s) in the same directory as the
-        i3 file being extracted.""",
+        "--fpath",
+        required=True,
+        nargs=1,
+        help="""Path to i3 file to extract""",
     )
-    parser.add_argument("--outdir")
+    parser.add_argument(
+        "--external-gcd",
+        required=False,
+        nargs="?",  # allow zero or more arguments
+        default=False,  # value if --external-gcd is not found at all
+        const=True,  # value if --external-gcd is found but has no arguments
+        help="""Specify an external GCD file to use; if --external-gcd is
+        passed but with no argument(s), a file named "*gcd*.i3*" (case
+        insensitive) must be found in the same directory as the file specified
+        by the --fpath argument. If --external-gcd is not specified at all, GCD
+        information will only be extracted if it can be found within the i3
+        file specfied by --fpath.""",
+    )
+    parser.add_argument(
+        "--outdir",
+        required=False,
+        help="""Directory into which to store the extracted directories and
+        files. If not specified, a directory is created with the same name as
+        each file specified by --fpath (but with ".i3*" extensions removed)""",
+    )
     parser.add_argument(
         "--photons",
         nargs="+",
@@ -2113,17 +2131,19 @@ def main(description=__doc__):
         default=[],
         help="""Trigger hierarchy names to extract from each event""",
     )
-    parser.add_argument("--truth", action="store_true")
+    parser.add_argument(
+        "--truth",
+        action="store_true",
+        help="""Extract truth information from Monte Carlo events""",
+    )
     parser.add_argument(
         "--additional-keys",
         default=None,
         nargs="+",
-        help="Additional keys to extract from event I3 frame",
+        help="""Additional keys to extract from event I3 frame""",
     )
     args = parser.parse_args()
     kwargs = vars(args)
-    if kwargs.pop("ignore_external_gcd"):
-        kwargs["external_gcd"] = False
     extract_events(**kwargs)
 
 
