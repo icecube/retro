@@ -219,11 +219,11 @@ FILENAME_INFO_RE = re.compile(
 
 GENERIC_I3_FNAME_RE = re.compile(
     r"""
-    ^                              # Anchor to beginning of string
-    (?P<base>.*)                   # Any number of any character
-    (?P<i3ext>\.i3)                # Must have ".i3" as extension
-    (?P<compext>\.gz|bz2|zst|zstd) # Optional extension indicating compression
-    $                              # End of string
+    ^                 # Anchor to beginning of string
+    (?P<base>.*)      # Any number of any character
+    (?P<i3ext>\.i3)   # Must have ".i3" as extension
+    (?P<compext>\..*) # Optional extension indicating compression
+    $                 # End of string
     """,
     (re.VERBOSE | re.IGNORECASE),
 )
@@ -510,14 +510,17 @@ def extract_i3_calibration(frame):
     dom_cal = np.empty(shape=len(dom_cal_frame_obj), dtype=I3DOMCALIBRATION_T)
     for i, omkey in enumerate(sorted(dom_cal_frame_obj.keys())):
         cal = dom_cal_frame_obj[omkey]
-        major, minor, rev = [np.uint8(x) for x in cal.dom_cal_version.split(".")]
+        if cal.dom_cal_version == "unknown":
+            ver = [-1, -1, -1]
+        else:
+            ver = [np.int8(int(x)) for x in cal.dom_cal_version.split(".")]
 
         dom_cal[i]["omkey"]["string"] = omkey.string
         dom_cal[i]["omkey"]["om"] = omkey.om
         dom_cal[i]["omkey"]["pmt"] = omkey.pmt
-        dom_cal[i]["dom_cal_version"]["major"] = major
-        dom_cal[i]["dom_cal_version"]["minor"] = minor
-        dom_cal[i]["dom_cal_version"]["rev"] = rev
+        dom_cal[i]["dom_cal_version"]["major"] = ver[0] if len(ver) > 0 else 0
+        dom_cal[i]["dom_cal_version"]["minor"] = ver[1] if len(ver) > 1 else 0
+        dom_cal[i]["dom_cal_version"]["rev"] = ver[2] if len(ver) > 2 else 0
         dom_cal[i]["dom_noise_decay_rate"] = cal.dom_noise_decay_rate
         dom_cal[i]["dom_noise_rate"] = cal.dom_noise_rate
         dom_cal[i]["dom_noise_scintillation_hits"] = cal.dom_noise_scintillation_hits
@@ -611,16 +614,18 @@ def extract_i3_detector_status(frame):
     # build up dict keyed by str(trigger index)
     trigger_status_frame_obj = i3_detector_status_frame_obj.trigger_status
     trigger_status = OrderedDict()
-    for trigger_num, (trigger_key_fobj, trigger_status_fobj) in enumerate(
-        trigger_status_frame_obj.items()
-    ):
+    for trigger_key_fobj, trigger_status_fobj in trigger_status_frame_obj.items():
         this_trigger_config = OrderedDict()
 
         trigger_key = np.empty(shape=1, dtype=TRIGGERKEY_T)
         trigger_key["source"] = TriggerSourceID(trigger_key_fobj.source)
         trigger_key["type"] = TriggerTypeID(trigger_key_fobj.type)
         trigger_key["subtype"] = TriggerSubtypeID(trigger_key_fobj.subtype)
-        trigger_key["config_id"] = TriggerConfigID(trigger_key_fobj.config_id)
+        # TODO: some config ID's aren't defined in the TriggerConfigID enum, no
+        # idea where they come from and whether or not it's a bug. For now,
+        # simply accept all ID's.
+        #trigger_key["config_id"] = TriggerConfigID(trigger_key_fobj.config_id)
+        trigger_key["config_id"] = trigger_key_fobj.config_id
 
         this_trigger_config["trigger_key"] = trigger_key
 
@@ -638,7 +643,7 @@ def extract_i3_detector_status(frame):
 
         this_trigger_config["readout_settings"] = dict2struct(readout_settings)
 
-        trigger_status[trigger_num] = dict2struct(this_trigger_config)
+        trigger_status[tuple(trigger_key[0])] = this_trigger_config
 
     detector_status["trigger_status"] = trigger_status
     detector_status["daq_configuration_name"] = np.string0(
@@ -1719,7 +1724,8 @@ def extract_events(
     external_gcd : str, bool, or None; optional
         If `True`, force loading a (single) GCD file to be found in the same
         directory as the data file(s) (e.g., use this option for actual data
-        run files). If a string, it shold specify the path to the GCD file to load. If `False` or `None` (the default), a single GCD file in the same
+        run files). If a string, it shold specify the path to the GCD file to
+        load. If `False` or `None` (the default), a single GCD file in the same
         directory is automatically loaded but if no file is found, no error
         results. If `False`, then no GCD file in the same directory is loaded,
         even if one is present. If `True` or `None` and multiple GCD files are
@@ -1816,6 +1822,11 @@ def extract_events(
                     fdir, gcd_fnames
                 )
             )
+    elif isinstance(external_gcd, string_types):
+        external_gcd = expand(external_gcd)
+        if not exists(external_gcd):
+            raise IOError('"{}" not a file'.format(external_gcd))
+        fpaths.insert(0, external_gcd)
 
     i3file_iterator = I3FrameSequence(fpaths)
 
@@ -1936,8 +1947,8 @@ def extract_events(
 
     # Default to dir same path as I3 file but with ".i3<compr ext>" removed
     if outdir is None:
-        fname_parts = GENERIC_I3_FNAME_RE.match(fpath).groupdict()
-        outdir = fname_parts["base"]
+        fname_parts = GENERIC_I3_FNAME_RE.match(basename(fpath)).groupdict()
+        outdir = join(dirname(fpath), fname_parts["base"])
     mkdir(outdir)
 
     # Write SHA-256 in format compatible with `sha256` Linux utility
@@ -2039,7 +2050,14 @@ def extract_events(
 
     for key, val in gcd_info.items():
         if isinstance(val, Mapping):
-            np.savez_compressed(join(gcd_dir, key + ".npz"), **val)
+            if key == "I3DetectorStatus":
+                pickle.dump(
+                    val,
+                    open(join(gcd_dir, key + ".pkl"), "wb"),
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+            else:
+                np.savez_compressed(join(gcd_dir, key + ".npz"), **val)
         else:
             assert isinstance(val, np.ndarray)
             np.save(join(gcd_dir, key + ".npy"), val)
@@ -2084,7 +2102,6 @@ def main(description=__doc__):
     parser.add_argument(
         "--fpath",
         required=True,
-        nargs=1,
         help="""Path to i3 file to extract""",
     )
     parser.add_argument(

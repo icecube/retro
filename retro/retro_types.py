@@ -186,9 +186,9 @@ I3DIRECTION_T = np.dtype(
 
 DOM_CAL_VERSION_T = np.dtype(
     [
-        ('major', np.uint8),
-        ('minor', np.uint8),
-        ('rev', np.uint8),
+        ('major', np.int8),
+        ('minor', np.int8),
+        ('rev', np.int8),
     ]
 )
 

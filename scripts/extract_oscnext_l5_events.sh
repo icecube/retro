@@ -31,13 +31,27 @@ mydir=$( dirname "$0" )
 
 function runit () {
     full_i3_filepath="$1"
-    echo "Extracting from file --> to dir: \"$full_i3_filepath\" -->  \"$outdir\""
-    outdir=$( echo "$full_i3_filepath" | sed 's/\.i3.*//' )
+    i3_basename=$( basename $full_i3_filepath )
+    if $( echo "$i3_basename" | grep -i "genie" >/dev/null 2>&1 ) ; then
+        truth_flag="--truth"
+        gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
+    elif $( echo "$i3_basename" | grep -i "muongun" >/dev/null 2>&1 ) ; then
+        truth_flag="--truth"
+        gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
+    elif $( echo "$i3_basename" | grep -i "oscNext_data" >/dev/null 2>&1 ) ; then
+        truth_flag=""
+        gcd=""
+    else
+        echo "dunno what to do with $full_i3_filepath"
+        exit 1
+    fi
+
+    echo "Extracting from file --> to dir: \"$full_i3_filepath\""
     "$mydir"/../retro/i3processing/extract_events.py \
         --fpath "$full_i3_filepath" \
         --additional-keys "L5_oscNext_bool" \
-        --outdir "$outdir" \
-        --truth \
+        $truth_flag \
+        --external-gcd $gcd \
         --triggers I3TriggerHierarchy \
         --pulses SplitInIcePulses \
         --recos LineFit_DC L5_SPEFit11 \
@@ -55,7 +69,9 @@ else
     runit "$full_i3_filepath"
 fi
 
-wait
+while (( $( jobs -r | wc -l ) > 0 )) ; do
+    sleep 1
+done
 
 stop_dt=$( date +'%Y-%m-%dT%H%M%z' )
 echo "Started at ${start_dt}, ended at ${stop_dt}"
