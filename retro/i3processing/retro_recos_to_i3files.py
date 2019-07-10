@@ -588,8 +588,16 @@ def retro_recos_to_i3files(
                         # present with no physics frame, physics frame present
                         # with no daq frame, or both being present (existence
                         # of other frames is considered to be irrelevant)
-                        if chain_has_daq_frame or chain_has_physics_frame:
-                            print("event_index:{:5d}".format(event_index))
+
+                        # TODO: oscNext v01.01 by L5, i3 file processing was
+                        # messed up, there were Q frames followed by I frames
+                        # and no associated P frame. Therefore we have to only
+                        # count chains with P frames in them as events, or else
+                        # the recos won't be put back in the right place /
+                        # indices run out.
+                        #if chain_has_daq_frame or chain_has_physics_frame:
+
+                        if chain_has_physics_frame:
                             event_index += 1
                             populate_pframe(
                                 event_index=event_index,
