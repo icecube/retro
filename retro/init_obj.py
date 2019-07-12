@@ -82,7 +82,6 @@ def setup_dom_tables(
     gcd,
     norm_version='binvol2.5',
     use_sd_indices=const.ALL_STRS_DOMS,
-    step_length=1.0,
     num_phi_samples=None,
     ckv_sigma_deg=None,
     template_library=None,
@@ -99,7 +98,6 @@ def setup_dom_tables(
     gcd : str
     norm_version : str, optional
     use_sd_indices : sequence, optional
-    step_length : float, optional
     num_phi_samples : int, optional
     ckv_sigma_deg : float, optional
     template_library : str, optional
@@ -173,7 +171,6 @@ def setup_dom_tables(
                 dom_tables.load_table(
                     fpath=fpath,
                     sd_indices=shared_table_sd_indices,
-                    step_length=step_length,
                     mmap=mmap,
                 )
 
@@ -203,7 +200,6 @@ def setup_dom_tables(
             dom_tables.load_table(
                 fpath=dpath,
                 sd_indices=shared_table_sd_indices,
-                step_length=step_length,
                 mmap=mmap,
             )
 
@@ -353,6 +349,7 @@ def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=
 
 def get_events(
     events_root,
+    gcd_dir,
     start=None,
     stop=None,
     step=None,
@@ -1042,10 +1039,6 @@ def parse_args(
         )
         group.add_argument(
             '--template-library', default=None,
-        )
-        group.add_argument(
-            '--step-length', type=float, default=1.0,
-            help='''Step length used in the CLSim table generator.'''
         )
         group.add_argument(
             '--no-noise', action='store_true',

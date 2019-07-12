@@ -345,7 +345,7 @@ class Retro5DTables(object):
 
         self.is_stacked = True
 
-    def load_table(self, fpath, sd_indices, mmap, step_length=None):
+    def load_table(self, fpath, sd_indices, mmap):
         """Load a single table (possibly applicable to more than one DOM) into
         the set of tables.
 
@@ -361,15 +361,6 @@ class Retro5DTables(object):
         mmap : bool
             Whether to attempt to memory map the table (only applicable for
             Retro npy-files-in-a-dir tables).
-
-        step_length : float > 0, optional
-            The stepLength parameter (in meters) used in CLSim tabulator code
-            for tabulating a single photon as it travels. This is a hard-coded
-            parameter set to 1 meter in the trunk version of the code, but it's
-            something we might play with to optimize table generation speed, so
-            just be warned that this _can_ change. Note that this is only
-            required for CLSim .fits tables, which do not record this
-            parameter.
 
         """
         if self.is_stacked is None:
@@ -391,7 +382,7 @@ class Retro5DTables(object):
             else:
                 assert step_length == table['step_length']
         else:
-            assert step_length is not None
+            step_length = 1.0
             table['step_length'] = step_length
 
         table_meta = OrderedDict()
