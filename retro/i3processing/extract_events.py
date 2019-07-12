@@ -65,10 +65,12 @@ from collections import Iterable, Mapping, OrderedDict, Sequence
 from copy import deepcopy
 from hashlib import sha256
 from os import listdir
-from os.path import abspath, basename, dirname, exists, join
+from os.path import abspath, basename, dirname, exists, isdir, join
 import pickle
 import re
+from shutil import rmtree
 import sys
+from tempfile import mkdtemp
 
 import numpy as np
 from six import string_types
@@ -112,7 +114,9 @@ from retro.retro_types import (
     TriggerConfigID,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
-from retro.utils.misc import expand, mkdir, set_explicit_dtype, dict2struct
+from retro.utils.misc import (
+    get_file_md5, expand, mkdir, set_explicit_dtype, dict2struct
+)
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
 
@@ -1703,9 +1707,92 @@ def extract_metadata_from_frame(frame):
     return event_meta
 
 
+GCD_README = """
+Directory names are md5 hashes of the _decompressed_ GCD i3 files (or if G, C,
+and D frames were found inline in an i3 data file, each unique combination of
+GCD frames are output to an i3 file and hashed).
+"""
+
+HEX_RE = re.compile("^[0-9a-f]$")
+
+
+def extract_gcd(g_frame, c_frame, d_frame, gcd_dir):
+    """Extract GCD info to Python/Numpy-readable objects stored to a central
+    GCD directory, subdirs of which are named by the hex md5sum of each
+    extracted GCD file.
+
+    Parameters
+    ----------
+    g_frame
+    c_frame
+    d_frame
+    gcd_dir
+
+    Returns
+    -------
+    gcd_md5_hex : len-32 string of chars 0-9 and/or a-f
+
+    """
+    from icecube.dataio import I3File
+
+    gcd_dir = expand(gcd_dir)
+
+    # Create dir if necessary and add README to dir
+    if not isdir(gcd_dir):
+        mkdir(gcd_dir)
+        with open(join(gcd_dir, "README")) as readme:
+            readme.write(GCD_README.strip() + "\n")
+
+    # Find md5sum of an uncompressed GCD file created by these G, C, & D frames
+    tempdir_path = mkdtemp(suffix="gcd")
+    try:
+        gcd_i3file_path = join(tempdir_path, "gcd.i3")
+        gcd_i3file = I3File(gcd_i3file_path, "w")
+        gcd_i3file.push(g_frame)
+        gcd_i3file.push(c_frame)
+        gcd_i3file.push(d_frame)
+        gcd_i3file.close()
+        md5_hex = get_file_md5(gcd_i3file_path)
+    finally:
+        rmtree(tempdir_path)
+
+    # Have we already extracted this GCD?
+    this_gcd_dir_path = join(gcd_dir, md5_hex)
+    if isdir(this_gcd_dir_path):
+        return md5_hex
+
+    # Extract GCD info into Python/Numpy-readable things
+    gcd_info = OrderedDict()
+    gcd_info["I3Geometry"] = extract_i3_geometry(g_frame)
+    gcd_info["I3Calibration"] = extract_i3_calibration(c_frame)
+    gcd_info["I3DetectorStatus"] = extract_i3_detector_status(d_frame)
+    gcd_info.update(extract_bad_doms_lists(d_frame))
+
+    # Write info to files. Preferable to write a single array to a .npy file;
+    # second most preferable is to write multiple arrays to (compressed) .npz
+    # file (faster to load than pkl files); finally, I3DetectorStatus _has_ to
+    # be stored as pickle to preserve varying-length items.
+    for key, val in gcd_info.items():
+        if isinstance(val, Mapping):
+            if key == "I3DetectorStatus":
+                pickle.dump(
+                    val,
+                    open(join(this_gcd_dir_path, key + ".pkl"), "wb"),
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+            else:
+                np.savez_compressed(join(this_gcd_dir_path, key + ".npz"), **val)
+        else:
+            assert isinstance(val, np.ndarray)
+            np.save(join(this_gcd_dir_path, key + ".npy"), val)
+
+    return md5_hex
+
+
 def extract_events(
     fpath,
     external_gcd,
+    gcd_dir,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
@@ -1730,6 +1817,10 @@ def extract_events(
         results. If `False`, then no GCD file in the same directory is loaded,
         even if one is present. If `True` or `None` and multiple GCD files are
         found, a ValueError is raised.
+
+    gcd_dir : str
+        Path to directory containing Retro-extracted GCD files (each
+        subdirectory is named by the md5sum of the corresponding GCD file)
 
     outdir : str, optional
         Directory in which to place generated files
@@ -1833,8 +1924,6 @@ def extract_events(
     events = []
     truths = []
 
-    gcd_info = OrderedDict()
-
     photons_d = OrderedDict()
     for name in photons:
         photons_d[name] = []
@@ -1852,7 +1941,7 @@ def extract_events(
     for name in triggers:
         trigger_hierarchies[name] = []
 
-    def process_frame_buffer(frame_buffer):
+    def process_frame_buffer(frame_buffer, gcd_md5_hex):
         """Get event information from a set of frames that, together, should
         completely describe a single event.
 
@@ -1862,6 +1951,7 @@ def extract_events(
         Parameters
         ----------
         frame_buffer : list
+        gcd_md5_hex : length-32 string
 
         Out
         ---
@@ -1870,9 +1960,6 @@ def extract_events(
         pulses_d : OrderedDict
         recos_d : OrderedDict
         trigger_hierarchies : OrderedDict
-        gcd_info : OrderedDict
-            Populated outside of this function, but this information is thus
-            made available to this function.
 
         """
         num_qframes = 0
@@ -1905,6 +1992,7 @@ def extract_events(
             allow_missing=False,
         )
         event["sourcefile_sha256"] = np.uint64(int(sha256_hex[:16], base=16))
+        event["gcd_md5_hex"] = gcd_md5_hex
         if len(events) > 2 ** 32 - 1:
             raise ValueError(
                 "only using uint32 to store event index, but have event index of {}".format(
@@ -1957,6 +2045,16 @@ def extract_events(
 
     frame_buffer = []
     frame_counter = 0
+
+    # * If gcd is False, don't extract any gcd info for events
+    # * gcd_outdir can specify a central location
+    # * If gcd is True and is found to be part of file
+    #   * Push GCD frames to a dummy I3 file & hash it
+    #   * Output dir is at same level as this i3 file / this file's output dir
+    #   *
+    gcd_frames = OrderedDict([("G", None), ("C", None), ("D", None)])
+    gcd_changed = False
+
     while i3file_iterator.more():
         try:
             frame = None
@@ -1970,22 +2068,25 @@ def extract_events(
             if frame is None:
                 break
 
-            frame_buffer.append(frame)
-
-            if frame.Stop == I3Frame.Physics:
-                process_frame_buffer(frame_buffer)
-            elif frame.Stop == I3Frame.DAQ:
-                frame_buffer = frame_buffer[-1:]
+            if frame.Stop in (I3Frame.Physics, I3Frame.DAQ):
+                if gcd_changed:
+                    gcd_md5_hex = extract_gcd(gcd_dir=gcd_dir, **gcd_frames)
+                    gcd_changed = False
+                if frame.Stop == I3Frame.Physics:
+                    frame_buffer.append(frame)
+                    process_frame_buffer(frame_buffer=frame_buffer, gcd_md5_hex=gcd_md5_hex)
+                    frame_buffer.pop()
+                elif frame.Stop == I3Frame.DAQ:
+                    frame_buffer = [frame]
             elif frame.Stop == I3Frame.Geometry:
-                frame_buffer.pop()
-                gcd_info["I3Geometry"] = extract_i3_geometry(frame)
+                gcd_frames["G"] = frame
+                gcd_changed = True
             elif frame.Stop == I3Frame.Calibration:
-                frame_buffer.pop()
-                gcd_info["I3Calibration"] = extract_i3_calibration(frame)
+                gcd_frames["C"] = frame
+                gcd_changed = True
             elif frame.Stop == I3Frame.DetectorStatus:
-                frame_buffer.pop()
-                gcd_info["I3DetectorStatus"] = extract_i3_detector_status(frame)
-                gcd_info.update(extract_bad_doms_lists(frame))
+                gcd_frames["D"] = frame
+                gcd_changed = True
 
         except Exception as err:
             sys.stderr.write(
@@ -2021,14 +2122,11 @@ def extract_events(
             assert not val, "'{}': {}".format(name, val)
         sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(fpath))
 
-    gcd_dir = join(outdir, "gcd")
     photon_series_dir = join(outdir, "photons")
     pulse_series_dir = join(outdir, "pulses")
     recos_dir = join(outdir, "recos")
     trigger_hierarchy_dir = join(outdir, "triggers")
 
-    if gcd_info:
-        mkdir(gcd_dir)
     if photons:
         mkdir(photon_series_dir)
     if pulses:
@@ -2047,20 +2145,6 @@ def extract_events(
 
     events = np.array([tuple(ev.values()) for ev in events], dtype=event_dtype)
     np.save(join(outdir, "events.npy"), events)
-
-    for key, val in gcd_info.items():
-        if isinstance(val, Mapping):
-            if key == "I3DetectorStatus":
-                pickle.dump(
-                    val,
-                    open(join(gcd_dir, key + ".pkl"), "wb"),
-                    protocol=pickle.HIGHEST_PROTOCOL,
-                )
-            else:
-                np.savez_compressed(join(gcd_dir, key + ".npz"), **val)
-        else:
-            assert isinstance(val, np.ndarray)
-            np.save(join(gcd_dir, key + ".npy"), val)
 
     if truth:
         np.save(join(outdir, "truth.npy"), np.array(truths))

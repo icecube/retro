@@ -39,6 +39,7 @@ __all__ = [
     'RE_LEADING_INVALID',
     'make_valid_python_name',
     'join_struct_arrays',
+    'NSORT_RE',
     'nsort_key_func',
     'set_explicit_dtype',
     'dict2struct',
@@ -847,9 +848,15 @@ def deduce_sph_pairs(param_names):
 
 
 RE_INVALID_CHARS = re.compile('[^0-9a-zA-Z_]')
+"""Invalid Python name if chars after first aren't one of 0-9, a-z, A-Z, or
+underscore"""
+
 RE_LEADING_INVALID = re.compile('^[^a-zA-Z_]+')
+"""Invalid Python name if first char isn't a-z or A-Z"""
+
+
 def make_valid_python_name(name):
-    """Make a name a valid Python identifier.
+    """Make a name a valid Python identifier by removing illegal chars.
 
     From user Triptych at http://stackoverflow.com/questions/3303312
 
@@ -895,6 +902,7 @@ def join_struct_arrays(arrays):
 
 
 NSORT_RE = re.compile(r'(\d+)')
+
 
 def nsort_key_func(s):
     """Use as the `key` argument to the `sorted` function or `sort` method.
@@ -957,6 +965,11 @@ def set_explicit_dtype(x):
 
     if isinstance(x, Number):
         x_new = np.float64(x)
+        assert x_new == x
+        return x_new
+
+    if isinstance(x, string_types):
+        x_new = np.string0(x)
         assert x_new == x
         return x_new
 
