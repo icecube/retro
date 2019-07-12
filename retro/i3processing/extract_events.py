@@ -111,11 +111,15 @@ from retro.retro_types import (
     TriggerSourceID,
     TriggerTypeID,
     TriggerSubtypeID,
-    TriggerConfigID,
+    #TriggerConfigID,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
 from retro.utils.misc import (
-    get_file_md5, expand, mkdir, set_explicit_dtype, dict2struct
+    get_file_md5,
+    expand,
+    mkdir,
+    set_explicit_dtype,
+    dict2struct,
 )
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
@@ -628,7 +632,7 @@ def extract_i3_detector_status(frame):
         # TODO: some config ID's aren't defined in the TriggerConfigID enum, no
         # idea where they come from and whether or not it's a bug. For now,
         # simply accept all ID's.
-        #trigger_key["config_id"] = TriggerConfigID(trigger_key_fobj.config_id)
+        # trigger_key["config_id"] = TriggerConfigID(trigger_key_fobj.config_id)
         trigger_key["config_id"] = trigger_key_fobj.config_id
 
         this_trigger_config["trigger_key"] = trigger_key
@@ -2052,7 +2056,7 @@ def extract_events(
     #   * Push GCD frames to a dummy I3 file & hash it
     #   * Output dir is at same level as this i3 file / this file's output dir
     #   *
-    gcd_frames = OrderedDict([("G", None), ("C", None), ("D", None)])
+    gcd_frames = OrderedDict([("g_frame", None), ("c_frame", None), ("d_frame", None)])
     gcd_changed = False
 
     while i3file_iterator.more():
@@ -2074,18 +2078,20 @@ def extract_events(
                     gcd_changed = False
                 if frame.Stop == I3Frame.Physics:
                     frame_buffer.append(frame)
-                    process_frame_buffer(frame_buffer=frame_buffer, gcd_md5_hex=gcd_md5_hex)
+                    process_frame_buffer(
+                        frame_buffer=frame_buffer, gcd_md5_hex=gcd_md5_hex
+                    )
                     frame_buffer.pop()
                 elif frame.Stop == I3Frame.DAQ:
                     frame_buffer = [frame]
             elif frame.Stop == I3Frame.Geometry:
-                gcd_frames["G"] = frame
+                gcd_frames["g_frame"] = frame
                 gcd_changed = True
             elif frame.Stop == I3Frame.Calibration:
-                gcd_frames["C"] = frame
+                gcd_frames["c_frame"] = frame
                 gcd_changed = True
             elif frame.Stop == I3Frame.DetectorStatus:
-                gcd_frames["D"] = frame
+                gcd_frames["d_frame"] = frame
                 gcd_changed = True
 
         except Exception as err:
@@ -2183,11 +2189,7 @@ def main(description=__doc__):
     """Script interface to `extract_events` function: Parse command line args
     and call function."""
     parser = ArgumentParser(description=description)
-    parser.add_argument(
-        "--fpath",
-        required=True,
-        help="""Path to i3 file to extract""",
-    )
+    parser.add_argument("--fpath", required=True, help="""Path to i3 file to extract""")
     parser.add_argument(
         "--external-gcd",
         required=False,
