@@ -24,48 +24,18 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 
 __all__ = [
-    "EM_CASCADE_PTYPES",
-    "HADR_CASCADE_PTYPES",
-    "CASCADE_PTYPES",
-    "TRACK_PTYPES",
-    "INVISIBLE_PTYPES",
-    "ELECTRONS",
-    "MUONS",
-    "TAUS",
-    "NUES",
-    "NUMUS",
-    "NUTAUS",
-    "NEUTRINOS",
-    "FILENAME_INFO_RE",
-    "GENERIC_I3_FNAME_RE",
-    "I3PARTICLE_SPECS",
-    "MissingPhysicsFrameError",
-    "extract_file_metadata",
     "get_frame_item",
     "extract_i3_geometry",
     "extract_i3_calibration",
     "extract_i3_detector_status",
     "extract_bad_doms_lists",
-    "extract_reco",
-    "extract_trigger_hierarchy",
-    "extract_pulses",
-    "extract_photons",
-    "get_cascade_and_track_info",
-    "populate_track_t",
-    "record_particles",
-    "process_true_neutrino",
-    "extract_truth",
-    "extract_metadata_from_frame",
-    "extract_events",
     "main",
+    "parse_args",
 ]
 
 from argparse import ArgumentParser
-from collections import Iterable, Mapping, OrderedDict, Sequence
-from copy import deepcopy
-from hashlib import sha256
-from os import listdir
-from os.path import abspath, basename, dirname, exists, isdir, join
+from collections import Mapping, OrderedDict
+from os.path import abspath, dirname, isdir, join
 import pickle
 import re
 from shutil import rmtree
@@ -80,48 +50,47 @@ if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.retro_types import (
-    PHOTON_T,
-    PULSE_T,
-    TRIGGER_T,
     I3DOMCALIBRATION_T,
     I3DOMSTATUS_T,
     I3OMGEO_T,
     I3TRIGGERREADOUTCONFIG_T,
     OMKEY_T,
     TRIGGERKEY_T,
-    TRACK_T,
-    CASCADE_T,
     CableType,
     DOMGain,
-    FitStatus,
-    InteractionType,
-    LocationType,
     LCMode,
     OnOff,
-    ParticleType,
-    ParticleShape,
     ToroidType,
     TrigMode,
-    ExtractionError,
-    NO_TRACK,
-    INVALID_TRACK,
-    NO_CASCADE,
-    INVALID_CASCADE,
     OMType,
     TriggerSourceID,
     TriggerTypeID,
     TriggerSubtypeID,
-    TriggerConfigID,
+    #TriggerConfigID,
 )
-from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
 from retro.utils.misc import (
     get_file_md5,
     expand,
     mkdir,
-    set_explicit_dtype,
     dict2struct,
 )
-from retro.utils.geom import cart2sph_np, sph2cart_np
+from retro.i3processing.extract_events import I3TIME_T, get_frame_item
+
+
+I3TIME_SPECS = OrderedDict(
+    [
+        (
+            "start_time",
+            dict(
+                paths=("start_time.utc_year", "start_time.utc_daq_time"), dtype=I3TIME_T
+            ),
+        ),
+        (
+            "end_time",
+            dict(paths=("end_time.utc_year", "end_time.utc_daq_time"), dtype=I3TIME_T),
+        ),
+    ]
+)
 
 
 def extract_i3_geometry(frame):
@@ -384,7 +353,7 @@ and D frames were found inline in an i3 data file, each unique combination of
 GCD frames are output to an i3 file and hashed).
 """
 
-HEX_RE = re.compile("^[0-9a-f]$")
+MD5_HEX_RE = re.compile("^[0-9a-f]{32}$")
 
 
 def extract_gcd(g_frame, c_frame, d_frame, gcd_dir):
@@ -474,7 +443,9 @@ def main(gcd, gcd_dir):
     from icecube.dataio import I3File  # pylint: disable=no-name-in-module
     from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
 
-    gcd = [expand(fpath) for fpath in gcd]
+    if isinstance(gcd, string_types):
+        gcd = [gcd]
+
     for gcd_fpath in gcd:
         gcd_fpath = expand(gcd_fpath)
         i3f = I3File(gcd_fpath)
@@ -493,10 +464,10 @@ def main(gcd, gcd_dir):
                 if "d_frame" in gcd_frames:
                     raise ValueError('GCD file "{}" contains multiple D frames'.format(gcd_fpath))
                 gcd_frames["d_frame"] = frame
+        for frame_type in "gcd".split():
+            if "{}_frame".format(frame_type) not in gcd_frames:
+                raise ValueError('No {} frame found in GCD file "{}"'.format(frame_type, gcd_fpath))
         extract_gcd(gcd_dir=gcd_dir, **gcd_frames)
-
-    i3frames = I3FrameSequence(gcd)
-    extract_gcd(**kwargs)
 
 
 def parse_args(description=__doc__):
@@ -516,9 +487,8 @@ def parse_args(description=__doc__):
         help="""Directory into which to store the extracted GCD info""",
     )
     args = parser.parse_args()
-    kwargs = vars(args)
-    main(**kwargs)
+    return args
 
 
 if __name__ == "__main__":
-    main()
+    main(**vars(parse_args()))
