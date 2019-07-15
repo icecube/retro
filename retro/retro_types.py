@@ -52,6 +52,7 @@ __all__ = [
     'TRIGGER_T',
     'TRIGGERKEY_T',
     'I3TRIGGERREADOUTCONFIG_T',
+    'I3TIME_T',
     'SRC_T',
     'TRACK_T',
     'INVALID_TRACK',
@@ -630,6 +631,11 @@ class TriggerConfigID(enum.IntEnum):
       $I3_SRC/trigger-sim/resources/scripts/print_trigger_configuration.py -g GCDFILE
 
     """
+    # I added "NONE" (code -1) since GCD file(s) were found with
+    # TriggerKey.source == 40 (GLOBAL), TriggerKey.type == 30 (THROUGHPUT), and
+    # TriggerKey.subtype == 0 (NO_SUBTYPE) have TriggerKey.config_id of None
+    NONE = -1
+
     SMT8_IN_ICE = 1006
     SMT3_DeepCore = 1011
     SMT6_ICE_TOP = 102
@@ -824,6 +830,11 @@ I3TRIGGERREADOUTCONFIG_T = np.dtype(
     ]
 )
 """icecube.dataclasses.I3TriggerReadoutConfig"""
+
+
+I3TIME_T = np.dtype([("utc_year", np.int32), ("utc_daq_time", np.int64)])
+"""I3Time is defined internally by the year and daqTime (tenths of ns since the
+beginning of the year). See dataclasses/public/dataclasses/I3Time.h"""
 
 
 SRC_T = np.dtype([

@@ -38,6 +38,7 @@ __all__ = [
     "NEUTRINOS",
     "FILENAME_INFO_RE",
     "GENERIC_I3_FNAME_RE",
+    "START_END_TIME_SPEC",
     "I3PARTICLE_SPECS",
     "MissingPhysicsFrameError",
     "extract_file_metadata",
@@ -59,9 +60,7 @@ __all__ = [
 from argparse import ArgumentParser
 from collections import Iterable, OrderedDict, Sequence
 from copy import deepcopy
-from hashlib import sha256
-from os import listdir
-from os.path import abspath, basename, dirname, exists, join
+from os.path import abspath, basename, dirname, join
 import pickle
 import re
 import sys
@@ -79,6 +78,7 @@ from retro.retro_types import (
     TRIGGER_T,
     TRACK_T,
     CASCADE_T,
+    I3TIME_T,
     FitStatus,
     InteractionType,
     LocationType,
@@ -91,7 +91,9 @@ from retro.retro_types import (
     INVALID_CASCADE,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
-from retro.utils.misc import expand, mkdir, set_explicit_dtype, dict2struct
+from retro.utils.misc import (
+    dict2struct, expand, get_file_md5, mkdir, set_explicit_dtype
+)
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
 
@@ -207,17 +209,8 @@ GENERIC_I3_FNAME_RE = re.compile(
     (re.VERBOSE | re.IGNORECASE),
 )
 
-
-I3TIME_T = np.dtype([("utc_year", np.int32), ("utc_daq_time", np.int64)])
-
-I3EVENTHEADER_SPECS = OrderedDict(
+START_END_TIME_SPEC = OrderedDict(
     [
-        ("run_id", dict(dtype=np.uint32)),
-        ("sub_run_id", dict(dtype=np.uint32)),
-        ("event_id", dict(dtype=np.uint32)),
-        ("sub_event_id", dict(dtype=np.uint32)),
-        ("sub_event_stream", dict(dtype=np.dtype("S20"))),
-        ("state", dict(dtype=np.uint8)),
         (
             "start_time",
             dict(
@@ -230,7 +223,20 @@ I3EVENTHEADER_SPECS = OrderedDict(
         ),
     ]
 )
+
+
+I3EVENTHEADER_SPECS = OrderedDict(
+    [
+        ("run_id", dict(dtype=np.uint32)),
+        ("sub_run_id", dict(dtype=np.uint32)),
+        ("event_id", dict(dtype=np.uint32)),
+        ("sub_event_id", dict(dtype=np.uint32)),
+        ("sub_event_stream", dict(dtype=np.dtype("S20"))),
+        ("state", dict(dtype=np.uint8)),
+    ]
+)
 """See: dataclasses/public/dataclasses/physics/I3EventHeader.h"""
+I3EVENTHEADER_SPECS.update(START_END_TIME_SPEC)
 
 I3PARTICLE_SPECS = OrderedDict(
     [
@@ -1413,10 +1419,10 @@ def extract_metadata_from_frame(frame):
     return event_meta
 
 
-def extract_events(
-    fpath,
-    external_gcd,
-    gcd_dir,
+def _extract_events_from_single_file(
+    i3_fpath,
+    retro_gcd_dir,
+    gcd_md5_hex=None,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
@@ -1425,93 +1431,16 @@ def extract_events(
     truth=False,
     additional_keys=None,
 ):
-    """Extract event information from an i3 file.
-
-    Parameters
-    ----------
-    fpath : str
-        Path to I3 file
-
-    external_gcd : str, bool, or None; optional
-        If `True`, force loading a (single) GCD file to be found in the same
-        directory as the data file(s) (e.g., use this option for actual data
-        run files). If a string, it shold specify the path to the GCD file to
-        load. If `False` or `None` (the default), a single GCD file in the same
-        directory is automatically loaded but if no file is found, no error
-        results. If `False`, then no GCD file in the same directory is loaded,
-        even if one is present. If `True` or `None` and multiple GCD files are
-        found, a ValueError is raised.
-
-    gcd_dir : str
-        Path to directory containing Retro-extracted GCD files (each
-        subdirectory is named by the md5sum of the corresponding GCD file)
-
-    outdir : str, optional
-        Directory in which to place generated files
-
-    photons : None, str, or iterable of str
-        Names of photons series' to extract from each event
-
-    pulses : None, str, or iterable of str
-        Names of pulse series' to extract from each event
-
-    recos : None, str, or iterable of str
-        Names of reconstructions to extract from each event
-
-    triggers : None, str, or iterable of str
-        Names of trigger hierarchies to extract from each event
-
-    truth : bool
-        Whether or not Monte Carlo truth for the event should be extracted for
-        each event
-
-    additional_keys : str, iterable thereof, or None
-
-    Returns
-    -------
-    list of OrderedDict, one per event
-        Each dict contains key "meta" with sub-dict containing file metadata.
-        Depending on which arguments are provided, OrderedDicts for each named
-        key passed will appear as a key within the OrderedDicts named "pulses",
-        "recos", "photons", and "truth". E.g.:
-
-        .. python ::
-
-            {
-                'i3_metadata': {...},
-                'events': [{...}, {...}, ...],
-                'truth': [{'pdg_encoding': ..., 'daughters': [{...}, ...]}],
-                'photons': {
-                    'photons': [[...], [...], ...],
-                    'other_photons': [[...], [...], ...]
-                },
-                'pulse_series': {
-                    'SRTOfflinePulses': [[...], [...], ...],
-                    'WaveDeformPulses': [[...], [...], ...]
-                },
-                'recos': {
-                    'PegLeg8D': [{...}, ...],
-                    'Retro8D': [{...}, ...]
-                },
-                'triggers': {
-                    'I3TriggerHierarchy': [{...}, ...],
-                }
-            }
-
-    """
     from icecube import (  # pylint: disable=unused-variable
         dataclasses,
         recclasses,
         simclasses,
     )
+    from icecube.dataio import I3File  # pylint: disable=no-name-in-module
     from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
-    from icecube.dataio import I3FrameSequence  # pylint: disable=no-name-in-module
-    from retro.i3processing.extract_gcd import extract_gcd
+    from retro.i3processing.extract_gcd import MD5_HEX_RE, extract_gcd_frames
 
-    fpath = expand(fpath)
-    sha256_hex = sha256(open(fpath, "rb").read()).hexdigest()
-
-    fpaths = [fpath]
+    i3_fpath = expand(i3_fpath)
 
     if additional_keys is None:
         additional_keys = tuple()
@@ -1521,30 +1450,18 @@ def extract_events(
         assert isinstance(additional_keys, Iterable)
         additional_keys = tuple(additional_keys)
 
-    if external_gcd is True or external_gcd is None:
-        fdir = dirname(fpath)
-        gcd_fnames = [
-            f
-            for f in listdir(fdir)
-            if "gcd" in f.lower() and ".i3" in f.lower() and exists(join(fdir, f))
-        ]
-        if len(gcd_fnames) == 1:
-            fpaths.insert(0, join(fdir, gcd_fnames[0]))
-        elif external_gcd is True and len(gcd_fnames) == 0:
-            raise ValueError('No GCD file found in directory "{}"'.format(fdir))
-        elif len(gcd_fnames) > 1:
-            raise ValueError(
-                'More than one GCD files found in directory "{}": {}'.format(
-                    fdir, gcd_fnames
-                )
-            )
-    elif isinstance(external_gcd, string_types):
-        external_gcd = expand(external_gcd)
-        if not exists(external_gcd):
-            raise IOError('"{}" not a file'.format(external_gcd))
-        fpaths.insert(0, external_gcd)
+    # Subdirectory will be named same as i3 file (with ".i3" and any
+    # compression extensions like .bz2, .zst, etc. removed)
+    fname_parts = GENERIC_I3_FNAME_RE.match(basename(i3_fpath)).groupdict()
+    leafdir_basename = fname_parts["base"]
+    if outdir is None:
+        # Default to dir same root directory as I3 file
+        outdir = join(dirname(i3_fpath), leafdir_basename)
+    else:
+        outdir = join(outdir, leafdir_basename)
 
-    i3file_iterator = I3FrameSequence(fpaths)
+    i3file_md5_hex = get_file_md5(i3_fpath)
+    i3file_iterator = I3File(i3_fpath)
 
     events = []
     truths = []
@@ -1587,6 +1504,8 @@ def extract_events(
         trigger_hierarchies : OrderedDict
 
         """
+        gcd_md5_hex = gcd_md5_hex.strip().lower()
+        assert MD5_HEX_RE.match(gcd_md5_hex)
         num_qframes = 0
         for frame in frame_buffer:
             if frame.Stop == I3Frame.DAQ:
@@ -1616,7 +1535,6 @@ def extract_events(
             specs=I3EVENTHEADER_SPECS,
             allow_missing=False,
         )
-        event["sourcefile_sha256"] = np.uint64(int(sha256_hex[:16], base=16))
         event["gcd_md5_hex"] = gcd_md5_hex
         if len(events) > 2 ** 32 - 1:
             raise ValueError(
@@ -1633,7 +1551,7 @@ def extract_events(
             try:
                 event_truth = extract_truth(pframe)
             except:
-                sys.stderr.write("Failed to get truth from frame buffer")
+                sys.stderr.write("Failed to get truth from frame buffer\n")
                 raise
             truths.append(event_truth)
 
@@ -1658,25 +1576,14 @@ def extract_events(
                 extract_trigger_hierarchy(pframe, trigger_hierarchy_name)
             )
 
-    # Default to dir same path as I3 file but with ".i3<compr ext>" removed
-    if outdir is None:
-        fname_parts = GENERIC_I3_FNAME_RE.match(basename(fpath)).groupdict()
-        outdir = join(dirname(fpath), fname_parts["base"])
     mkdir(outdir)
 
-    # Write SHA-256 in format compatible with `sha256` Linux utility
-    with open(join(outdir, "sourcefile_sha256.txt"), "w") as sha_file:
-        sha_file.write("{}  {}\n".format(sha256_hex, fpath))
+    with open(join(outdir, "sourcefile_md5sum.txt"), "w") as md5sum_file:
+        md5sum_file.write("{}  {}\n".format(i3file_md5_hex, i3_fpath))
 
     frame_buffer = []
     frame_counter = 0
 
-    # * If gcd is False, don't extract any gcd info for events
-    # * gcd_outdir can specify a central location
-    # * If gcd is True and is found to be part of file
-    #   * Push GCD frames to a dummy I3 file & hash it
-    #   * Output dir is at same level as this i3 file / this file's output dir
-    #   *
     gcd_frames = OrderedDict([("g_frame", None), ("c_frame", None), ("d_frame", None)])
     gcd_changed = False
 
@@ -1695,13 +1602,11 @@ def extract_events(
 
             if frame.Stop in (I3Frame.Physics, I3Frame.DAQ):
                 if gcd_changed:
-                    gcd_md5_hex = extract_gcd(gcd_dir=gcd_dir, **gcd_frames)
+                    gcd_md5_hex = extract_gcd_frames(retro_gcd_dir=retro_gcd_dir, **gcd_frames)
                     gcd_changed = False
                 if frame.Stop == I3Frame.Physics:
                     frame_buffer.append(frame)
-                    process_frame_buffer(
-                        frame_buffer=frame_buffer, gcd_md5_hex=gcd_md5_hex
-                    )
+                    process_frame_buffer(frame_buffer, gcd_md5_hex=gcd_md5_hex)
                     frame_buffer.pop()
                 elif frame.Stop == I3Frame.DAQ:
                     frame_buffer = [frame]
@@ -1718,7 +1623,7 @@ def extract_events(
         except Exception as err:
             sys.stderr.write(
                 'ERROR! file "{}", frame #{}, error: {}\n'.format(
-                    fpath, frame_counter + 1, err
+                    i3_fpath, frame_counter + 1, err
                 )
             )
             raise
@@ -1747,7 +1652,7 @@ def extract_events(
             assert not val, "'{}': {}".format(name, val)
         for key, val in trigger_hierarchies.items():
             assert not val, "'{}': {}".format(name, val)
-        sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(fpath))
+        sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(i3_fpath))
 
     photon_series_dir = join(outdir, "photons")
     pulse_series_dir = join(outdir, "pulses")
@@ -1806,30 +1711,164 @@ def extract_events(
         )
 
 
+def extract_events(
+    i3_files,
+    retro_gcd_dir,
+    gcd=None,
+    outdir=None,
+    photons=tuple(),
+    pulses=tuple(),
+    recos=tuple(),
+    triggers=tuple(),
+    truth=False,
+    additional_keys=None,
+):
+    """Extract event information from an i3 file.
+
+    Parameters
+    ----------
+    i3_files : str or iterable thereof
+        Path(s) to I3 file(s). If a `gcd` is specified, it will apply to all i3
+        files specified that do not GCD frames embedded in them.
+
+    retro_gcd_dir : str
+        Path to directory containing Retro-extracted GCD files (each
+        subdirectory is named by the md5sum of the corresponding GCD file)
+
+    gcd : str or None
+        GCD information for the events _must_ be provided one way or another.
+        If GCD frames are embedded in the i3 file(s) passed via `i3_files`, then
+        nothing needs to be specified for `gcd`. Otherwise, `gcd` must be a
+        string specifying either a path to a GCD file or the MD5 sum derived
+        from storing the GCD frames (in that order, with no other frames) to an
+        (uncompressed) i3 file (see
+        `retro.i3processing.extract_gcd.extract_gcd_frames`); a GCD specified
+        in this way is applied to i3 files specified by the `i3_files` argument
+        except for those files containing embedded GCD frames (which supersede
+        the `gcd` argument).
+
+    outdir : str, optional
+        Directory in which to place generated leaf directory (named same as i3
+        file but with extensions removed). Default is same directory(ies) where
+        the i3 file(s) are stored
+
+    photons : None, str, or iterable of str
+        Names of photons series' to extract from each event
+
+    pulses : None, str, or iterable of str
+        Names of pulse series' to extract from each event
+
+    recos : None, str, or iterable of str
+        Names of reconstructions to extract from each event
+
+    triggers : None, str, or iterable of str
+        Names of trigger hierarchies to extract from each event
+
+    truth : bool
+        Whether or not Monte Carlo truth for the event should be extracted for
+        each event
+
+    additional_keys : str, iterable thereof, or None
+
+    Returns
+    -------
+    list of OrderedDict, one per event
+        Each dict contains key "meta" with sub-dict containing file metadata.
+        Depending on which arguments are provided, OrderedDicts for each named
+        key passed will appear as a key within the OrderedDicts named "pulses",
+        "recos", "photons", and "truth". E.g.:
+
+        .. python ::
+
+            {
+                'i3_metadata': {...},
+                'events': [{...}, {...}, ...],
+                'truth': [{'pdg_encoding': ..., 'daughters': [{...}, ...]}],
+                'photons': {
+                    'photons': [[...], [...], ...],
+                    'other_photons': [[...], [...], ...]
+                },
+                'pulse_series': {
+                    'SRTOfflinePulses': [[...], [...], ...],
+                    'WaveDeformPulses': [[...], [...], ...]
+                },
+                'recos': {
+                    'PegLeg8D': [{...}, ...],
+                    'Retro8D': [{...}, ...]
+                },
+                'triggers': {
+                    'I3TriggerHierarchy': [{...}, ...],
+                }
+            }
+
+    """
+    from retro.i3processing.extract_gcd import MD5_HEX_RE, extract_gcd_files
+
+    if isinstance(i3_files, string_types):
+        i3_files = [i3_files]
+
+    if gcd is None:
+        gcd_md5_hex = None
+    elif isinstance(gcd, string_types):
+        if MD5_HEX_RE.match(gcd.strip().lower()):
+            gcd_md5_hex = gcd.strip().lower()
+        else:
+            gcd_md5_hexs = extract_gcd_files(
+                gcd_files=gcd, retro_gcd_dir=retro_gcd_dir
+            )
+            assert len(gcd_md5_hexs) == 1
+            gcd_md5_hex = gcd_md5_hexs[0]
+    else:
+        raise TypeError("Cannot handle `gcd` arg of type {}".format(type(gcd)))
+
+    for i3_fpath in i3_files:
+        _extract_events_from_single_file(
+            i3_fpath=i3_fpath,
+            retro_gcd_dir=retro_gcd_dir,
+            gcd_md5_hex=gcd_md5_hex,
+            outdir=outdir,
+            photons=photons,
+            pulses=pulses,
+            recos=recos,
+            triggers=triggers,
+            truth=truth,
+            additional_keys=additional_keys,
+        )
+
+
 def main(description=__doc__):
     """Script interface to `extract_events` function: Parse command line args
     and call function."""
     parser = ArgumentParser(description=description)
-    parser.add_argument("--fpath", required=True, help="""Path to i3 file to extract""")
     parser.add_argument(
-        "--external-gcd",
+        "--i3-files",
+        nargs="+",
+        required=True,
+        help="""Paths to i3 files to extract""",
+    )
+    parser.add_argument(
+        "--retro-gcd-dir",
+        required=True,
+        help="""Directory into which to store any extracted GCD info""",
+    )
+    parser.add_argument(
+        "--gcd",
         required=False,
-        nargs="?",  # allow zero or more arguments
-        default=False,  # value if --external-gcd is not found at all
-        const=True,  # value if --external-gcd is found but has no arguments
-        help="""Specify an external GCD file to use; if --external-gcd is
-        passed but with no argument(s), a file named "*gcd*.i3*" (case
-        insensitive) must be found in the same directory as the file specified
-        by the --fpath argument. If --external-gcd is not specified at all, GCD
-        information will only be extracted if it can be found within the i3
-        file specfied by --fpath.""",
+        default=None,
+        help="""Specify an external GCD file or md5sum (as returned by
+        `retro.i3processing.extract_gcd_frames`, i.e., the md5sum of an
+        uncompressed i3 file containing _only_ the G, C, and D frames). It is
+        not required to specify --gcd if the G, C, and D frames are embedded in
+        all files specified by --i3-files. Any GCD frames within said files
+        will also take precedent if --gcd _is_ specified.""",
     )
     parser.add_argument(
         "--outdir",
         required=False,
         help="""Directory into which to store the extracted directories and
-        files. If not specified, a directory is created with the same name as
-        each file specified by --fpath (but with ".i3*" extensions removed)""",
+        files. If not specified, the directory where each i3 file is stored is
+        used (a leaf directory is created with the same name as each i3 file
+        but with .i3 and any compression extensions removed)."""
     )
     parser.add_argument(
         "--photons",

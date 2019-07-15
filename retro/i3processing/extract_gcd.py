@@ -24,21 +24,25 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 
 __all__ = [
-    "get_frame_item",
+    "GCD_README",
+    "MD5_HEX_RE",
     "extract_i3_geometry",
     "extract_i3_calibration",
     "extract_i3_detector_status",
     "extract_bad_doms_lists",
-    "main",
+    "extract_gcd_frames",
+    "extract_gcd_files",
     "parse_args",
 ]
 
 from argparse import ArgumentParser
 from collections import Mapping, OrderedDict
-from os.path import abspath, dirname, isdir, join
+import json
+from os.path import abspath, dirname, isdir, isfile, join
 import pickle
 import re
-from shutil import rmtree
+from shutil import move, rmtree
+import socket
 import sys
 from tempfile import mkdtemp
 
@@ -54,6 +58,7 @@ from retro.retro_types import (
     I3DOMSTATUS_T,
     I3OMGEO_T,
     I3TRIGGERREADOUTCONFIG_T,
+    I3TIME_T,
     OMKEY_T,
     TRIGGERKEY_T,
     CableType,
@@ -66,31 +71,20 @@ from retro.retro_types import (
     TriggerSourceID,
     TriggerTypeID,
     TriggerSubtypeID,
-    #TriggerConfigID,
+    TriggerConfigID,
 )
-from retro.utils.misc import (
-    get_file_md5,
-    expand,
-    mkdir,
-    dict2struct,
-)
-from retro.i3processing.extract_events import I3TIME_T, get_frame_item
+from retro.utils.misc import dict2struct, expand, get_file_md5, mkdir
+from retro.i3processing.extract_events import START_END_TIME_SPEC, get_frame_item
 
 
-I3TIME_SPECS = OrderedDict(
-    [
-        (
-            "start_time",
-            dict(
-                paths=("start_time.utc_year", "start_time.utc_daq_time"), dtype=I3TIME_T
-            ),
-        ),
-        (
-            "end_time",
-            dict(paths=("end_time.utc_year", "end_time.utc_daq_time"), dtype=I3TIME_T),
-        ),
-    ]
-)
+GCD_README = """
+Directory names are md5 hashes of the _decompressed_ GCD i3 files (or if G, C,
+and D frames were found inline in an i3 data file, each unique combination of
+GCD frames are output to an i3 file and hashed).
+"""
+
+
+MD5_HEX_RE = re.compile("^[0-9a-f]{32}$")
 
 
 def extract_i3_geometry(frame):
@@ -115,7 +109,7 @@ def extract_i3_geometry(frame):
     """
     # Get `start_time` & `end_time` using standard functions
     geometry = get_frame_item(
-        frame, key="I3Geometry", specs=I3TIME_SPECS, allow_missing=False
+        frame, key="I3Geometry", specs=START_END_TIME_SPEC, allow_missing=False
     )
 
     # Get omgeo, which is not simply extractable using `get_frame_item` func
@@ -165,7 +159,7 @@ def extract_i3_calibration(frame):
     """
     # Get `start_time` & `end_time` using standard functions
     calibration = get_frame_item(
-        frame, key="I3Calibration", specs=I3TIME_SPECS, allow_missing=False
+        frame, key="I3Calibration", specs=START_END_TIME_SPEC, allow_missing=False
     )
 
     i3_calibration_frame_obj = frame["I3Calibration"]
@@ -209,7 +203,8 @@ def extract_i3_calibration(frame):
 
 
 def extract_i3_detector_status(frame):
-    """
+    """Extract (most, maybe?) items found in a I3Detector frame.
+
     Parameters
     ----------
     frame : icecube.icetray.I3Frame
@@ -221,11 +216,36 @@ def extract_i3_detector_status(frame):
     detector_status : OrderedDict
         Roughly equivalent Numpy representation of I3DetectorStatus frame object
 
+    Notes
+    -----
+    Frame keys seen that aren't extracted: IceTopBadTanks and
+    I3FlasherSubrunMap; there might be an infinite number of others missed.
+    Caveat emptor.
+
     """
     # Get `start_time` & `end_time` using standard functions
     detector_status = get_frame_item(
-        frame, key="I3DetectorStatus", specs=I3TIME_SPECS, allow_missing=False
+        frame, key="I3DetectorStatus", specs=START_END_TIME_SPEC, allow_missing=False
     )
+
+    # TODO: roll the following few items into a single spec incl.
+    #       START_END_TIME_SPEC
+
+    key = "GRLSnapshotId"
+    if key in frame:
+        detector_status[key] = np.float64(frame[key].value)
+
+    key = "OfflineProductionVersion"
+    if key in frame:
+        detector_status[key] = np.float64(frame[key].value)
+
+    for key in ["GoodRunStartTime", "GoodRunEndTime"]:
+        if key not in frame:
+            continue
+        detector_status[key] = np.array(
+            [tuple(getattr(frame[key], name) for name in I3TIME_T.names)],
+            dtype=I3TIME_T,
+        )
 
     # DETECTOR_STATUS_T = np.dtype(
     #    [
@@ -289,7 +309,14 @@ def extract_i3_detector_status(frame):
         # idea where they come from and whether or not it's a bug. For now,
         # simply accept all ID's.
         # trigger_key["config_id"] = TriggerConfigID(trigger_key_fobj.config_id)
-        trigger_key["config_id"] = trigger_key_fobj.config_id
+        if (
+            hasattr(trigger_key_fobj, "config_id")
+            and trigger_key_fobj.config_id is not None
+        ):
+            config_id = trigger_key_fobj.config_id
+        else:
+            config_id = TriggerConfigID.NONE  # custom code; see `retro_types`
+        trigger_key["config_id"] = config_id
 
         this_trigger_config["trigger_key"] = trigger_key
 
@@ -318,8 +345,8 @@ def extract_i3_detector_status(frame):
 
 
 def extract_bad_doms_lists(frame):
-    """Extract frame objects named "*BadDomsList*", each of which must be a
-    ``icecube.dataclasses.I3VectorOMKey``.
+    """Extract frame objects named "*BadDoms*" (case insensitive), each of
+    which must be a ``icecube.dataclasses.I3VectorOMKey``.
 
     Parameters
     ----------
@@ -336,7 +363,7 @@ def extract_bad_doms_lists(frame):
     """
     bad_doms_lists = OrderedDict()
     for key, bad_doms_list_obj in frame.items():
-        if "baddomslist" not in key.lower():
+        if "baddoms" not in key.lower():
             continue
         bad_doms = np.empty(shape=len(bad_doms_list_obj), dtype=OMKEY_T)
         for i, omkey in enumerate(bad_doms_list_obj):
@@ -347,40 +374,44 @@ def extract_bad_doms_lists(frame):
     return bad_doms_lists
 
 
-GCD_README = """
-Directory names are md5 hashes of the _decompressed_ GCD i3 files (or if G, C,
-and D frames were found inline in an i3 data file, each unique combination of
-GCD frames are output to an i3 file and hashed).
-"""
-
-MD5_HEX_RE = re.compile("^[0-9a-f]{32}$")
-
-
-def extract_gcd(g_frame, c_frame, d_frame, gcd_dir):
+def extract_gcd_frames(g_frame, c_frame, d_frame, retro_gcd_dir, metadata=None):
     """Extract GCD info to Python/Numpy-readable objects stored to a central
     GCD directory, subdirs of which are named by the hex md5sum of each
     extracted GCD file.
 
     Parameters
     ----------
-    g_frame
-    c_frame
-    d_frame
-    gcd_dir
+    g_frame : icecube.icetray.I3Frame with stop I3Frame.Geometry
+    c_frame : icecube.icetray.I3Frame with stop I3Frame.Calibration
+    d_frame : icecube.icetray.I3Frame with stop I3Frame.DetectorStatus
+    retro_gcd_dir : string
+    metadata : None or mapping, optional
+        If non-empty mapping (e.g., OrderedDict) is provided, the contents are
+        written to the gcd file's subdirectory inside retro_gcd_dir as
+        "metadata.json"
 
     Returns
     -------
     gcd_md5_hex : len-32 string of chars 0-9 and/or a-f
+        MD5 sum of _only_ the G, C, and D frames (in that order) dumped to an
+        uncompressed i3 file. Note that this can result in a hash value
+        different from hashing the original GCD file if other frames were
+        present besides the GCD frames (such as an I frame, or Q/P/etc. if the
+        GCD is embedded in a data i3 file)
 
     """
     from icecube.dataio import I3File
 
-    gcd_dir = expand(gcd_dir)
+    retro_gcd_dir = expand(retro_gcd_dir)
 
-    # Create dir if necessary and add README to dir
-    if not isdir(gcd_dir):
-        mkdir(gcd_dir)
-        with open(join(gcd_dir, "README")) as readme:
+    # Create root dir for gcd subdirs if necessary
+    if not isdir(retro_gcd_dir):
+        mkdir(retro_gcd_dir)
+
+    # Add a vaguely useful README to gcd root dir
+    readme_fpath = join(retro_gcd_dir, "README")
+    if not isfile(readme_fpath):
+        with file(readme_fpath, "w") as readme:
             readme.write(GCD_README.strip() + "\n")
 
     # Find md5sum of an uncompressed GCD file created by these G, C, & D frames
@@ -392,61 +423,92 @@ def extract_gcd(g_frame, c_frame, d_frame, gcd_dir):
         gcd_i3file.push(c_frame)
         gcd_i3file.push(d_frame)
         gcd_i3file.close()
-        md5_hex = get_file_md5(gcd_i3file_path)
+        gcd_md5_hex = get_file_md5(gcd_i3file_path)
     finally:
-        rmtree(tempdir_path)
+        try:
+            rmtree(tempdir_path)
+        except Exception:
+            pass
 
-    # Have we already extracted this GCD?
-    this_gcd_dir_path = join(gcd_dir, md5_hex)
+    this_gcd_dir_path = join(retro_gcd_dir, gcd_md5_hex)
     if isdir(this_gcd_dir_path):
-        return md5_hex
+        # already extracted this GCD
+        sys.stderr.write("Already extracted GCD with md5sum {}\n".format(gcd_md5_hex))
+        return gcd_md5_hex
 
-    # Extract GCD info into Python/Numpy-readable things
-    gcd_info = OrderedDict()
-    gcd_info["I3Geometry"] = extract_i3_geometry(g_frame)
-    gcd_info["I3Calibration"] = extract_i3_calibration(c_frame)
-    gcd_info["I3DetectorStatus"] = extract_i3_detector_status(d_frame)
-    gcd_info.update(extract_bad_doms_lists(d_frame))
+    tempdir_path = mkdtemp(suffix="." + gcd_md5_hex)
+    try:
+        # Extract GCD info into Python/Numpy-readable things
+        gcd_info = OrderedDict()
+        gcd_info["I3Geometry"] = extract_i3_geometry(g_frame)
+        gcd_info["I3Calibration"] = extract_i3_calibration(c_frame)
+        gcd_info["I3DetectorStatus"] = extract_i3_detector_status(d_frame)
+        gcd_info.update(extract_bad_doms_lists(d_frame))
 
-    # Write info to files. Preferable to write a single array to a .npy file;
-    # second most preferable is to write multiple arrays to (compressed) .npz
-    # file (faster to load than pkl files); finally, I3DetectorStatus _has_ to
-    # be stored as pickle to preserve varying-length items.
-    for key, val in gcd_info.items():
-        if isinstance(val, Mapping):
-            if key == "I3DetectorStatus":
-                pickle.dump(
-                    val,
-                    open(join(this_gcd_dir_path, key + ".pkl"), "wb"),
-                    protocol=pickle.HIGHEST_PROTOCOL,
-                )
+        # Write info to files. Preferable to write a single array to a .npy file;
+        # second most preferable is to write multiple arrays to (compressed) .npz
+        # file (faster to load than pkl files); finally, I3DetectorStatus _has_ to
+        # be stored as pickle to preserve varying-length items.
+        for key, val in gcd_info.items():
+            if isinstance(val, Mapping):
+                if key == "I3DetectorStatus":
+                    pickle.dump(
+                        val,
+                        open(join(tempdir_path, key + ".pkl"), "wb"),
+                        protocol=pickle.HIGHEST_PROTOCOL,
+                    )
+                else:
+                    np.savez_compressed(join(tempdir_path, key + ".npz"), **val)
             else:
-                np.savez_compressed(join(this_gcd_dir_path, key + ".npz"), **val)
-        else:
-            assert isinstance(val, np.ndarray)
-            np.save(join(this_gcd_dir_path, key + ".npy"), val)
+                assert isinstance(val, np.ndarray)
+                np.save(join(tempdir_path, key + ".npy"), val)
 
-    return md5_hex
+        if metadata:
+            json.dump(
+                metadata,
+                file(join(tempdir_path, "metadata.json"), "w"),
+                sort_keys=False,
+                indent=4,
+            )
+    except:
+        try:
+            rmtree(tempdir_path)
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            pass
+        raise
+    else:
+        move(tempdir_path, this_gcd_dir_path)
+
+    return gcd_md5_hex
 
 
-def main(gcd, gcd_dir):
+def extract_gcd_files(gcd_files, retro_gcd_dir, verbosity=0):
     """
     Parameters
     ----------
-    gcd : string or iterable thereof
+    gcd_files : string or iterable thereof
 
-    gcd_dir : string
+    retro_gcd_dir : string
         Path to communal Retro-extracted GCD dir
+
+    verbosity : int in [0, 1]
+
+    Returns
+    -------
+    gcd_md5_hexs : len(gcd_files)-list of strings
 
     """
     # Import here so module can be read without access to IceCube software
     from icecube.dataio import I3File  # pylint: disable=no-name-in-module
     from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
 
-    if isinstance(gcd, string_types):
-        gcd = [gcd]
+    if isinstance(gcd_files, string_types):
+        gcd_files = [gcd_files]
 
-    for gcd_fpath in gcd:
+    gcd_md5_hexs = []
+    for gcd_fpath in gcd_files:
         gcd_fpath = expand(gcd_fpath)
         i3f = I3File(gcd_fpath)
         gcd_frames = OrderedDict()
@@ -454,20 +516,45 @@ def main(gcd, gcd_dir):
             frame = i3f.pop_frame()
             if frame.Stop == I3Frame.Geometry:
                 if "g_frame" in gcd_frames:
-                    raise ValueError('GCD file "{}" contains multiple G frames'.format(gcd_fpath))
+                    raise ValueError(
+                        'GCD file "{}" contains multiple G frames'.format(gcd_fpath)
+                    )
                 gcd_frames["g_frame"] = frame
             elif frame.Stop == I3Frame.Calibration:
                 if "c_frame" in gcd_frames:
-                    raise ValueError('GCD file "{}" contains multiple C frames'.format(gcd_fpath))
+                    raise ValueError(
+                        'GCD file "{}" contains multiple C frames'.format(gcd_fpath)
+                    )
                 gcd_frames["c_frame"] = frame
             elif frame.Stop == I3Frame.DetectorStatus:
                 if "d_frame" in gcd_frames:
-                    raise ValueError('GCD file "{}" contains multiple D frames'.format(gcd_fpath))
+                    raise ValueError(
+                        'GCD file "{}" contains multiple D frames'.format(gcd_fpath)
+                    )
                 gcd_frames["d_frame"] = frame
-        for frame_type in "gcd".split():
+        for frame_type in ("g", "c", "d"):
             if "{}_frame".format(frame_type) not in gcd_frames:
-                raise ValueError('No {} frame found in GCD file "{}"'.format(frame_type, gcd_fpath))
-        extract_gcd(gcd_dir=gcd_dir, **gcd_frames)
+                raise ValueError(
+                    'No {} frame found in GCD file "{}"'.format(frame_type, gcd_fpath)
+                )
+        metadata = OrderedDict()
+        metadata["extracted_on_fqdn"] = socket.getfqdn()
+        metadata["path_to_sourcefile"] = abspath(gcd_fpath)
+        metadata["sourcefile_md5sum"] = get_file_md5(gcd_fpath)
+        try:
+            gcd_md5_hex = extract_gcd_frames(
+                retro_gcd_dir=retro_gcd_dir,
+                metadata=metadata,
+                **gcd_frames
+            )
+        except:
+            sys.stederr.write('failed to extract GCD file "{}"\n'.format(gcd_fpath))
+            raise
+        gcd_md5_hexs.append(gcd_md5_hex)
+        if verbosity:
+            sys.stdout.write("{}  {}\n".format(gcd_md5_hex, gcd_fpath))
+
+    return gcd_md5_hexs
 
 
 def parse_args(description=__doc__):
@@ -475,20 +562,23 @@ def parse_args(description=__doc__):
     and call function."""
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        "--gcd",
+        "--gcd-files",
         required=True,
         nargs="+",  # allow one or more GCD files
         help="""GCD i3 file(s) to extract (each optionally compressed in a
         manner icecube software understands... gz, bz2, zst).""",
     )
     parser.add_argument(
-        "--gcd-dir",
-        required=False,
+        "--retro-gcd-dir",
+        required=True,
         help="""Directory into which to store the extracted GCD info""",
+    )
+    parser.add_argument(
+        "-v", dest="verbosity", action="count", default=0, help="set verbosity level"
     )
     args = parser.parse_args()
     return args
 
 
 if __name__ == "__main__":
-    main(**vars(parse_args()))
+    extract_gcd_files(**vars(parse_args()))
