@@ -1423,6 +1423,7 @@ def _extract_events_from_single_file(
     i3_fpath,
     retro_gcd_dir,
     gcd_md5_hex=None,
+    gcd=None,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
@@ -1436,11 +1437,13 @@ def _extract_events_from_single_file(
         recclasses,
         simclasses,
     )
-    from icecube.dataio import I3File  # pylint: disable=no-name-in-module
+    from icecube.dataio import I3FrameSequence  # pylint: disable=no-name-in-module
     from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
     from retro.i3processing.extract_gcd import MD5_HEX_RE, extract_gcd_frames
 
     i3_fpath = expand(i3_fpath)
+    if gcd is not None:
+        gcd = expand(gcd)
 
     if additional_keys is None:
         additional_keys = tuple()
@@ -1461,7 +1464,10 @@ def _extract_events_from_single_file(
         outdir = join(outdir, leafdir_basename)
 
     i3file_md5_hex = get_file_md5(i3_fpath)
-    i3file_iterator = I3File(i3_fpath)
+    i3_fpaths = [i3_fpath]
+    if gcd is not None:
+        i3_fpaths = [gcd] + i3_fpaths
+    i3file_iterator = I3FrameSequence(i3_fpaths)
 
     events = []
     truths = []
@@ -1812,6 +1818,7 @@ def extract_events(
     elif isinstance(gcd, string_types):
         if MD5_HEX_RE.match(gcd.strip().lower()):
             gcd_md5_hex = gcd.strip().lower()
+            gcd = None
         else:
             gcd_md5_hexs = extract_gcd_files(
                 gcd_files=gcd, retro_gcd_dir=retro_gcd_dir
@@ -1825,6 +1832,7 @@ def extract_events(
         _extract_events_from_single_file(
             i3_fpath=i3_fpath,
             retro_gcd_dir=retro_gcd_dir,
+            gcd=gcd,
             gcd_md5_hex=gcd_md5_hex,
             outdir=outdir,
             photons=photons,

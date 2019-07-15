@@ -32,28 +32,23 @@ fi
 
 mydir=$( dirname "$0" )
 
-simulation_gcd_md5=$( "$mydir"/../retro/i3processing/extract_gcd.py --gcd-files "$simulation_gcd" --retro-gcd-dir "$retro_gcd_dir" -v )
-
 function runit () {
     full_i3_filepath="$1"
     i3_basename=$( basename $full_i3_filepath )
     if $( echo "$i3_basename" | grep -i "genie" >/dev/null 2>&1 ) ; then
         truth_flag="--truth"
-        #gcd="934aa4cc5bc1330e872fc6704c240377"
-        gcd=$simulation_gcd_md5
+        gcd=$simulation_gcd
     elif $( echo "$i3_basename" | grep -i "muongun" >/dev/null 2>&1 ) ; then
         truth_flag="--truth"
-        #gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
-        #gcd="934aa4cc5bc1330e872fc6704c240377"
-        gcd=$simulation_gcd_md5
+        gcd=$simulation_gcd
     elif $( echo "$i3_basename" | grep -i "oscNext_data" >/dev/null 2>&1 ) ; then
         truth_flag=""
-        #!! TODO : find the gcd file associated with this run / subrun / whatever!!
         gcd=$( find $( dirname "$full_i3_filepath" ) -mindepth 1 -maxdepth 1 -type f -iname "*GCD*.i3*" )
     else
         echo "dunno what to do with $full_i3_filepath"
         exit 1
     fi
+    echo "i3_basename=$i3_basename gcd=$gcd"
 
     echo "Extracting from file --> to dir: \"$full_i3_filepath\""
     "$mydir"/../retro/i3processing/extract_events.py \
@@ -69,7 +64,7 @@ function runit () {
 }
 
 if [ -n "$root_dir" ] ; then
-    find "$root_dir" -name "oscNext*.i3*" | sort -V | while read full_i3_filepath ; do
+    find "$root_dir" -iregex ".*oscNext_.*[0-9]\.i3.*" | sort -V | while read full_i3_filepath ; do
         while (( $( jobs -r | wc -l ) >= $num_subprocs )) ; do
             sleep 0.2
         done
