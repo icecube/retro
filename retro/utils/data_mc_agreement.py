@@ -1,47 +1,196 @@
 #!/usr/bin/env python
+# pylint: disable=wrong-import-position
 
+from __future__ import absolute_import, division, print_function
 
-from os import listdir, walk
+__all__ = [
+    "LABELS",
+    "UNITS",
+    "PULSE_SERIES_NAME",
+    "OUTDIR",
+    "LEVEL",
+    "PROC_VER",
+    "LEVEL_PROC_VER",
+    "ROOT_DIR",
+    "DATA_ROOT_DIR",
+    "GENIE_ROOT_DIR",
+    "MUONGUN_ROOT_DIR",
+    "MC_NAME_DIRS",
+    "DATA_NAME_DIRS",
+    "get_stats",
+    "get_all_stats",
+]
+
+from collections import OrderedDict
+import cPickle as pickle
+from os import walk
 from os.path import (
     abspath,
     dirname,
-    expanduser,
-    expandvars,
-    isdir,
     isfile,
     join,
-    splitext,
 )
+import sys
+import time
 
 import numpy as np
+from six import string_types
 
 if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import expand, join_struct_arrays, mkdir, nsort_key_func
-
-def get_qtot_by_nchan(root_dir, pulse_series_name):
-    for dirpath, dirs, files in walk(root_dir, followlinks=True):
-        dirs.sort(key=nsort_key_func)
-
-        if "events.npy" not in files:
-            continue
-
-        this_pulses = pickle.load(
-            file(join(dirpath, "pulses", "{}.pkl".format(pulse_series_name)), "r")
-        )
-
-        
+from retro.utils.misc import expand, mkdir, nsort_key_func
 
 
-def qtot_by_nchan(mc_dirs, data_dirs):
-    if isinstance(mc_dirs, string_types):
-        mc_dirs = [mc_dirs]
-    if isinstance(data_dirs, string_types):
-        data_dirs = [data_dirs]
+LABELS = dict(
+    nue=r'GENIE $\nu_e$',
+    numu=r'GENIE $\nu_\mu$',
+    nutau=r'GENIE $\nu_\tau$',
+    mu=r'MuonGun',
 
-    data_vals = []
-    for data_dir in data_dirs:
-        data_a = np.load(data_f, mmap_mode="r")
-        
+    coszen=r'$\cos\theta_{\rm zen}$',
+    zenith=r'$\theta_{\rm zen}$',
+    azimuth=r'$\phi_{\rm az}$',
+)
+
+UNITS = dict(
+    x="m",
+    y="m",
+    z="m",
+    time="ns",
+    azimuth="rad",
+    zenith="rad",
+    energy="GeV",
+)
+
+PULSE_SERIES_NAME = "SplitInIcePulses"
+
+OUTDIR = "/home/justin/cowen/oscNext/data_mc_agreement"
+
+LEVEL = 5
+PROC_VER = "v01.01"
+LEVEL_PROC_VER = "level{}_{}".format(LEVEL, PROC_VER)
+ROOT_DIR = "/data/icecube/ana/LE/oscNext/pass2/"
+
+DATA_ROOT_DIR = join(ROOT_DIR, "data", LEVEL_PROC_VER)
+GENIE_ROOT_DIR = join(ROOT_DIR, "genie", LEVEL_PROC_VER)
+MUONGUN_ROOT_DIR = join(ROOT_DIR, "muongun", LEVEL_PROC_VER)
+
+MC_NAME_DIRS = OrderedDict(
+    [
+        ("nue", [join(GENIE_ROOT_DIR, "120000")]),
+        ("numu", [join(GENIE_ROOT_DIR, "140000")]),
+        ("nutau", [join(GENIE_ROOT_DIR, "160000")]),
+        ("mu", [join(MUONGUN_ROOT_DIR, "139010")]),
+    ]
+)
+
+DATA_NAME_DIRS = OrderedDict()
+for _yr in range(12, 19):
+    _data_year_dirname = "IC86.{:02d}".format(_yr)
+    DATA_NAME_DIRS[str(_yr)] = [join(DATA_ROOT_DIR, _data_year_dirname)]
+
+
+
+def get_stats(dirs, pulse_series_name):
+    if isinstance(dirs, string_types):
+        dirs = [dirs]
+
+    stats = OrderedDict(
+        [
+            ("charge_per_hit", []),
+            ("charge_per_dom", []),
+            ("charge_per_event", []),
+            ("hits_per_dom", []),
+            ("hits_per_event", []),  # aka "nchannel"
+            ("doms_per_event", []),
+            ("time_diffs", []),
+        ]
+    )
+
+    for root_dir in dirs:
+        root_dir = expand(root_dir)
+        for dirpath, dirs_, files in walk(root_dir, followlinks=True):
+            dirs_.sort(key=nsort_key_func)
+
+            if "events.npy" not in files:
+                continue
+
+            pulses = pickle.load(
+                file(join(dirpath, "pulses", "{}.pkl".format(pulse_series_name)), "r")
+            )
+
+            for event_pulses in pulses:
+                # nchannel is number of unique DOMs that got hit
+                nchannel = len(event_pulses)
+
+                stats["doms_per_event"].append(nchannel)
+
+                # qtot is sum of charge of all hits on all DOMs
+                event_pulses_ = []
+                for _, dom_pulses in event_pulses:
+                    stats["hits_per_dom"].append(len(dom_pulses))
+                    stats["charge_per_dom"].append(dom_pulses["charge"].sum())
+                    event_pulses_.append(dom_pulses)
+                event_pulses = np.concatenate(event_pulses_)
+
+                charge = event_pulses["charge"]
+                total_charge = charge.sum()
+
+                stats["charge_per_hit"].append(charge)
+                stats["charge_per_event"].append(total_charge)
+
+                stats["hits_per_event"].append(len(event_pulses))
+
+                stats["time_diffs"].append(event_pulses["time"] - event_pulses["time"].min())
+
+    for stat_name, vals in stats.items():
+        if np.isscalar(vals[0]):
+            stats[stat_name] = np.array(vals)
+        else:
+            stats[stat_name] = np.concatenate(vals)
+
+    return stats
+
+
+def get_all_stats(overwrite=False):
+    """Get stats for all data and MC sets.
+
+    Parameters
+    ----------
+    overwrite : bool, optional
+        Whether to overwrite any existing stats files
+
+    Returns
+    -------
+    stats : OrderedDict
+        Keys are dataset names and values are OrderedDicts containing the stats
+        for the corresponding datasets.
+
+    """
+    mkdir(OUTDIR)
+    stats = OrderedDict()
+    for name, dirs in list(DATA_NAME_DIRS.items()) + list(MC_NAME_DIRS.items()):
+        t0 = time.time()
+        outfile = join(OUTDIR, "stats_{}.npz".format(name))
+        if isfile(outfile) and not overwrite:
+            contents = np.load(outfile)
+            this_stats = OrderedDict([(k, contents[k]) for k in contents.keys()])
+            del contents
+            sys.stderr.write(
+                'loaded stats for set "{}" from file "{}" ({} sec)\n'.format(
+                    name, outfile, time.time() - t0
+                )
+            )
+        else:
+            this_stats = get_stats(dirs=dirs, pulse_series_name=PULSE_SERIES_NAME)
+            np.savez_compressed(outfile, **this_stats)
+            sys.stderr.write(
+                'saved stats for set "{}" to file "{}" ({} sec)\n'.format(
+                    name, outfile, time.time() - t0
+                )
+            )
+        stats[name] = this_stats
+
+    return stats
