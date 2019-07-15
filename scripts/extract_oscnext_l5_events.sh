@@ -12,6 +12,7 @@
 # extension(s) stripped.
 
 retro_gcd_dir=/data/icecube/retro_gcd
+simulation_gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
 
 start_dt=$( date +'%Y-%m-%dT%H%M%z' )
 
@@ -31,21 +32,24 @@ fi
 
 mydir=$( dirname "$0" )
 
+simulation_gcd_md5=$( "$mydir"/../retro/i3processing/extract_gcd.py --gcd-files "$simulation_gcd" --retro-gcd-dir "$retro_gcd_dir" -v )
+
 function runit () {
     full_i3_filepath="$1"
     i3_basename=$( basename $full_i3_filepath )
     if $( echo "$i3_basename" | grep -i "genie" >/dev/null 2>&1 ) ; then
         truth_flag="--truth"
-        #gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
-        gcd="934aa4cc5bc1330e872fc6704c240377"
+        #gcd="934aa4cc5bc1330e872fc6704c240377"
+        gcd=$simulation_gcd_md5
     elif $( echo "$i3_basename" | grep -i "muongun" >/dev/null 2>&1 ) ; then
         truth_flag="--truth"
         #gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
-        gcd="934aa4cc5bc1330e872fc6704c240377"
+        #gcd="934aa4cc5bc1330e872fc6704c240377"
+        gcd=$simulation_gcd_md5
     elif $( echo "$i3_basename" | grep -i "oscNext_data" >/dev/null 2>&1 ) ; then
         truth_flag=""
         #!! TODO : find the gcd file associated with this run / subrun / whatever!!
-        gcd=""
+        gcd=$( find $( dirname "$full_i3_filepath" ) -mindepth 1 -maxdepth 1 -type f -iname "*GCD*.i3*" )
     else
         echo "dunno what to do with $full_i3_filepath"
         exit 1

@@ -548,7 +548,7 @@ def extract_gcd_files(gcd_files, retro_gcd_dir, verbosity=0):
                 **gcd_frames
             )
         except:
-            sys.stederr.write('failed to extract GCD file "{}"\n'.format(gcd_fpath))
+            sys.stderr.write('failed to extract GCD file "{}"\n'.format(gcd_fpath))
             raise
         gcd_md5_hexs.append(gcd_md5_hex)
         if verbosity:
