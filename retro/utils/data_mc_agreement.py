@@ -92,7 +92,6 @@ for _yr in range(12, 19):
     DATA_NAME_DIRS[str(_yr)] = [join(DATA_ROOT_DIR, _data_year_dirname)]
 
 
-
 def get_stats(dirs, pulse_series_name):
     if isinstance(dirs, string_types):
         dirs = [dirs]
@@ -103,8 +102,8 @@ def get_stats(dirs, pulse_series_name):
             ("charge_per_dom", []),
             ("charge_per_event", []),
             ("hits_per_dom", []),
-            ("hits_per_event", []),  # aka "nchannel"
-            ("doms_per_event", []),
+            ("hits_per_event", []),
+            ("doms_per_event", []),  # aka "nchannel"
             ("time_diffs", []),
         ]
     )
@@ -117,15 +116,23 @@ def get_stats(dirs, pulse_series_name):
             if "events.npy" not in files:
                 continue
 
+            events = np.load(join(dirpath, "events.npy"), mmap_mode="r")
+            process_mask = events["L5_oscNext_bool"]
+
+            weight = None
+            if "truth.npy" in files:
+                truth = np.load(join(dirpath, "truth.npy"), mmap_mode="r")
+                weight = truth["weight"]
+
             pulses = pickle.load(
                 file(join(dirpath, "pulses", "{}.pkl".format(pulse_series_name)), "r")
             )
 
-            for event_pulses in pulses:
-                # nchannel is number of unique DOMs that got hit
-                nchannel = len(event_pulses)
+            for process_bool, event_pulses in zip(process_mask, pulses):
+                if not process_bool:
+                    continue
 
-                stats["doms_per_event"].append(nchannel)
+                stats["doms_per_event"].append(len(event_pulses))
 
                 # qtot is sum of charge of all hits on all DOMs
                 event_pulses_ = []
@@ -134,16 +141,13 @@ def get_stats(dirs, pulse_series_name):
                     stats["charge_per_dom"].append(dom_pulses["charge"].sum())
                     event_pulses_.append(dom_pulses)
                 event_pulses = np.concatenate(event_pulses_)
-
                 charge = event_pulses["charge"]
-                total_charge = charge.sum()
-
                 stats["charge_per_hit"].append(charge)
-                stats["charge_per_event"].append(total_charge)
-
+                stats["charge_per_event"].append(charge.sum())
                 stats["hits_per_event"].append(len(event_pulses))
-
-                stats["time_diffs"].append(event_pulses["time"] - event_pulses["time"].min())
+                first_hit_time = event_pulses["time"].min()
+                time_diffs = event_pulses["time"] - first_hit_time
+                stats["time_diffs"].append(time_diffs)
 
     for stat_name, vals in stats.items():
         if np.isscalar(vals[0]):
@@ -174,23 +178,38 @@ def get_all_stats(overwrite=False):
     for name, dirs in list(DATA_NAME_DIRS.items()) + list(MC_NAME_DIRS.items()):
         t0 = time.time()
         outfile = join(OUTDIR, "stats_{}.npz".format(name))
-        if isfile(outfile) and not overwrite:
-            contents = np.load(outfile)
-            this_stats = OrderedDict([(k, contents[k]) for k in contents.keys()])
-            del contents
-            sys.stderr.write(
-                'loaded stats for set "{}" from file "{}" ({} sec)\n'.format(
-                    name, outfile, time.time() - t0
+        try:
+            if isfile(outfile) and not overwrite:
+                contents = np.load(outfile)
+                this_stats = OrderedDict([(k, contents[k]) for k in contents.keys()])
+                del contents
+                sys.stderr.write(
+                    'loaded stats for set "{}" from file "{}" ({} sec)\n'.format(
+                        name, outfile, time.time() - t0
+                    )
                 )
-            )
-        else:
-            this_stats = get_stats(dirs=dirs, pulse_series_name=PULSE_SERIES_NAME)
-            np.savez_compressed(outfile, **this_stats)
-            sys.stderr.write(
-                'saved stats for set "{}" to file "{}" ({} sec)\n'.format(
-                    name, outfile, time.time() - t0
+            else:
+                this_stats = get_stats(dirs=dirs, pulse_series_name=PULSE_SERIES_NAME)
+                np.savez_compressed(outfile, **this_stats)
+                sys.stderr.write(
+                    'saved stats for set "{}" to file "{}" ({} sec)\n'.format(
+                        name, outfile, time.time() - t0
+                    )
                 )
-            )
-        stats[name] = this_stats
+            stats[name] = this_stats
+        except:
+            pass
 
     return stats
+
+
+def plot_distributions():
+    all_stats = get_all_stats()
+    for name in ["total_mc", "total_data"]:
+        all_stats["total_mc"] = OrderedDict(
+            [
+                (name, []) for name in all_stats.values()[0].keys()
+            ]
+        )
+    #for name, stats in all_stats.items():
+    #    if
