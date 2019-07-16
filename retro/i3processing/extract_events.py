@@ -1432,6 +1432,75 @@ def _extract_events_from_single_file(
     truth=False,
     additional_keys=None,
 ):
+    """Extract event information from an i3 file.
+
+    Parameters
+    ----------
+    fpath : str
+        Path to I3 file
+
+    external_gcd : bool, optional
+        If `True`, force loading a (single) GCD file to be found in the same
+        directory as the data file(s) (e.g., use this option for actual data
+        run files). If `None` (the default), a single GCD file in the same
+        directory is automatically loaded but if no file is found, no error
+        results. If `False`, then no GCD file in the same directory is loaded,
+        even if one is present. If `True` or `None` and multiple GCD files are
+        found, a ValueError is raised.
+
+    outdir : str, optional
+        Directory in which to place generated files
+
+    photons : None, str, or iterable of str
+        Names of photons series' to extract from each event
+
+    pulses : None, str, or iterable of str
+        Names of pulse series' to extract from each event
+
+    recos : None, str, or iterable of str
+        Names of reconstructions to extract from each event
+
+    triggers : None, str, or iterable of str
+        Names of trigger hierarchies to extract from each event
+
+    truth : bool
+        Whether or not Monte Carlo truth for the event should be extracted for
+        each event
+
+    additional_keys : str, iterable thereof, or None
+
+    Returns
+    -------
+    list of OrderedDict, one per event
+        Each dict contains key "meta" with sub-dict containing file metadata.
+        Depending on which arguments are provided, OrderedDicts for each named
+        key passed will appear as a key within the OrderedDicts named "pulses",
+        "recos", "photons", and "truth". E.g.:
+
+        .. python ::
+
+            {
+                'i3_metadata': {...},
+                'events': [{...}, {...}, ...],
+                'truth': [{'pdg_encoding': ..., 'daughters': [{...}, ...]}],
+                'photons': {
+                    'photons': [[...], [...], ...],
+                    'other_photons': [[...], [...], ...]
+                },
+                'pulse_series': {
+                    'SRTOfflinePulses': [[...], [...], ...],
+                    'WaveDeformPulses': [[...], [...], ...]
+                },
+                'recos': {
+                    'PegLeg8D': [{...}, ...],
+                    'Retro8D': [{...}, ...]
+                },
+                'triggers': {
+                    'I3TriggerHierarchy': [{...}, ...],
+                }
+            }
+
+    """
     from icecube import (  # pylint: disable=unused-variable
         dataclasses,
         recclasses,

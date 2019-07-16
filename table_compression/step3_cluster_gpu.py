@@ -40,7 +40,7 @@ if not os.path.isfile(os.path.join(args.dir, 'cluster_data.fp32.npy')):
     np.save(os.path.join(args.dir, 'cluster_data.fp32.npy'), data)
 else:
     print('loading exisiting data')
-    data = np.load(os.path.join(args.path, 'cluster_data.fp32.npy'))
+    data = np.load(os.path.join(args.dir, 'cluster_data.fp32.npy'))
 
 # random subsample
 #print('subsampling')
@@ -55,7 +55,7 @@ print('data loaded')
 
 n_clusters = args.n_clusters
 
-centroids, assignments = kmeans_cuda(data, args.n_clusters, verbosity=2, seed=3, device=5, yinyang_t=0, tolerance=0.05)
+centroids, assignments = kmeans_cuda(data, args.n_clusters, verbosity=2, seed=3, device=0, yinyang_t=0, tolerance=0.05)
 #centroids, assignments = kmeans_cuda(data, args.n_clusters, verbosity=2, seed=3, device=1, yinyang_t=0, tolerance=0.5, init='random')
 
 print('clustering done')
