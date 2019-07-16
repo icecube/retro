@@ -678,7 +678,7 @@ def get_events(
             del file_iterator_tree
 
 
-def iterate_file(fpath, start=None, stop=None, step=None):
+def iterate_file(fpath, start=None, stop=None, step=None, mmap_mode=None):
     """Iterate through the elements in a pickle (.pkl) or numpy (.npy) file. If
     a pickle file, structure must be a sequence of objects, one object per
     event. If a numpy file, it must be a one-dimensional structured array where
@@ -690,6 +690,15 @@ def iterate_file(fpath, start=None, stop=None, step=None):
     start, stop, step : optional
         Arguments passed to `slice` for extracting select events from the
         file.
+    mmap_mode : None or string in {"r", "r+", "w+", "c"}
+        Only applicable if `fpath` is a numpy .npy file; see help for
+        `numpy.memmap` for more information on each mode. Note that memory
+        mapping a file is useful for not consuming too much memory and being
+        able to simultaneously write to the same reco output file from multiple
+        processes (presumably each process working on different events) from
+        multiple processes BUT too many open file handles can result in an
+        exception. Default is `None` (file is not memory mapped, instead entire
+        file is read into memory).
 
     Yields
     ------
@@ -703,10 +712,7 @@ def iterate_file(fpath, start=None, stop=None, step=None):
         events = load_pickle(fpath)
     elif ext == '.npy':
         try:
-            # Note that memory mapping the file is useful for not consuming too
-            # much memory, and also might be essential in the future if we
-            # write recos directly to the {reco}.npy file
-            events = np.load(fpath) #, mmap_mode='r')
+            events = np.load(fpath, mmap_mode=mmap_mode)
         except:
             sys.stderr.write('failed to load "{}"\n'.format(fpath))
             raise
