@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating
+# pylint: disable=wrong-import-position
 
 """
 Extract information on events from an i3 file needed for running Retro Reco.
@@ -52,15 +52,15 @@ __all__ = [
     "extract_truth",
     "extract_metadata_from_frame",
     "extract_events",
-    "parse_args",
+    "main",
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict, Sequence
+from collections import Iterable, OrderedDict, Sequence
 from copy import deepcopy
 from hashlib import sha256
-import numbers
-from os.path import abspath, basename, dirname, join
+from os import listdir
+from os.path import abspath, basename, dirname, exists, join
 import pickle
 import re
 import sys
@@ -90,7 +90,7 @@ from retro.retro_types import (
     INVALID_CASCADE,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
-from retro.utils.misc import expand, mkdir
+from retro.utils.misc import expand, mkdir, set_explicit_dtype
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
 
@@ -339,49 +339,6 @@ def dict2struct(d):
     return array
 
 
-def set_explicit_dtype(x):
-    """Force `x` to have a numpy type if it doesn't already have one.
-
-    Parameters
-    ----------
-    x : numpy-typed object, bool, integer, float
-        If not numpy-typed, type is attempted to be inferred. Currently only
-        bool, int, and float are supported, where bool is converted to
-        np.bool8, integer is converted to np.int64, and float is converted to
-        np.float64. This ensures that full precision for all but the most
-        extreme cases is maintained for inferred types.
-
-    Returns
-    -------
-    x : numpy-typed object
-
-    Raises
-    ------
-    TypeError
-        In case the type of `x` is not already set or is not a valid inferred
-        type. As type inference can yield different results for different
-        inputs, rather than deal with everything, explicitly failing helps to
-        avoid inferring the different instances of the same object differently
-        (which will cause a failure later on when trying to concatenate the
-        types in a larger array).
-
-    """
-    if hasattr(x, "dtype"):
-        return x
-
-    # bools are numbers.Integral, so test for bool first
-    if isinstance(x, bool):
-        return np.bool8(x)
-
-    if isinstance(x, numbers.Integral):
-        return np.int64(x)
-
-    if isinstance(x, numbers.Number):
-        return np.float64(x)
-
-    raise TypeError("Type of argument is invalid: {}".format(type(x)))
-
-
 def get_frame_item(frame, key, specs, allow_missing):
     """
     Parameters
@@ -420,7 +377,7 @@ def get_frame_item(frame, key, specs, allow_missing):
 
                 # Assume it's an attribute if the string does not explicitly
                 # define attribute (".") or item ("[") access syntax
-                if not path[0] in (".", "["):
+                if path[0] not in (".", "["):
                     path = "." + path
                 value = eval("obj" + path)  # pylint: disable=eval-used
                 values.append(value)
@@ -676,18 +633,13 @@ def extract_pulses(frame, pulse_series_name):
 
     pulse_series = frame[pulse_series_name]
 
-    time_range_name = None
-    if pulse_series_name + "TimeRange" in frame:
-        time_range_name = pulse_series_name + "TimeRange"
-    elif "UncleanedInIcePulsesTimeRange" in frame:
-        # TODO: use WaveformRange instead?
-        time_range_name = "UncleanedInIcePulsesTimeRange"
+    time_range_name = pulse_series_name + "TimeRange"
 
-    if time_range_name is not None:
+    if time_range_name in frame:
         i3_time_range = frame[time_range_name]
         time_range = i3_time_range.start, i3_time_range.stop
     else:
-        time_range = None
+        time_range = np.nan, np.nan
 
     if isinstance(pulse_series, I3RecoPulseSeriesMapMask):
         pulse_series = pulse_series.apply(frame)
@@ -1481,12 +1433,14 @@ def extract_metadata_from_frame(frame):
 
 def extract_events(
     fpath,
+    external_gcd=None,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
     recos=tuple(),
     triggers=tuple(),
     truth=False,
+    additional_keys=None,
 ):
     """Extract event information from an i3 file.
 
@@ -1494,6 +1448,15 @@ def extract_events(
     ----------
     fpath : str
         Path to I3 file
+
+    external_gcd : bool, optional
+        If `True`, force loading a (single) GCD file to be found in the same
+        directory as the data file(s) (e.g., use this option for actual data
+        run files). If `None` (the default), a single GCD file in the same
+        directory is automatically loaded but if no file is found, no error
+        results. If `False`, then no GCD file in the same directory is loaded,
+        even if one is present. If `True` or `None` and multiple GCD files are
+        found, a ValueError is raised.
 
     outdir : str, optional
         Directory in which to place generated files
@@ -1513,6 +1476,8 @@ def extract_events(
     truth : bool
         Whether or not Monte Carlo truth for the event should be extracted for
         each event
+
+    additional_keys : str, iterable thereof, or None
 
     Returns
     -------
@@ -1552,11 +1517,42 @@ def extract_events(
         simclasses,
     )
     from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
-    from icecube.dataio import I3File  # pylint: disable=no-name-in-module
+    from icecube.dataio import I3FrameSequence  # pylint: disable=no-name-in-module
 
     fpath = expand(fpath)
     sha256_hex = sha256(open(fpath, "rb").read()).hexdigest()
-    i3file = I3File(fpath, "r")
+
+    fpaths = [fpath]
+
+    if additional_keys is None:
+        additional_keys = tuple()
+    elif isinstance(additional_keys, string_types):
+        additional_keys = (additional_keys,)
+    else:
+        assert isinstance(additional_keys, Iterable)
+        additional_keys = tuple(additional_keys)
+
+    if external_gcd is True or external_gcd is None:
+        fdir = dirname(fpath)
+        gcd_fnames = [
+            f
+            for f in listdir(fdir)
+            if "gcd" in f.lower() and ".i3" in f.lower() and exists(join(fdir, f))
+        ]
+        if len(gcd_fnames) == 1:
+            fpaths.insert(0, join(fdir, gcd_fnames[0]))
+        elif (
+            external_gcd is True and len(gcd_fnames) == 0
+        ):  # pylint: disable=len-as-condition
+            raise ValueError('No GCD file found in directory "{}"'.format(fdir))
+        elif len(gcd_fnames) > 1:
+            raise ValueError(
+                'More than one GCD files found in directory "{}": {}'.format(
+                    fdir, gcd_fnames
+                )
+            )
+
+    i3file_iterator = I3FrameSequence(fpaths)
 
     events = []
     truths = []
@@ -1568,6 +1564,7 @@ def extract_events(
     pulses_d = OrderedDict()
     for name in pulses:
         pulses_d[name] = []
+        pulses_d[name + "TimeRange"] = []
 
     recos_d = OrderedDict()
     for name in recos:
@@ -1578,7 +1575,7 @@ def extract_events(
         trigger_hierarchies[name] = []
 
     def process_frame_buffer(frame_buffer):
-        """Get event information from an set of frames that, together, should
+        """Get event information from a set of frames that, together, should
         completely describe a single event.
 
         Information gathered about the event is added to the (pre-existing)
@@ -1646,6 +1643,9 @@ def extract_events(
                 raise
             truths.append(event_truth)
 
+        for frame_key in additional_keys:
+            event[frame_key] = pframe[frame_key].value
+
         events.append(event)
 
         for photon_name in photons:
@@ -1654,11 +1654,7 @@ def extract_events(
         for pulse_series_name in pulses:
             pulses_list, time_range = extract_pulses(pframe, pulse_series_name)
             pulses_d[pulse_series_name].append(pulses_list)
-            tr_key = pulse_series_name + "TimeRange"
-            if time_range is not None:
-                if tr_key not in pulses_d:
-                    pulses_d[tr_key] = []
-                pulses_d[tr_key].append(time_range)
+            pulses_d[pulse_series_name + "TimeRange"].append(time_range)
 
         for reco_name in recos:
             recos_d[reco_name].append(extract_reco(pframe, reco_name))
@@ -1680,11 +1676,11 @@ def extract_events(
 
     frame_buffer = []
     frame_counter = 0
-    while i3file.more():
+    while i3file_iterator.more():
         try:
             frame = None
             try:
-                frame = i3file.pop_frame()
+                frame = i3file_iterator.pop_frame()
             except:
                 sys.stderr.write("Failed to pop frame #{}\n".format(frame_counter + 1))
                 raise
@@ -1714,9 +1710,9 @@ def extract_events(
     # resulting array)
     for pulse_series_name in pulses:
         tr_key = pulse_series_name + "TimeRange"
-        if tr_key not in pulses_d:
-            continue
-        if len(pulses_d[pulse_series_name]) != len(pulses_d[tr_key]):
+        if tr_key in pulses_d and len(pulses_d[pulse_series_name]) != len(
+            pulses_d[tr_key]
+        ):
             raise ValueError(
                 "{} present in some frames but not present in other frames".format(
                     tr_key
@@ -1733,7 +1729,6 @@ def extract_events(
         for key, val in trigger_hierarchies.items():
             assert not val, "'{}': {}".format(name, val)
         sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(fpath))
-        return
 
     photon_series_dir = join(outdir, "photons")
     pulse_series_dir = join(outdir, "pulses")
@@ -1749,9 +1744,12 @@ def extract_events(
     if triggers:
         mkdir(trigger_hierarchy_dir)
 
-    event_dtype = []
-    for key, val in events[0].items():
-        event_dtype.append((key, set_explicit_dtype(val).dtype))
+    event_dtype = None
+    if events:
+        for key, val in events[0].items():
+            if event_dtype is None:
+                event_dtype = []
+            event_dtype.append((key, set_explicit_dtype(val).dtype))
 
     events = np.array([tuple(ev.values()) for ev in events], dtype=event_dtype)
     np.save(join(outdir, "events.npy"), events)
@@ -1772,12 +1770,11 @@ def extract_events(
             open(join(pulse_series_dir, name + ".pkl"), "wb"),
             protocol=pickle.HIGHEST_PROTOCOL,
         )
-        key = name + "TimeRange"
-        if key in pulses_d and pulses_d[key]:
-            np.save(
-                join(pulse_series_dir, key + ".npy"),
-                np.array(pulses_d[key], dtype=np.float32),
-            )
+        tr_key = name + "TimeRange"
+        np.save(
+            join(pulse_series_dir, tr_key + ".npy"),
+            np.array(pulses_d[tr_key], dtype=np.float32),
+        )
 
     for name in recos:
         np.save(join(recos_dir, name + ".npy"), np.array(recos_d[name]))
@@ -1790,10 +1787,17 @@ def extract_events(
         )
 
 
-def parse_args(description=__doc__):
-    """Parse command line args"""
+def main(description=__doc__):
+    """Script interface to `extract_events` function: Parse command line args
+    and call function."""
     parser = ArgumentParser(description=description)
     parser.add_argument("--fpath", required=True, help="""Path to i3 file""")
+    parser.add_argument(
+        "--ignore-external-gcd",
+        action="store_true",
+        help="""Force _ignoring_ any GCD file(s) in the same directory as the
+        i3 file being extracted.""",
+    )
     parser.add_argument("--outdir")
     parser.add_argument(
         "--photons",
@@ -1820,8 +1824,18 @@ def parse_args(description=__doc__):
         help="""Trigger hierarchy names to extract from each event""",
     )
     parser.add_argument("--truth", action="store_true")
-    return parser.parse_args()
+    parser.add_argument(
+        "--additional-keys",
+        default=None,
+        nargs="+",
+        help="Additional keys to extract from event I3 frame",
+    )
+    args = parser.parse_args()
+    kwargs = vars(args)
+    if kwargs.pop("ignore_external_gcd"):
+        kwargs["external_gcd"] = False
+    extract_events(**kwargs)
 
 
 if __name__ == "__main__":
-    extract_events(**vars(parse_args()))
+    main()

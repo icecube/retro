@@ -117,8 +117,12 @@ def generate_ckv_table(
     # Store original table to keep binning info, etc.
     full_table = table
 
-    costhetadir_bin_edges = full_table['costhetadir_bin_edges']
-    deltaphidir_bin_edges = full_table['deltaphidir_bin_edges']
+    if "binning" in full_table:
+        costhetadir_bin_edges = full_table["binning"]["costhetadir"]
+        deltaphidir_bin_edges = full_table["binning"]["deltaphidir"]
+    else:
+        costhetadir_bin_edges = full_table['costhetadir_bin_edges']
+        deltaphidir_bin_edges = full_table['deltaphidir_bin_edges']
 
     n_phase = full_table['phase_refractive_index']
     cos_ckv = 1 / (n_phase * beta)
@@ -128,9 +132,7 @@ def generate_ckv_table(
             ' produce Cherenkov light!'.format(beta, n_phase)
         )
 
-    # Extract just the "useful" part of the table, i.e., exclude under/overflow
-    # bins.
-    table = full_table['table'][(slice(1, -1),)*5]
+    table = full_table["table"]
 
     if outdir is None:
         if isdir(input_filename):

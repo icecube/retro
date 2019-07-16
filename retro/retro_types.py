@@ -218,8 +218,8 @@ HITS_SUMMARY_T = np.dtype([
     ('latest_hit_time', np.float32),
     ('average_hit_time', np.float32),
     ('total_charge', np.float32),
-    ('total_num_hits', np.uint32),
-    ('total_num_doms_hit', np.uint32),
+    ('num_hits', np.uint32),
+    ('num_doms_hit', np.uint32),
     ('time_window_start', np.float32),
     ('time_window_stop', np.float32)
 ])

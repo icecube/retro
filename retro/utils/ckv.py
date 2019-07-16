@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, too-many-nested-blocks, line-too-long, too-many-locals
+# pylint: disable=wrong-import-position, line-too-long, bad-continuation
 
 """
-Convert raw Retro 5D tables (which represent survival probabilities for light
+Convert raw Retro N-D tables (which represent survival probabilities for light
 traveling in a particular direction) to tables for Cherenkov emitters with a
 particular direction.
+
+The only requirement is that the table have last two dimensions
+(costhetadir, deltaphidir).
 
 Output tables will be in .npy-files-in-a-directory format for easy memory
 mapping.
@@ -284,7 +287,7 @@ def convolve_table(
     costhetadir_min, costhetadir_max : floats in [-1, 1]
         Lower and upper edges of costhetadir binning
 
-    phidir_min, phidir_max : floats in [-pi, pi]
+    phidir_min, phidir_max : floats with phidir_max - phidir_min == 2*pi
         Lower and upper edges of phidir binning
 
     """
@@ -296,8 +299,7 @@ def convolve_table(
     assert phidir_max > phidir_min
     assert -1 <= costhetadir_max <= 1
     assert -1 <= costhetadir_min <= 1
-    assert -np.pi <= phidir_min <= np.pi
-    assert -np.pi <= phidir_max <= np.pi
+    assert np.abs((phidir_max - phidir_min) - 2*np.pi) < 1e5
 
     sin_ckv = math.sin(math.acos(cos_ckv))
 

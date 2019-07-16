@@ -197,7 +197,6 @@ class Retro5DTables(object):
                 load_template_compr_ckv_table
             )
             self.table_loader_func = load_template_compr_ckv_table
-            self.usable_table_slice = (slice(None),)*3
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_template_map'
         elif self.tbl_is_raw:
@@ -206,13 +205,11 @@ class Retro5DTables(object):
             # NOTE: original tables have underflow (bin 0) and overflow
             # (bin -1) bins, so whole-axis slices must exclude the first and
             # last bins.
-            self.usable_table_slice = (slice(1, -1),)*5
             self.t_indep_table_name = 't_indep_table'
             self.table_name = 'table'
         else: # self.tbl_is_ckv:
             from retro.tables.ckv_tables import load_ckv_table
             self.table_loader_func = load_ckv_table
-            self.usable_table_slice = (slice(None),)*5
             self.t_indep_table_name = 't_indep_ckv_table'
             self.table_name = 'ckv_table'
 

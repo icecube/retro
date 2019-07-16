@@ -31,22 +31,23 @@ mydir=$( dirname "$0" )
 
 function runit () {
     full_i3_filepath="$1"
-    echo "Extracting file: \"$full_i3_filepath\""
-    outdir="/tmp/."$( echo "$full_i3_filepath" | sed 's/\.i3.*//' )
+    echo "Extracting from file --> to dir: \"$full_i3_filepath\" -->  \"$outdir\""
+    outdir=$( echo "$full_i3_filepath" | sed 's/\.i3.*//' )
     "$mydir"/../retro/i3processing/extract_events.py \
-        --triggers I3TriggerHierarchy \
-        --truth \
-        --pulses SplitInIcePulses \
-        --recos Pegleg_Fit_MN CascadeLast_DC FiniteRecoFit L4_ToIEval2 L4_iLineFit LineFit MM_DC_LineFitI_MM_DC_Pulses_1P_C05 MPEFit PoleMuonLinefit SPEFit2 SPEFit2_DC SPEFitSingle_DC DipoleFit_DC L4_ToI L4_ToIEval3 L5_SPEFit11 LineFit_DC MM_IC_LineFitI MPEFitMuEX PoleMuonLlhFit SPEFit2MuEX_FSS SPEFitSingle ToI_DC \
         --fpath "$full_i3_filepath" \
-        --outdir "$outdir" &
+        --additional-keys "L5_oscNext_bool" \
+        --outdir "$outdir" \
+        --truth \
+        --triggers I3TriggerHierarchy \
+        --pulses SplitInIcePulses \
+        --recos LineFit_DC L5_SPEFit11 \
+        &
 }
 
 if [ -n "$root_dir" ] ; then
-    find "$root_dir" -name "*.i3*" | sort -V | while read full_i3_filepath ; do
-        while (( 1 )) ; do
-            (( $( jobs -r | wc -l ) < $num_subprocs )) && break
-            sleep 3
+    find "$root_dir" -name "oscNext*.i3*" | sort -V | while read full_i3_filepath ; do
+        while (( $( jobs -r | wc -l ) >= $num_subprocs )) ; do
+            sleep 0.2
         done
         runit "$full_i3_filepath"
     done

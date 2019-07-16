@@ -5,7 +5,7 @@ timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 scripts_dir="$( dirname $0 )"
 retro_dir="$( dirname $scripts_dir )"
-events_base="$1"
+events_root="$1"
 start_idx="$2"
 outdir="$3"
 
@@ -130,7 +130,7 @@ $retro_dir/retro/reco.py \
     $tdi0 \
     $tdi1 \
     \
-    --events-base "$events_base" \
+    --events-root "$events_root" \
     --start "$start_idx" \
     --step 10 \
     \
