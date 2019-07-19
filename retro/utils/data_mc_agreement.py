@@ -19,14 +19,14 @@ __all__ = [
     "DATA_ROOT_DIR",
     "GENIE_ROOT_DIR",
     "MUONGUN_ROOT_DIR",
-    "MC_NAME_DIRS",
-    "DATA_NAME_DIRS",
+    "MC_NAME_DIRINFOS",
+    "DATA_NAME_DIRINFOS",
     "get_stats",
     "get_all_stats",
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict
+from collections import Mapping, OrderedDict
 import cPickle as pickle
 from multiprocessing import Pool
 from os import walk
@@ -41,6 +41,10 @@ import time
 
 import numpy as np
 from six import string_types
+import matplotlib as mpl
+mpl.use("agg")
+mpl.rcParams['font.family'] = 'sans-serif'
+mpl.rcParams['font.sans-serif'] = ['Tahoma']
 
 if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -83,22 +87,45 @@ DATA_ROOT_DIR = join(ROOT_DIR, "data", LEVEL_PROC_VER)
 GENIE_ROOT_DIR = join(ROOT_DIR, "genie", LEVEL_PROC_VER)
 MUONGUN_ROOT_DIR = join(ROOT_DIR, "muongun", LEVEL_PROC_VER)
 
-MC_NAME_DIRS = OrderedDict(
+N_FILES = {
+    # MC
+    "nue": 601,
+    "numu": 1494,
+    "nutau": 335,
+    "mu": 1000,
+
+    # Data
+    "12": 21142,
+    "13": 21128,
+    "14": 37305,
+    "15": 23831,
+    "16": 21939,
+    "17": 30499,
+    "18": 23589,
+}
+
+
+MC_NAME_DIRINFOS = OrderedDict(
     [
-        ("nutau", [join(GENIE_ROOT_DIR, "160000")]),
-        ("numu", [join(GENIE_ROOT_DIR, "140000")]),
-        ("nue", [join(GENIE_ROOT_DIR, "120000")]),
-        ("mu", [join(MUONGUN_ROOT_DIR, "139010")]),
+        ("nue", [dict(path=join(GENIE_ROOT_DIR, "120000"), n_files=601)]),
+        ("numu", [dict(path=join(GENIE_ROOT_DIR, "140000"), n_files=1494)]),
+        ("nutau", [dict(path=join(GENIE_ROOT_DIR, "160000"), n_files=335)]),
+        ("mu", [dict(path=join(MUONGUN_ROOT_DIR, "139010"), n_files=1000)]),
     ]
 )
 
-DATA_NAME_DIRS = OrderedDict()
+DATA_NAME_DIRINFOS = OrderedDict()
 for _yr in range(12, 19):
     _data_year_dirname = "IC86.{:02d}".format(_yr)
-    DATA_NAME_DIRS[str(_yr)] = [join(DATA_ROOT_DIR, _data_year_dirname)]
+    DATA_NAME_DIRINFOS[str(_yr)] = [
+        dict(
+            path=join(DATA_ROOT_DIR, _data_year_dirname),
+            n_files=N_FILES[str(_yr)],
+        )
+    ]
 
 
-def process_dir(dirpath):
+def process_dir(dirpath, n_files):
     stats = OrderedDict(
         [
             ("charge_per_hit", []),
@@ -109,6 +136,7 @@ def process_dir(dirpath):
             ("doms_per_event", []),  # aka "nchannel"
             ("time_diffs", []),
             ("weight_per_event", []),
+            ("weight_per_dom", []),
             ("weight_per_hit", []),
         ]
     )
@@ -117,7 +145,8 @@ def process_dir(dirpath):
     if len(events) == 0:
         return stats
 
-    sys.stderr.write('processing dir "{}"\n'.format(dirpath))
+    #sys.stderr.write('processing dir "{}"\n'.format(dirpath))
+    sys.stderr.write('.')
 
     l5_bools = events["L5_oscNext_bool"]
 
@@ -137,6 +166,8 @@ def process_dir(dirpath):
         if not l5_bool:
             continue
 
+        weight /= n_files
+
         stats["doms_per_event"].append(len(event_pulses))
 
         # qtot is sum of charge of all hits on all DOMs
@@ -145,6 +176,9 @@ def process_dir(dirpath):
             stats["hits_per_dom"].append(len(dom_pulses))
             stats["charge_per_dom"].append(dom_pulses["charge"].sum())
             event_pulses_.append(dom_pulses)
+            if use_weights:
+                stats["weight_per_dom"].append(weight)
+
         event_pulses = np.concatenate(event_pulses_)
         charge = event_pulses["charge"]
         stats["charge_per_hit"].append(charge)
@@ -161,22 +195,32 @@ def process_dir(dirpath):
 
     return stats
 
-def get_stats(dirs):
-    if isinstance(dirs, string_types):
-        dirs = [dirs]
+
+def get_stats(dirinfo):
+    if isinstance(dirinfo, string_types):
+        dirinfo = [dirinfo]
+    elif isinstance(dirinfo, Mapping):
+        dirinfo = [dirinfo]
 
     pool = Pool()
-    dirpaths_to_process = []
 
-    for root_dir in dirs:
-        root_dir = expand(root_dir)
+    #dirpaths_to_process = []
+    results = []
+
+    for root_dirinfo in dirinfo:
+        root_dir = expand(root_dirinfo["path"])
+        n_files = root_dirinfo["n_files"]
         for dirpath, dirs_, files in walk(root_dir, followlinks=True):
             dirs_.sort(key=nsort_key_func)
 
             if "events.npy" in files:
-                dirpaths_to_process.append(dirpath)
+                #dirpaths_to_process.append(dirpath)
+                results.append(pool.apply_async(process_dir, (dirpath, n_files)))
 
-    results = pool.map(process_dir, dirpaths_to_process)
+    pool.close()
+    pool.join()
+
+    #results = pool.map(process_dir, dirpaths_to_process)
 
     stats = OrderedDict(
         [
@@ -188,24 +232,22 @@ def get_stats(dirs):
             ("doms_per_event", []),  # aka "nchannel"
             ("time_diffs", []),
             ("weight_per_event", []),
+            ("weight_per_dom", []),
             ("weight_per_hit", []),
         ]
     )
     for result in results:
+        result = result.get()
         for key in result.keys():
             stats[key].extend(result[key])
 
-    #if len(stats["weight_per_event"]) == 0:
-    #    stats.pop("weight_per_event")
-    #if len(stats["weight_per_hit"]) == 0:
-    #    stats.pop("weight_per_hit")
-
+    # Concatenate and cull
     for stat_name in stats.keys():
         vals = stats[stat_name]
         if len(vals) == 0:
             stats.pop(stat_name)
             sys.stderr.write(
-                'Not using stat "{}" for dirs {}\n'.format(stat_name, dirs)
+                'Not using stat "{}" for dirs {}\n'.format(stat_name, dirinfo)
             )
         elif np.isscalar(vals[0]):
             stats[stat_name] = np.array(vals)
@@ -232,7 +274,7 @@ def get_all_stats(overwrite=False):
     """
     mkdir(OUTDIR)
     stats = OrderedDict()
-    for name, dirs in list(MC_NAME_DIRS.items()) +  list(DATA_NAME_DIRS.items()):
+    for name, dirinfo in list(MC_NAME_DIRINFOS.items()) +  list(DATA_NAME_DIRINFOS.items()):
         t0 = time.time()
         outfile = join(OUTDIR, "stats_{}.npz".format(name))
         if isfile(outfile) and not overwrite:
@@ -245,8 +287,9 @@ def get_all_stats(overwrite=False):
                 )
             )
         else:
-            this_stats = get_stats(dirs=dirs)
-            np.savez_compressed(outfile, **this_stats)
+            this_stats = get_stats(dirinfo=dirinfo)
+            #np.savez_compressed(outfile, **this_stats)
+            np.savez(outfile, **this_stats)
             sys.stderr.write(
                 'saved stats for set "{}" to file "{}" ({} sec)\n'.format(
                     name, outfile, time.time() - t0
@@ -265,8 +308,14 @@ def plot_distributions():
                 (name, []) for name in all_stats.values()[0].keys()
             ]
         )
+
     #for name, stats in all_stats.items():
-    #    if
+    #    if name in MC_NAME_DIRINFOS:
+    #        dmc = "total_mc"
+    #    else:
+    #        dmc = "total_data"
+
+    #        for key
 
 
 def main(description=__doc__):
