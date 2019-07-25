@@ -160,7 +160,7 @@ def setup_dom_tables(
 
                 shared_table_sd_indices = []
                 for string in strings:
-                    sd_idx = const.get_sd_idx(string=string, dom=dom)
+                    sd_idx = const.get_sd_idx(string=string, om=dom, pmt=0)
                     if sd_idx not in use_sd_indices:
                         continue
                     shared_table_sd_indices.append(sd_idx)
@@ -670,9 +670,6 @@ def get_events(
 
                 yield event
 
-            for key in file_iterator_tree.keys():
-                del file_iterator_tree[key]
-
             while True:
                 try:
                     event = extract_next_event(file_iterator_tree)
@@ -748,7 +745,7 @@ def iterate_file(fpath, start=None, stop=None, step=None, mmap_mode=None):
         raise ValueError(fpath)
 
     num_events_in_file = len(events)
-    indices = range(num_events_in_file)[slicer]
+    indices = list(range(num_events_in_file)[slicer])
     sliced_events = events[slicer]
 
     return num_events_in_file, indices, sliced_events
@@ -777,6 +774,8 @@ def get_path(event, path):
         try:
             node = getitem(node, subpath)
         except:
+            if hasattr(event, "meta"):
+                sys.stderr.write("event.meta: {}\n".format(event.meta))
             sys.stderr.write(
                 "node = {} type = {}, subpath = {} type = {}\n".format(
                     node, type(node), subpath, type(subpath)
@@ -885,7 +884,7 @@ def get_hits(event, path, angsens_model=None):
     offset = 0
 
     for (string, dom, pmt), p in series:
-        sd_idx = const.get_sd_idx(string=string, dom=dom, pmt=pmt)
+        sd_idx = const.get_sd_idx(string=string, om=dom, pmt=pmt)
         num = len(p)
         sd_hits = np.empty(shape=num, dtype=HIT_T)
         sd_hits['time'] = p['time']

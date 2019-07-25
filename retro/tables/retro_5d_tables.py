@@ -45,10 +45,10 @@ if __name__ == '__main__' and __package__ is None:
 from retro import load_pickle
 from retro.const import (
     ALL_STRS_DOMS, ALL_STRS_DOMS_SET, NUM_DOMS_TOT, SPEED_OF_LIGHT_M_PER_NS,
-    PI, TWO_PI, get_string_dom_pair
+    PI, TWO_PI, get_string_om_pair
 )
 from retro.i3info.angsens_model import load_angsens_model
-from retro.retro_types import DOM_INFO_T
+from retro.retro_types import DOMINFO_T
 #from retro.tables.pexp_5d import generate_pexp_and_llh_functions
 from retro.utils.geom import spherical_volume
 from retro.utils.misc import expand
@@ -237,9 +237,9 @@ class Retro5DTables(object):
         mask = zero_mask | nan_mask | inf_mask
         operational_doms = ~mask
 
-        self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOM_INFO_T)
+        self.dom_info = np.empty(NUM_DOMS_TOT, dtype=DOMINFO_T)
         for sd_idx in range(NUM_DOMS_TOT):
-            string_num, dom_num = get_string_dom_pair(sd_idx)
+            string_num, dom_num = get_string_om_pair(sd_idx)
             string_idx, dom_idx = string_num - 1, dom_num - 1
 
             this_dom_info = self.dom_info[sd_idx]
@@ -377,10 +377,7 @@ class Retro5DTables(object):
 
         table = self.table_loader_func(fpath=fpath, mmap=mmap)
         if 'step_length' in table:
-            if step_length is None:
-                step_length = table['step_length']
-            else:
-                assert step_length == table['step_length']
+            step_length = table['step_length']
         else:
             step_length = 1.0
             table['step_length'] = step_length
