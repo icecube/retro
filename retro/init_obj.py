@@ -745,7 +745,7 @@ def iterate_file(fpath, start=None, stop=None, step=None, mmap_mode=None):
         raise ValueError(fpath)
 
     num_events_in_file = len(events)
-    indices = list(range(num_events_in_file)[slicer])
+    indices = range(num_events_in_file)[slicer]
     sliced_events = events[slicer]
 
     return num_events_in_file, indices, sliced_events
