@@ -41,6 +41,9 @@ function runit () {
     elif $( echo "$i3_basename" | grep -i "muongun" >/dev/null 2>&1 ) ; then
         truth_flag="--truth"
         gcd=$simulation_gcd
+    elif $( echo "$i3_basename" | grep -i "oscNext_noise" >/dev/null 2>&1 ) ; then
+        truth_flag="--truth"
+        gcd=$simulation_gcd
     elif $( echo "$i3_basename" | grep -i "oscNext_data" >/dev/null 2>&1 ) ; then
         truth_flag=""
         gcd=$( find $( dirname "$full_i3_filepath" ) -mindepth 1 -maxdepth 1 -type f -iname "*GCD*.i3*" )

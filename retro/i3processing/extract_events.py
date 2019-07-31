@@ -1326,20 +1326,22 @@ def extract_truth(frame):
     # Extract info from I3MCTree: ...
     mctree = frame["I3MCTree"]
 
-    # ... primary particle
-    primary = mctree.primaries[0]
-    primary_pdg = primary.pdg_encoding
+    # ... primary particle, if there is one ("noise" sim has none)
+    primary_pdg = None
+    if mctree.primaries:
+        primary = mctree.primaries[0]
+        primary_pdg = primary.pdg_encoding
 
-    event_truth["pdg_encoding"] = primary_pdg
-    event_truth["time"] = primary.time
-    event_truth["x"] = primary.pos.x
-    event_truth["y"] = primary.pos.y
-    event_truth["z"] = primary.pos.z
-    event_truth["energy"] = primary.energy
-    event_truth["zenith"] = primary.dir.zenith
-    event_truth["coszen"] = np.cos(primary.dir.zenith)
-    event_truth["azimuth"] = primary.dir.azimuth
-    event_truth["extraction_error"] = ExtractionError.NO_ERROR
+        event_truth["pdg_encoding"] = primary_pdg
+        event_truth["time"] = primary.time
+        event_truth["x"] = primary.pos.x
+        event_truth["y"] = primary.pos.y
+        event_truth["z"] = primary.pos.z
+        event_truth["energy"] = primary.energy
+        event_truth["zenith"] = primary.dir.zenith
+        event_truth["coszen"] = np.cos(primary.dir.zenith)
+        event_truth["azimuth"] = primary.dir.azimuth
+        event_truth["extraction_error"] = ExtractionError.NO_ERROR
 
     # TODO: should we prefix I3MCWeightDict items to avoid overwriting
     # something else?
@@ -1351,6 +1353,7 @@ def extract_truth(frame):
             raise ValueError("key '{}' already in event_truth".format(key))
         event_truth[key] = i3_mcwd[key]
 
+    particles_to_record = None
     if primary_pdg in NEUTRINOS:
         particles_to_record = process_true_neutrino(
             nu=primary, mctree=mctree, frame=frame, event_truth=event_truth
@@ -1382,12 +1385,13 @@ def extract_truth(frame):
         track = populate_track_t(mctree=mctree, particle=muon)
         particles_to_record = OrderedDict([("track", track)])
 
-    else:  # is not neutrino:
+    elif primary_pdg is not None:  # is not neutrino, not noise (None):
         raise NotImplementedError("Only neutrino primaries are implemented")
 
-    values_dict, dtypes_dict = record_particles(particles_to_record)
-    event_truth.update(values_dict)
-    truth_dtypes.update(dtypes_dict)
+    if particles_to_record:
+        values_dict, dtypes_dict = record_particles(particles_to_record)
+        event_truth.update(values_dict)
+        truth_dtypes.update(dtypes_dict)
 
     struct_dtype_spec = []
     for key in event_truth.keys():
