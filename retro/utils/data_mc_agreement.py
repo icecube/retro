@@ -12,13 +12,7 @@ __all__ = [
     "UNITS",
     "PULSE_SERIES_NAME",
     "OUTDIR",
-    "LEVEL",
-    "PROC_VER",
-    "LEVEL_PROC_VER",
     "ROOT_DIR",
-    "DATA_ROOT_DIR",
-    "GENIE_ROOT_DIR",
-    "MUONGUN_ROOT_DIR",
     "MC_NAME_DIRINFOS",
     "DATA_NAME_DIRINFOS",
     "get_stats",
@@ -27,7 +21,8 @@ __all__ = [
 
 from argparse import ArgumentParser
 from collections import Mapping, OrderedDict
-import cPickle as pickle
+from copy import deepcopy
+import pickle
 from multiprocessing import Pool
 from os import walk
 from os.path import (
@@ -42,16 +37,33 @@ import time
 import numpy as np
 from six import string_types
 import matplotlib as mpl
-mpl.use("agg")
-mpl.rcParams['font.family'] = 'sans-serif'
-mpl.rcParams['font.sans-serif'] = ['Tahoma']
+#mpl.use("agg")
+#mpl.rcParams['font.family'] = 'sans-serif'
+#mpl.rcParams['font.sans-serif'] = ['Tahoma']
 
 if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
+from retro import load_pickle
 from retro.utils.misc import expand, mkdir, nsort_key_func
 
+
+STATS_PROTO = OrderedDict(
+    [
+        #("event_id", []),
+        ("charge_per_hit", []),
+        ("charge_per_dom", []),
+        ("charge_per_event", []),
+        ("hits_per_dom", []),
+        ("hits_per_event", []),
+        ("doms_per_event", []),  # aka "nchannel"
+        ("time_diffs", []),
+        ("weight_per_event", []),
+        ("weight_per_dom", []),
+        ("weight_per_hit", []),
+    ]
+)
 
 LABELS = dict(
     nue=r'GENIE $\nu_e$',
@@ -78,23 +90,54 @@ PULSE_SERIES_NAME = "SplitInIcePulses"
 
 OUTDIR = "/home/justin/cowen/oscNext/data_mc_agreement"
 
-LEVEL = 5
-PROC_VER = "v01.01"
-LEVEL_PROC_VER = "level{}_{}".format(LEVEL, PROC_VER)
 ROOT_DIR = "/data/icecube/ana/LE/oscNext/pass2/"
 
-DATA_ROOT_DIR = join(ROOT_DIR, "data", LEVEL_PROC_VER)
-GENIE_ROOT_DIR = join(ROOT_DIR, "genie", LEVEL_PROC_VER)
-MUONGUN_ROOT_DIR = join(ROOT_DIR, "muongun", LEVEL_PROC_VER)
+MC_NAME_DIRINFOS = OrderedDict(
+    [
+        ("noise", [
+            dict(
+                path=join(ROOT_DIR, "noise", "level5_v01.02", "888003"),
+                weight_total=1.3040341273881495,
+                n_files=5000
+            )
+        ]),
+        ("mu", [
+            #dict(
+            #    path=join(ROOT_DIR, "muongun", "level5_v01.01", "139010"),
+            #    weight_total=1.1798228513571303,
+            #    n_files=1000,
+            #),
+            dict(
+                path=join(ROOT_DIR, "muongun", "level5_v01.02", "139011"),
+                weight_total=1.8125354640433216,
+                n_files=1775,
+            ),
+        ]),
+        ("nue", [
+            dict(
+                path=join(ROOT_DIR, "genie", "level5_v01.01", "120000"),
+                weight_total=0.30346032240777276,
+                n_files=601,
+            )
+        ]),
+        ("numu", [
+            dict(
+                path=join(ROOT_DIR, "genie", "level5_v01.01", "140000"),
+                weight_total=2.3206170310731977,
+                n_files=1494,
+            )
+        ]),
+        ("nutau", [
+            dict(
+                path=join(ROOT_DIR, "genie", "level5_v01.01", "160000"),
+                weight_total=0.03273706639447482,
+                n_files=335,
+            )
+        ]),
+    ]
+)
 
-N_FILES = {
-    # MC
-    "nue": 601,
-    "numu": 1494,
-    "nutau": 335,
-    "mu": 1000,
-
-    # Data
+DATA_N_FILES = {
     "12": 21142,
     "13": 21128,
     "14": 37305,
@@ -104,42 +147,42 @@ N_FILES = {
     "18": 23589,
 }
 
-
-MC_NAME_DIRINFOS = OrderedDict(
-    [
-        ("nue", [dict(path=join(GENIE_ROOT_DIR, "120000"), n_files=601)]),
-        ("numu", [dict(path=join(GENIE_ROOT_DIR, "140000"), n_files=1494)]),
-        ("nutau", [dict(path=join(GENIE_ROOT_DIR, "160000"), n_files=335)]),
-        ("mu", [dict(path=join(MUONGUN_ROOT_DIR, "139010"), n_files=1000)]),
-    ]
-)
+DATA_NUM_EVENTS = {
+    "12": 8954,
+    "13": 8930,
+    "14": 9464,
+    "15": 9957,
+    "16": 8995,
+    "17": 11550,
+    "18": 8575,
+}
 
 DATA_NAME_DIRINFOS = OrderedDict()
 for _yr in range(12, 19):
     _data_year_dirname = "IC86.{:02d}".format(_yr)
     DATA_NAME_DIRINFOS[str(_yr)] = [
         dict(
-            path=join(DATA_ROOT_DIR, _data_year_dirname),
-            n_files=N_FILES[str(_yr)],
+            path=join(ROOT_DIR, "data", "level5_v01.01",  _data_year_dirname),
+            weight_total=DATA_NUM_EVENTS[str(_yr)],
+            n_files=DATA_N_FILES[str(_yr)],
         )
     ]
 
 
 def process_dir(dirpath, n_files):
-    stats = OrderedDict(
-        [
-            ("charge_per_hit", []),
-            ("charge_per_dom", []),
-            ("charge_per_event", []),
-            ("hits_per_dom", []),
-            ("hits_per_event", []),
-            ("doms_per_event", []),  # aka "nchannel"
-            ("time_diffs", []),
-            ("weight_per_event", []),
-            ("weight_per_dom", []),
-            ("weight_per_hit", []),
-        ]
-    )
+    """
+    Parameters
+    ----------
+    dirpath : string
+    n_files : int > 0
+
+    Returns
+    -------
+    stats : OrderedDict
+        Keys are taken from STATS_PROTO, values are numpy arrays
+
+    """
+    stats = deepcopy(STATS_PROTO)
 
     events = np.load(join(dirpath, "events.npy"), mmap_mode="r")
     if len(events) == 0:
@@ -158,9 +201,7 @@ def process_dir(dirpath, n_files):
         weights = np.ones(shape=len(events))
         use_weights = False
 
-    pulses = pickle.load(
-        file(join(dirpath, "pulses", "{}.pkl".format(PULSE_SERIES_NAME)), "r")
-    )
+    pulses = load_pickle(join(dirpath, "pulses", "{}.pkl".format(PULSE_SERIES_NAME)))
 
     for l5_bool, event_pulses, weight in zip(l5_bools, pulses, weights):
         if not l5_bool:
@@ -197,6 +238,12 @@ def process_dir(dirpath, n_files):
 
 
 def get_stats(dirinfo):
+    """
+    Parameters
+    ----------
+    dirinfo
+
+    """
     if isinstance(dirinfo, string_types):
         dirinfo = [dirinfo]
     elif isinstance(dirinfo, Mapping):
@@ -222,37 +269,26 @@ def get_stats(dirinfo):
 
     #results = pool.map(process_dir, dirpaths_to_process)
 
-    stats = OrderedDict(
-        [
-            ("charge_per_hit", []),
-            ("charge_per_dom", []),
-            ("charge_per_event", []),
-            ("hits_per_dom", []),
-            ("hits_per_event", []),
-            ("doms_per_event", []),  # aka "nchannel"
-            ("time_diffs", []),
-            ("weight_per_event", []),
-            ("weight_per_dom", []),
-            ("weight_per_hit", []),
-        ]
-    )
+    stats = deepcopy(STATS_PROTO)
     for result in results:
         result = result.get()
         for key in result.keys():
             stats[key].extend(result[key])
 
     # Concatenate and cull
+    new_stats = OrderedDict()
     for stat_name in stats.keys():
         vals = stats[stat_name]
         if len(vals) == 0:
-            stats.pop(stat_name)
+            #stats.pop(stat_name)
             sys.stderr.write(
                 'Not using stat "{}" for dirs {}\n'.format(stat_name, dirinfo)
             )
         elif np.isscalar(vals[0]):
-            stats[stat_name] = np.array(vals)
+            new_stats[stat_name] = np.array(vals)
         else:
-            stats[stat_name] = np.concatenate(vals)
+            new_stats[stat_name] = np.concatenate(vals)
+    stats = new_stats
 
     return stats
 
