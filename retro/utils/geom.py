@@ -75,6 +75,8 @@ from retro.retro_types import TimeSphCoord
 from retro.utils.misc import hash_obj
 
 
+NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, fastmath=True, error_model="numpy")
+
 GEOM_FILE_PROTO = 'geom_{hash:s}.npy'
 """File containing detector geometry as a Numpy 5D array with coordinates
 (string, om, x, y, z)"""
@@ -643,7 +645,7 @@ def generate_digitizer(bin_edges, clip=True):
 
         """.format(bindescr)
     )
-    digitize = numba_jit(**DFLT_NUMBA_JIT_KWARGS)(digitize)
+    digitize = numba_jit(**NUMBA_JIT_KWARGS)(digitize)
 
     if DEBUG:
         print(bindescr)
