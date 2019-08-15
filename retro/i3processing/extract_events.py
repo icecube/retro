@@ -285,6 +285,95 @@ MILLIPEDE_FIT_PARAMS_SPECS = OrderedDict(
 )
 """See millipede/private/millipede/converter/MillipedeFitParamsConverter.cxx"""
 
+HIT_MULTIPLICITY_SPECS = OrderedDict(
+    [
+        ("n_hit_doms", dict(dtype=np.int32, default=-1)),
+        ("n_hit_doms_one_pulse", dict(dtype=np.int32, default=-1)),
+        ("n_hit_strings", dict(dtype=np.int32, default=-1)),
+        ("n_pulses", dict(dtype=np.int32, default=-1)),
+    ]
+)
+
+HIT_STATISTICS_SPECS = OrderedDict(
+    [
+        ("cog_x", dict(path="cog.x", dtype=np.float32, default=-1)),
+        ("cog_y", dict(path="cog.y", dtype=np.float32, default=-1)),
+        ("cog_z", dict(path="cog.z", dtype=np.float32, default=-1)),
+        ("cog_z_sigma", dict(dtype=np.float32, default=np.nan)),
+        ("max_pulse_time", dict(dtype=np.float32, default=np.nan)),
+        ("min_pulse_time", dict(dtype=np.float32, default=np.nan)),
+        ("q_max_doms", dict(dtype=np.float32, default=np.nan)),
+        ("q_tot_pulses", dict(dtype=np.float32, default=np.nan)),
+        ("z_max", dict(dtype=np.float32, default=np.nan)),
+        ("z_mean", dict(dtype=np.float32, default=np.nan)),
+        ("z_min", dict(dtype=np.float32, default=np.nan)),
+        ("z_sigma", dict(dtype=np.float32, default=np.nan)),
+        ("z_travel", dict(dtype=np.float32, default=np.nan)),
+    ]
+)
+
+TIME_WINDOW_SPECS = OrderedDict(
+    [
+        ("start", dict(dtype=np.float64)),
+        ("stop", dict(dtype=np.float64)),
+        ("length", dict(dtype=np.float64)),
+    ]
+)
+
+CLAST_FIT_PARAMS_SPECS = OrderedDict(
+    [
+        ("mineval", dict(dtype=np.float64, default=np.nan)),
+        ("evalratio", dict(dtype=np.float64, default=np.nan)),
+        ("eval2", dict(dtype=np.float64, default=np.nan)),
+        ("eval3", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+FINITE_CUTS_SPECS = OrderedDict(
+    [
+        ("Length", dict(dtype=np.float64, default=np.nan)),
+        ("Lend", dict(dtype=np.float64, default=np.nan)),
+        ("Lstart", dict(dtype=np.float64, default=np.nan)),
+        ("Sdet", dict(dtype=np.float64, default=np.nan)),
+        ("finiteCut", dict(dtype=np.float64, default=np.nan)),
+        ("DetectorLength", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+START_STOP_PARAMS_SPECS = OrderedDict(
+    [
+        ("LLHStartingTrack", dict(dtype=np.float64, default=np.nan)),
+        ("LLHStoppingTrack", dict(dtype=np.float64, default=np.nan)),
+        ("LLHInfTrack", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+DIPOLE_FIT_PARAMS_SPECS = OrderedDict(
+    [
+        ("Magnet", dict(dtype=np.float64, default=np.nan)),
+        ("MagnetX", dict(dtype=np.float64, default=np.nan)),
+        ("MagnetY", dict(dtype=np.float64, default=np.nan)),
+        ("MagnetZ", dict(dtype=np.float64, default=np.nan)),
+        ("AmpSum", dict(dtype=np.float64, default=np.nan)),
+        ("NHits", dict(dtype=np.int32, default=-1)),
+        ("NPairs", dict(dtype=np.int32, default=-1)),
+        ("MaxAmp", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+DST_PARAM_SPECS = OrderedDict(
+    [
+        ("cog_x", dict(path="cog.x", dtype=np.int8)),
+        ("cog_y", dict(path="cog.y", dtype=np.int8)),
+        ("cog_z", dict(path="cog.z", dtype=np.int8)),
+        ("n_dir", dict(dtype=np.uint8)),
+        ("n_string", dict(dtype=np.uint8)),
+        ("ndom", dict(dtype=np.uint16)),
+        ("reco_label", dict(dtype=np.uint8)),
+        ("time", dict(dtype=np.uint32)),
+        ("trigger_tag", dict(dtype=np.uint16)),
+    ]
+)
 
 class MissingPhysicsFrameError(Exception):
     """Processing a frame buffer via the `process_frame_buffer` closure
@@ -326,6 +415,28 @@ def extract_file_metadata(fname):
     )
 
     return file_info
+
+
+def auto_get_frame_item(frame, key):
+    from icecube import dataclasses, icetray, recclasses
+
+    TYPE_SPECS = {
+        recclasses.I3HitMultiplicityValues: HIT_MULTIPLICITY_SPECS,
+        recclasses.I3HitStatisticsValues: HIT_STATISTICS_SPECS,
+        dataclasses.I3TimeWindow: TIME_WINDOW_SPECS,
+        dataclasses.I3Particle: I3PARTICLE_SPECS,
+        recclasses.I3CLastFitParams: CLAST_FIT_PARAMS_SPECS,
+        recclasses.I3FiniteCuts: FINITE_CUTS_SPECS,
+        recclasses.I3DipoleFitParams: DIPOLE_FIT_PARAMS_SPECS,
+        recclasses.I3StartStopParams: START_STOP_PARAMS_SPECS,
+        recclasses.I3DST16: DST_PARAM_SPECS,
+        icetray.I3Bool: np.bool8,
+    }
+
+    if key in ADVANCED_KEY_SPECS:
+        pass
+    elif type(key) in TYPE_SPECS:
+        pass
 
 
 def get_frame_item(frame, key, specs, allow_missing):
