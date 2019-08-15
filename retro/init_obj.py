@@ -60,6 +60,7 @@ from retro.retro_types import (
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
+from retro.utils.data_mc_agreement import quantize_min_q_filter
 from retro.utils.misc import expand, nsort_key_func
 
 
@@ -607,6 +608,10 @@ def get_events(
                     )
                     assert num_ps == num_events
                     iterators[pulse_series] = iter(pulse_serieses)
+                    #(
+                    #    quantize_min_q_filter(ps, qmin=0.4, quantum=0.05)
+                    #    for ps in iter(pulse_serieses)
+                    #)
 
                     num_tr, _, time_ranges = iterate_file(
                         fpath=join(
@@ -698,7 +703,7 @@ def get_events(
 
                 yield event
 
-            for key in file_iterator_tree.keys():
+            for key in list(file_iterator_tree.keys()):
                 del file_iterator_tree[key]
             del file_iterator_tree
 
@@ -814,8 +819,8 @@ def get_hits(event, path, angsens_model=None):
     series = get_path(event, path)
 
     if photons:
-        time_window_start = 0
-        time_window_stop = 0
+        time_window_start = 0.
+        time_window_stop = 0.
         if angsens_model is not None:
             if isinstance(angsens_model, string_types):
                 angsens_poly, _ = load_angsens_model(angsens_model)
