@@ -70,30 +70,39 @@ def count_events(root_dirs, reco=None, verbosity=0):
                 continue
 
             this_events = np.load(join(dirpath, "events.npy"), mmap_mode="r")
-            if len(this_events) == 0:
-                continue
 
             if "L5_oscNext_bool" in this_events.dtype.names:
                 l5_mask = this_events["L5_oscNext_bool"]
-                event_count += np.count_nonzero(l5_mask)
+                this_events_count = np.count_nonzero(l5_mask)
             else:
                 l5_mask = None
-                event_count += len(this_events)
+                this_events_count = len(this_events)
+
+            if this_events_count == 0:
+                continue
+
+            event_count += this_events_count
 
             if reco is not None:
                 reco_fpath = join(dirpath, "recos", reco + ".npy")
                 if not isfile(reco_fpath):
+                    if verbosity > 0:
+                        print(dirpath)
                     continue
                 recos = np.load(reco_fpath, mmap_mode="r")
                 if l5_mask is not None:
                     recos = recos[l5_mask]
                 success_mask = recos["fit_status"] == FitStatus.OK
-                reco_stats["successes"] += np.count_nonzero(success_mask)
+                this_num_successes = np.count_nonzero(success_mask)
+                reco_stats["successes"] += this_num_successes
                 if "run_time" in recos.dtype.names:
                     reco_stats["avg_run_time"] += np.sum(
                         recos[success_mask]["run_time"]
                     )
-                reco_stats["failures"] += np.count_nonzero(recos["fit_status"] > 0)
+                this_failures = np.count_nonzero(recos["fit_status"] > 0)
+                if verbosity > 0 and this_num_successes < this_events_count:
+                    print(dirpath)
+                reco_stats["failures"] += this_failures
 
     if reco is not None:
         reco_stats["not_yet_run"] = (
