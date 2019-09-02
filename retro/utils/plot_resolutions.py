@@ -19,7 +19,7 @@ import numpy as np
 from six import string_types
 
 import matplotlib as mpl
-mpl.use("agg")
+#mpl.use("agg")
 import matplotlib.pyplot as plt
 
 if __name__ == "__main__" and __package__ is None:
