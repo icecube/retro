@@ -20,7 +20,10 @@ __all__ = [
 
 from argparse import ArgumentParser
 from collections import OrderedDict
-from collections.abc import Mapping
+try:
+    from collections.abc import Mapping
+except ImportError:  # py2 compatibility
+    from collections import Mapping
 from copy import deepcopy
 from itertools import chain
 import pickle
