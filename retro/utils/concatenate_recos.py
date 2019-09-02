@@ -231,7 +231,10 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
                 paths_with_empty_events_file.append(dirpath)
                 continue
 
-            if np.count_nonzero(this_events["L5_oscNext_bool"]) == 0:
+            if (
+                "L5_oscNext_bool" in this_events.dtype.names
+                and np.count_nonzero(this_events["L5_oscNext_bool"]) == 0
+            ):
                 paths_with_empty_events_file.append(dirpath)
                 continue
 
