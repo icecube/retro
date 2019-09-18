@@ -35,6 +35,18 @@ __all__ = [
     'EVT_HIT_INFO_T',
     'SPHER_T',
     'ParticleType',
+    "EM_CASCADE_PTYPES",
+    "HADR_CASCADE_PTYPES",
+    "CASCADE_PTYPES",
+    "TRACK_PTYPES",
+    "INVISIBLE_PTYPES",
+    "ELECTRONS",
+    "MUONS",
+    "TAUS",
+    "NUES",
+    "NUMUS",
+    "NUTAUS",
+    "NEUTRINOS",
     'ParticleShape',
     'FitStatus',
     'LocationType',
@@ -564,6 +576,94 @@ class ParticleType(enum.IntEnum):
     SMPPlus = -2000009500
     SMPMinus = -2000009501
 
+
+EM_CASCADE_PTYPES = (
+    ParticleType.EMinus,
+    ParticleType.EPlus,
+    ParticleType.Brems,
+    ParticleType.DeltaE,
+    ParticleType.PairProd,
+    ParticleType.Gamma,
+    ParticleType.Pi0,
+)
+"""Particle types parameterized as electromagnetic cascades,
+from clsim/python/GetHybridParameterizationList.py"""
+
+
+HADR_CASCADE_PTYPES = (
+    ParticleType.Hadrons,
+    ParticleType.Neutron,
+    ParticleType.PiPlus,
+    ParticleType.PiMinus,
+    ParticleType.K0_Long,
+    ParticleType.KPlus,
+    ParticleType.KMinus,
+    ParticleType.PPlus,
+    ParticleType.PMinus,
+    ParticleType.K0_Short,
+    ParticleType.Eta,
+    ParticleType.Lambda,
+    ParticleType.SigmaPlus,
+    ParticleType.Sigma0,
+    ParticleType.SigmaMinus,
+    ParticleType.Xi0,
+    ParticleType.XiMinus,
+    ParticleType.OmegaMinus,
+    ParticleType.NeutronBar,
+    ParticleType.LambdaBar,
+    ParticleType.SigmaMinusBar,
+    ParticleType.Sigma0Bar,
+    ParticleType.SigmaPlusBar,
+    ParticleType.Xi0Bar,
+    ParticleType.XiPlusBar,
+    ParticleType.OmegaPlusBar,
+    ParticleType.DPlus,
+    ParticleType.DMinus,
+    ParticleType.D0,
+    ParticleType.D0Bar,
+    ParticleType.DsPlus,
+    ParticleType.DsMinusBar,
+    ParticleType.LambdacPlus,
+    ParticleType.WPlus,
+    ParticleType.WMinus,
+    ParticleType.Z0,
+    ParticleType.NuclInt,
+    ParticleType.TauPlus,
+    ParticleType.TauMinus,
+)
+"""Particle types parameterized as hadronic cascades,
+from clsim/CLSimLightSourceToStepConverterPPC.cxx with addition of TauPlus and
+TauMinus"""
+
+
+CASCADE_PTYPES = EM_CASCADE_PTYPES + HADR_CASCADE_PTYPES
+"""Particle types classified as either EM or hadronic cascades"""
+
+
+TRACK_PTYPES = (ParticleType.MuPlus, ParticleType.MuMinus)
+"""Particle types classified as tracks"""
+
+
+INVISIBLE_PTYPES = (
+    ParticleType.Neutron,  # long decay time exceeds trigger window
+    ParticleType.K0,
+    ParticleType.K0Bar,
+    ParticleType.NuE,
+    ParticleType.NuEBar,
+    ParticleType.NuMu,
+    ParticleType.NuMuBar,
+    ParticleType.NuTau,
+    ParticleType.NuTauBar,
+)
+"""Invisible particles (at least to low-energy IceCube triggers)"""
+
+ELECTRONS = (ParticleType.EPlus, ParticleType.EMinus)
+MUONS = (ParticleType.MuPlus, ParticleType.MuMinus)
+TAUS = (ParticleType.TauPlus, ParticleType.TauMinus)
+NUES = (ParticleType.NuE, ParticleType.NuEBar)
+NUMUS = (ParticleType.NuMu, ParticleType.NuMuBar)
+NUTAUS = (ParticleType.NuTau, ParticleType.NuTauBar)
+NEUTRINOS = NUES + NUMUS + NUTAUS
 
 class ParticleShape(enum.IntEnum):
     """`I3Particle` property `shape`.

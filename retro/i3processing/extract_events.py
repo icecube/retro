@@ -24,18 +24,6 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 
 __all__ = [
-    "EM_CASCADE_PTYPES",
-    "HADR_CASCADE_PTYPES",
-    "CASCADE_PTYPES",
-    "TRACK_PTYPES",
-    "INVISIBLE_PTYPES",
-    "ELECTRONS",
-    "MUONS",
-    "TAUS",
-    "NUES",
-    "NUMUS",
-    "NUTAUS",
-    "NEUTRINOS",
     "FILENAME_INFO_RE",
     "GENERIC_I3_FNAME_RE",
     "START_END_TIME_SPEC",
@@ -58,7 +46,11 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import Iterable, OrderedDict, Sequence
+from collections import OrderedDict
+try:
+    from collections import Iterable, Sequence
+except ImportError:
+    from collections.abc import Iterable, Sequence
 from copy import deepcopy
 from os.path import abspath, basename, dirname, join
 import pickle
@@ -83,6 +75,17 @@ from retro.retro_types import (
     InteractionType,
     LocationType,
     ParticleType,
+    EM_CASCADE_PTYPES,
+    HADR_CASCADE_PTYPES,
+    TRACK_PTYPES,
+    INVISIBLE_PTYPES,
+    ELECTRONS,
+    MUONS,
+    TAUS,
+    NUES,
+    NUMUS,
+    NUTAUS,
+    NEUTRINOS,
     ParticleShape,
     ExtractionError,
     NO_TRACK,
@@ -96,94 +99,6 @@ from retro.utils.misc import (
 )
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
-
-EM_CASCADE_PTYPES = (
-    ParticleType.EMinus,
-    ParticleType.EPlus,
-    ParticleType.Brems,
-    ParticleType.DeltaE,
-    ParticleType.PairProd,
-    ParticleType.Gamma,
-    ParticleType.Pi0,
-)
-"""Particle types parameterized as electromagnetic cascades,
-from clsim/python/GetHybridParameterizationList.py"""
-
-
-HADR_CASCADE_PTYPES = (
-    ParticleType.Hadrons,
-    ParticleType.Neutron,
-    ParticleType.PiPlus,
-    ParticleType.PiMinus,
-    ParticleType.K0_Long,
-    ParticleType.KPlus,
-    ParticleType.KMinus,
-    ParticleType.PPlus,
-    ParticleType.PMinus,
-    ParticleType.K0_Short,
-    ParticleType.Eta,
-    ParticleType.Lambda,
-    ParticleType.SigmaPlus,
-    ParticleType.Sigma0,
-    ParticleType.SigmaMinus,
-    ParticleType.Xi0,
-    ParticleType.XiMinus,
-    ParticleType.OmegaMinus,
-    ParticleType.NeutronBar,
-    ParticleType.LambdaBar,
-    ParticleType.SigmaMinusBar,
-    ParticleType.Sigma0Bar,
-    ParticleType.SigmaPlusBar,
-    ParticleType.Xi0Bar,
-    ParticleType.XiPlusBar,
-    ParticleType.OmegaPlusBar,
-    ParticleType.DPlus,
-    ParticleType.DMinus,
-    ParticleType.D0,
-    ParticleType.D0Bar,
-    ParticleType.DsPlus,
-    ParticleType.DsMinusBar,
-    ParticleType.LambdacPlus,
-    ParticleType.WPlus,
-    ParticleType.WMinus,
-    ParticleType.Z0,
-    ParticleType.NuclInt,
-    ParticleType.TauPlus,
-    ParticleType.TauMinus,
-)
-"""Particle types parameterized as hadronic cascades,
-from clsim/CLSimLightSourceToStepConverterPPC.cxx with addition of TauPlus and
-TauMinus"""
-
-
-CASCADE_PTYPES = EM_CASCADE_PTYPES + HADR_CASCADE_PTYPES
-"""Particle types classified as either EM or hadronic cascades"""
-
-
-TRACK_PTYPES = (ParticleType.MuPlus, ParticleType.MuMinus)
-"""Particle types classified as tracks"""
-
-
-INVISIBLE_PTYPES = (
-    ParticleType.Neutron,  # long decay time exceeds trigger window
-    ParticleType.K0,
-    ParticleType.K0Bar,
-    ParticleType.NuE,
-    ParticleType.NuEBar,
-    ParticleType.NuMu,
-    ParticleType.NuMuBar,
-    ParticleType.NuTau,
-    ParticleType.NuTauBar,
-)
-"""Invisible particles (at least to low-energy IceCube triggers)"""
-
-ELECTRONS = (ParticleType.EPlus, ParticleType.EMinus)
-MUONS = (ParticleType.MuPlus, ParticleType.MuMinus)
-TAUS = (ParticleType.TauPlus, ParticleType.TauMinus)
-NUES = (ParticleType.NuE, ParticleType.NuEBar)
-NUMUS = (ParticleType.NuMu, ParticleType.NuMuBar)
-NUTAUS = (ParticleType.NuTau, ParticleType.NuTauBar)
-NEUTRINOS = NUES + NUMUS + NUTAUS
 
 FILENAME_INFO_RE = re.compile(
     r"""
@@ -420,7 +335,7 @@ def extract_file_metadata(fname):
 def auto_get_frame_item(frame, key):
     from icecube import dataclasses, icetray, recclasses
 
-    TYPE_SPECS = {
+    type_specs = {
         recclasses.I3HitMultiplicityValues: HIT_MULTIPLICITY_SPECS,
         recclasses.I3HitStatisticsValues: HIT_STATISTICS_SPECS,
         dataclasses.I3TimeWindow: TIME_WINDOW_SPECS,
@@ -435,7 +350,7 @@ def auto_get_frame_item(frame, key):
 
     if key in ADVANCED_KEY_SPECS:
         pass
-    elif type(key) in TYPE_SPECS:
+    elif isinstance(key, tuple(type_specs.keys())):
         pass
 
 
@@ -515,7 +430,7 @@ def extract_reco(frame, reco):
     reco_dict = None
 
     if reco.startswith("Pegleg_Fit"):
-        from icecube import millipede  # pylint: disable=unused-variable
+        from icecube import millipede  # pylint: disable=unused-import
 
         reco_dict = OrderedDict()
         reco_dict["fit_params"] = dict2struct(
@@ -559,7 +474,7 @@ def extract_reco(frame, reco):
         )
 
     elif reco.startswith("Monopod_"):
-        from icecube import millipede  # pylint: disable=unused-variable
+        from icecube import millipede  # pylint: disable=unused-import
 
         reco_dict = OrderedDict()
         reco_dict["fit_params"] = dict2struct(
@@ -670,7 +585,7 @@ def extract_trigger_hierarchy(frame, path):
     triggers : length n_triggers array of dtype retro_types.TRIGGER_T
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
@@ -678,7 +593,11 @@ def extract_trigger_hierarchy(frame, path):
 
     trigger_hierarchy = frame[path]
     triggers = []
-    for _, trigger in trigger_hierarchy.iteritems():
+    iterattr = getattr(
+        trigger_hierarchy,
+        "items" if "items" in dir(trigger_hierarchy) else "iteritems"
+    )
+    for _, trigger in iterattr():
         config_id = trigger.key.config_id or 0
         triggers.append(
             (
@@ -721,7 +640,7 @@ def extract_pulses(frame, pulse_series_name):
         None is returned if the <pulses>TimeRange field is missing
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
@@ -779,7 +698,7 @@ def extract_photons(frame, photon_key):
         number of photons recorded in that DOM.
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
@@ -1284,7 +1203,7 @@ def process_true_neutrino(nu, mctree, frame, event_truth):
             cascade1["hadr_equiv_energy"] = remaining_energy
 
     else:  # interaction_type == InteractionType.undefined
-        from icecube import genie_icetray  # pylint: disable=unused-variable
+        from icecube import genie_icetray  # pylint: disable=unused-import
 
         grd = frame["I3GENIEResultDict"]
         if not grd["nuel"]:  # nuel=True means elastic collision, apparently
@@ -1414,10 +1333,10 @@ def extract_truth(frame):
     event_truth : OrderedDict
 
     """
-    from icecube import dataclasses, icetray  # pylint: disable=unused-variable
+    from icecube import dataclasses, icetray  # pylint: disable=unused-import
 
     try:
-        from icecube import multinest_icetray  # pylint: disable=unused-variable
+        from icecube import multinest_icetray  # pylint: disable=unused-import
     except ImportError:
         multinest_icetray = None
 
@@ -1493,6 +1412,7 @@ def extract_truth(frame):
 
         # If we get here, we have a single muon
 
+        event_truth["pdg_encoding"] = secondary_pdg
         track = populate_track_t(mctree=mctree, particle=muon)
         particles_to_record = OrderedDict([("track", track)])
 
@@ -1616,7 +1536,7 @@ def _extract_events_from_single_file(
             }
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
