@@ -45,7 +45,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
+from collections import namedtuple, OrderedDict
+try:
+    from collections import Iterable, Mapping, Sequence
+except ImportError:
+    from collections.abc import Iterable, Mapping, Sequence
 from itertools import product
 import math
 from os import environ
