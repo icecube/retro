@@ -159,7 +159,7 @@ MC_NAME_DIRINFOS = OrderedDict(
         ("nutau", [
             dict(
                 id="160000",
-                path=join(ROOT_DIR, "genie", "level5_v01.02", "160000"),
+                path=join(ROOT_DIR, "genie", "level5_v01.03", "160000"),
                 n_files=335,
             ),
         ]),
@@ -190,10 +190,12 @@ for _yr in range(12, 19):
 
 
 def quantize(x, quantum):
+    if not np.isfinite(quantum) or quantum <= 0:
+        return x
     return ((x.astype(np.float64) // quantum) * quantum + quantum / 2).astype(x.dtype)
 
 
-def quantize_min_q_filter(pulses, qmin=0.4, quantum=0):
+def quantize_min_q_filter(pulses, qmin=0.4, quantum=0.5):
     """
     Parameters
     ----------
@@ -210,7 +212,6 @@ def quantize_min_q_filter(pulses, qmin=0.4, quantum=0):
 
     """
     new_pulses = []
-    q_bool = np.isfinite(quantum) and quantum > 0
     for om, pulse_array in pulses:
         if qmin > 0:
             mask = pulse_array["charge"] >= qmin
@@ -219,10 +220,7 @@ def quantize_min_q_filter(pulses, qmin=0.4, quantum=0):
             new_pulse_array = deepcopy(pulse_array[mask])
         else:
             new_pulse_array = deepcopy(pulse_array)
-        if q_bool:
-            new_pulse_array["charge"] = quantize(
-                new_pulse_array["charge"], quantum=quantum
-            )
+        new_pulse_array["charge"] = quantize(new_pulse_array["charge"], quantum=quantum)
         new_pulses.append((om, new_pulse_array))
     return new_pulses
 
@@ -331,7 +329,7 @@ def flaring_dom_filter(pulses, charge_threshold):
     selectedKeys = set(omkey for omkey, q in chargemap.items() if q > charge_threshold)
 
 
-def pulse_integrator(pulses, quantum, window_len):
+def pulse_integrator(pulses, qmin, quantum, window_len, qmin_before, quantize_before):
     """Find total charge and weighted-average time of pulses (from a single
     PulseSeries, i.e. from within a single DOM) in adjacent time windows.
 
@@ -344,9 +342,15 @@ def pulse_integrator(pulses, quantum, window_len):
     ----------
     pulses : array of dtype PULSE_T
 
-    quantum : scalar > 0
+    qmin
+
+    quantum : scalar >= 0
 
     window_len : scalar, units of ns
+
+    qmin_before : bool
+
+    quantize_before : bool
 
 
     Returns
@@ -354,9 +358,15 @@ def pulse_integrator(pulses, quantum, window_len):
     integrated_pulses : array of dtype PULSE_T
 
     """
-    pulses["charge"] = quantize(pulses["charge"], quantum=quantum)
+    if qmin_before:
+        pulses = pulses[pulses["charge"] >= qmin]
+        if len(pulses) == 0:
+            return pulses
 
-    if len(pulses) <= 1:
+    if quantize_before:
+        pulses["charge"] = quantize(pulses["charge"], quantum=quantum)
+
+    if len(pulses) == 1:
         return pulses
 
     sorted_pulses = np.sort(pulses, order=["time"])
@@ -379,6 +389,8 @@ def pulse_integrator(pulses, quantum, window_len):
             continue
         these_pulses = sorted_pulses[mask]
         total_charge = np.sum(these_pulses["charge"])
+        if not qmin_before and total_charge < qmin:
+            continue
         weighted_avg_time = np.sum(these_pulses["charge"] * these_pulses["time"]) / total_charge
         integrated_pulse_times.append(weighted_avg_time)
         integrated_pulse_charges.append(total_charge)
@@ -389,26 +401,52 @@ def pulse_integrator(pulses, quantum, window_len):
             (first_pulse["width"] + last_pulse["width"]) / 2
         )
 
-    if len(integrated_pulse_times) == 0:
-        raise ValueError("t_width = {}, pulses = {}".format(t_width, pulses))
+    #if len(integrated_pulse_times) == 0:
+    #    raise ValueError("t_width = {}, pulses = {}".format(t_width, pulses))
 
-    integrated_pulses = np.empty(shape=len(integrated_pulse_times), dtype=PULSE_T)
+    num_pulses = len(integrated_pulse_times)
+    integrated_pulses = np.empty(shape=num_pulses, dtype=PULSE_T)
+    if num_pulses == 0:
+        return integrated_pulses
     integrated_pulses["time"] = integrated_pulse_times
-    integrated_pulses["charge"] = integrated_pulse_charges
     integrated_pulses["width"] = integrated_pulse_widths
+
+    if quantize_before:
+        integrated_pulses["charge"] = integrated_pulse_charges
+    else:
+        integrated_pulses["charge"] = quantize(
+            integrated_pulses["charge"], quantum=quantum
+        )
 
     return integrated_pulses
 
 
-def pulse_integration_filter(pulses, quantum=0.05, window_len=1000):
+def pulse_integration_filter(
+    pulses,
+    qmin=0,
+    quantum=0.5,
+    window_len=200,
+    qmin_before=False,
+    quantize_before=False,
+):
     new_pulses = []
     for omkey, pulses_array in pulses:
-        new_pulses.append(
-            (
-                omkey,
-                pulse_integrator(pulses_array, quantum=quantum, window_len=window_len),
-            )
+        new_pulses_array = pulse_integrator(
+            pulses_array,
+            qmin=qmin,
+            quantum=quantum,
+            window_len=window_len,
+            qmin_before=qmin_before,
+            quantize_before=quantize_before,
         )
+        if len(new_pulses_array) == 0:
+            continue
+        new_pulses.append((omkey, new_pulses_array))
+    #new_pulses = quantize_min_q_filter(
+    #    pulses=new_pulses,
+    #    qmin=qmin,
+    #    quantum=0,
+    #)
     return new_pulses
 
 
@@ -498,6 +536,9 @@ def process_dir(
                 tmp_weight_per_dom.append(normed_weight)
 
         event_pulses = np.concatenate(event_pulses_)
+
+        # TODO: move min_pulses_per_event before qmin processing
+        # TODO: small-pulse agglomeration filter
         if len(event_pulses) < min_pulses_per_event:
             continue
 
@@ -550,8 +591,8 @@ def get_stats(dirinfo, min_pulses_per_event, processes=None, verbosity=0):
     #pulses_filter = fixed_charge_filter
     #pulses_filter = quantize_min_q_filter
     #pulses_filter = irregular_quantize_min_q_filter
-    #pulses_filter = pulse_integration_filter
-    pulses_filter = None
+    pulses_filter = pulse_integration_filter
+    #pulses_filter = None
 
     #emax = 100
     emax = np.inf
