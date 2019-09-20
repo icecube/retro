@@ -67,12 +67,16 @@ function runit () {
 }
 
 if [ -n "$root_dir" ] ; then
-    find "$root_dir" -iregex ".*oscNext_.*[0-9]\.i3.*" | sort -V | while read full_i3_filepath ; do
-        while (( $( jobs -r | wc -l ) >= $num_subprocs )) ; do
-            sleep 0.2
+    if [ -d "$root_dir" ] ; then
+        find "$root_dir" -iregex ".*oscNext_.*[0-9]\.i3.*" | sort -V | while read full_i3_filepath ; do
+            while (( $( jobs -r | wc -l ) >= $num_subprocs )) ; do
+                sleep 0.2
+            done
+            runit "$full_i3_filepath"
         done
-        runit "$full_i3_filepath"
-    done
+    else
+        runit "$root_dir"
+    fi
 else
     runit "$full_i3_filepath"
 fi
