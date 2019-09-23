@@ -12,7 +12,7 @@ just an array of pulse times and charges.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ["process_leaf_dir", "produce_arrays", "main"]
+__all__ = ["process_events_dir", "produce_arrays", "main"]
 
 from argparse import ArgumentParser
 from multiprocessing import Pool
@@ -146,11 +146,12 @@ COPY_LINEFIT_DC_DST_FIELDS = [
 ]
 
 
-def process_leaf_dir(dirpath, pulse_series):
+def process_events_dir(events_dirpath, pulse_series):
     """
     Parameters
     ----------
-    dirpath : string
+    events_dirpath : string
+    pulse_series : string
 
     Returns
     -------
@@ -162,9 +163,9 @@ def process_leaf_dir(dirpath, pulse_series):
     pulses_array : numpy ndarray of dtype `SIMPLE_PULSE_T`
 
     """
-    dirpath = expand(dirpath)
-    basedir = basename(dirpath)
-    events = np.load(join(dirpath, "events.npy"), mmap_mode="r")
+    events_dirpath = expand(events_dirpath)
+    basedir = basename(events_dirpath)
+    events = np.load(join(events_dirpath, "events.npy"), mmap_mode="r")
     if len(events) == 0:
         return None
 
@@ -174,27 +175,27 @@ def process_leaf_dir(dirpath, pulse_series):
     if num_valid_events == 0:
         return None
 
-    if isfile(join(dirpath, "truth.npy")):  # is Monte Carlo simulation
+    truth = None
+    weights = None
+    is_noise = False
+    if isfile(join(events_dirpath, "truth.npy")):  # is Monte Carlo simulation
         is_data = False
-        truth = np.load(join(dirpath, "truth.npy"), mmap_mode="r")
+        truth = np.load(join(events_dirpath, "truth.npy"), mmap_mode="r")
         weights = truth["weight"]
         events_dtype = MC_DOMS_IDX_T
         is_noise = "pdg_encoding" not in truth.dtype.names
         match = MC_DIRPATH_META_RE.match(basedir)
         if not match:
-            raise ValueError(dirpath)
+            raise ValueError(events_dirpath)
         finfo_d = match.groupdict()
         finfo_d["dataset"] = int(finfo_d["dataset"])
         finfo_d["file_id"] = int(finfo_d["file_id"])
     else:  # is actual detector data
         is_data = True
-        truth = None
-        weights = None
         events_dtype = DATA_DOMS_IDX_T
-        is_noise = False
-        match = DATA_DIRPATH_META_RE.match(basename(dirpath))
+        match = DATA_DIRPATH_META_RE.match(basename(events_dirpath))
         if not match:
-            raise ValueError(dirpath)
+            raise ValueError(events_dirpath)
         finfo_d = match.groupdict()
         finfo_d["season"] = int(finfo_d["season"])
         finfo_d["sub_run_id"] = int(finfo_d["sub_run_id"])
@@ -207,8 +208,8 @@ def process_leaf_dir(dirpath, pulse_series):
     dom_idx0 = 0
     pulses_idx0 = 0
 
-    pulses = load_pickle(join(dirpath, "pulses", "{}.pkl".format(pulse_series)))
-    linefit_dc = np.load(join(dirpath, "recos", "LineFit_DC.npy"))
+    pulses = load_pickle(join(events_dirpath, "pulses", "{}.pkl".format(pulse_series)))
+    linefit_dc = np.load(join(events_dirpath, "recos", "LineFit_DC.npy"))
 
     for rel_idx, valid_idx in enumerate(valid_event_indices):
         events_array[rel_idx:rel_idx+1][COPY_ID_FIELDS] = events[valid_idx][COPY_ID_FIELDS]
@@ -294,18 +295,18 @@ def process_leaf_dir(dirpath, pulse_series):
 
 
 def produce_arrays(
-    indirs,
-    pulse_series,
+    indir,
     outdir,
+    pulse_series,
     processes=None,
     serial=False,
 ):
     """
     Parameters
     ----------
-    indirs
-    pulse_series
+    indir
     outdir
+    pulse_series
     processes
     serial : bool, optional
 
@@ -348,23 +349,27 @@ def produce_arrays(
 
     # -- Find leaf directories to process -- #
 
-    for root_dir in indirs:
-        for dirpath, dirs_, files in walk(root_dir, followlinks=True):
-            dirs_.sort(key=nsort_key_func)
-            if not "events.npy" in files:  # not a "leaf" dir
-                continue
-            args = tuple()
-            kwargs = dict(dirpath=dirpath, pulse_series=pulse_series)
-            if serial:
-                result = process_leaf_dir(*args, **kwargs)
-                concatenate_results(result)
-            else:
-                pool.apply_async(
-                    process_leaf_dir,
-                    args,
-                    kwargs,
-                    concatenate_results,
-                )
+    events_dirpaths = []
+    for dirpath, dirs_, files in walk(indir, followlinks=True):
+        dirs_.sort(key=nsort_key_func)
+        if not "events.npy" in files:  # not a "leaf" dir
+            continue
+        events_dirpaths.append(dirpath)
+
+    args = tuple()
+    for events_dirpath in events_dirpaths:
+        kwargs = dict(events_dirpath=events_dirpath, pulse_series=pulse_series)
+        if serial:
+            result = process_events_dir(*args, **kwargs)
+            concatenate_results(result)
+        else:
+            pool.apply_async(
+                process_events_dir,
+                args,
+                kwargs,
+                concatenate_results,
+            )
+
     if not serial:
         pool.close()
         pool.join()
@@ -372,7 +377,7 @@ def produce_arrays(
     if len(events_arrays) == 0:
         assert len(doms_arrays) == 0
         assert len(pulses_arrays) == 0
-        print("no events found in `indirs`:", indirs)
+        print("no events found in `indir`:", indir)
         return None
 
     events_array = np.concatenate(events_arrays)
@@ -390,7 +395,7 @@ def produce_arrays(
 def main(description=__doc__):
     """Script interface to produce_arrays function"""
     parser = ArgumentParser(description=description)
-    parser.add_argument("--indirs", nargs="+")
+    parser.add_argument("--indir")
     parser.add_argument("--pulse-series")
     parser.add_argument("--outdir")
     parser.add_argument("--serial", action="store_true", default=False)
