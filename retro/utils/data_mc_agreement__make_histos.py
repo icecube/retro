@@ -520,8 +520,12 @@ def generate_filter_func(
 
             event_pulse_t0 = np.inf
             if max_evt_dt > 0:
-                for dom in doms[event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]]:
-                    event_pulse_t0 = min(event_pulse_t0, pulses[dom["pulses_idx0"]]["time"])
+                for dom in doms[
+                    event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]
+                ]:
+                    event_pulse_t0 = min(
+                        event_pulse_t0, pulses[dom["pulses_idx0"]]["time"]
+                    )
 
             #lower_q_t_qtl_time = -np.inf
             #upper_q_t_qtl_time = -np.inf
@@ -900,7 +904,7 @@ def create_histos(events, doms, pulses, get_weight_func, edges):
                     edges=edges["time_diffs_within_dom"],
                     histo=histos["time_diffs_within_dom"],
                     histo_w2=histos_w2["time_diffs_within_dom"],
-                 )
+                )
 
                 binit(
                     val=pulse["time"] - event_pulse_t0,
@@ -966,17 +970,14 @@ def get_true_time_relative_info(events, doms, pulses):
         cumulative_q = np.cumsum(sorted_pulses["charge"])
 
         cumulative_q_at_true_time = np.interp(
-            x=event["true_time"],
-            xp=sorted_pulses["time"],
-            fp=cumulative_q,
+            x=event["true_time"], xp=sorted_pulses["time"], fp=cumulative_q
         )
 
         info[event_idx]["true_energy"] = event["true_energy"]
         info[event_idx]["weight"] = event["weight"]
         info[event_idx]["q_fract"] = cumulative_q_at_true_time / cumulative_q[-1]
-        info[event_idx]["t_fract"] = (
-            (event["true_time"] - event_pulses[0]["time"])
-            / (event_pulses[-1]["time"] - event_pulses[0]["time"])
+        info[event_idx]["t_fract"] = (event["true_time"] - event_pulses[0]["time"]) / (
+            event_pulses[-1]["time"] - event_pulses[0]["time"]
         )
 
     return info
@@ -1333,9 +1334,8 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
                 if set(s[0] for s in only_seasons) == set(range(12, 18 + 1)):
                     only_seasons_str = ""
                 else:
-                    only_seasons_str = (
-                        "__only_seasons="
-                        + ",".join(str(s[0]) for s in sorted(only_seasons))
+                    only_seasons_str = "__only_seasons=" + ",".join(
+                        str(s[0]) for s in sorted(only_seasons)
                     )
 
                 plt_basename = (
