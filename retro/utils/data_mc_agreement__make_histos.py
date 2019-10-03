@@ -63,8 +63,8 @@ import warnings
 import numba
 import numpy as np
 
+RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
 if __name__ == "__main__" and __package__ is None:
-    RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import load_pickle
@@ -73,7 +73,15 @@ from retro.utils.misc import expand, mkdir
 from retro.utils.geom import generate_digitizer
 
 
-TRUE_TIME_INFO_T = np.dtype([("true_energy", "weight", "q_fract", "t_fract")])
+TRUE_TIME_INFO_T = np.dtype(
+    [
+        ("true_energy", np.float32),
+        ("weight", np.float32),
+        ("q_fract", np.float32),
+        ("t_fract", np.float32),
+        ("dt", np.float32),
+    ]
+)
 
 JIT_KW = dict(
     nopython=True, nogil=True, parallel=False, error_model="numpy", fastmath=True
@@ -439,10 +447,15 @@ def generate_filter_func(
     qntm,
     min_pulse_q,
     min_evt_p,
+    min_evt_dt,
     max_evt_dt,
-    #min_evt_q_t_qtl,
-    #max_evt_q_t_qtl,
+    # min_evt_t_fract,
+    # max_evt_t_fract,
+    # t_fract_window,
+    # min_evt_q_t_qtl,
+    # max_evt_q_t_qtl,
     min_dom_p,
+    # min_dom_dt,
     max_dom_dt,
     integ_t,
     i3,
@@ -456,10 +469,15 @@ def generate_filter_func(
     qntm : float
     min_pulse_q : float
     min_evt_p : int >= 1
+    min_evt_dt : float >= 0
     max_evt_dt : float >= 0
+    #min_evt_t_fract
+    #max_evt_t_fract
+    #t_fract_window
     #min_evt_q_t_qtl : 0 <= float < 1
     #max_evt_q_t_qtl : 0 < float <= 1
     min_dom_p : int >= 1
+    #min_dom_dt : float >= 0
     max_dom_dt : float >= 0
         Time in ns. If set to 0, no max-delta-time limit is set for accepting
         pulses
@@ -477,10 +495,13 @@ def generate_filter_func(
     assert qntm >= 0
     assert min_pulse_q >= 0
     assert min_evt_p >= 1
-    assert max_evt_dt >= 0
-    #assert 0 <= min_evt_q_t_qtl < 1
-    #assert 0 < max_evt_q_t_qtl <= 1
+    assert 0 <= min_evt_dt <= max_evt_dt
+    # assert 0 <= min_evt_t_fract <= max_evt_t_fract <= 1
+    # assert t_fract_window >= 0
+    # assert 0 <= min_evt_q_t_qtl < 1
+    # assert 0 < max_evt_q_t_qtl <= 1
     assert min_dom_p >= 1
+    # assert 0 <= min_dom_dt <= max_dom_dt
     assert max_dom_dt >= 0
     if isinstance(z_regions, int):
         z_regions = (z_regions,)
@@ -519,7 +540,7 @@ def generate_filter_func(
             event_charge = 0.0
 
             event_pulse_t0 = np.inf
-            if max_evt_dt > 0:
+            if min_evt_dt > 0 or max_evt_dt > 0:
                 for dom in doms[
                     event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]
                 ]:
@@ -527,8 +548,14 @@ def generate_filter_func(
                         event_pulse_t0, pulses[dom["pulses_idx0"]]["time"]
                     )
 
-            #lower_q_t_qtl_time = -np.inf
-            #upper_q_t_qtl_time = -np.inf
+            # if min_evt_t_fract > 0 or max_evt_t_fract > 0:
+            #     event_first_dom = doms[int(event["dom_idx0"])]
+            #     event_last_dom = doms[int(event["dom_idx0"] + event["num_hit_doms"] - 1)]
+            #     event_first_pulse = pulses[int(event_first_dom["pulses_idx0"])]
+            #     event_last_pulse = pulses[int(event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"] - 1)]
+
+            # lower_q_t_qtl_time = -np.inf
+            # upper_q_t_qtl_time = -np.inf
 
             for dom in doms[
                 event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]
@@ -559,12 +586,20 @@ def generate_filter_func(
                 for pulse in pulses[
                     dom["pulses_idx0"] : dom["pulses_idx0"] + dom["num_pulses"]
                 ]:
+                    # if min_dom_dt > 0:
+                    #     if (pulse["time"] - dom_pulse_t0) < min_dom_dt:
+                    #         continue
+
                     if max_dom_dt > 0:
-                        if (pulse["time"] - dom_pulse_t0) > max_dom_dt:
+                        if (pulse["time"] - dom_pulse_t0) >= max_dom_dt:
+                            continue
+
+                    if min_evt_dt > 0:
+                        if (pulse["time"] - event_pulse_t0) < min_evt_dt:
                             continue
 
                     if max_evt_dt > 0:
-                        if (pulse["time"] - event_pulse_t0) > max_evt_dt:
+                        if (pulse["time"] - event_pulse_t0) >= max_evt_dt:
                             continue
 
                     pulse_charge = pulse["charge"]
@@ -584,7 +619,9 @@ def generate_filter_func(
                         if pulse_time - last_integ_pulse_t0 > integ_t:
                             # Record previous integrated pulse
                             if num_integ_pulses > 0:
-                                new_pulses[total_num_pulses]["charge"] = integ_pulse_total_q
+                                new_pulses[total_num_pulses][
+                                    "charge"
+                                ] = integ_pulse_total_q
                                 new_pulses[total_num_pulses]["time"] = (
                                     integ_pulse_total_qt / integ_pulse_total_q
                                 )
@@ -670,8 +707,13 @@ def load_and_filter(
     qntm,
     min_pulse_q,
     min_evt_p,
+    min_evt_dt,
     max_evt_dt,
+    # min_evt_t_fract,
+    # max_evt_t_fract,
+    # t_fract_window,
     min_dom_p,
+    # min_dom_dt,
     max_dom_dt,
     integ_t,
     i3,
@@ -687,8 +729,13 @@ def load_and_filter(
     qntm
     min_pulse_q
     min_evt_p
+    min_evt_dt
     max_evt_dt
+    #min_evt_t_fract
+    #max_evt_t_fract
+    #t_fract_window
     min_dom_p
+    #min_dom_dt
     max_dom_dt
     integ_t
         Integration time in ns. If 0, no integration is performed.
@@ -712,10 +759,15 @@ def load_and_filter(
         qntm=qntm,
         min_pulse_q=min_pulse_q,
         min_evt_p=min_evt_p,
+        min_evt_dt=min_evt_dt,
         max_evt_dt=max_evt_dt,
-        #min_evt_q_t_qtl=min_evt_q_t_qtl,
-        #max_evt_q_t_qtl=max_evt_q_t_qtl,
+        # min_evt_t_fract=min_evt_t_fract,
+        # max_evt_t_fract=max_evt_t_fract,
+        # t_fract_window=t_fract_window,
+        # min_evt_q_t_qtl=min_evt_q_t_qtl,
+        # max_evt_q_t_qtl=max_evt_q_t_qtl,
         min_dom_p=min_dom_p,
+        # min_dom_dt=min_dom_dt,
         max_dom_dt=max_dom_dt,
         integ_t=integ_t,
         i3=i3,
@@ -954,16 +1006,16 @@ def get_true_time_relative_info(events, doms, pulses):
 
     Returns
     -------
-    info : ndarray of dtype INFO_T
+    info : ndarray of dtype TRUE_TIME_INFO_T
 
     """
     info = np.empty(shape=len(events), dtype=TRUE_TIME_INFO_T)
     for event_idx, event in enumerate(events):
-        event_first_dom = event["dom_idx0"]
-        event_last_dom = doms[event["dom_idx0"] + event["num_hit_doms"] - 1]
+        event_first_dom = doms[event["dom_idx0"]]
+        event_last_dom = doms[int(event["dom_idx0"] + event["num_hit_doms"] - 1)]
 
-        event_pulses_start = event_first_dom["pulses_idx0"]
-        event_pulses_stop = event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"]
+        event_pulses_start = int(event_first_dom["pulses_idx0"])
+        event_pulses_stop = int(event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"])
 
         event_pulses = pulses[event_pulses_start:event_pulses_stop]
         sorted_pulses = np.sort(event_pulses, order="time")
@@ -976,9 +1028,14 @@ def get_true_time_relative_info(events, doms, pulses):
         info[event_idx]["true_energy"] = event["true_energy"]
         info[event_idx]["weight"] = event["weight"]
         info[event_idx]["q_fract"] = cumulative_q_at_true_time / cumulative_q[-1]
-        info[event_idx]["t_fract"] = (event["true_time"] - event_pulses[0]["time"]) / (
-            event_pulses[-1]["time"] - event_pulses[0]["time"]
-        )
+
+        dt = event["true_time"] - sorted_pulses[0]["time"]
+        pulses_width = sorted_pulses[-1]["time"] - sorted_pulses[0]["time"]
+        if pulses_width == 0:
+            info[event_idx]["t_fract"] = np.nan
+        else:
+            info[event_idx]["t_fract"] = dt / pulses_width
+        info[event_idx]["dt"] = dt
 
     return info
 
@@ -1378,10 +1435,15 @@ def parse_args(description=__doc__):
         subp.add_argument("--qntm", type=float, default=0)
         subp.add_argument("--min-pulse-q", type=float, default=0)
         subp.add_argument("--min-evt-p", type=int, default=1)
+        subp.add_argument("--min-evt-dt", type=float, default=0)
         subp.add_argument("--max-evt-dt", type=float, default=0)
-        #subp.add_argument("--min-evt-q-t-qtl", type=float, default=0)
-        #subp.add_argument("--max-evt-q-t-qtl", type=float, default=1)
+        # subp.add_argument("--min-evt-t-fract", type=float, default=0)
+        # subp.add_argument("--max-evt-t-fract", type=float, default=0)
+        # subp.add_argument("--t-fract-window", type=float, default=0)
+        # subp.add_argument("--min-evt-q-t-qtl", type=float, default=0)
+        # subp.add_argument("--max-evt-q-t-qtl", type=float, default=1)
         subp.add_argument("--min-dom-p", type=int, default=1)
+        # subp.add_argument("--min-dom-dt", type=float, default=0)
         subp.add_argument("--max-dom-dt", type=float, default=0)
         subp.add_argument("--integ-t", type=float, default=0)
         subp.add_argument("--no-i3", action="store_true")
@@ -1414,10 +1476,15 @@ def main():
         "qntm",
         "min_pulse_q",
         "min_evt_p",
+        "min_evt_dt",
         "max_evt_dt",
-        #"min_evt_q_t_qtl",
-        #"max_evt_q_t_qtl",
+        # "min_evt_t_fract",
+        # "max_evt_t_fract",
+        # "t_fract_window",
+        # "min_evt_q_t_qtl",
+        # "max_evt_q_t_qtl",
         "min_dom_p",
+        # "min_dom_dt",
         "max_dom_dt",
         "integ_t",
         "i3",
