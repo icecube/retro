@@ -10,6 +10,7 @@ doms_array.npy, and pulses_array.npy files (see
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
+    "TRUE_TIME_INFO_T",
     "JIT_KW",
     "DATA_DIR_INFOS",
     "MC_DIR_INFOS",
@@ -40,6 +41,7 @@ __all__ = [
     "get_mc_weight_func",
     "binit",
     "create_histos",
+    "get_true_time_relative_info",
     "integer_if_integral",
     "get_histo_fname_prefix",
     "load_histos",
@@ -70,6 +72,8 @@ from retro.const import DC_STRS
 from retro.utils.misc import expand, mkdir
 from retro.utils.geom import generate_digitizer
 
+
+TRUE_TIME_INFO_T = np.dtype([("true_energy", "weight", "q_fract", "t_fract")])
 
 JIT_KW = dict(
     nopython=True, nogil=True, parallel=False, error_model="numpy", fastmath=True
@@ -436,9 +440,11 @@ def generate_filter_func(
     min_pulse_q,
     min_evt_p,
     max_evt_dt,
+    #min_evt_q_t_qtl,
+    #max_evt_q_t_qtl,
     min_dom_p,
     max_dom_dt,
-
+    integ_t,
     i3,
     dc,
     z_regions,
@@ -451,11 +457,14 @@ def generate_filter_func(
     min_pulse_q : float
     min_evt_p : int >= 1
     max_evt_dt : float >= 0
+    #min_evt_q_t_qtl : 0 <= float < 1
+    #max_evt_q_t_qtl : 0 < float <= 1
     min_dom_p : int >= 1
     max_dom_dt : float >= 0
         Time in ns. If set to 0, no max-delta-time limit is set for accepting
         pulses
-
+    integ_t : float >= 0
+        Integration time in ns. If 0, no integration is performed.
     i3 : bool
     dc : bool
     z_regions : int or tuple of int
@@ -469,6 +478,8 @@ def generate_filter_func(
     assert min_pulse_q >= 0
     assert min_evt_p >= 1
     assert max_evt_dt >= 0
+    #assert 0 <= min_evt_q_t_qtl < 1
+    #assert 0 < max_evt_q_t_qtl <= 1
     assert min_dom_p >= 1
     assert max_dom_dt >= 0
     if isinstance(z_regions, int):
@@ -512,6 +523,9 @@ def generate_filter_func(
                 for dom in doms[event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]]:
                     event_pulse_t0 = min(event_pulse_t0, pulses[dom["pulses_idx0"]]["time"])
 
+            #lower_q_t_qtl_time = -np.inf
+            #upper_q_t_qtl_time = -np.inf
+
             for dom in doms[
                 event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]
             ]:
@@ -532,6 +546,12 @@ def generate_filter_func(
                 dom_num_pulses = 0
                 dom_charge = 0.0
 
+                num_integ_pulses = 0
+                last_integ_pulse_t0 = -np.inf
+                integ_pulse_total_t = 0.0
+                integ_pulse_total_q = 0.0
+                integ_pulse_total_qt = 0.0
+
                 for pulse in pulses[
                     dom["pulses_idx0"] : dom["pulses_idx0"] + dom["num_pulses"]
                 ]:
@@ -544,6 +564,7 @@ def generate_filter_func(
                             continue
 
                     pulse_charge = pulse["charge"]
+                    pulse_time = pulse["time"]
 
                     if qntm > 0:
                         pulse_charge = quantize(pulse_charge, qntm=qntm)
@@ -555,12 +576,45 @@ def generate_filter_func(
                     if fixed_pulse_q > 0:
                         pulse_charge = fixed_pulse_q
 
-                    new_pulses[total_num_pulses]["charge"] = pulse_charge
-                    new_pulses[total_num_pulses]["time"] = pulse["time"]
+                    if integ_t > 0:
+                        if pulse_time - last_integ_pulse_t0 > integ_t:
+                            # Record previous integrated pulse
+                            if num_integ_pulses > 0:
+                                new_pulses[total_num_pulses]["charge"] = integ_pulse_total_q
+                                new_pulses[total_num_pulses]["time"] = (
+                                    integ_pulse_total_qt / integ_pulse_total_q
+                                )
+                                dom_num_pulses += 1
+                                total_num_pulses += 1
+                                dom_charge += integ_pulse_total_q
 
+                            # Start a new integrated pulse
+                            num_integ_pulses += 1
+                            last_integ_pulse_t0 = pulse_time
+                            integ_pulse_total_t = pulse_time
+                            integ_pulse_total_q = pulse_charge
+                            integ_pulse_total_qt = pulse_charge * pulse_time
+                        else:
+                            integ_pulse_total_t += pulse_time
+                            integ_pulse_total_q += pulse_charge
+                            integ_pulse_total_qt = pulse_charge * pulse_time
+
+                    else:
+                        new_pulses[total_num_pulses]["charge"] = pulse_charge
+                        new_pulses[total_num_pulses]["time"] = pulse_time
+
+                        dom_num_pulses += 1
+                        total_num_pulses += 1
+                        dom_charge += pulse_charge
+
+                if integ_pulse_total_q > 0:
+                    new_pulses[total_num_pulses]["charge"] = integ_pulse_total_q
+                    new_pulses[total_num_pulses]["time"] = (
+                        integ_pulse_total_qt / integ_pulse_total_q
+                    )
                     dom_num_pulses += 1
                     total_num_pulses += 1
-                    dom_charge += pulse_charge
+                    dom_charge += integ_pulse_total_q
 
                 if dom_num_pulses < min_dom_p:
                     # "rewind" array populated in the dom loop
@@ -615,6 +669,7 @@ def load_and_filter(
     max_evt_dt,
     min_dom_p,
     max_dom_dt,
+    integ_t,
     i3,
     dc,
     z_regions,
@@ -631,6 +686,8 @@ def load_and_filter(
     max_evt_dt
     min_dom_p
     max_dom_dt
+    integ_t
+        Integration time in ns. If 0, no integration is performed.
     i3
     dc
     z_regions
@@ -652,8 +709,11 @@ def load_and_filter(
         min_pulse_q=min_pulse_q,
         min_evt_p=min_evt_p,
         max_evt_dt=max_evt_dt,
+        #min_evt_q_t_qtl=min_evt_q_t_qtl,
+        #max_evt_q_t_qtl=max_evt_q_t_qtl,
         min_dom_p=min_dom_p,
         max_dom_dt=max_dom_dt,
+        integ_t=integ_t,
         i3=i3,
         dc=dc,
         z_regions=z_regions,
@@ -880,6 +940,48 @@ def create_histos(events, doms, pulses, get_weight_func, edges):
     return histos, histos_w2, total_weights, total_weights_squared
 
 
+def get_true_time_relative_info(events, doms, pulses):
+    """
+    Parameters
+    ----------
+    events : ndarray of dtype MC_DOMS_IDX_T
+    doms : ndarray of dtype DOM_PULSES_IDX_T
+    pulses : ndarray of dtype SIMPLE_PULSE_T
+
+    Returns
+    -------
+    info : ndarray of dtype INFO_T
+
+    """
+    info = np.empty(shape=len(events), dtype=TRUE_TIME_INFO_T)
+    for event_idx, event in enumerate(events):
+        event_first_dom = event["dom_idx0"]
+        event_last_dom = doms[event["dom_idx0"] + event["num_hit_doms"] - 1]
+
+        event_pulses_start = event_first_dom["pulses_idx0"]
+        event_pulses_stop = event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"]
+
+        event_pulses = pulses[event_pulses_start:event_pulses_stop]
+        sorted_pulses = np.sort(event_pulses, order="time")
+        cumulative_q = np.cumsum(sorted_pulses["charge"])
+
+        cumulative_q_at_true_time = np.interp(
+            x=event["true_time"],
+            xp=sorted_pulses["time"],
+            fp=cumulative_q,
+        )
+
+        info[event_idx]["true_energy"] = event["true_energy"]
+        info[event_idx]["weight"] = event["weight"]
+        info[event_idx]["q_fract"] = cumulative_q_at_true_time / cumulative_q[-1]
+        info[event_idx]["t_fract"] = (
+            (event["true_time"] - event_pulses[0]["time"])
+            / (event_pulses[-1]["time"] - event_pulses[0]["time"])
+        )
+
+    return info
+
+
 def integer_if_integral(x):
     """Convert a float to int if it can be represented as an int"""
     return int(x) if x == int(x) else x
@@ -981,7 +1083,9 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
         for mc_name, mc_key in mc_set_spec.items():
             mc_sets_d[mc_name] = mc_key
             mc_data[mc_name] = load_histos(
-                histo_data_dir=histo_data_dir, processing_kw=processing_kw, set_key=mc_key
+                histo_data_dir=histo_data_dir,
+                processing_kw=processing_kw,
+                set_key=mc_key,
             )
 
         data_data = OrderedDict()
@@ -990,7 +1094,9 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
             season_num_str = "IC86.{:02d}".format(season_num)
             data_sets_d[season_num_str] = season
             data_data[season_num_str] = load_histos(
-                histo_data_dir=histo_data_dir, processing_kw=processing_kw, set_key=season
+                histo_data_dir=histo_data_dir,
+                processing_kw=processing_kw,
+                set_key=season,
             )
 
         # Invert ordering hierarchy of dicts; stats_d is keyed by stat name
@@ -1268,15 +1374,16 @@ def parse_args(description=__doc__):
 
     for subp in [populate_sp, plot_sp]:
         subp.add_argument("--histo-data-dir", type=str)
-
         subp.add_argument("--fixed-pulse-q", type=float, default=0)
         subp.add_argument("--qntm", type=float, default=0)
         subp.add_argument("--min-pulse-q", type=float, default=0)
         subp.add_argument("--min-evt-p", type=int, default=1)
         subp.add_argument("--max-evt-dt", type=float, default=0)
+        #subp.add_argument("--min-evt-q-t-qtl", type=float, default=0)
+        #subp.add_argument("--max-evt-q-t-qtl", type=float, default=1)
         subp.add_argument("--min-dom-p", type=int, default=1)
         subp.add_argument("--max-dom-dt", type=float, default=0)
-
+        subp.add_argument("--integ-t", type=float, default=0)
         subp.add_argument("--no-i3", action="store_true")
         subp.add_argument("--no-dc", action="store_true")
         subp.add_argument("--z-regions", nargs="+", type=int)
@@ -1308,8 +1415,11 @@ def main():
         "min_pulse_q",
         "min_evt_p",
         "max_evt_dt",
+        #"min_evt_q_t_qtl",
+        #"max_evt_q_t_qtl",
         "min_dom_p",
         "max_dom_dt",
+        "integ_t",
         "i3",
         "dc",
         "z_regions",
