@@ -5,8 +5,8 @@ pass=2
 level="level5_v01.03"
 pulse_series=SplitInIcePulses
 
-mydir=$( dirname $0 )
-script="$mydir"/../retro/utils/data_mc_agreement__extract_pulses.py
+retro_scripts_dir=$( dirname $0 )
+script="$retro_scripts_dir"/../retro/utils/data_mc_agreement__extract_pulses.py
 
 # -- Monte Carlo -- #
 
@@ -35,7 +35,7 @@ for d in \
     ;
 do
     echo "Extracting pulses from \"$d\""
-    time $script --pulse-series $pulse_series --indirs "$d" --outdir "$d" --serial
+    time $script --pulse-series $pulse_series --indir "$d" --outdir "$d" --processes=1 &
     sleep 0.2
 done
 
@@ -44,6 +44,8 @@ done
 for y in {12..18} ; do
     d="${data_rootdir}/ana/LE/oscNext/pass${pass}/data/${level}/IC86.${y}/"
     echo "Extracting pulses from \"$d\""
-    time $script --pulse-series $pulse_series --indirs "$d" --outdir "$d"
+    time $script --pulse-series $pulse_series --indir "$d" --outdir "$d" --processes=1 &
     sleep 0.2
 done
+
+wait

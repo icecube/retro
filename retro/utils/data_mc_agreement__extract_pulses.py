@@ -15,7 +15,7 @@ from __future__ import absolute_import, division, print_function
 __all__ = ["process_events_dir", "produce_arrays", "main"]
 
 from argparse import ArgumentParser
-from multiprocessing import Pool
+from multiprocessing import cpu_count, Pool
 from os import walk
 from os.path import abspath, basename, dirname, isfile, join
 import re
@@ -82,6 +82,7 @@ MC_DOMS_IDX_T = np.dtype(
         ("true_pdg", np.int8),
         ("true_int", np.uint8),
         ("true_energy", np.float32),
+        ("true_time", np.float32),
     ]
 )
 
@@ -228,15 +229,18 @@ def process_events_dir(events_dirpath, pulse_series):
             events_array[rel_idx]["weight"] = weights[valid_idx]
             if is_noise:
                 true_pdg = 0
-                true_energy = 0
+                true_energy = np.nan
+                true_time = np.nan
             else:
                 true_pdg = truth[valid_idx]["pdg_encoding"]
                 true_energy = truth[valid_idx]["energy"]
+                true_time = truth[valid_idx]["time"]
             events_array[rel_idx]["true_pdg"] = true_pdg
             #if abs(true_pdg) >= 128:
             #    print("true_pdg =", true_pdg)
             #    raise ValueError("true_pdg = {}".format(true_pdg))
             events_array[rel_idx]["true_energy"] = true_energy
+            events_array[rel_idx]["true_time"] = true_time
 
             if true_pdg in NEUTRINOS:
                 events_array[rel_idx]["true_int"] = truth[valid_idx]["InteractionType"]
@@ -299,7 +303,6 @@ def produce_arrays(
     outdir,
     pulse_series,
     processes=None,
-    serial=False,
 ):
     """
     Parameters
@@ -307,13 +310,17 @@ def produce_arrays(
     indir
     outdir
     pulse_series
-    processes
-    serial : bool, optional
+    processes : None or int > 0, optional
 
     """
     if outdir is not None:
         outdir = expand(outdir)
         mkdir(outdir)
+
+    if processes is None:
+        processes = cpu_count()
+    assert processes >= 1
+    serial = processes == 1
 
     if not serial:
         pool = Pool(processes=processes)
@@ -398,12 +405,12 @@ def main(description=__doc__):
     parser.add_argument("--indir")
     parser.add_argument("--pulse-series")
     parser.add_argument("--outdir")
-    parser.add_argument("--serial", action="store_true", default=False)
     parser.add_argument(
         "--processes",
         default=None,
         type=int,
-        help="""Number of subprocesses to spawn to process directories""",
+        help="""Number of subprocesses to spawn to process directories. Setting
+        to 1 avoids use of multiprocessing.Pool""",
     )
     args = parser.parse_args()
     kwargs = vars(args)
