@@ -10,7 +10,7 @@ doms_array.npy, and pulses_array.npy files (see
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    "TRUE_TIME_INFO_T",
+    "TRUE_TIME_WRT_EVENT_INFO_T",
     "JIT_KW",
     "DATA_DIR_INFOS",
     "MC_DIR_INFOS",
@@ -41,7 +41,7 @@ __all__ = [
     "get_mc_weight_func",
     "binit",
     "create_histos",
-    "get_true_time_relative_info",
+    "get_true_time_relative_to_event_info",
     "integer_if_integral",
     "get_histo_fname_prefix",
     "load_histos",
@@ -53,6 +53,7 @@ __all__ = [
 from argparse import ArgumentParser
 from collections import OrderedDict
 from copy import deepcopy
+import inspect
 import numbers
 from os.path import abspath, basename, dirname, isdir, isfile, join
 import pickle
@@ -74,8 +75,20 @@ from retro.utils.geom import generate_digitizer
 from retro.utils.stats import weighted_percentile
 
 
-TRUE_TIME_INFO_T = np.dtype(
+TRUE_TIME_WRT_EVENT_INFO_T = np.dtype(
     [
+        ("true_energy", np.float32),
+        ("weight", np.float32),
+        ("q_fract", np.float32),
+        ("t_fract", np.float32),
+        ("dt", np.float32),
+    ]
+)
+
+TRUE_TIME_WRT_DOM_INFO_T = np.dtype(
+    [
+        ("string", np.uint8),
+        ("om", np.uint8),
         ("true_energy", np.float32),
         ("weight", np.float32),
         ("q_fract", np.float32),
@@ -444,24 +457,24 @@ def quantize(x, qntm):
 
 
 def generate_filter_func(
-    fixed_pulse_q,
-    qntm,
-    min_pulse_q,
-    min_evt_p,
-    min_evt_dt,
-    max_evt_dt,
-    # min_evt_t_fract,
-    # max_evt_t_fract,
-    # t_fract_window,
-    # min_evt_q_t_qtl,
-    # max_evt_q_t_qtl,
-    min_dom_p,
-    # min_dom_dt,
-    max_dom_dt,
-    integ_t,
-    i3,
-    dc,
-    z_regions,
+    fixed_pulse_q=0,
+    qntm=0,
+    min_pulse_q=0,
+    min_evt_p=1,
+    min_evt_dt=0,
+    max_evt_dt=0,
+    # min_evt_t_fract=0,
+    # max_evt_t_fract=0,
+    # t_fract_window=0,
+    # min_evt_q_t_qtl=0,
+    # max_evt_q_t_qtl=0,
+    min_dom_p=1,
+    # min_dom_dt=0,
+    max_dom_dt=0,
+    integ_t=0,
+    i3=True,
+    dc=True,
+    z_regions=(0, 1, 2),
 ):
     """
     Parameters
@@ -504,9 +517,15 @@ def generate_filter_func(
     assert min_dom_p >= 1
     # assert 0 <= min_dom_dt <= max_dom_dt
     assert max_dom_dt >= 0
-    if isinstance(z_regions, int):
-        z_regions = (z_regions,)
-    z_regions = tuple(z_regions)
+    assert i3 or dc
+
+    if np.isscalar(z_regions):
+        z_regions = [z_regions]
+    z_rs = []
+    for z_region in z_regions:
+        assert int(z_region) == z_region, "z_region {} not integer?".format(z_region)
+        z_rs.append(int(z_region))
+    z_regions = tuple(sorted(z_rs))
 
     @numba.jit(cache=False, **JIT_KW)
     def filter_arrays(events, doms, pulses):
@@ -553,7 +572,9 @@ def generate_filter_func(
             #     event_first_dom = doms[int(event["dom_idx0"])]
             #     event_last_dom = doms[int(event["dom_idx0"] + event["num_hit_doms"] - 1)]
             #     event_first_pulse = pulses[int(event_first_dom["pulses_idx0"])]
-            #     event_last_pulse = pulses[int(event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"] - 1)]
+            #     event_last_pulse = pulses[
+            #         int(event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"] - 1)
+            #     ]
 
             # lower_q_t_qtl_time = -np.inf
             # upper_q_t_qtl_time = -np.inf
@@ -701,48 +722,14 @@ def generate_filter_func(
     return filter_arrays
 
 
-def load_and_filter(
-    set_key,
-    root_data_dir,
-    fixed_pulse_q=0,
-    qntm=0,
-    min_pulse_q=0,
-    min_evt_p=0,
-    min_evt_dt=0,
-    max_evt_dt=0,
-    # min_evt_t_fract=0,
-    # max_evt_t_fract=0,
-    # t_fract_window=0,
-    min_dom_p=1,
-    # min_dom_dt=0,
-    max_dom_dt=0,
-    integ_t=0,
-    i3=True,
-    dc=True,
-    z_regions=(0, 1, 2),
-):
+def load_and_filter(set_key, root_data_dir, **processing_kw):
     """
     Parameters
     ----------
     set_key : key in either DATA_DIR_INFOS or MC_DIR_INFOS
     root_data_dir
-    fixed_pulse_q
-    qntm
-    min_pulse_q
-    min_evt_p
-    min_evt_dt
-    max_evt_dt
-    #min_evt_t_fract
-    #max_evt_t_fract
-    #t_fract_window
-    min_dom_p
-    #min_dom_dt
-    max_dom_dt
-    integ_t
-        Integration time in ns. If 0, no integration is performed.
-    i3
-    dc
-    z_regions
+    **processing_kw
+        kwargs to `generate_filter_func`
 
     Returns
     -------
@@ -752,29 +739,9 @@ def load_and_filter(
 
     """
     root_data_dir = expand(root_data_dir)
-    assert i3 or dc
     assert set_key in MC_DIR_INFOS or set_key in DATA_DIR_INFOS
 
-    filter_arrays = generate_filter_func(
-        fixed_pulse_q=fixed_pulse_q,
-        qntm=qntm,
-        min_pulse_q=min_pulse_q,
-        min_evt_p=min_evt_p,
-        min_evt_dt=min_evt_dt,
-        max_evt_dt=max_evt_dt,
-        # min_evt_t_fract=min_evt_t_fract,
-        # max_evt_t_fract=max_evt_t_fract,
-        # t_fract_window=t_fract_window,
-        # min_evt_q_t_qtl=min_evt_q_t_qtl,
-        # max_evt_q_t_qtl=max_evt_q_t_qtl,
-        min_dom_p=min_dom_p,
-        # min_dom_dt=min_dom_dt,
-        max_dom_dt=max_dom_dt,
-        integ_t=integ_t,
-        i3=i3,
-        dc=dc,
-        z_regions=z_regions,
-    )
+    filter_arrays = generate_filter_func(**processing_kw)
 
     if set_key in DATA_DIR_INFOS:
         is_mc = False
@@ -997,8 +964,13 @@ def create_histos(events, doms, pulses, get_weight_func, edges):
     return histos, histos_w2, total_weights, total_weights_squared
 
 
-def get_true_time_relative_info(events, doms, pulses):
-    """
+def get_true_time_relative_to_event_info(events, doms, pulses):
+    """Get times relative to markers in event (fraction of charge, fraction of
+    time, and absolute time offset from first pulse in event).
+
+    Additionally store misc info for use later (see fields in
+    `TRUE_TIME_WRT_EVENT_INFO_T` for everything stored per event).
+
     Parameters
     ----------
     events : ndarray of dtype MC_DOMS_IDX_T
@@ -1007,16 +979,18 @@ def get_true_time_relative_info(events, doms, pulses):
 
     Returns
     -------
-    info : ndarray of dtype TRUE_TIME_INFO_T
+    info : ndarray of dtype TRUE_TIME_WRT_EVENT_INFO_T
 
     """
-    info = np.empty(shape=len(events), dtype=TRUE_TIME_INFO_T)
+    info = np.empty(shape=len(events), dtype=TRUE_TIME_WRT_EVENT_INFO_T)
     for event_idx, event in enumerate(events):
         event_first_dom = doms[event["dom_idx0"]]
         event_last_dom = doms[int(event["dom_idx0"] + event["num_hit_doms"] - 1)]
 
         event_pulses_start = int(event_first_dom["pulses_idx0"])
-        event_pulses_stop = int(event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"])
+        event_pulses_stop = int(
+            event_last_dom["pulses_idx0"] + event_last_dom["num_pulses"]
+        )
 
         event_pulses = pulses[event_pulses_start:event_pulses_stop]
         sorted_pulses = np.sort(event_pulses, order="time")
@@ -1029,14 +1003,61 @@ def get_true_time_relative_info(events, doms, pulses):
         info[event_idx]["true_energy"] = event["true_energy"]
         info[event_idx]["weight"] = event["weight"]
         info[event_idx]["q_fract"] = cumulative_q_at_true_time / cumulative_q[-1]
+        info[event_idx]["dt"] = dt = event["true_time"] - sorted_pulses[0]["time"]
 
-        dt = event["true_time"] - sorted_pulses[0]["time"]
         pulses_width = sorted_pulses[-1]["time"] - sorted_pulses[0]["time"]
         if pulses_width == 0:
             info[event_idx]["t_fract"] = np.nan
         else:
             info[event_idx]["t_fract"] = dt / pulses_width
-        info[event_idx]["dt"] = dt
+
+    return info
+
+
+def get_true_time_relative_to_dom_info(events, doms, pulses):
+    """Get true times relative to markers in each DOM.
+
+    Parameters
+    ----------
+    events : ndarray of dtype MC_DOMS_IDX_T
+    doms : ndarray of dtype DOM_PULSES_IDX_T
+    pulses : ndarray of dtype SIMPLE_PULSE_T
+
+    Returns
+    -------
+    info : ndarray of dtype TRUE_TIME_WRT_DOM_INFO_T
+
+    """
+    info = np.empty(shape=len(doms), dtype=TRUE_TIME_WRT_DOM_INFO_T)
+    warnings.filterwarnings("ignore")
+    try:
+        for event in events:
+            for dom_idx in range(
+                event["dom_idx0"], event["dom_idx0"] + event["num_hit_doms"]
+            ):
+                dom = doms[dom_idx]
+                dom_pulses = pulses[
+                    dom["pulses_idx0"] : dom["pulses_idx0"] + dom["num_pulses"]
+                ]
+                cumulative_q = np.cumsum(dom_pulses["charge"])
+                if len(dom_pulses) > 1:
+                    cumulative_q_at_true_time = np.interp(
+                        x=event["true_time"], xp=dom_pulses["time"], fp=cumulative_q
+                    )
+                else:
+                    cumulative_q_at_true_time = dom_pulses[0]["charge"]
+
+                info[dom_idx]["string"] = dom["string"]
+                info[dom_idx]["om"] = dom["om"]
+                info[dom_idx]["true_energy"] = event["true_energy"]
+                info[dom_idx]["weight"] = event["weight"]
+                info[dom_idx]["q_fract"] = cumulative_q_at_true_time / cumulative_q[-1]
+                info[dom_idx]["dt"] = dt = event["true_time"] - dom_pulses[0]["time"]
+
+                pulses_width = dom_pulses[-1]["time"] - dom_pulses[0]["time"]
+                info[dom_idx]["t_fract"] = dt / pulses_width
+    finally:
+        warnings.resetwarnings()
 
     return info
 
@@ -1050,8 +1071,26 @@ def get_histo_fname_prefix(processing_kw, set_key=None):
     """Get name of file that will/does contain histograms for a given data/MC
     set processed with processing_kw"""
     kw = deepcopy(processing_kw)
+
+    # Convert floats that are integral to ints for clean output
+    for key, val in list(kw.items()):
+        if isinstance(val, bool) or not isinstance(val, numbers.Number):
+            continue
+        kw[key] = integer_if_integral(val)
+
     if not isinstance(kw["z_regions"], int):
-        kw["z_regions"] = ",".join(str(r) for r in kw["z_regions"])
+        if len(kw["z_regions"]) == 0:
+            raise ValueError()
+        elif len(kw["z_regions"]) == 1:
+            kw["z_regions"] = kw["z_regions"][0]
+            assert int(kw["z_regions"]) == kw["z_regions"]
+            kw["z_regions"] = int(kw["z_regions"])
+        else:
+            z_regions = []
+            for z_region in kw["z_regions"]:
+                assert int(z_region) == z_region
+                z_regions.append(int(z_region))
+            kw["z_regions"] = ",".join(str(r) for r in sorted(z_regions))
 
     prefix = "__".join("{}={}".format(*it) for it in kw.items())
     if set_key is not None:
@@ -1087,7 +1126,9 @@ def load_histos(histo_data_dir, processing_kw, set_key):
     return load_pickle(histo_fpath)
 
 
-def plot_vtx_t_dists(histo_data_dir, histo_plot_dir, mc_set, processing_kw):
+def plot_vtx_t_dists(
+    root_data_dir, histo_data_dir, histo_plot_dir, mc_set, processing_kw
+):
     """
     Parameters
     ----------
@@ -1098,86 +1139,169 @@ def plot_vtx_t_dists(histo_data_dir, histo_plot_dir, mc_set, processing_kw):
 
     """
     import matplotlib as mpl
+
     if __name__ == "__main__" and __package__ is None:
         mpl.use("Agg")
     import matplotlib.pyplot as plt
 
     mc_set_spec = MC_SET_SPECS[mc_set]
 
+    root_data_dir = expand(root_data_dir)
+
     histo_data_dir = expand(histo_data_dir)
     if basename(histo_data_dir) != "histo_data":
         histo_data_dir = join(histo_data_dir, "histo_data")
+    mkdir(histo_data_dir)
 
     histo_plot_dir = expand(histo_plot_dir)
     if basename(histo_plot_dir) != "histo_plots":
         histo_plot_dir = join(histo_plot_dir, "histo_plots")
     mkdir(histo_plot_dir)
 
-    nu_i = []
-    for mc_name, mc_key in mc_set_spec.items():
-        if mc_name not in ["nue", "numu", "nutau"]:
-            continue
-        #arrays = load_and_filter(set_key=mc_key, **processing_kw)
-        arrays = load_histos(
-            histo_data_dir=histo_data_dir,
-            processing_kw=processing_kw,
-            set_key=mc_key,
-        )
-        mc_data_i = get_true_time_relative_info(*arrays)
-        mc_data_i["weight"] /= MC_DIR_INFOS[mc_key]["num_files"]
-        nu_i.append(mc_data_i)
+    fpath_basename = "{}__{}".format(
+        mc_set, get_histo_fname_prefix(processing_kw=processing_kw)
+    )
+    plt_fpath_root = join(histo_plot_dir, fpath_basename) + "__"
+    npy_fpath_proto = join(histo_data_dir, fpath_basename) + "__nu_vtx_t_{}_info.npy"
+    npy_evt_fpath = npy_fpath_proto.format("evt")
+    npy_dom_fpath = npy_fpath_proto.format("dom")
 
-    nu_i = np.concatenate(nu_i)
+    if isfile(npy_evt_fpath):
+        print('loading nu_evt_i from "{}"'.format(npy_evt_fpath))
+        nu_evt_i = np.load(npy_evt_fpath)
+    else:
+        print("generating nu_evt_i")
+        nu_evt_i = None
+
+    if isfile(npy_dom_fpath):
+        print('loading nu_dom_i from "{}"'.format(npy_dom_fpath))
+        nu_dom_i = np.load(npy_dom_fpath)
+    else:
+        print("generating nu_dom_i")
+        nu_dom_i = None
+
+    get_nu_evt_i = nu_evt_i is None
+    get_nu_dom_i = nu_dom_i is None
+
+    if get_nu_evt_i or get_nu_dom_i:
+        if get_nu_evt_i:
+            nu_evt_i = []
+
+        if get_nu_dom_i:
+            nu_dom_i = []
+
+        for mc_name, mc_key in mc_set_spec.items():
+            if mc_name not in ["nue", "numu", "nutau"]:
+                continue
+            events, doms, pulses = load_and_filter(
+                set_key=mc_key, root_data_dir=root_data_dir, **processing_kw
+            )
+            if get_nu_evt_i:
+                this_nu_evt_i = get_true_time_relative_to_event_info(
+                    events=events, doms=doms, pulses=pulses
+                )
+                this_nu_evt_i["weight"] /= MC_DIR_INFOS[mc_key]["num_files"]
+                nu_evt_i.append(this_nu_evt_i)
+
+            if get_nu_dom_i:
+                this_nu_dom_i = get_true_time_relative_to_dom_info(
+                    events=events, doms=doms, pulses=pulses
+                )
+                this_nu_dom_i["weight"] /= MC_DIR_INFOS[mc_key]["num_files"]
+                nu_dom_i.append(this_nu_dom_i)
+
+        if get_nu_evt_i:
+            nu_evt_i = np.concatenate(nu_evt_i)
+            print('saving nu_evt_i to "{}"'.format(npy_evt_fpath))
+            np.save(npy_evt_fpath, nu_evt_i)
+
+        if get_nu_dom_i:
+            nu_dom_i = np.concatenate(nu_dom_i)
+            print('saving nu_dom_i to "{}"'.format(npy_dom_fpath))
+            np.save(npy_dom_fpath, nu_dom_i)
 
     pctiles = np.array([0.01, 0.1, 1, 50, 99, 99.9, 99.99])
-    is_finite = np.is_finite(nu_i["t_fract"])
-    t_at_pctiles = weighted_percentile(
-        nu_i["t_fract"][is_finite], q=pctiles, weights=nu_i["weight"][is_finite]
-    )
-    q_at_pctiles = weighted_percentile(nu_i["q_fract"], q=pctiles, weights=nu_i["weight"])
-    dt_at_pctiles = weighted_percentile(nu_i["dt"], q=pctiles, weights=nu_i["weight"])
 
-    plt_basename = "{}__{}__".format(
-        mc_set,
-        get_histo_fname_prefix(processing_kw=processing_kw),
-    )
-    fpath_root = join(histo_plot_dir, plt_basename)
+    for label, nu_i in [("evt", nu_evt_i), ("dom", nu_dom_i)]:
+        t_fract_finite_mask = np.isfinite(nu_i["t_fract"])
+        t_at_pctiles = weighted_percentile(
+            nu_i["t_fract"][t_fract_finite_mask],
+            q=pctiles,
+            weights=nu_i["weight"][t_fract_finite_mask],
+        )
+        q_at_pctiles = weighted_percentile(
+            nu_i["q_fract"], q=pctiles, weights=nu_i["weight"]
+        )
+        dt_at_pctiles = weighted_percentile(
+            nu_i["dt"], q=pctiles, weights=nu_i["weight"]
+        )
 
-    fig, ax = plt.subplots()
-    ax.hist(nu_i["q_fract"], bins=1000, weights=nu_i["weight"])
-    ax.plot(q_at_pctiles, np.zeros_like(q_at_pctiles), "k|")
-    ax.set_xticks(q_at_pctiles)
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
-    fig.tight_layout()
-    fig.savefig(fpath_root + "q_fract.png", dpi=300)
-    fig.savefig(fpath_root + "q_fract.pdf")
+        # -- Make charge fraction relative to event plot -- #
 
-    fig, ax = plt.subplots()
-    ax.hist(nu_i["t_fract"][is_finite], bins=1000, weights=nu_i["weight"][is_finite])
-    ax.plot(t_at_pctiles, np.zeros_like(t_at_pctiles), "k|")
-    ax.set_xticks(t_at_pctiles)
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
-    fig.tight_layout()
-    fig.savefig(fpath_root + "t_fract.png", dpi=300)
-    fig.savefig(fpath_root + "t_fract.pdf")
+        fig, ax = plt.subplots()
+        ax.hist(nu_i["q_fract"], bins=1000, weights=nu_i["weight"])
+        ax.plot(q_at_pctiles, np.zeros_like(q_at_pctiles), "k|")
+        ax.set_xticks(q_at_pctiles)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+        fig.tight_layout()
 
-    fig, ax = plt.subplots()
-    ax.hist(nu_i["dt"], bins=1000, weights=nu_i["weight"])
-    ax.plot(dt_at_pctiles, np.zeros_like(dt_at_pctiles), "k|")
-    ax.set_xticks(dt_at_pctiles)
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
-    fig.tight_layout()
-    fig.savefig(fpath_root + "dt.png", dpi=300)
-    fig.savefig(fpath_root + "dt.pdf")
+        fp = plt_fpath_root + "{}__q_fract.png".format(label)
+        fig.savefig(fp, dpi=300)
+        print('saved "{}"'.format(fp))
+
+        fp = plt_fpath_root + "{}__q_fract.pdf".format(label)
+        fig.savefig(fp)
+        print('saved "{}"'.format(fp))
+
+        # -- Make time fraction relative to event plot -- #
+
+        fig, ax = plt.subplots()
+        ax.hist(
+            nu_i["t_fract"][t_fract_finite_mask],
+            bins=1000,
+            weights=nu_i["weight"][t_fract_finite_mask],
+        )
+        ax.plot(t_at_pctiles, np.zeros_like(t_at_pctiles), "k|")
+        ax.set_xticks(t_at_pctiles)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+        fig.tight_layout()
+
+        fp = plt_fpath_root + "{}__t_fract.png".format(label)
+        fig.savefig(fp, dpi=300)
+        print('saved "{}"'.format(fp))
+
+        fp = plt_fpath_root + "{}__t_fract.pdf".format(label)
+        fig.savefig(fp)
+        print('saved "{}"'.format(fp))
+
+        # -- Make time since first pulse in event plot -- #
+
+        fig, ax = plt.subplots()
+        ax.hist(nu_i["dt"], bins=1000, weights=nu_i["weight"])
+        ax.plot(dt_at_pctiles, np.zeros_like(dt_at_pctiles), "k|")
+        ax.set_xticks(dt_at_pctiles)
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+        fig.tight_layout()
+
+        fp = plt_fpath_root + "{}__dt.png".format(label)
+        fig.savefig(fp, dpi=300)
+        print('saved "{}"'.format(fp))
+
+        fp = plt_fpath_root + "{}__dt.pdf".format(label)
+        fig.savefig(fp)
+        print('saved "{}"'.format(fp))
 
 
 def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=None):
     """
     Parameters
     ----------
-
-    Returns
-    -------
+    histo_data_dir
+    histo_plot_dir
+    processing_kw : mapping
+        kwargs to `generate_filter_func`
+    mc_set : str in MC_SET_SPECS
+    only_seasons : keys in DATA_DIR_INFOS or None for all; optional
 
     """
     import matplotlib as mpl
@@ -1507,14 +1631,15 @@ def parse_args(description=__doc__):
     subparsers = parser.add_subparsers()
 
     populate_sp = subparsers.add_parser("populate")
+    plot_sp = subparsers.add_parser("plot")
+    plot_vtx_sp = subparsers.add_parser("plot_vtx_t_dists")
 
-    populate_sp.add_argument("--root-data-dir", type=str)
     populate_sp.add_argument("--set-key", type=str)
 
-    plot_sp = subparsers.add_parser("plot")
     plot_sp.add_argument("--only-seasons", type=str, default=None)
 
-    plot_vtx_sp = subparsers.add_parser("plot_vtx_t_dists")
+    for subp in [populate_sp, plot_vtx_sp]:
+        subp.add_argument("--root-data-dir", type=str)
 
     for subp in [plot_sp, plot_vtx_sp]:
         subp.add_argument("--mc-set", type=str)
@@ -1522,6 +1647,9 @@ def parse_args(description=__doc__):
 
     for subp in [populate_sp, plot_sp, plot_vtx_sp]:
         subp.add_argument("--histo-data-dir", type=str)
+
+    # Add "processing_kw" (i.e., args to `generate_filter_func`)
+    for subp in [populate_sp, plot_sp, plot_vtx_sp]:
         subp.add_argument("--fixed-pulse-q", type=float, default=0)
         subp.add_argument("--qntm", type=float, default=0)
         subp.add_argument("--min-pulse-q", type=float, default=0)
@@ -1558,66 +1686,45 @@ def main():
 
     kwargs = parse_args()
 
-    histo_data_dir = expand(kwargs.pop("histo_data_dir"))
-    if basename(histo_data_dir) != "histo_data":
-        histo_data_dir = join(histo_data_dir, "histo_data")
+    if "histo_data_dir" in kwargs:
+        histo_data_dir = expand(kwargs["histo_data_dir"])
+        if basename(histo_data_dir) != "histo_data":
+            histo_data_dir = join(histo_data_dir, "histo_data")
+        kwargs["histo_data_dir"] = histo_data_dir
 
-    proc_kw_keys = [
-        "fixed_pulse_q",
-        "qntm",
-        "min_pulse_q",
-        "min_evt_p",
-        "min_evt_dt",
-        "max_evt_dt",
-        # "min_evt_t_fract",
-        # "max_evt_t_fract",
-        # "t_fract_window",
-        # "min_evt_q_t_qtl",
-        # "max_evt_q_t_qtl",
-        "min_dom_p",
-        # "min_dom_dt",
-        "max_dom_dt",
-        "integ_t",
-        "i3",
-        "dc",
-        "z_regions",
-    ]
+    if "root_data_dir" in kwargs:
+        kwargs["root_data_dir"] = expand(kwargs["root_data_dir"])
+        assert isdir(kwargs["root_data_dir"])
+
+    if "set_key" in kwargs:
+        kwargs["set_key"] = eval(kwargs["set_key"])  # pylint: disable=eval-used
+        assert kwargs["set_key"] in DATA_DIR_INFOS or kwargs["set_key"] in MC_DIR_INFOS
+
     processing_kw = OrderedDict(
-        (k, kwargs.pop(k)) for k in list(kwargs.keys()) if k in proc_kw_keys
+        (k, kwargs.pop(k)) for k in inspect.getfullargspec(generate_filter_func).args
     )
-
-    if len(processing_kw["z_regions"]) == 1:
-        processing_kw["z_regions"] = processing_kw["z_regions"][0]
-
-    # Convert floats that are integral to ints for clean output
-    for key, val in list(processing_kw.items()):
-        if isinstance(val, bool) or not isinstance(val, numbers.Number):
-            continue
-        processing_kw[key] = integer_if_integral(val)
 
     if "mc_set" in kwargs:
         if "only_seasons" in kwargs:
             return plot(
-                histo_data_dir=histo_data_dir,
-                histo_plot_dir=kwargs["histo_plot_dir"],
+                # histo_data_dir=histo_data_dir,
+                # histo_plot_dir=kwargs["histo_plot_dir"],
                 processing_kw=processing_kw,
-                mc_set=kwargs["mc_set"],
-                only_seasons=kwargs["only_seasons"],
+                **kwargs
+                # mc_set=kwargs["mc_set"],
+                # only_seasons=kwargs["only_seasons"],
             )
         return plot_vtx_t_dists(
-            histo_data_dir=histo_data_dir,
-            histo_plot_dir=kwargs["histo_plot_dir"],
             processing_kw=processing_kw,
-            mc_set=kwargs["mc_set"],
+            **kwargs
+            # root_data_dir=kwargs["root_data_dir"],
+            # histo_plot_dir=kwargs["histo_plot_dir"],
+            # mc_set=kwargs["mc_set"],
         )
 
     # -- Else: populate histos for a single mc or data run -- #
 
-    root_data_dir = expand(kwargs.pop("root_data_dir"))
-    assert isdir(root_data_dir)
-
-    set_key = eval(kwargs.pop("set_key"))  # pylint: disable=eval-used
-    assert set_key in DATA_DIR_INFOS or set_key in MC_DIR_INFOS
+    set_key = kwargs["set_key"]
     histo_fname = (
         get_histo_fname_prefix(set_key=set_key, processing_kw=processing_kw) + ".pkl"
     )
@@ -1636,7 +1743,9 @@ def main():
     print('{} : Histo vals will be saved to file "{}"'.format(set_key, histo_fpath))
 
     events, doms, pulses = load_and_filter(
-        root_data_dir=root_data_dir, set_key=set_key, **processing_kw
+        root_data_dir=kwargs["root_data_dir"],
+        set_key=kwargs["set_key"],
+        **processing_kw,
     )
     t1 = time.time()
     print("{} : load_and_filter : {:.3f} sec".format(set_key, t1 - t0))
