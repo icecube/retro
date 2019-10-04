@@ -71,6 +71,7 @@ from retro import load_pickle
 from retro.const import DC_STRS
 from retro.utils.misc import expand, mkdir
 from retro.utils.geom import generate_digitizer
+from retro.utils.stats import weighted_percentile
 
 
 TRUE_TIME_INFO_T = np.dtype(
@@ -703,22 +704,22 @@ def generate_filter_func(
 def load_and_filter(
     set_key,
     root_data_dir,
-    fixed_pulse_q,
-    qntm,
-    min_pulse_q,
-    min_evt_p,
-    min_evt_dt,
-    max_evt_dt,
-    # min_evt_t_fract,
-    # max_evt_t_fract,
-    # t_fract_window,
-    min_dom_p,
-    # min_dom_dt,
-    max_dom_dt,
-    integ_t,
-    i3,
-    dc,
-    z_regions,
+    fixed_pulse_q=0,
+    qntm=0,
+    min_pulse_q=0,
+    min_evt_p=0,
+    min_evt_dt=0,
+    max_evt_dt=0,
+    # min_evt_t_fract=0,
+    # max_evt_t_fract=0,
+    # t_fract_window=0,
+    min_dom_p=1,
+    # min_dom_dt=0,
+    max_dom_dt=0,
+    integ_t=0,
+    i3=True,
+    dc=True,
+    z_regions=(0, 1, 2),
 ):
     """
     Parameters
@@ -1086,6 +1087,85 @@ def load_histos(histo_data_dir, processing_kw, set_key):
     return load_pickle(histo_fpath)
 
 
+def plot_vtx_t_dists(histo_data_dir, histo_plot_dir, processing_kw, mc_set):
+    """
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    """
+    import matplotlib as mpl
+
+    if __name__ == "__main__" and __package__ is None:
+        mpl.use("Agg")
+
+    import matplotlib.pyplot as plt
+    mc_set_spec = MC_SET_SPECS[mc_set]
+
+    histo_data_dir = expand(histo_data_dir)
+    if basename(histo_data_dir) != "histo_data":
+        histo_data_dir = join(histo_data_dir, "histo_data")
+
+    histo_plot_dir = expand(histo_plot_dir)
+    if basename(histo_plot_dir) != "histo_plots":
+        histo_plot_dir = join(histo_plot_dir, "histo_plots")
+    mkdir(histo_plot_dir)
+
+    nu_i = []
+    for mc_name, mc_key in mc_set_spec.items():
+        if mc_name not in ["nue", "numu", "nutau"]:
+            continue
+        arrays = load_and_filter(set_key=mc_key, **processing_kw)
+        mc_data_i = get_true_time_relative_info(*arrays)
+        mc_data_i["weight"] /= MC_DIR_INFOS[mc_key]["num_files"]
+        nu_i.append(mc_data_i)
+
+    nu_i = np.concatenate(nu_i)
+
+    pctiles = np.array([0.01, 0.1, 1, 50, 99, 99.9, 99.99])
+    is_finite = np.is_finite(nu_i["t_fract"])
+    t_at_pctiles = weighted_percentile(
+        nu_i["t_fract"][is_finite], q=pctiles, weights=nu_i["weight"][is_finite]
+    )
+    q_at_pctiles = weighted_percentile(nu_i["q_fract"], q=pctiles, weights=nu_i["weight"])
+    dt_at_pctiles = weighted_percentile(nu_i["dt"], q=pctiles, weights=nu_i["weight"])
+
+    plt_basename = "{}__{}__".format(
+        mc_set,
+        get_histo_fname_prefix(processing_kw=processing_kw),
+    )
+    fpath_root = join(histo_plot_dir, plt_basename)
+
+    fig, ax = plt.subplots()
+    ax.hist(nu_i["q_fract"], bins=1000, weights=nu_i["weight"])
+    ax.plot(q_at_pctiles, np.zeros_like(q_at_pctiles), "k|")
+    ax.set_xticks(q_at_pctiles)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+    fig.tight_layout()
+    fig.savefig(fpath_root + "q_fract.png", dpi=300)
+    fig.savefig(fpath_root + "q_fract.pdf")
+
+    fig, ax = plt.subplots()
+    ax.hist(nu_i["t_fract"][is_finite], bins=1000, weights=nu_i["weight"][is_finite])
+    ax.plot(t_at_pctiles, np.zeros_like(t_at_pctiles), "k|")
+    ax.set_xticks(t_at_pctiles)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+    fig.tight_layout()
+    fig.savefig(fpath_root + "t_fract.png", dpi=300)
+    fig.savefig(fpath_root + "t_fract.pdf")
+
+    fig, ax = plt.subplots()
+    ax.hist(nu_i["dt"], bins=1000, weights=nu_i["weight"])
+    ax.plot(dt_at_pctiles, np.zeros_like(dt_at_pctiles), "k|")
+    ax.set_xticks(dt_at_pctiles)
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=90)
+    fig.tight_layout()
+    fig.savefig(fpath_root + "dt.png", dpi=300)
+    fig.savefig(fpath_root + "dt.pdf")
+
+
 def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=None):
     """
     Parameters
@@ -1102,6 +1182,7 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
     import matplotlib.pyplot as plt
 
     def setup_plots():
+        """create fig, axes for data/mc plot"""
         width, height = 16, 7
         fig = plt.Figure(figsize=(width, height), dpi=50)
         gs = plt.GridSpec(2, 1, height_ratios=[2, 1], hspace=0, figure=fig)
@@ -1115,6 +1196,7 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
         return fig, (ax0, ax1)
 
     def augment(y):
+        """Augment values for use by `matplotlib.pyplot.step`"""
         return np.concatenate([[y_n] * 2 for y_n in y])
 
     warnings.filterwarnings("ignore")
@@ -1395,16 +1477,17 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
                         str(s[0]) for s in sorted(only_seasons)
                     )
 
-                plt_basename = (
-                    "{}{}__".format(mc_set, only_seasons_str)
-                    + get_histo_fname_prefix(processing_kw=processing_kw)
-                    + "__{}".format(stat)
+                plt_basename = "{}{}__{}__{}".format(
+                    mc_set,
+                    only_seasons_str,
+                    get_histo_fname_prefix(processing_kw=processing_kw),
+                    stat,
                 )
-                fbasename = join(histo_plot_dir, plt_basename)
+                fpath_root = join(histo_plot_dir, plt_basename)
                 if log_yscale:
-                    extended_fbasename = fbasename + "__logy"
+                    extended_fbasename = fpath_root + "__logy"
                 else:
-                    extended_fbasename = deepcopy(fbasename)
+                    extended_fbasename = deepcopy(fpath_root)
 
                 fig.savefig(extended_fbasename + ".pdf")
                 fig.savefig(extended_fbasename + ".png", dpi=120)
@@ -1424,10 +1507,13 @@ def parse_args(description=__doc__):
     populate_sp.add_argument("--set-key", type=str)
 
     plot_sp = subparsers.add_parser("plot")
-
-    plot_sp.add_argument("--mc-set", type=str)
     plot_sp.add_argument("--only-seasons", type=str, default=None)
-    plot_sp.add_argument("--histo-plot-dir", type=str)
+
+    plot_vtx_sp = subparsers.add_subparsers("plot_vtx_t_dists")
+
+    for subp in [plot_sp, plot_vtx_sp]:
+        subp.add_argument("--mc-set", type=str)
+        plot_sp.add_argument("--histo-plot-dir", type=str)
 
     for subp in [populate_sp, plot_sp]:
         subp.add_argument("--histo-data-dir", type=str)
@@ -1505,12 +1591,19 @@ def main():
         processing_kw[key] = integer_if_integral(val)
 
     if "mc_set" in kwargs:
-        return plot(
+        if "only_seasons" in kwargs:
+            return plot(
+                histo_data_dir=histo_data_dir,
+                histo_plot_dir=kwargs["histo_plot_dir"],
+                processing_kw=processing_kw,
+                mc_set=kwargs["mc_set"],
+                only_seasons=kwargs["only_seasons"],
+            )
+        return plot_vtx_t_dists(
             histo_data_dir=histo_data_dir,
             histo_plot_dir=kwargs["histo_plot_dir"],
             processing_kw=processing_kw,
             mc_set=kwargs["mc_set"],
-            only_seasons=kwargs["only_seasons"],
         )
 
     # -- Else: populate histos for a single mc or data run -- #
