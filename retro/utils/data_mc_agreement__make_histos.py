@@ -1087,21 +1087,21 @@ def load_histos(histo_data_dir, processing_kw, set_key):
     return load_pickle(histo_fpath)
 
 
-def plot_vtx_t_dists(histo_data_dir, histo_plot_dir, processing_kw, mc_set):
+def plot_vtx_t_dists(histo_data_dir, histo_plot_dir, mc_set, processing_kw):
     """
     Parameters
     ----------
-
-    Returns
-    -------
+    histo_data_dir : str
+    histo_plot_dir : str
+    mc_set : str in MC_SET_SPECS.keys()
+    processing_kw : mapping with kwargs to `generate_filter_func`
 
     """
     import matplotlib as mpl
-
     if __name__ == "__main__" and __package__ is None:
         mpl.use("Agg")
-
     import matplotlib.pyplot as plt
+
     mc_set_spec = MC_SET_SPECS[mc_set]
 
     histo_data_dir = expand(histo_data_dir)
@@ -1117,7 +1117,12 @@ def plot_vtx_t_dists(histo_data_dir, histo_plot_dir, processing_kw, mc_set):
     for mc_name, mc_key in mc_set_spec.items():
         if mc_name not in ["nue", "numu", "nutau"]:
             continue
-        arrays = load_and_filter(set_key=mc_key, **processing_kw)
+        #arrays = load_and_filter(set_key=mc_key, **processing_kw)
+        arrays = load_histos(
+            histo_data_dir=histo_data_dir,
+            processing_kw=processing_kw,
+            set_key=mc_key,
+        )
         mc_data_i = get_true_time_relative_info(*arrays)
         mc_data_i["weight"] /= MC_DIR_INFOS[mc_key]["num_files"]
         nu_i.append(mc_data_i)
@@ -1509,13 +1514,13 @@ def parse_args(description=__doc__):
     plot_sp = subparsers.add_parser("plot")
     plot_sp.add_argument("--only-seasons", type=str, default=None)
 
-    plot_vtx_sp = subparsers.add_subparsers("plot_vtx_t_dists")
+    plot_vtx_sp = subparsers.add_parser("plot_vtx_t_dists")
 
     for subp in [plot_sp, plot_vtx_sp]:
         subp.add_argument("--mc-set", type=str)
-        plot_sp.add_argument("--histo-plot-dir", type=str)
+        subp.add_argument("--histo-plot-dir", type=str)
 
-    for subp in [populate_sp, plot_sp]:
+    for subp in [populate_sp, plot_sp, plot_vtx_sp]:
         subp.add_argument("--histo-data-dir", type=str)
         subp.add_argument("--fixed-pulse-q", type=float, default=0)
         subp.add_argument("--qntm", type=float, default=0)
