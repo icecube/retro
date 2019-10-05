@@ -648,6 +648,7 @@ def extract_pulses(frame, pulse_series_name):
     from icecube.dataclasses import (  # pylint: disable=no-name-in-module
         I3RecoPulseSeriesMap,
         I3RecoPulseSeriesMapMask,
+        I3RecoPulseSeriesMapUnion,
     )
 
     pulse_series = frame[pulse_series_name]
@@ -660,7 +661,7 @@ def extract_pulses(frame, pulse_series_name):
     else:
         time_range = np.nan, np.nan
 
-    if isinstance(pulse_series, I3RecoPulseSeriesMapMask):
+    if isinstance(pulse_series, (I3RecoPulseSeriesMapMask, I3RecoPulseSeriesMapUnion)):
         pulse_series = pulse_series.apply(frame)
 
     if not isinstance(pulse_series, I3RecoPulseSeriesMap):
