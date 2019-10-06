@@ -722,12 +722,13 @@ def generate_filter_func(
     return filter_arrays
 
 
-def load_and_filter(set_key, root_data_dir, **processing_kw):
+def load_and_filter(set_key, pulse_series, root_data_dir, **processing_kw):
     """
     Parameters
     ----------
     set_key : key in either DATA_DIR_INFOS or MC_DIR_INFOS
-    root_data_dir
+    pulse_series : str
+    root_data_dir : str
     **processing_kw
         kwargs to `generate_filter_func`
 
@@ -761,7 +762,9 @@ def load_and_filter(set_key, root_data_dir, **processing_kw):
     filter_args = tuple()
     filter_kwargs = dict()
     for name in ["events", "doms", "pulses"]:
-        filter_kwargs[name] = np.load(join(dirpath, name + "_array.npy"), mmap_mode="r")
+        filter_kwargs[name] = np.load(
+            join(dirpath, "{}__{}_array.npy".format(pulse_series, name)), mmap_mode="r"
+        )
 
     result = filter_arrays(*filter_args, **filter_kwargs)
     if is_mc:
@@ -1067,7 +1070,7 @@ def integer_if_integral(x):
     return int(x) if x == int(x) else x
 
 
-def get_histo_fname_prefix(processing_kw, set_key=None):
+def get_histo_fname_prefix(pulse_series, processing_kw, set_key=None):
     """Get name of file that will/does contain histograms for a given data/MC
     set processed with processing_kw"""
     kw = deepcopy(processing_kw)
@@ -1092,20 +1095,23 @@ def get_histo_fname_prefix(processing_kw, set_key=None):
                 z_regions.append(int(z_region))
             kw["z_regions"] = ",".join(str(r) for r in sorted(z_regions))
 
-    prefix = "__".join("{}={}".format(*it) for it in kw.items())
+    prefix = "{}__{}".format(
+        pulse_series, "__".join("{}={}".format(*it) for it in kw.items())
+    )
     if set_key is not None:
         prefix += "__set_key={}".format(str(set_key).replace(" ", ""))
 
     return prefix
 
 
-def load_histos(histo_data_dir, processing_kw, set_key):
+def load_histos(histo_data_dir, pulse_series, processing_kw, set_key):
     """Load histograms (and weights totals)
 
     Parameters
     ----------
     histo_data_dir : str
         Dir containing histo data
+    pulse_series
     processing_kw : mapping
     set_key : tuple
 
@@ -1119,7 +1125,10 @@ def load_histos(histo_data_dir, processing_kw, set_key):
 
     """
     histo_fname = (
-        get_histo_fname_prefix(set_key=set_key, processing_kw=processing_kw) + ".pkl"
+        get_histo_fname_prefix(
+            pulse_series=pulse_series, set_key=set_key, processing_kw=processing_kw
+        )
+        + ".pkl"
     )
     histo_fpath = join(histo_data_dir, histo_fname)
     print('loading "{}"'.format(histo_fpath))
@@ -1127,13 +1136,14 @@ def load_histos(histo_data_dir, processing_kw, set_key):
 
 
 def plot_vtx_t_dists(
-    root_data_dir, histo_data_dir, histo_plot_dir, mc_set, processing_kw
+    root_data_dir, histo_data_dir, histo_plot_dir, pulse_series, mc_set, processing_kw
 ):
     """
     Parameters
     ----------
     histo_data_dir : str
     histo_plot_dir : str
+    pulse_series : str
     mc_set : str in MC_SET_SPECS.keys()
     processing_kw : mapping with kwargs to `generate_filter_func`
 
@@ -1159,7 +1169,8 @@ def plot_vtx_t_dists(
     mkdir(histo_plot_dir)
 
     fpath_basename = "{}__{}".format(
-        mc_set, get_histo_fname_prefix(processing_kw=processing_kw)
+        mc_set,
+        get_histo_fname_prefix(pulse_series=pulse_series, processing_kw=processing_kw),
     )
     plt_fpath_root = join(histo_plot_dir, fpath_basename) + "__"
     npy_fpath_proto = join(histo_data_dir, fpath_basename) + "__nu_vtx_t_{}_info.npy"
@@ -1194,7 +1205,10 @@ def plot_vtx_t_dists(
             if mc_name not in ["nue", "numu", "nutau"]:
                 continue
             events, doms, pulses = load_and_filter(
-                set_key=mc_key, root_data_dir=root_data_dir, **processing_kw
+                set_key=mc_key,
+                pulse_series=pulse_series,
+                root_data_dir=root_data_dir,
+                **processing_kw
             )
             if get_nu_evt_i:
                 this_nu_evt_i = get_true_time_relative_to_event_info(
@@ -1292,7 +1306,14 @@ def plot_vtx_t_dists(
         print('saved "{}"'.format(fp))
 
 
-def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=None):
+def plot(
+    histo_data_dir,
+    histo_plot_dir,
+    processing_kw,
+    pulse_series,
+    mc_set,
+    only_seasons=None,
+):
     """
     Parameters
     ----------
@@ -1300,6 +1321,7 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
     histo_plot_dir
     processing_kw : mapping
         kwargs to `generate_filter_func`
+    pulse_series : str
     mc_set : str in MC_SET_SPECS
     only_seasons : keys in DATA_DIR_INFOS or None for all; optional
 
@@ -1353,6 +1375,7 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
             mc_sets_d[mc_name] = mc_key
             mc_data[mc_name] = load_histos(
                 histo_data_dir=histo_data_dir,
+                pulse_series=pulse_series,
                 processing_kw=processing_kw,
                 set_key=mc_key,
             )
@@ -1364,6 +1387,7 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
             data_sets_d[season_num_str] = season
             data_data[season_num_str] = load_histos(
                 histo_data_dir=histo_data_dir,
+                pulse_series=pulse_series,
                 processing_kw=processing_kw,
                 set_key=season,
             )
@@ -1609,7 +1633,9 @@ def plot(histo_data_dir, histo_plot_dir, processing_kw, mc_set, only_seasons=Non
                 plt_basename = "{}{}__{}__{}".format(
                     mc_set,
                     only_seasons_str,
-                    get_histo_fname_prefix(processing_kw=processing_kw),
+                    get_histo_fname_prefix(
+                        pulse_series=pulse_series, processing_kw=processing_kw
+                    ),
                     stat,
                 )
                 fpath_root = join(histo_plot_dir, plt_basename)
@@ -1650,6 +1676,7 @@ def parse_args(description=__doc__):
 
     # Add "processing_kw" (i.e., args to `generate_filter_func`)
     for subp in [populate_sp, plot_sp, plot_vtx_sp]:
+        subp.add_argument("--pulse-seriesl", type=str)
         subp.add_argument("--fixed-pulse-q", type=float, default=0)
         subp.add_argument("--qntm", type=float, default=0)
         subp.add_argument("--min-pulse-q", type=float, default=0)
@@ -1725,8 +1752,12 @@ def main():
     # -- Else: populate histos for a single mc or data run -- #
 
     set_key = kwargs["set_key"]
+    pulse_series = kwargs["pulse_series"]
     histo_fname = (
-        get_histo_fname_prefix(set_key=set_key, processing_kw=processing_kw) + ".pkl"
+        get_histo_fname_prefix(
+            pulse_series=pulse_series, set_key=set_key, processing_kw=processing_kw
+        )
+        + ".pkl"
     )
     if set_key in MC_DIR_INFOS:
         get_weight_func = get_mc_weight_func
@@ -1743,9 +1774,10 @@ def main():
     print('{} : Histo vals will be saved to file "{}"'.format(set_key, histo_fpath))
 
     events, doms, pulses = load_and_filter(
-        root_data_dir=kwargs["root_data_dir"],
         set_key=kwargs["set_key"],
-        **processing_kw,
+        pulse_series=pulse_series,
+        root_data_dir=kwargs["root_data_dir"],
+        **processing_kw
     )
     t1 = time.time()
     print("{} : load_and_filter : {:.3f} sec".format(set_key, t1 - t0))

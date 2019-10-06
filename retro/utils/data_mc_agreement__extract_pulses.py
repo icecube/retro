@@ -392,9 +392,9 @@ def produce_arrays(
     pulses_array = np.concatenate(pulses_arrays)
 
     if outdir is not None:
-        np.save(join(outdir, "events_array.npy"), events_array)
-        np.save(join(outdir, "doms_array.npy"), doms_array)
-        np.save(join(outdir, "pulses_array.npy"), pulses_array)
+        np.save(join(outdir, "{}__events_array.npy".format(pulse_series)), events_array)
+        np.save(join(outdir, "{}__doms_array.npy".format(pulse_series)), doms_array)
+        np.save(join(outdir, "{}__pulses_array.npy".format(pulse_series)), pulses_array)
 
     return events_array, doms_array, pulses_array
 
