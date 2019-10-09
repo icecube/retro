@@ -479,19 +479,19 @@ def generate_filter_func(
     """
     Parameters
     ----------
-    fixed_pulse_q : float
-    qntm : float
-    min_pulse_q : float
+    fixed_pulse_q : float >= 0
+    qntm : float >= 0
+    min_pulse_q : float >= 0
     min_evt_p : int >= 1
     min_evt_dt : float >= 0
     max_evt_dt : float >= 0
-    #min_evt_t_fract
-    #max_evt_t_fract
-    #t_fract_window
-    #min_evt_q_t_qtl : 0 <= float < 1
-    #max_evt_q_t_qtl : 0 < float <= 1
+    # min_evt_t_fract
+    # max_evt_t_fract
+    # t_fract_window
+    # min_evt_q_t_qtl : 0 <= float < 1
+    # max_evt_q_t_qtl : 0 < float <= 1
     min_dom_p : int >= 1
-    #min_dom_dt : float >= 0
+    # min_dom_dt : float >= 0
     max_dom_dt : float >= 0
         Time in ns. If set to 0, no max-delta-time limit is set for accepting
         pulses
@@ -506,6 +506,7 @@ def generate_filter_func(
     filter_arrays : callable
 
     """
+    assert fixed_pulse_q >= 0
     assert qntm >= 0
     assert min_pulse_q >= 0
     assert min_evt_p >= 1
@@ -517,6 +518,7 @@ def generate_filter_func(
     assert min_dom_p >= 1
     # assert 0 <= min_dom_dt <= max_dom_dt
     assert max_dom_dt >= 0
+    assert integ_t >= 0
     assert i3 or dc
 
     if np.isscalar(z_regions):
@@ -647,6 +649,7 @@ def generate_filter_func(
                                 new_pulses[total_num_pulses]["time"] = (
                                     integ_pulse_total_qt / integ_pulse_total_q
                                 )
+
                                 dom_num_pulses += 1
                                 total_num_pulses += 1
                                 dom_charge += integ_pulse_total_q
@@ -660,8 +663,7 @@ def generate_filter_func(
                         else:
                             integ_pulse_total_t += pulse_time
                             integ_pulse_total_q += pulse_charge
-                            integ_pulse_total_qt = pulse_charge * pulse_time
-
+                            integ_pulse_total_qt += pulse_charge * pulse_time
                     else:
                         new_pulses[total_num_pulses]["charge"] = pulse_charge
                         new_pulses[total_num_pulses]["time"] = pulse_time
@@ -675,6 +677,7 @@ def generate_filter_func(
                     new_pulses[total_num_pulses]["time"] = (
                         integ_pulse_total_qt / integ_pulse_total_q
                     )
+
                     dom_num_pulses += 1
                     total_num_pulses += 1
                     dom_charge += integ_pulse_total_q
@@ -1141,6 +1144,7 @@ def plot_vtx_t_dists(
     """
     Parameters
     ----------
+    root_data_dir : str
     histo_data_dir : str
     histo_plot_dir : str
     pulse_series : str
@@ -1313,6 +1317,7 @@ def plot(
     pulse_series,
     mc_set,
     only_seasons=None,
+    root_data_dir=None,
 ):
     """
     Parameters
@@ -1324,6 +1329,10 @@ def plot(
     pulse_series : str
     mc_set : str in MC_SET_SPECS
     only_seasons : keys in DATA_DIR_INFOS or None for all; optional
+    root_data_dir : str or None
+        If not specified, histograms must already have been populated by
+        calling the `populate` function. If `root_data_dir` is specified, then
+        any missing histograms will be populated in subprocesses, in parallel.
 
     """
     import matplotlib as mpl
@@ -1350,61 +1359,61 @@ def plot(
         """Augment values for use by `matplotlib.pyplot.step`"""
         return np.concatenate([[y_n] * 2 for y_n in y])
 
+    mc_set_spec = MC_SET_SPECS[mc_set]
+    if only_seasons is None:
+        only_seasons = list(DATA_DIR_INFOS.keys())
+    elif only_seasons in DATA_DIR_INFOS:
+        only_seasons = [only_seasons]
+
+    histo_data_dir = expand(histo_data_dir)
+    if basename(histo_data_dir) != "histo_data":
+        histo_data_dir = join(histo_data_dir, "histo_data")
+
+    histo_plot_dir = expand(histo_plot_dir)
+    if basename(histo_plot_dir) != "histo_plots":
+        histo_plot_dir = join(histo_plot_dir, "histo_plots")
+    mkdir(histo_plot_dir)
+
+    mc_sets_d = OrderedDict()
+    data_sets_d = OrderedDict()
+
+    mc_data = OrderedDict()
+    for mc_name, mc_key in mc_set_spec.items():
+        mc_sets_d[mc_name] = mc_key
+        mc_data[mc_name] = load_histos(
+            histo_data_dir=histo_data_dir,
+            pulse_series=pulse_series,
+            processing_kw=processing_kw,
+            set_key=mc_key,
+        )
+
+    data_data = OrderedDict()
+    for season in only_seasons:
+        season_num, _ = season
+        season_num_str = "IC86.{:02d}".format(season_num)
+        data_sets_d[season_num_str] = season
+        data_data[season_num_str] = load_histos(
+            histo_data_dir=histo_data_dir,
+            pulse_series=pulse_series,
+            processing_kw=processing_kw,
+            set_key=season,
+        )
+
+    # Invert ordering hierarchy of dicts; stats_d is keyed by stat name
+    stats_d = OrderedDict()
+    for stat in next(iter(next(iter(mc_data.values())).values())).keys():
+        stats_d[stat] = OrderedDict()
+        for set_name, set_info in list(mc_data.items()) + list(data_data.items()):
+            stats_d[stat][set_name] = dict(
+                histo=set_info["histos"][stat],
+                histo_w2=set_info["histos_w2"][stat],
+                total_weight=set_info["total_weights"][stat],
+                total_weight_sq=set_info["total_weights_squared"][stat],
+            )
+
+    # Make plots!
     warnings.filterwarnings("ignore")
     try:
-        mc_set_spec = MC_SET_SPECS[mc_set]
-        if only_seasons is None:
-            only_seasons = list(DATA_DIR_INFOS.keys())
-        elif only_seasons in DATA_DIR_INFOS:
-            only_seasons = [only_seasons]
-
-        histo_data_dir = expand(histo_data_dir)
-        if basename(histo_data_dir) != "histo_data":
-            histo_data_dir = join(histo_data_dir, "histo_data")
-
-        histo_plot_dir = expand(histo_plot_dir)
-        if basename(histo_plot_dir) != "histo_plots":
-            histo_plot_dir = join(histo_plot_dir, "histo_plots")
-        mkdir(histo_plot_dir)
-
-        mc_sets_d = OrderedDict()
-        data_sets_d = OrderedDict()
-
-        mc_data = OrderedDict()
-        for mc_name, mc_key in mc_set_spec.items():
-            mc_sets_d[mc_name] = mc_key
-            mc_data[mc_name] = load_histos(
-                histo_data_dir=histo_data_dir,
-                pulse_series=pulse_series,
-                processing_kw=processing_kw,
-                set_key=mc_key,
-            )
-
-        data_data = OrderedDict()
-        for season in only_seasons:
-            season_num, _ = season
-            season_num_str = "IC86.{:02d}".format(season_num)
-            data_sets_d[season_num_str] = season
-            data_data[season_num_str] = load_histos(
-                histo_data_dir=histo_data_dir,
-                pulse_series=pulse_series,
-                processing_kw=processing_kw,
-                set_key=season,
-            )
-
-        # Invert ordering hierarchy of dicts; stats_d is keyed by stat name
-        stats_d = OrderedDict()
-        for stat in next(iter(next(iter(mc_data.values())).values())).keys():
-            stats_d[stat] = OrderedDict()
-            for set_name, set_info in list(mc_data.items()) + list(data_data.items()):
-                stats_d[stat][set_name] = dict(
-                    histo=set_info["histos"][stat],
-                    histo_w2=set_info["histos_w2"][stat],
-                    total_weight=set_info["total_weights"][stat],
-                    total_weight_sq=set_info["total_weights_squared"][stat],
-                )
-
-        # Make plots!
         for stat, stat_info in stats_d.items():
             fig, (ax0, ax1) = setup_plots()
 
@@ -1660,23 +1669,24 @@ def parse_args(description=__doc__):
     plot_sp = subparsers.add_parser("plot")
     plot_vtx_sp = subparsers.add_parser("plot_vtx_t_dists")
 
-    populate_sp.add_argument("--set-key", type=str)
+    populate_sp.add_argument("--set-key", type=str, required=True)
 
-    plot_sp.add_argument("--only-seasons", type=str, default=None)
+    plot_sp.add_argument("--only-seasons", type=str, default=None, required=False)
 
     for subp in [populate_sp, plot_vtx_sp]:
-        subp.add_argument("--root-data-dir", type=str)
+        subp.add_argument("--root-data-dir", type=str, required=True)
+    plot_sp.add_argument("--root-data-dir", type=str, default=None, required=False)
 
     for subp in [plot_sp, plot_vtx_sp]:
-        subp.add_argument("--mc-set", type=str)
-        subp.add_argument("--histo-plot-dir", type=str)
+        subp.add_argument("--mc-set", type=str, required=True)
+        subp.add_argument("--histo-plot-dir", type=str, required=True)
 
     for subp in [populate_sp, plot_sp, plot_vtx_sp]:
-        subp.add_argument("--histo-data-dir", type=str)
+        subp.add_argument("--histo-data-dir", type=str, required=True)
 
     # Add "processing_kw" (i.e., args to `generate_filter_func`)
     for subp in [populate_sp, plot_sp, plot_vtx_sp]:
-        subp.add_argument("--pulse-seriesl", type=str)
+        subp.add_argument("--pulse-series", type=str, required=True)
         subp.add_argument("--fixed-pulse-q", type=float, default=0)
         subp.add_argument("--qntm", type=float, default=0)
         subp.add_argument("--min-pulse-q", type=float, default=0)
