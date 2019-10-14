@@ -34,7 +34,6 @@ __all__ = [
     "REF_LOG_TICKLABELS",
     "REF_LOG_TICKS",
     "get_dom_region",
-    "quantize",
     "generate_filter_func",
     "load_and_filter",
     "get_data_weight_func",
@@ -70,7 +69,7 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.append(RETRO_DIR)
 from retro import load_pickle
 from retro.const import DC_STRS
-from retro.utils.misc import expand, mkdir
+from retro.utils.misc import expand, mkdir, quantize
 from retro.utils.geom import generate_digitizer
 from retro.utils.stats import weighted_percentile
 
@@ -438,22 +437,6 @@ def get_dom_region(dom):
         z_region = 2
 
     return (is_dc, z_region)
-
-
-@numba.jit(cache=True, **JIT_KW)
-def quantize(x, qntm):
-    """
-    Parameters
-    ----------
-    x : scalar >= 0
-    qntm : scalar > 0
-
-    Returns
-    -------
-    q : scalar >= 0
-
-    """
-    return (np.float64(x) // qntm) * qntm + qntm / 2
 
 
 def generate_filter_func(

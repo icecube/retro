@@ -32,7 +32,11 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from argparse import ArgumentParser
-from collections import Iterable, Mapping, OrderedDict
+from collections import OrderedDict
+try:
+    from collections import Iterable, Mapping
+except ImportError:
+    from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from operator import getitem
 from os import listdir, walk
@@ -41,6 +45,7 @@ import re
 import sys
 import time
 
+import numba
 import numpy as np
 from six import string_types
 
@@ -61,7 +66,7 @@ from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
 from retro.utils.data_mc_agreement import quantize_min_q_filter
-from retro.utils.misc import expand, nsort_key_func
+from retro.utils.misc import expand, nsort_key_func, quantize
 
 
 I3_FNAME_INFO_RE = re.compile(
@@ -675,34 +680,6 @@ def get_events(
 
                 yield event
 
-            while True:
-                try:
-                    event = extract_next_event(file_iterator_tree)
-                except StopIteration:
-                    break
-
-                if hits_ is not None:
-                    hits_array, hits_indexer, hits_summary = get_hits(
-                        event=event, path=hits_, angsens_model=angsens_model
-                    )
-                    event['hits'] = hits_array
-                    event['hits_indexer'] = hits_indexer
-                    event['hits_summary'] = hits_summary
-
-                agg_event_idx += 1
-
-                event.meta = deepcopy(meta)
-                event.meta["event_idx"] = next(event_indices_iter)
-                event.meta["agg_event_idx"] = agg_event_idx
-
-                if agg_stop is not None and agg_event_idx >= agg_stop:
-                    return
-
-                if agg_event_idx < agg_start or (agg_event_idx - agg_start) % agg_step != 0:
-                    continue
-
-                yield event
-
             for key in list(file_iterator_tree.keys()):
                 del file_iterator_tree[key]
             del file_iterator_tree
@@ -788,6 +765,9 @@ def get_path(event, path):
             )
             raise
     return node
+
+
+QUANTIZE_VEC = numba.vectorize(cache=True, target="cpu")(quantize.py_func)
 
 
 def get_hits(event, path, angsens_model=None):
@@ -889,8 +869,16 @@ def get_hits(event, path, angsens_model=None):
     offset = 0
 
     for (string, dom, pmt), p in series:
-        sd_idx = const.get_sd_idx(string=string, om=dom, pmt=pmt)
+        # -- Filter the pulses -- #
+        # TODO: make filtering optional, specify kind of filtering by kwargs, etc.
+        p["charge"] = QUANTIZE_VEC(p["charge"], 0.05)
+        p = p[p["charge"] >= 0.4]
+
         num = len(p)
+        if num == 0:
+            continue
+
+        sd_idx = const.get_sd_idx(string=string, om=dom, pmt=pmt)
         sd_hits = np.empty(shape=num, dtype=HIT_T)
         sd_hits['time'] = p['time']
         if not photons:
@@ -903,6 +891,12 @@ def get_hits(event, path, angsens_model=None):
         hits.append(sd_hits)
         hits_indexer.append((sd_idx, offset, num))
         offset += num
+
+    if len(hits) == 0:
+        hits = np.empty(shape=0, dtype=HIT_T)
+        hits_indexer = np.empty(shape=0, dtype=SD_INDEXER_T)
+        hits_summary = np.empty(shape=0, dtype=HITS_SUMMARY_T)
+        return hits, hits_indexer, hits_summary
 
     hits = np.concatenate(hits) #, dtype=HIT_T)
     if hits.dtype != HIT_T:

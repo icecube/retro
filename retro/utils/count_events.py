@@ -86,7 +86,7 @@ def count_events(root_dirs, reco=None, verbosity=0):
             if reco is not None:
                 reco_fpath = join(dirpath, "recos", reco + ".npy")
                 if not isfile(reco_fpath):
-                    if verbosity > 0:
+                    if verbosity > 1:
                         print(dirpath)
                     continue
                 recos = np.load(reco_fpath, mmap_mode="r")
@@ -100,7 +100,7 @@ def count_events(root_dirs, reco=None, verbosity=0):
                         recos[success_mask]["run_time"]
                     )
                 this_failures = np.count_nonzero(recos["fit_status"] > 0)
-                if verbosity > 0 and this_num_successes < this_events_count:
+                if verbosity > 1 and this_num_successes < this_events_count:
                     print(dirpath)
                 reco_stats["failures"] += this_failures
 
@@ -142,6 +142,14 @@ def main(description=__doc__):
         default=None,
         help="""Count successes, failures, and not-yet-run statistics for a
         particular reconstruction""",
+    )
+    parser.add_argument(
+        "-v",
+        dest="verbosity",
+        required=False,
+        default=1,
+        action="count",
+        help="""verbosity""",
     )
 
     kwargs = vars(parser.parse_args())
