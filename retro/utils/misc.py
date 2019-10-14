@@ -43,6 +43,7 @@ __all__ = [
     'nsort_key_func',
     'set_explicit_dtype',
     'dict2struct',
+    'quantize',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -61,7 +62,11 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 import base64
-from collections import Iterable, OrderedDict, Mapping, Sequence
+from collections import OrderedDict
+try:
+    from collections import Iterable, Mapping, Sequence
+except ImportError:
+    from collections.abc import Iterable, Mapping, Sequence
 import errno
 import hashlib
 from numbers import Integral, Number
@@ -74,6 +79,7 @@ from subprocess import Popen, PIPE
 import sys
 
 import enum
+import numba
 import numpy as np
 from six import BytesIO, string_types
 from six.moves import map, range
@@ -110,9 +116,9 @@ class LazyLoader(object):
         self._is_loaded = False
 
     def _load_data(self):
-        sdata = open(self.datasource).read()
+        sdata = open(self.datasource, "rb").read()
         self._sha256 = hashlib.sha256(sdata).hexdigest()
-        self._data = pickle.loads(sdata)
+        self._data = pickle.loads(sdata, encoding="latin1")
 
     @property
     def datasource(self):
@@ -997,6 +1003,29 @@ def dict2struct(d):
         dt_spec[key] = typed_val.dtype
     array = np.array(tuple(d.values()), dtype=dt_spec.items())
     return array
+
+
+@numba.jit(
+    cache=True,
+    nopython=True,
+    nogil=True,
+    parallel=False,
+    error_model="numpy",
+    fastmath=True,
+)
+def quantize(x, qntm):
+    """
+    Parameters
+    ----------
+    x : scalar >= 0
+    qntm : scalar > 0
+
+    Returns
+    -------
+    q : scalar >= 0
+
+    """
+    return (np.float64(x) // qntm) * qntm + qntm / 2
 
 
 if __name__ == '__main__':
