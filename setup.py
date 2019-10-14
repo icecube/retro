@@ -52,6 +52,7 @@ setup(
         'pymultinest',
         'scipy>=0.17',
         'sobol',
+        'sobol_seq',
         'dynesty',
     ],
     packages=find_packages(),
