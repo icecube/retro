@@ -110,7 +110,7 @@ REPORT_AFTER = 100
 
 CART_DIMS = ("x", "y", "z", "time")
 
-MIN_NUM_HITS = 20
+MIN_NUM_HITS = 8
 
 
 class Reco(object):
