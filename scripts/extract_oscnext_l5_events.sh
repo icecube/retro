@@ -59,11 +59,21 @@ function runit () {
         --retro-gcd-dir $retro_gcd_dir \
         --gcd $gcd \
         --additional-keys "L5_oscNext_bool" \
-        $truth_flag \
         --triggers I3TriggerHierarchy \
-        --pulses SplitInIcePulses \
         --recos LineFit_DC L5_SPEFit11 \
+        $truth_flag \
+        --pulses SRTTWOfflinePulsesDC \
         &
+        #    SplitInIcePulses \
+        #    SRTInIcePulses \
+        #    InIcePulses \
+        #    L4_TWPulses \
+        #    L4_TWPulses_DCFid_DTW200 \
+        #    L5_WideCorridorCutPulses \
+        #    RTTWOfflinePulses_FR_WIMP \
+        #    TWOfflinePulsesDC \
+        #    TWOfflinePulses_FR_WIMP \
+        #    TWRTVetoSeries \
 }
 
 if [ -n "$root_dir" ] ; then
