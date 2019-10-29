@@ -19,7 +19,11 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import Iterable, OrderedDict
+from collections import  OrderedDict
+try:
+    from collections import Iterable
+except ImportError:
+    from collections.abc import Iterable
 from glob import glob
 from os import listdir, walk
 from os.path import (
