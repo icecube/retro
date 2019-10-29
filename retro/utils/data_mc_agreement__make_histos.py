@@ -564,6 +564,8 @@ def generate_filter_func(
             # lower_q_t_qtl_time = -np.inf
             # upper_q_t_qtl_time = -np.inf
 
+            # event_num_orig_pulses = 0
+
             for dom in doms[
                 event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]
             ]:
@@ -582,6 +584,7 @@ def generate_filter_func(
                 dom_pulse_t0 = pulses[dom["pulses_idx0"]]["time"]
 
                 dom_num_pulses = 0
+                # dom_num_orig_pulses = 0
                 dom_charge = 0.0
 
                 num_integ_pulses = 0
@@ -618,6 +621,8 @@ def generate_filter_func(
                     if min_pulse_q > 0:
                         if pulse_charge < min_pulse_q:
                             continue
+
+                    # dom_num_orig_pulses += 1
 
                     if fixed_pulse_q > 0:
                         pulse_charge = fixed_pulse_q
@@ -665,6 +670,9 @@ def generate_filter_func(
                     total_num_pulses += 1
                     dom_charge += integ_pulse_total_q
 
+                # event_num_orig_pulses += dom_num_orig_pulses
+
+                # if dom_num_orig_pulses < min_dom_p:
                 if dom_num_pulses < min_dom_p:
                     # "rewind" array populated in the dom loop
                     total_num_pulses -= dom_num_pulses
@@ -682,6 +690,7 @@ def generate_filter_func(
 
                 total_num_hit_doms += 1
 
+            # if event_num_orig_pulses < min_evt_p:
             if event_num_pulses < min_evt_p:
                 # "rewind" all arrays populated in the event loop
                 total_num_pulses -= event_num_pulses
@@ -752,11 +761,20 @@ def load_and_filter(set_key, pulse_series, root_data_dir, **processing_kw):
             join(dirpath, "{}__{}_array.npy".format(pulse_series, name)), mmap_mode="r"
         )
 
-    result = filter_arrays(*filter_args, **filter_kwargs)
+    events, doms, pulses = filter_arrays(*filter_args, **filter_kwargs)
     if is_mc:
-        result[0]["weight"] /= num_files
+        efficiency = np.sum(events["weight"]) / np.sum(filter_kwargs["events"]["weight"])
+        events["weight"] /= num_files
+    else:
+        efficiency = len(events) / len(filter_kwargs["events"])
 
-    return result
+    print(
+        "efficiency = {:.4f}, set = {}, pulse series = {}".format(
+            efficiency, set_key, pulse_series
+        )
+    )
+
+    return events, doms, pulses
 
 
 @numba.jit(cache=True, **JIT_KW)
