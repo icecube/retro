@@ -871,7 +871,7 @@ def get_hits(event, path, angsens_model=None):
     for (string, dom, pmt), p in series:
         # -- Filter the pulses -- #
         # TODO: make filtering optional, specify kind of filtering by kwargs, etc.
-        p["charge"] = QUANTIZE_VEC(p["charge"], 0.5)
+        p["charge"] = QUANTIZE_VEC(p["charge"], 0.05)
         p = p[p["charge"] >= 0.3]
 
         num = len(p)

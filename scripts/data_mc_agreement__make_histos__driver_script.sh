@@ -15,12 +15,7 @@ declare -a z_regionses=( \
     )
 
 declare -a filter_keyses=( \
-    "--qntm=0.05 --min-evt-p=8 --min-pulse-q=0.3" \
-    "--qntm=0.1  --min-evt-p=8 --min-pulse-q=0.3" \
-    "--qntm=0.2  --min-evt-p=8 --min-pulse-q=0.3" \
-    "--qntm=0.3  --min-evt-p=8 --min-pulse-q=0.3" \
-    "--qntm=0.4  --min-evt-p=8 --min-pulse-q=0.3" \
-    "--qntm=0.5  --min-evt-p=8 --min-pulse-q=0.3" \
+    "--qntm=0.05  --min-evt-p=8 --min-pulse-q=0.3" \
     )
 
 declare -a set_keys=( \
