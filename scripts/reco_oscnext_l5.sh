@@ -57,6 +57,19 @@ if [ "$myhostname" = "ET" ] ; then
     tblkind="ckv_templ_compr"
     gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.pkl"
 
+elif [[ $HOSTNAME = cobalt*.icecube.wisc.edu ]] ; then
+
+    tdi0=""
+    tdi1=""
+
+    # -- Lea tables: 80 IceCube-only clusters, 60 DeepCore-only clusters; template compressed (high stats) -- #
+
+    proto="/data/user/peller/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/cl{cluster_idx}"
+    tmpl_lib="--template-library /data/user/peller/retro/tables/tilt_on_anisotropy_on_noazimuth_ic80_dc60_histats/ckv_dir_templates.npy"
+    tblkind="ckv_templ_compr"
+    gcd="/data/sim/DeepCore/2018/pass2/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
+
+
 else
     conda activate
     tdi0=""
