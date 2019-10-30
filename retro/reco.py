@@ -112,47 +112,21 @@ CART_DIMS = ("x", "y", "z", "time")
 
 MIN_NUM_HITS = 8
 
-
-class Reco(object):
-    """
-    Setup tables, get events, run reconstructons on them, and optionally store
-    results to disk.
-
-    Note that "recipes" for different reconstructions are defined in the
-    `Reco.run` method.
-
-    Parameters
-    ----------
-    events_kw, dom_tables_kw, tdi_tables_kw : mappings
-        As returned by `retro.init_obj.parse_args`
-
-    debug : bool
-
-    """
-
-    def __init__(
-        self,
-        events_kw,
-        dom_tables_kw,
-        tdi_tables_kw,
-        debug=False,
+class standalone_events(object):
+    '''
+    standalone events class to iteratively run recos, as opposed to I3tray Module
+    '''
+    def __init__(                                                                                                                                                                                                                                                                                                  self,                                                                                                                                                                                                                                                                                                      events_kw,
     ):
-        self.debug = bool(debug)
+        '''
+        events_kw
+        As returned by `retro.init_obj.parse_args`
+        '''
 
         # We don't want to specify 'recos' so that new recos are automatically
         # found by `init_obj.get_events` function
         events_kw.pop("recos", None)
         self.events_kw = sort_dict(events_kw)
-
-        self.dom_tables_kw = sort_dict(dom_tables_kw)
-        self.tdi_tables_kw = sort_dict(tdi_tables_kw)
-        self.attrs = OrderedDict(
-            [
-                ("events_kw", self.events_kw),
-                ("dom_tables_kw", self.dom_tables_kw),
-                ("tdi_tables_kw", self.tdi_tables_kw),
-            ]
-        )
 
         # Replace None values for `start` and `step` for fewer branches in
         # subsequent logic (i.e., these will always be integers)
@@ -161,23 +135,13 @@ class Reco(object):
         # Nothing we can do about None for `stop` since we don't know how many
         # events there are in total.
         self.events_stop = events_kw["stop"]
-
-        self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
-        self.tdi_tables, self.tdi_metas = init_obj.setup_tdi_tables(**tdi_tables_kw)
-        self.pexp, self.get_llh, _ = generate_pexp_and_llh_functions(
-            dom_tables=self.dom_tables,
-            tdi_tables=self.tdi_tables,
-            tdi_metas=self.tdi_metas,
-        )
-        self.event = None
         self.event_counter = 0
-        self.successful_reco_counter = OrderedDict()
-        self.hypo_handler = None
-        self.prior = None
-        self.priors_used = None
-        self.loglike = None
-        self.n_params = None
-        self.n_opt_params = None
+
+        self.attrs = OrderedDict(
+            [
+                ("events_kw", self.events_kw),
+            ]
+        )
 
     @property
     def events(self):
@@ -194,8 +158,7 @@ class Reco(object):
         # do initialization here so any new recos are automatically detected
         events = init_obj.get_events(**self.events_kw)
         for event in events:
-            self.event = event
-            self.event.meta["prefix"] = join(
+            event.meta["prefix"] = join(
                 event.meta["events_root"],
                 "recos",
                 "evt{}.".format(event.meta["event_idx"]),
@@ -204,11 +167,62 @@ class Reco(object):
             print(
                 'Reconstructing event #{} (index {} in dir "{}")'.format(
                     self.event_counter,
-                    self.event.meta["event_idx"],
-                    self.event.meta["events_root"],
+                    event.meta["event_idx"],
+                    event.meta["events_root"],
                 )
             )
-            yield self.event
+            yield event
+
+
+
+class Reco(object):
+    """
+    Setup tables, get events, run reconstructons on them, and optionally store
+    results to disk.
+
+    Note that "recipes" for different reconstructions are defined in the
+    `Reco.run` method.
+
+    Parameters
+    ----------
+    dom_tables_kw, tdi_tables_kw : mappings
+    As returned by `retro.init_obj.parse_args`
+    debug : bool
+
+    """
+
+    def __init__(
+        self,
+        dom_tables_kw,
+        tdi_tables_kw,
+        debug=False,
+    ):
+        self.debug = bool(debug)
+
+        self.dom_tables_kw = sort_dict(dom_tables_kw)
+        self.tdi_tables_kw = sort_dict(tdi_tables_kw)
+        self.attrs = OrderedDict(
+            [
+                ("dom_tables_kw", self.dom_tables_kw),
+                ("tdi_tables_kw", self.tdi_tables_kw),
+            ]
+        )
+
+
+        self.dom_tables = init_obj.setup_dom_tables(**dom_tables_kw)
+        self.tdi_tables, self.tdi_metas = init_obj.setup_tdi_tables(**tdi_tables_kw)
+        self.pexp, self.get_llh, _ = generate_pexp_and_llh_functions(
+            dom_tables=self.dom_tables,
+            tdi_tables=self.tdi_tables,
+            tdi_metas=self.tdi_metas,
+        )
+        self.event = None
+        self.hypo_handler = None
+        self.prior = None
+        self.priors_used = None
+        self.loglike = None
+        self.n_params = None
+        self.n_opt_params = None
 
     def setup_hypo(self, **kwargs):
         """Setup hypothesis and record `n_params` and `n_opt_params`
@@ -578,6 +592,7 @@ class Reco(object):
 
     def run(
         self,
+        event,
         methods,
         redo_failed=False,
         redo_all=False,
@@ -588,6 +603,8 @@ class Reco(object):
 
         Parameters
         ----------
+        event : event
+
         methods : string or iterable thereof
             Each must be one of `METHODS`
 
@@ -616,7 +633,9 @@ class Reco(object):
                 filter="event['header']['L5_oscNext_bool']"
 
         """
-        start_time = time.time()
+
+        self.event = event
+
         if isinstance(methods, string_types):
             methods = [methods]
 
@@ -636,80 +655,74 @@ class Reco(object):
             filter = filter.strip()
             print("filter: '{}'".format(filter))
 
-        print("Running {} reconstruction(s) on all specified events".format(methods))
+        print("Running {} reconstruction(s) on event".format(methods))
 
-        self.successful_reco_counter = OrderedDict([(method, 0) for method in methods])
-
-        for event in self.events:  # pylint: disable=unused-variable
-            if filter and not eval(filter):  # pylint: disable=eval-used
-                print(
-                    "filter evaluates to False; skipping event #{} (index {})".format(
-                        self.event_counter, event.meta["event_idx"]
-                    )
+        if filter and not eval(filter):  # pylint: disable=eval-used
+            print(
+                "filter evaluates to False; skipping event (index {})".format(
+                    event.meta["event_idx"]
                 )
-                continue
+            )
+            return
 
-            if len(event["hits"]) < MIN_NUM_HITS:
-                print(
-                    "fewer than {} hits found; skipping event #{} (index {})".format(
-                        MIN_NUM_HITS, self.event_counter, event.meta["event_idx"]
-                    )
+        if len(event["hits"]) < MIN_NUM_HITS:
+            print(
+                "fewer than {} hits found; skipping event (index {})".format(
+                    MIN_NUM_HITS, event.meta["event_idx"]
                 )
-                continue
+            )
+            return
 
-            for method in methods:
-                estimate_outf = join(
-                    self.event.meta["events_root"],
-                    "recos",
-                    "retro_{}.npy".format(method),
-                )
-                if isfile(estimate_outf):
-                    estimates = np.load(estimate_outf, mmap_mode="r+")
-                    fit_status = estimates[self.event.meta["event_idx"]]["fit_status"]
-                    if fit_status != FitStatus.NotSet:
-                        if redo_all:
-                            print(
-                                'Method "{}" already run on event; redoing'.format(
-                                    method
-                                )
+        for method in methods:
+            estimate_outf = join(
+                self.event.meta["events_root"],
+                "recos",
+                "retro_{}.npy".format(method),
+            )
+            if isfile(estimate_outf):
+                estimates = np.load(estimate_outf, mmap_mode="r+")
+                fit_status = estimates[self.event.meta["event_idx"]]["fit_status"]
+                if fit_status != FitStatus.NotSet:
+                    if redo_all:
+                        print(
+                            'Method "{}" already run on event; redoing'.format(
+                                method
                             )
-                        elif redo_failed and fit_status != FitStatus.OK:
-                            print(
-                                'Method "{}" already run on event but failed'
-                                " previously; retrying".format(method)
-                            )
-                        else:
-                            print(
-                                'Method "{}" already run on event; skipping'.format(
-                                    method
-                                )
-                            )
-                            continue
-
-                print('Running "{}" reconstruction'.format(method))
-                try:
-                    self._reco_event(method=method, save_llhp=save_llhp)
-                except MissingOrInvalidPrefitError as error:
-                    print(
-                        'ERROR: event idx {}, reco method {}: "{}"; ignoring'
-                        " and moving to next event".format(
-                            self.event.meta["event_idx"], method, error
                         )
+                    elif redo_failed and fit_status != FitStatus.OK:
+                        print(
+                            'Method "{}" already run on event but failed'
+                            " previously; retrying".format(method)
+                        )
+                    else:
+                        print(
+                            'Method "{}" already run on event; skipping'.format(
+                                method
+                            )
+                        )
+                        return
+
+            print('Running "{}" reconstruction'.format(method))
+            try:
+                self._reco_event(method=method, save_llhp=save_llhp)
+            except MissingOrInvalidPrefitError as error:
+                print(
+                    'ERROR: event idx {}, reco method {}: "{}"; ignoring'
+                    " and moving to next event".format(
+                        self.event.meta["event_idx"], method, error
                     )
+                )
 
-                    # TODO: if file doesn't exist yet (no successful estimate
-                    # prior to this one in the file), the fit_status cannot be
-                    # set for this event... but might be set elsewhere... so
-                    # this fit status is useless
+                # TODO: if file doesn't exist yet (no successful estimate
+                # prior to this one in the file), the fit_status cannot be
+                # set for this event... but might be set elsewhere... so
+                # this fit status is useless
 
-                    #if isfile(estimate_outf):
-                    #    estimates[self.event.meta["event_idx"]]["fit_status"] = (
-                    #        FitStatus.MissingSeed
-                    #    )
-                else:
-                    self.successful_reco_counter[method] += 1
+                #if isfile(estimate_outf):
+                #    estimates[self.event.meta["event_idx"]]["fit_status"] = (
+                #        FitStatus.MissingSeed
+                #    )
 
-        print("Total run time is {:.3f} s".format(time.time() - start_time))
 
     def generate_prior_method(self, return_cube=False, **kwargs):
         """Generate the prior transform method `self.prior` and info
@@ -2321,9 +2334,19 @@ def main(description=__doc__):
     )
 
     other_kw = split_kwargs.pop("other_kw")
-    my_reco = Reco(**split_kwargs)
-    my_reco.run(**other_kw)
 
+    events_kw = split_kwargs.pop('events_kw')
+
+    my_events = standalone_events(events_kw)
+    my_reco = Reco(**split_kwargs)
+
+
+    start_time = time.time()
+    
+    for event in my_events.events:
+        my_reco.run(event, **other_kw)
+
+    print("Total run time is {:.3f} s".format(time.time() - start_time))
 
 if __name__ == "__main__":
     main()
