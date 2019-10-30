@@ -48,6 +48,7 @@ from os.path import (
     isfile,
     join,
     relpath,
+    splitext,
 )
 import sys
 
@@ -413,20 +414,32 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
 
 
 def retro_recos_to_i3files(
-    recos, eventsdir, point_estimator, i3dir=None, overwrite=False
+    eventsdir, point_estimator, recos=None, i3dir=None, overwrite=False
 ):
     """
 
     Parameters
     ----------
-    recos : str or iterable thereof
     eventsdir : str
     point_estimator : str in {"mean", "median", "max"}
+    recos : str or iterable thereof, optional
+        If not specified, all "retro_*" recos found will be populated
     i3dir : str, optional
         If None or not specified, defaults to `eventsdir`
     overwrite : bool
 
     """
+    eventsdir = abspath(expanduser(expandvars(eventsdir)))
+    # If the leaf reco/events/truth dir "recos" was specified, must go one up
+    # to find events/truth
+    if basename(eventsdir) == "recos":
+        eventsdir = dirname(eventsdir)
+
+    if recos is None:
+        recos = [
+            splitext(basename(n))[0] for n in glob(join(eventsdir, "recos", "retro_*.npy"))
+        ]
+
     if isinstance(recos, string_types):
         recos = [recos]
     else:
@@ -436,12 +449,6 @@ def retro_recos_to_i3files(
             raise ValueError(
                 'Can only populate "retro_*" recos; "{}" is invalid'.format(reco)
             )
-
-    eventsdir = abspath(expanduser(expandvars(eventsdir)))
-    # If the leaf reco/events/truth dir "recos" was specified, must go one up
-    # to find events/truth
-    if basename(eventsdir) == "recos":
-        eventsdir = dirname(eventsdir)
 
     if i3dir is None:
         i3dir = eventsdir
@@ -524,21 +531,31 @@ def retro_recos_to_i3files(
                     )
                 )
 
+        # Collect frames into an event chain until we hit a physics frame, a
+        # second DAQ frame, or the end of the file.
+        #
+        # * If we have only a DAQ frame in the chain, create a new Physics
+        #   frame and populate the reco(s) to it.
+        #
+        # * If we have a Physics frame, populate the recos to that frame.
+        #
+        # * If we have no DAQ or Physics frames in the chain, we should be
+        #   done. Make sure we've accounted for all the recos in the npy files
+        #   and quit.
+        #
+        # When done with the chain, push all frames in the chain to the output file.
+        # physics frame, we have a new "event" to process; populate recos to
+        # that frame. Then, regardless of why we finished the event chain,
+        # write the frames in the chain out to the new i3 file.
+
         input_i3file = I3File(input_i3filepath, "r")
         output_i3file = I3File(output_i3filepath, "w")
 
         frame_buffer = []
+        chain_has_daq_frame = False
+        chain_has_physics_frame = False
         frame_counter = 0
         event_index = -1
-
-        # Collect frames until we hit a DAQ frame. Once we do, we start an
-        # "event chain," until we hit another DAQ or the end of the file. When
-        # we hit the end of the chain (i.e. the next DAQ frame or end of file),
-        # then we want to grab the last physics frame and augment it OR if
-        # there's no physics frame in the chain, we want to create a new one
-        # and append it to the chain. Flush the entire chain to the output
-        # file, and then create a new chain with the new-found DAQ frame (or
-        # quit if at end of file).
 
         try:
             while True:
@@ -554,32 +571,61 @@ def retro_recos_to_i3files(
                 else:
                     next_frame = None
 
-                # If no more frames or next frame is DAQ, current chain has
-                # ended. Populate the reco to the current chain, push the
-                # current chain's frames to the output file, and start a new
-                # chain with the next frame.
-                if next_frame is None or next_frame.Stop == I3Frame.DAQ:
-                    if frame_buffer:
-                        populate_pframe(
-                            event_index=event_index,
-                            frame_buffer=frame_buffer,
-                            recos_d=recos_d,
-                            point_estimator=point_estimator,
-                        )
+                # Current chain has ended and a new one will have to be started
+                # (or we're at the end of the file).
 
+                # Populate the reco to the current chain, push all of the
+                # current chain's frames to the output file, and start a new
+                # chain with the next frame (or quit if we're at the end of the
+                # file).
+                if (
+                    next_frame is None
+                    or next_frame.Stop == I3Frame.DAQ
+                    or (chain_has_physics_frame and next_frame.Stop == I3Frame.Physics)
+                ):
+                    if frame_buffer:
+                        # Events are identified as a chain with daq frame being
+                        # present with no physics frame, physics frame present
+                        # with no daq frame, or both being present (existence
+                        # of other frames is considered to be irrelevant)
+
+                        # TODO: oscNext v01.01 by L5, i3 file processing was
+                        # messed up, there were Q frames followed by I frames
+                        # and no associated P frame. Therefore we have to only
+                        # count chains with P frames in them as events, or else
+                        # the recos won't be put back in the right place /
+                        # indices run out.
+                        #if chain_has_daq_frame or chain_has_physics_frame:
+
+                        if chain_has_physics_frame:
+                            event_index += 1
+                            populate_pframe(
+                                event_index=event_index,
+                                frame_buffer=frame_buffer,
+                                recos_d=recos_d,
+                                point_estimator=point_estimator,
+                            )
+
+                        # Regardless if there was an event identified in the
+                        # chain, push all frames to the output file
                         for frame in frame_buffer:
                             output_i3file.push(frame)
 
+                    # No next frame indicates we hit the end of the file; quit
                     if next_frame is None:
                         break
 
+                    # Create a new chain, starting with the next frame
                     frame_buffer = [next_frame]
-                    event_index += 1
+                    chain_has_daq_frame = next_frame.Stop == I3Frame.DAQ
+                    chain_has_physics_frame = next_frame.Stop == I3Frame.Physics
 
                 # Otherwise, we have just another frame in the current chain;
                 # append it and move on.
                 else:
                     frame_buffer.append(next_frame)
+                    chain_has_daq_frame |= next_frame.Stop == I3Frame.DAQ
+                    chain_has_physics_frame |= next_frame.Stop == I3Frame.Physics
 
         except:
             output_i3file.close()
@@ -603,7 +649,7 @@ def main(description=__doc__):
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "--recos",
-        required=True,
+        default=None,
         nargs="+",
         help="""Reco names to populate to the i3 file(s)""",
     )

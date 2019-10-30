@@ -13,6 +13,7 @@ __all__ = [
     "CRS_STOP_FLAGS",
     "REPORT_AFTER",
     "CART_DIMS",
+    "MIN_NUM_HITS",
     "Reco",
     "get_multinest_meta",
     "main",
@@ -108,6 +109,8 @@ CRS_STOP_FLAGS = {
 REPORT_AFTER = 100
 
 CART_DIMS = ("x", "y", "z", "time")
+
+MIN_NUM_HITS = 8
 
 
 class Reco(object):
@@ -642,6 +645,14 @@ class Reco(object):
                 print(
                     "filter evaluates to False; skipping event #{} (index {})".format(
                         self.event_counter, event.meta["event_idx"]
+                    )
+                )
+                continue
+
+            if len(event["hits"]) < MIN_NUM_HITS:
+                print(
+                    "fewer than {} hits found; skipping event #{} (index {})".format(
+                        MIN_NUM_HITS, self.event_counter, event.meta["event_idx"]
                     )
                 )
                 continue

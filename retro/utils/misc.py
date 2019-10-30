@@ -39,8 +39,11 @@ __all__ = [
     'RE_LEADING_INVALID',
     'make_valid_python_name',
     'join_struct_arrays',
+    'NSORT_RE',
     'nsort_key_func',
     'set_explicit_dtype',
+    'dict2struct',
+    'quantize',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -59,7 +62,11 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 import base64
-from collections import Iterable, OrderedDict, Mapping, Sequence
+from collections import OrderedDict
+try:
+    from collections import Iterable, Mapping, Sequence
+except ImportError:
+    from collections.abc import Iterable, Mapping, Sequence
 import errno
 import hashlib
 from numbers import Integral, Number
@@ -72,6 +79,7 @@ from subprocess import Popen, PIPE
 import sys
 
 import enum
+import numba
 import numpy as np
 from six import BytesIO, string_types
 from six.moves import map, range
@@ -108,9 +116,9 @@ class LazyLoader(object):
         self._is_loaded = False
 
     def _load_data(self):
-        sdata = open(self.datasource).read()
+        sdata = open(self.datasource, "rb").read()
         self._sha256 = hashlib.sha256(sdata).hexdigest()
-        self._data = pickle.loads(sdata)
+        self._data = pickle.loads(sdata, encoding="latin1")
 
     @property
     def datasource(self):
@@ -846,9 +854,15 @@ def deduce_sph_pairs(param_names):
 
 
 RE_INVALID_CHARS = re.compile('[^0-9a-zA-Z_]')
+"""Invalid Python name if chars after first aren't one of 0-9, a-z, A-Z, or
+underscore"""
+
 RE_LEADING_INVALID = re.compile('^[^a-zA-Z_]+')
+"""Invalid Python name if first char isn't a-z or A-Z"""
+
+
 def make_valid_python_name(name):
-    """Make a name a valid Python identifier.
+    """Make a name a valid Python identifier by removing illegal chars.
 
     From user Triptych at http://stackoverflow.com/questions/3303312
 
@@ -894,6 +908,7 @@ def join_struct_arrays(arrays):
 
 
 NSORT_RE = re.compile(r'(\d+)')
+
 
 def nsort_key_func(s):
     """Use as the `key` argument to the `sorted` function or `sort` method.
@@ -950,12 +965,67 @@ def set_explicit_dtype(x):
         return np.bool8(x)
 
     if isinstance(x, Integral):
-        return np.int64(x)
+        x_new = np.int64(x)
+        assert x_new == x
+        return x_new
 
     if isinstance(x, Number):
-        return np.float64(x)
+        x_new = np.float64(x)
+        assert x_new == x
+        return x_new
+
+    if isinstance(x, string_types):
+        x_new = np.string0(x)
+        assert x_new == x
+        return x_new
 
     raise TypeError("Type of argument is invalid: {}".format(type(x)))
+
+
+def dict2struct(d):
+    """Convert a dict with string keys and numpy-typed values into a numpy
+    array with struct dtype.
+
+    Parameters
+    ----------
+    d : OrderedMapping
+        The dict's keys are the names of the fields (strings) and the dict's
+        values are numpy-typed objects.
+
+    Returns
+    -------
+    array : numpy.array of struct dtype
+
+    """
+    dt_spec = OrderedDict()
+    for key, val in d.items():
+        d[key] = typed_val = set_explicit_dtype(val)
+        dt_spec[key] = typed_val.dtype
+    array = np.array(tuple(d.values()), dtype=dt_spec.items())
+    return array
+
+
+@numba.jit(
+    cache=True,
+    nopython=True,
+    nogil=True,
+    parallel=False,
+    error_model="numpy",
+    fastmath=True,
+)
+def quantize(x, qntm):
+    """
+    Parameters
+    ----------
+    x : scalar >= 0
+    qntm : scalar > 0
+
+    Returns
+    -------
+    q : scalar >= 0
+
+    """
+    return (np.float64(x) // qntm) * qntm + qntm / 2
 
 
 if __name__ == '__main__':

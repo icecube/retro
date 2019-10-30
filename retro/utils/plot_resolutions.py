@@ -1,25 +1,39 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, protected-access
 
 """
-Plot resolutions and distributions for reconstructions.
+Plot resolutions and raw variable distributions for reconstructions.
 """
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = ["xlate_zen", "xlate_cascade", "xlate", "get_pval", "get_nu_flavints_mask", "get_nu_flavints_mask", "get_nu_flavints", "plotit"]
+__all__ = [
+    "NUM_FILES",
+    "LABELS",
+    "UNITS",
+    "xlate_zen",
+    "xlate_cascade",
+    "xlate",
+    "get_pval",
+    "get_nu_flavints_mask",
+    "get_nu_flavints_mask",
+    "get_nu_flavints",
+    "plotit",
+]
 
 from collections import OrderedDict
 from copy import deepcopy
 from os.path import abspath, dirname, join
 import sys
 
+import numba
 import numpy as np
 from six import string_types
 
-import matplotlib as mpl
-mpl.use("agg")
+if __name__ == "__main__" and __package__ is None:
+    import matplotlib as mpl
+    mpl.use("agg")
 import matplotlib.pyplot as plt
 
 if __name__ == "__main__" and __package__ is None:
@@ -27,8 +41,48 @@ if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.priors import get_point_estimate
+from retro.utils.misc import expand
 from retro.utils.stats import weighted_percentile
 
+
+NUM_FILES = {
+    # MC
+    "nue": 601,
+    "numu": 1494,
+    "nutau": 335,
+    "mu": 1000,
+
+    # Data
+    "2012": 21142,
+    "2013": 21128,
+    "2014": 37305,
+    "2015": 23831,
+    "2016": 21939,
+    "2017": 30499,
+    "2018": 23589,
+}
+
+
+LABELS = dict(
+    nue=r'GENIE $\nu_e$',
+    numu=r'GENIE $\nu_\mu$',
+    nutau=r'GENIE $\nu_\tau$',
+    mu=r'MuonGun',
+
+    coszen=r'$\cos\theta_{\rm zen}$',
+    zenith=r'$\theta_{\rm zen}$',
+    azimuth=r'$\phi_{\rm az}$',
+)
+
+UNITS = dict(
+    x="m",
+    y="m",
+    z="m",
+    time="ns",
+    azimuth="rad",
+    zenith="rad",
+    energy="GeV",
+)
 
 def xlate_zen(pname, other_pnames):
     if "coszen" in pname:
@@ -79,7 +133,8 @@ def xlate(pname_xforms, index=None):
 
 
 def get_pval(array, param):
-    array = np.array(array)
+    # Convert a recarray to a simple array with struct dtype; convert scalar to 0-d array
+    #array = np.array(array)
     if param in array.dtype.names:
         return get_point_estimate(array[param], estimator="median", expect_scalar=False)
 
@@ -167,110 +222,25 @@ def get_nu_flavints(array, flavints):
     return array[mask]
 
 
-#reco_names = ['retro_crs_prefit'] #, 'retro_mn8d']#[2:]
-#info = OrderedDict()
-#
-#for reco_name in reco_names:
-#    events, truth, recos = extract_reco(
-#        reco=reco_name,
-#        #recodir='~/retro_results/recos/2019-04-01.oscnext_l5_v1.code_updates_crsprifix',
-#        recodir=destdir,
-#    )
-#    assert len(recos) == len(truth)
-#    mask = recos["fit_status"] == FitStatus.OK
-#    if "run_time" in recos.dtype.names:
-#        rt_finite = np.isfinite(recos["run_time"])
-#        x_finite = np.isfinite(recos["x"]["median"])
-#        if not np.all(rt_finite):
-#            assert np.all(rt_finite == x_finite)
-#            print("fit_status is OK but x not finite for {} of {} events".format(np.count_nonzero(np.logical_not(x_finite) & mask), mask.size))
-#            mask &= rt_finite
-#    num_ok = np.count_nonzero(mask)
-#    print(reco_name, "--", "num_ok:", num_ok, "percent ok:", 100*num_ok/len(recos))
-#    info[reco_name] = dict(
-#        events=events[mask],
-#        truth=truth[mask],
-#        recos=recos[mask],
-#    )
-#
-#
-#ebin_edges = np.logspace(0, 3, 11)
-#all_to_plot = ['retro_crs_prefit', 'retro_mn8d', 'total']
-#
-#recodict = info
-#
-#
-#for to_plot in all_to_plot:
-#
-#    run_times = []
-#    num_events = []
-#    num_llh = []
-#    for e0, e1 in zip(ebin_edges[:-1], ebin_edges[1:]):
-#        run_time = 0
-#        num = 0
-#        nllh = 0
-#        for reco in recos_to_plot:
-#            if reco not in recodict:
-#                break
-#            rinfo = recodict[reco]
-#            true_energy = rinfo["truth"]["energy"]
-#            mask = (true_energy >= e0) & (true_energy <= e1)
-#            this_recos = rinfo["recos"][mask]
-#            run_time += np.nanmean(this_recos["run_time"])
-#            nllh += np.nanmean(this_recos["num_llh"])
-#        run_times.append(run_time)
-#        num_llh.append(nllh)
-#        num_events.append(np.count_nonzero(mask))
-#    run_times = np.array(run_times)
-#    num_llh = np.array(num_llh)
-#    num_events = np.array(num_events)
-#
-#    meanval = np.sum(run_times * num_events) / np.sum(num_events)
-#
-#    fig, axes = plt.subplots(1, 2, figsize=(12, 4), squeeze=False)
-#    axit = iter(axes.flat)
-#
-#    ax = next(axit)
-#    ax.step(ebin_edges, [run_times[0]] + run_times.tolist())
-#    if meanval < 60:
-#        disp_mean = "{:.1f} sec".format(meanval)
-#    else:
-#        disp_mean = "{:.2f} min".format(meanval / 60)
-#    ax.plot(ebin_edges, [meanval]*len(ebin_edges), '--', label="mean = {}".format(disp_mean))
-#    ax.set_ylim(0, ax.get_ylim()[1])
-#    ax.set_xscale('log')
-#    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
-#    ax.set_xlabel('Energy (GeV)')
-#    ax.set_ylabel('Mean reco time (s)')
-#    ax.legend(loc='best')
-#    #ax.set_title('Reconstruction time')
-#    # fbase = join(outdir, 'reco_time')
-#    # fig.savefig(fbase + '.png', dpi=120)
-#    # fig.savefig(fbase + '.pdf')
-#
-#    ax = next(axit)
-#    ax.step(ebin_edges, [num_llh[0]] + num_llh.tolist())
-#    #ax.plot(ebin_edges, [meanval]*len(ebin_edges), '--', label="mean = {:.1f} min".format(meanval))
-#    #ax.set_ylim(0, ax.get_ylim()[1])
-#    ax.set_xscale('log')
-#    ax.set_xlim(ebin_edges[0], ebin_edges[-1])
-#    ax.set_xlabel('Energy (GeV)')
-#    ax.set_ylabel('Num LLH')
-#    ax.legend(loc='best')
-#    #ax.set_title('Reconstruction time')
-#
-#    fig.suptitle(to_plot, fontsize=16)
-#    fig.tight_layout(rect=(0, 0, 1, 0.95))
-#
-#    outfbase = join(outdir, "{}_timings".format(to_plot))
-#    fig.savefig(outfbase + ".pdf")
-#    fig.savefig(outfbase + ".png", dpi=120)
+@numba.jit(nopython=True, nogil=True, parallel=True, fastmath=True, error_model='numpy')
+def get_common_mask(event_ids, common_ids):
+    mask = np.zeros(shape=event_ids.shape, dtype=np.bool8)
+    for idx in numba.prange(len(event_ids)):
+        id = event_ids[idx]
+        for cid in common_ids:
+            if id['index'] == cid['index'] and id['sourcefile_sha256'] == cid['sourcefile_sha256']:
+                mask[idx] = True
+                break
+    return mask
 
 
-# ================================================================= #
-
-
-def plotit():
+def plotit(toplot, outdir=None):
+    """
+    Parameters
+    ----------
+    toplot : sequence of (events, str) tuples
+        Each events should be 
+    """
     plot_recos = [
         #"LineFit_DC",
         #"L5_SPEFit11",
@@ -292,8 +262,6 @@ def plotit():
         "track_coszen",
         "track_azimuth",
     ]
-
-    toplot = common
     use_weights = False
     n_bins = 71
     n_ebins = 10
@@ -314,11 +282,11 @@ def plotit():
                 .format(reco, recos["run_time"].mean(), truth["energy"].mean())
             )
 
-
     #nx = int(np.ceil(np.round(np.sqrt(len(plot_params)*2)/2)*2))
     nx = 4
     ny = int(np.ceil(len(plot_params)*4 / nx))
     f = 1.5
+
     fig, axes = plt.subplots(ny, nx, figsize=(4*f*nx, 3*f*ny), dpi=120, squeeze=False)
     axit = iter(axes.flat)
 
@@ -326,6 +294,10 @@ def plotit():
         err_lower, err_upper = np.inf, -np.inf
         lower, upper = np.inf, -np.inf
         stuff = OrderedDict()
+
+        plabel = LABELS[param] if param in LABELS else param
+        ulabel = " ({})".format(UNITS[param]) if param in UNITS else ""
+        bare_ulabel = " {}".format(UNITS[param]) if param in UNITS else ""
 
         for reco in plot_recos:
             rinfo = toplot[reco]
@@ -343,7 +315,11 @@ def plotit():
             recos = get_point_estimate(recos, estimator="median", expect_scalar=False)
             if not np.all(np.isfinite(recos)):
                 n_nonfinite = np.count_nonzero(np.logical_not(np.isfinite(recos)))
-                print('not all finite: {}, {}: {} / {} not finite'.format(param, reco, n_nonfinite, recos.size))
+                print(
+                    'not all finite: {}, {}: {} / {} not finite'.format(
+                        param, reco, n_nonfinite, recos.size
+                    )
+                )
                 continue
             weight = rinfo['truth']['weight']
             if "azimuth" in param:
@@ -355,9 +331,17 @@ def plotit():
 
             stuff[reco] = (recos, truth, error, weight)
             if use_weights:
-                lower_, upper_ = weighted_percentile(error[np.isfinite(error)], [lower_disp_pctile, upper_disp_pctile], weight)
+                lower_, upper_ = weighted_percentile(
+                    error[np.isfinite(error)],
+                    [lower_disp_pctile, upper_disp_pctile],
+                    weight,
+                )
             else:
-                lower_, upper_ = np.percentile(error[np.isfinite(error)], [lower_disp_pctile, upper_disp_pctile])
+                lower_, upper_ = np.percentile(
+                    error[np.isfinite(error)],
+                    [lower_disp_pctile,
+                     upper_disp_pctile],
+                )
             err_lower = np.nanmin([lower_, err_lower])
             err_upper = np.nanmax([upper_, err_upper])
 
@@ -366,9 +350,17 @@ def plotit():
                 if "energy" in param:
                     mask &= array > 0
                 if use_weights:
-                    lower_, upper_ = weighted_percentile(array[mask], [lower_disp_pctile, upper_disp_pctile], weight)
+                    lower_, upper_ = weighted_percentile(
+                        array[mask],
+                        [lower_disp_pctile,
+                         upper_disp_pctile],
+                        weight,
+                    )
                 else:
-                    lower_, upper_ = np.percentile(array[mask], [lower_disp_pctile, upper_disp_pctile])
+                    lower_, upper_ = np.percentile(
+                        array[mask],
+                        [lower_disp_pctile, upper_disp_pctile],
+                    )
                 lower = np.nanmin([lower_, lower])
                 upper = np.nanmax([upper_, upper])
 
@@ -392,7 +384,11 @@ def plotit():
             if nf != mask.size:
                 print(reco, recos, nf, mask.size)
             if use_weights:
-                pc_lower, median, pc_upper = weighted_percentile(recos[mask], [lower_pct, 50, upper_pct], weight)
+                pc_lower, median, pc_upper = weighted_percentile(
+                    recos[mask],
+                    [lower_pct, 50, upper_pct],
+                    weight,
+                )
             else:
                 pc_lower, median, pc_upper = np.percentile(recos[mask], [lower_pct, 50, upper_pct])
             iq = pc_upper - pc_lower
@@ -406,7 +402,15 @@ def plotit():
                     lw=1,
                 )
             except:
-                print(reco, param, np.all(np.isfinite(recos)), np.nanmin(recos), np.nanmax(recos), lower, upper)
+                print(
+                    reco,
+                    param,
+                    np.all(np.isfinite(recos)),
+                    np.nanmin(recos),
+                    np.nanmax(recos),
+                    lower,
+                    upper,
+                )
                 raise
 
         recos, truth, error, weight = stuff.values()[0]
@@ -442,7 +446,11 @@ def plotit():
                 print(param, reco, "error", nf, mask.size)
 
             if use_weights:
-                pc_lower, median, pc_upper = weighted_percentile(error[mask], [lower_pct, 50, upper_pct], weight)
+                pc_lower, median, pc_upper = weighted_percentile(
+                    error[mask],
+                    [lower_pct, 50, upper_pct],
+                    weight,
+                )
             else:
                 pc_lower, median, pc_upper = np.percentile(error[mask], [lower_pct, 50, upper_pct])
 
@@ -457,7 +465,15 @@ def plotit():
                     lw=1,
                 )
             except:
-                print(reco, param, np.all(np.isfinite(error)), np.nanmin(error), np.nanmax(error), lower, upper)
+                print(
+                    reco,
+                    param,
+                    np.all(np.isfinite(error)),
+                    np.nanmin(error),
+                    np.nanmax(error),
+                    lower,
+                    upper,
+                )
                 raise
         ax.set_xlim(err_lower, err_upper)
         ax.set_ylim(0, ax.get_ylim()[1]*1.3)
@@ -481,7 +497,6 @@ def plotit():
             title = "{} error, all E".format(param)
         ax.set_title(title)
 
-
         # -- Plot errors vs. true energy -- #
 
         ax = next(axit)
@@ -496,27 +511,56 @@ def plotit():
             for idx in range(n_ebins):
                 bin_error = error[(idxs == idx) & mask]
                 if use_weights:
-                    pc_l_, med_, pc_u_ = weighted_percentile(bin_error, [lower_pct, 50, upper_pct], weight)
+                    pc_l_, med_, pc_u_ = weighted_percentile(
+                        bin_error, [lower_pct, 50, upper_pct], weight
+                    )
                 else:
-                    pc_l_, med_, pc_u_ = np.percentile(bin_error, [lower_pct, 50, upper_pct])
+                    pc_l_, med_, pc_u_ = np.percentile(
+                        bin_error, [lower_pct, 50, upper_pct]
+                    )
                 pc_l.append(pc_l_)
                 pc_u.append(pc_u_)
+
             color = next(colors_iter)
-            ax.fill_between(
+            #ax.fill_between(
+            #    x=ebin_edges,
+            #    y1=[pc_l[0]] + pc_l,
+            #    y2=[pc_u[0]] + pc_u,
+            #    interpolate=False,
+            #    step="post",
+            #    facecolor='none',
+            #    edgecolor=color,
+            #)
+            ax.step(
                 x=ebin_edges,
-                y1=[pc_l[0]]+pc_l,
-                y2=[pc_u[0]]+pc_u,
-                interpolate=False,
-                step="post",
-                facecolor='none',
-                edgecolor=color,
+                y=[pc_l[0]] + pc_l,
+                #facecolor='none',
+                color=color,
             )
+            ax.step(
+                x=ebin_edges,
+                y=[pc_u[0]] + pc_u,
+                #facecolor='none',
+                color=color,
+            )
+
             ax.set_xscale('log')
             ax.set_xlim(ebin_edges[0], ebin_edges[-1])
+            #if "energy" in param:
+            #    title = "fractional {} error [{}, {}]% vs. true E".format(
+            #        param, lower_pct, upper_pct
+            #    )
+            #else:
+            #    title = "{} error [{}, {}]% vs true E".format(
+            #        param, lower_pct, upper_pct
+            #    )
             if "energy" in param:
-                title = "fractional {} error [{}, {}]% vs. true E".format(param, lower_pct, upper_pct)
+                title = "Fractional error [{}, {}]% vs. true E".format(lower_pct, upper_pct)
+                ax.set_ylabel("Fractional {} error".format(plabel))
             else:
-                title = "{} error [{}, {}]% vs true E".format(param, lower_pct, upper_pct)
+                title = "Error [{}, {}]% vs true E".format(lower_pct, upper_pct)
+                ax.set_ylabel("{} error{}".format(plabel, ulabel))
+
             ax.set_title(title)
 
         # -- Plot error WIDTHS vs. true energy -- #
@@ -525,13 +569,24 @@ def plotit():
         colors_iter = iter(colors)
         for reco, (recos, truth, error, weight) in stuff.items():
             mask = np.isfinite(error)
+
+            if use_weights:
+                pc_l_, pc_u_ = weighted_percentile(
+                    error[mask], [lower_pct, upper_pct], weights=weight[mask]
+                )
+            else:
+                pc_l_, pc_u_ = np.percentile(error[mask], [lower_pct, upper_pct])
+            overall_iq_width = pc_u_ - pc_l_
+
             true_en = get_pval(toplot[reco]['truth'], "energy")
             idxs = np.digitize(true_en, ebin_edges) - 1
             widths = []
             for idx in range(n_ebins):
                 bin_error = error[(idxs == idx) & mask]
                 if use_weights:
-                    pc_l_, med_, pc_u_ = weighted_percentile(bin_error, [lower_pct, 50, upper_pct], weight)
+                    pc_l_, med_, pc_u_ = weighted_percentile(
+                        bin_error, [lower_pct, 50, upper_pct], weight
+                    )
                 else:
                     pc_l_, med_, pc_u_ = np.percentile(bin_error, [lower_pct, 50, upper_pct])
                 widths.append(pc_u_ - pc_l_)
@@ -542,23 +597,36 @@ def plotit():
                 #facecolor='none',
                 color=color,
             )
+            ax.plot(
+                ebin_edges[[0, -1]],
+                [overall_iq_width]*2,
+                linestyle='--',
+                color=color,
+                label=r"IQ{}% width $\forall$ E = {:.2f}{}".format(
+                    iq_pct, overall_iq_width, bare_ulabel
+                ),
+            )
+
             ax.set_xscale('log')
             ax.set_xlim(ebin_edges[0], ebin_edges[-1])
             if "energy" in param:
-                title = "fractional {} error IQ{}% width vs true E".format(param, iq_pct)
+                title = "Fractional error IQ{}% width vs true E".format(iq_pct)
+                ax.set_ylabel("Fractional {} error width".format(plabel))
             else:
-                title = "{} error IQ{}% width vs true E".format(param, iq_pct)
+                title = "Error IQ{}% width vs true E".format(iq_pct)
+                ax.set_ylabel("{} error width{}".format(plabel, ulabel))
             ax.set_title(title)
-
+            ax.legend(loc="best", frameon=False)
 
     for ax in axit:
         ax.remove()
 
-    #fig.tight_layout(h_pad=1, w_pad=0.01)
-    fig.subplots_adjust(wspace=0.1, hspace=0.25)
+    fig.tight_layout(h_pad=1, w_pad=0.01)
+    #fig.subplots_adjust(wspace=0.1, hspace=0.25)
     plt.draw()
     plt.show()
 
-    fbasename = join(outdir, "distributions")
-    fig.savefig(fbasename + ".pdf")
-    fig.savefig(fbasename + ".png", dpi=120)
+    if outdir is not None:
+        fbasename = join(expand(outdir), "distributions")
+        fig.savefig(fbasename + ".pdf")
+        fig.savefig(fbasename + ".png", dpi=120)

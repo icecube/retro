@@ -24,23 +24,13 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 
 __all__ = [
-    "EM_CASCADE_PTYPES",
-    "HADR_CASCADE_PTYPES",
-    "CASCADE_PTYPES",
-    "TRACK_PTYPES",
-    "INVISIBLE_PTYPES",
-    "ELECTRONS",
-    "MUONS",
-    "TAUS",
-    "NUES",
-    "NUMUS",
-    "NUTAUS",
-    "NEUTRINOS",
     "FILENAME_INFO_RE",
     "GENERIC_I3_FNAME_RE",
+    "START_END_TIME_SPEC",
     "I3PARTICLE_SPECS",
     "MissingPhysicsFrameError",
     "extract_file_metadata",
+    "get_frame_item",
     "extract_reco",
     "extract_trigger_hierarchy",
     "extract_pulses",
@@ -56,11 +46,13 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import Iterable, OrderedDict, Sequence
+from collections import OrderedDict
+try:
+    from collections import Iterable, Sequence
+except ImportError:
+    from collections.abc import Iterable, Sequence
 from copy import deepcopy
-from hashlib import sha256
-from os import listdir
-from os.path import abspath, basename, dirname, exists, join
+from os.path import abspath, basename, dirname, join
 import pickle
 import re
 import sys
@@ -76,111 +68,37 @@ from retro.retro_types import (
     PHOTON_T,
     PULSE_T,
     TRIGGER_T,
-    ParticleType,
-    ParticleShape,
+    TRACK_T,
+    CASCADE_T,
+    I3TIME_T,
+    FitStatus,
     InteractionType,
     LocationType,
-    FitStatus,
+    ParticleType,
+    EM_CASCADE_PTYPES,
+    HADR_CASCADE_PTYPES,
+    TRACK_PTYPES,
+    INVISIBLE_PTYPES,
+    ELECTRONS,
+    MUONS,
+    TAUS,
+    NUES,
+    NUMUS,
+    NUTAUS,
+    NEUTRINOS,
+    ParticleShape,
     ExtractionError,
-    TRACK_T,
     NO_TRACK,
     INVALID_TRACK,
-    CASCADE_T,
     NO_CASCADE,
     INVALID_CASCADE,
 )
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
-from retro.utils.misc import expand, mkdir, set_explicit_dtype
+from retro.utils.misc import (
+    dict2struct, expand, get_file_md5, mkdir, set_explicit_dtype
+)
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
-
-EM_CASCADE_PTYPES = (
-    ParticleType.EMinus,
-    ParticleType.EPlus,
-    ParticleType.Brems,
-    ParticleType.DeltaE,
-    ParticleType.PairProd,
-    ParticleType.Gamma,
-    ParticleType.Pi0,
-)
-"""Particle types parameterized as electromagnetic cascades,
-from clsim/python/GetHybridParameterizationList.py"""
-
-
-HADR_CASCADE_PTYPES = (
-    ParticleType.Hadrons,
-    ParticleType.Neutron,
-    ParticleType.PiPlus,
-    ParticleType.PiMinus,
-    ParticleType.K0_Long,
-    ParticleType.KPlus,
-    ParticleType.KMinus,
-    ParticleType.PPlus,
-    ParticleType.PMinus,
-    ParticleType.K0_Short,
-    ParticleType.Eta,
-    ParticleType.Lambda,
-    ParticleType.SigmaPlus,
-    ParticleType.Sigma0,
-    ParticleType.SigmaMinus,
-    ParticleType.Xi0,
-    ParticleType.XiMinus,
-    ParticleType.OmegaMinus,
-    ParticleType.NeutronBar,
-    ParticleType.LambdaBar,
-    ParticleType.SigmaMinusBar,
-    ParticleType.Sigma0Bar,
-    ParticleType.SigmaPlusBar,
-    ParticleType.Xi0Bar,
-    ParticleType.XiPlusBar,
-    ParticleType.OmegaPlusBar,
-    ParticleType.DPlus,
-    ParticleType.DMinus,
-    ParticleType.D0,
-    ParticleType.D0Bar,
-    ParticleType.DsPlus,
-    ParticleType.DsMinusBar,
-    ParticleType.LambdacPlus,
-    ParticleType.WPlus,
-    ParticleType.WMinus,
-    ParticleType.Z0,
-    ParticleType.NuclInt,
-    ParticleType.TauPlus,
-    ParticleType.TauMinus,
-)
-"""Particle types parameterized as hadronic cascades,
-from clsim/CLSimLightSourceToStepConverterPPC.cxx with addition of TauPlus and
-TauMinus"""
-
-
-CASCADE_PTYPES = EM_CASCADE_PTYPES + HADR_CASCADE_PTYPES
-"""Particle types classified as either EM or hadronic cascades"""
-
-
-TRACK_PTYPES = (ParticleType.MuPlus, ParticleType.MuMinus)
-"""Particle types classified as tracks"""
-
-
-INVISIBLE_PTYPES = (
-    ParticleType.Neutron,  # long decay time exceeds trigger window
-    ParticleType.K0,
-    ParticleType.K0Bar,
-    ParticleType.NuE,
-    ParticleType.NuEBar,
-    ParticleType.NuMu,
-    ParticleType.NuMuBar,
-    ParticleType.NuTau,
-    ParticleType.NuTauBar,
-)
-"""Invisible particles (at least to low-energy IceCube triggers)"""
-
-ELECTRONS = (ParticleType.EPlus, ParticleType.EMinus)
-MUONS = (ParticleType.MuPlus, ParticleType.MuMinus)
-TAUS = (ParticleType.TauPlus, ParticleType.TauMinus)
-NUES = (ParticleType.NuE, ParticleType.NuEBar)
-NUMUS = (ParticleType.NuMu, ParticleType.NuMuBar)
-NUTAUS = (ParticleType.NuTau, ParticleType.NuTauBar)
-NEUTRINOS = NUES + NUMUS + NUTAUS
 
 FILENAME_INFO_RE = re.compile(
     r"""
@@ -197,26 +115,17 @@ FILENAME_INFO_RE = re.compile(
 
 GENERIC_I3_FNAME_RE = re.compile(
     r"""
-    ^                              # Anchor to beginning of string
-    (?P<base>.*)                   # Any number of any character
-    (?P<i3ext>\.i3)                # Must have ".i3" as extension
-    (?P<compext>\.gz|bz2|zst|zstd) # Optional extension indicating compression
-    $                              # End of string
+    ^                 # Anchor to beginning of string
+    (?P<base>.*)      # Any number of any character
+    (?P<i3ext>\.i3)   # Must have ".i3" as extension
+    (?P<compext>\..*) # Optional extension indicating compression
+    $                 # End of string
     """,
     (re.VERBOSE | re.IGNORECASE),
 )
 
-
-I3TIME_T = np.dtype([("utc_year", np.int32), ("utc_daq_time", np.int64)])
-
-I3EVENTHEADER_SPECS = OrderedDict(
+START_END_TIME_SPEC = OrderedDict(
     [
-        ("run_id", dict(dtype=np.uint32)),
-        ("sub_run_id", dict(dtype=np.uint32)),
-        ("event_id", dict(dtype=np.uint32)),
-        ("sub_event_id", dict(dtype=np.uint32)),
-        ("sub_event_stream", dict(dtype=np.dtype("S20"))),
-        ("state", dict(dtype=np.uint8)),
         (
             "start_time",
             dict(
@@ -229,7 +138,20 @@ I3EVENTHEADER_SPECS = OrderedDict(
         ),
     ]
 )
+
+
+I3EVENTHEADER_SPECS = OrderedDict(
+    [
+        ("run_id", dict(dtype=np.uint32)),
+        ("sub_run_id", dict(dtype=np.uint32)),
+        ("event_id", dict(dtype=np.uint32)),
+        ("sub_event_id", dict(dtype=np.uint32)),
+        ("sub_event_stream", dict(dtype=np.dtype("S20"))),
+        ("state", dict(dtype=np.uint8)),
+    ]
+)
 """See: dataclasses/public/dataclasses/physics/I3EventHeader.h"""
+I3EVENTHEADER_SPECS.update(START_END_TIME_SPEC)
 
 I3PARTICLE_SPECS = OrderedDict(
     [
@@ -278,8 +200,101 @@ MILLIPEDE_FIT_PARAMS_SPECS = OrderedDict(
 )
 """See millipede/private/millipede/converter/MillipedeFitParamsConverter.cxx"""
 
+HIT_MULTIPLICITY_SPECS = OrderedDict(
+    [
+        ("n_hit_doms", dict(dtype=np.int32, default=-1)),
+        ("n_hit_doms_one_pulse", dict(dtype=np.int32, default=-1)),
+        ("n_hit_strings", dict(dtype=np.int32, default=-1)),
+        ("n_pulses", dict(dtype=np.int32, default=-1)),
+    ]
+)
+
+HIT_STATISTICS_SPECS = OrderedDict(
+    [
+        ("cog_x", dict(path="cog.x", dtype=np.float32, default=-1)),
+        ("cog_y", dict(path="cog.y", dtype=np.float32, default=-1)),
+        ("cog_z", dict(path="cog.z", dtype=np.float32, default=-1)),
+        ("cog_z_sigma", dict(dtype=np.float32, default=np.nan)),
+        ("max_pulse_time", dict(dtype=np.float32, default=np.nan)),
+        ("min_pulse_time", dict(dtype=np.float32, default=np.nan)),
+        ("q_max_doms", dict(dtype=np.float32, default=np.nan)),
+        ("q_tot_pulses", dict(dtype=np.float32, default=np.nan)),
+        ("z_max", dict(dtype=np.float32, default=np.nan)),
+        ("z_mean", dict(dtype=np.float32, default=np.nan)),
+        ("z_min", dict(dtype=np.float32, default=np.nan)),
+        ("z_sigma", dict(dtype=np.float32, default=np.nan)),
+        ("z_travel", dict(dtype=np.float32, default=np.nan)),
+    ]
+)
+
+TIME_WINDOW_SPECS = OrderedDict(
+    [
+        ("start", dict(dtype=np.float64)),
+        ("stop", dict(dtype=np.float64)),
+        ("length", dict(dtype=np.float64)),
+    ]
+)
+
+CLAST_FIT_PARAMS_SPECS = OrderedDict(
+    [
+        ("mineval", dict(dtype=np.float64, default=np.nan)),
+        ("evalratio", dict(dtype=np.float64, default=np.nan)),
+        ("eval2", dict(dtype=np.float64, default=np.nan)),
+        ("eval3", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+FINITE_CUTS_SPECS = OrderedDict(
+    [
+        ("Length", dict(dtype=np.float64, default=np.nan)),
+        ("Lend", dict(dtype=np.float64, default=np.nan)),
+        ("Lstart", dict(dtype=np.float64, default=np.nan)),
+        ("Sdet", dict(dtype=np.float64, default=np.nan)),
+        ("finiteCut", dict(dtype=np.float64, default=np.nan)),
+        ("DetectorLength", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+START_STOP_PARAMS_SPECS = OrderedDict(
+    [
+        ("LLHStartingTrack", dict(dtype=np.float64, default=np.nan)),
+        ("LLHStoppingTrack", dict(dtype=np.float64, default=np.nan)),
+        ("LLHInfTrack", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+DIPOLE_FIT_PARAMS_SPECS = OrderedDict(
+    [
+        ("Magnet", dict(dtype=np.float64, default=np.nan)),
+        ("MagnetX", dict(dtype=np.float64, default=np.nan)),
+        ("MagnetY", dict(dtype=np.float64, default=np.nan)),
+        ("MagnetZ", dict(dtype=np.float64, default=np.nan)),
+        ("AmpSum", dict(dtype=np.float64, default=np.nan)),
+        ("NHits", dict(dtype=np.int32, default=-1)),
+        ("NPairs", dict(dtype=np.int32, default=-1)),
+        ("MaxAmp", dict(dtype=np.float64, default=np.nan)),
+    ]
+)
+
+DST_PARAM_SPECS = OrderedDict(
+    [
+        ("cog_x", dict(path="cog.x", dtype=np.int8)),
+        ("cog_y", dict(path="cog.y", dtype=np.int8)),
+        ("cog_z", dict(path="cog.z", dtype=np.int8)),
+        ("n_dir", dict(dtype=np.uint8)),
+        ("n_string", dict(dtype=np.uint8)),
+        ("ndom", dict(dtype=np.uint16)),
+        ("reco_label", dict(dtype=np.uint8)),
+        ("time", dict(dtype=np.uint32)),
+        ("trigger_tag", dict(dtype=np.uint16)),
+    ]
+)
 
 class MissingPhysicsFrameError(Exception):
+    """Processing a frame buffer via the `process_frame_buffer` closure
+    (function) defined within ::func::`extract_events` requires a physics
+    frame."""
+
     pass
 
 
@@ -317,26 +332,26 @@ def extract_file_metadata(fname):
     return file_info
 
 
-def dict2struct(d):
-    """Convert a dict with string keys and typed values into a numpy array with
-    struct dtype.
+def auto_get_frame_item(frame, key):
+    from icecube import dataclasses, icetray, recclasses
 
-    Parameters
-    ----------
-    d : OrderedMapping
-        The dict's keys are the names of the fields (strings) and the dict's
-        values are numpy-typed objects.
+    type_specs = {
+        recclasses.I3HitMultiplicityValues: HIT_MULTIPLICITY_SPECS,
+        recclasses.I3HitStatisticsValues: HIT_STATISTICS_SPECS,
+        dataclasses.I3TimeWindow: TIME_WINDOW_SPECS,
+        dataclasses.I3Particle: I3PARTICLE_SPECS,
+        recclasses.I3CLastFitParams: CLAST_FIT_PARAMS_SPECS,
+        recclasses.I3FiniteCuts: FINITE_CUTS_SPECS,
+        recclasses.I3DipoleFitParams: DIPOLE_FIT_PARAMS_SPECS,
+        recclasses.I3StartStopParams: START_STOP_PARAMS_SPECS,
+        recclasses.I3DST16: DST_PARAM_SPECS,
+        icetray.I3Bool: np.bool8,
+    }
 
-    Returns
-    -------
-    array : numpy.array of struct dtype
-
-    """
-    dt_spec = OrderedDict()
-    for key, val in d.items():
-        dt_spec[key] = val.dtype
-    array = np.array(tuple(d.values()), dtype=dt_spec.items())
-    return array
+    if key in ADVANCED_KEY_SPECS:
+        pass
+    elif isinstance(key, tuple(type_specs.keys())):
+        pass
 
 
 def get_frame_item(frame, key, specs, allow_missing):
@@ -415,7 +430,7 @@ def extract_reco(frame, reco):
     reco_dict = None
 
     if reco.startswith("Pegleg_Fit"):
-        from icecube import millipede  # pylint: disable=unused-variable
+        from icecube import millipede  # pylint: disable=unused-import
 
         reco_dict = OrderedDict()
         reco_dict["fit_params"] = dict2struct(
@@ -459,7 +474,7 @@ def extract_reco(frame, reco):
         )
 
     elif reco.startswith("Monopod_"):
-        from icecube import millipede  # pylint: disable=unused-variable
+        from icecube import millipede  # pylint: disable=unused-import
 
         reco_dict = OrderedDict()
         reco_dict["fit_params"] = dict2struct(
@@ -570,7 +585,7 @@ def extract_trigger_hierarchy(frame, path):
     triggers : length n_triggers array of dtype retro_types.TRIGGER_T
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
@@ -578,7 +593,11 @@ def extract_trigger_hierarchy(frame, path):
 
     trigger_hierarchy = frame[path]
     triggers = []
-    for _, trigger in trigger_hierarchy.iteritems():
+    iterattr = getattr(
+        trigger_hierarchy,
+        "items" if "items" in dir(trigger_hierarchy) else "iteritems"
+    )
+    for _, trigger in iterattr():
         config_id = trigger.key.config_id or 0
         triggers.append(
             (
@@ -621,7 +640,7 @@ def extract_pulses(frame, pulse_series_name):
         None is returned if the <pulses>TimeRange field is missing
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
@@ -629,6 +648,7 @@ def extract_pulses(frame, pulse_series_name):
     from icecube.dataclasses import (  # pylint: disable=no-name-in-module
         I3RecoPulseSeriesMap,
         I3RecoPulseSeriesMapMask,
+        I3RecoPulseSeriesMapUnion,
     )
 
     pulse_series = frame[pulse_series_name]
@@ -641,7 +661,7 @@ def extract_pulses(frame, pulse_series_name):
     else:
         time_range = np.nan, np.nan
 
-    if isinstance(pulse_series, I3RecoPulseSeriesMapMask):
+    if isinstance(pulse_series, (I3RecoPulseSeriesMapMask, I3RecoPulseSeriesMapUnion)):
         pulse_series = pulse_series.apply(frame)
 
     if not isinstance(pulse_series, I3RecoPulseSeriesMap):
@@ -679,7 +699,7 @@ def extract_photons(frame, photon_key):
         number of photons recorded in that DOM.
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
@@ -1184,7 +1204,7 @@ def process_true_neutrino(nu, mctree, frame, event_truth):
             cascade1["hadr_equiv_energy"] = remaining_energy
 
     else:  # interaction_type == InteractionType.undefined
-        from icecube import genie_icetray  # pylint: disable=unused-variable
+        from icecube import genie_icetray  # pylint: disable=unused-import
 
         grd = frame["I3GENIEResultDict"]
         if not grd["nuel"]:  # nuel=True means elastic collision, apparently
@@ -1314,10 +1334,10 @@ def extract_truth(frame):
     event_truth : OrderedDict
 
     """
-    from icecube import dataclasses, icetray  # pylint: disable=unused-variable
+    from icecube import dataclasses, icetray  # pylint: disable=unused-import
 
     try:
-        from icecube import multinest_icetray  # pylint: disable=unused-variable
+        from icecube import multinest_icetray  # pylint: disable=unused-import
     except ImportError:
         multinest_icetray = None
 
@@ -1337,39 +1357,40 @@ def extract_truth(frame):
     # Extract info from I3MCTree: ...
     mctree = frame["I3MCTree"]
 
-    # ... primary particle
-    primary = mctree.primaries[0]
-    primary_pdg = primary.pdg_encoding
+    # ... primary particle, if there is one ("noise" sim has none)
+    primary_pdg = None
+    if mctree.primaries:
+        primary = mctree.primaries[0]
+        primary_pdg = primary.pdg_encoding
 
-    # TODO: deal with charged leptons e.g. for CORSIKA/MuonGun
-
-    event_truth["pdg_encoding"] = primary_pdg
-    event_truth["time"] = primary.time
-    event_truth["x"] = primary.pos.x
-    event_truth["y"] = primary.pos.y
-    event_truth["z"] = primary.pos.z
-    event_truth["energy"] = primary.energy
-    event_truth["zenith"] = primary.dir.zenith
-    event_truth["coszen"] = np.cos(primary.dir.zenith)
-    event_truth["azimuth"] = primary.dir.azimuth
-    event_truth["extraction_error"] = ExtractionError.NO_ERROR
+        event_truth["pdg_encoding"] = primary_pdg
+        event_truth["time"] = primary.time
+        event_truth["x"] = primary.pos.x
+        event_truth["y"] = primary.pos.y
+        event_truth["z"] = primary.pos.z
+        event_truth["energy"] = primary.energy
+        event_truth["zenith"] = primary.dir.zenith
+        event_truth["coszen"] = np.cos(primary.dir.zenith)
+        event_truth["azimuth"] = primary.dir.azimuth
+        event_truth["extraction_error"] = ExtractionError.NO_ERROR
 
     # TODO: should we prefix I3MCWeightDict items to avoid overwriting
     # something else?
 
     # Extract per-event info from I3MCWeightDict
-    mcwd = frame["I3MCWeightDict"]
-    for key in sorted(mcwd.keys()):
+    i3_mcwd = frame["I3MCWeightDict"]
+    for key in sorted(i3_mcwd.keys()):
         if key in event_truth:
             raise ValueError("key '{}' already in event_truth".format(key))
-        event_truth[key] = mcwd[key]
+        event_truth[key] = i3_mcwd[key]
 
+    particles_to_record = None
     if primary_pdg in NEUTRINOS:
         particles_to_record = process_true_neutrino(
             nu=primary, mctree=mctree, frame=frame, event_truth=event_truth
         )
 
-    elif primary_pdg == ParticleType.unknown:
+    elif primary_pdg == ParticleType.unknown:  # This (can) indicate a muon
         # TODO: how to handle muon bundles?
 
         secondaries = mctree.get_daughters(primary)
@@ -1380,8 +1401,9 @@ def extract_truth(frame):
                 muon = secondaries[0]
             else:
                 raise NotImplementedError(
-                    "Unknown primary with {} secondary not implemented".format(
-                        ParticleType(secondary_pdg)
+                    "primary of type {} and secondary of type {} not"
+                    "implemented".format(
+                        ParticleType.unknown, ParticleType(secondary_pdg)
                     )
                 )
         else:
@@ -1391,15 +1413,17 @@ def extract_truth(frame):
 
         # If we get here, we have a single muon
 
+        event_truth["pdg_encoding"] = secondary_pdg
         track = populate_track_t(mctree=mctree, particle=muon)
         particles_to_record = OrderedDict([("track", track)])
 
-    else:  # is not neutrino:
+    elif primary_pdg is not None:  # is not neutrino, not noise (None):
         raise NotImplementedError("Only neutrino primaries are implemented")
 
-    values_dict, dtypes_dict = record_particles(particles_to_record)
-    event_truth.update(values_dict)
-    truth_dtypes.update(dtypes_dict)
+    if particles_to_record:
+        values_dict, dtypes_dict = record_particles(particles_to_record)
+        event_truth.update(values_dict)
+        truth_dtypes.update(dtypes_dict)
 
     struct_dtype_spec = []
     for key in event_truth.keys():
@@ -1431,9 +1455,11 @@ def extract_metadata_from_frame(frame):
     return event_meta
 
 
-def extract_events(
-    fpath,
-    external_gcd=None,
+def _extract_events_from_single_file(
+    i3_fpath,
+    retro_gcd_dir,
+    gcd_md5_hex=None,
+    gcd=None,
     outdir=None,
     photons=tuple(),
     pulses=tuple(),
@@ -1511,18 +1537,18 @@ def extract_events(
             }
 
     """
-    from icecube import (  # pylint: disable=unused-variable
+    from icecube import (  # pylint: disable=unused-import
         dataclasses,
         recclasses,
         simclasses,
     )
-    from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
     from icecube.dataio import I3FrameSequence  # pylint: disable=no-name-in-module
+    from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
+    from retro.i3processing.extract_gcd import MD5_HEX_RE, extract_gcd_frames
 
-    fpath = expand(fpath)
-    sha256_hex = sha256(open(fpath, "rb").read()).hexdigest()
-
-    fpaths = [fpath]
+    i3_fpath = expand(i3_fpath)
+    if gcd is not None:
+        gcd = expand(gcd)
 
     if additional_keys is None:
         additional_keys = tuple()
@@ -1532,27 +1558,21 @@ def extract_events(
         assert isinstance(additional_keys, Iterable)
         additional_keys = tuple(additional_keys)
 
-    if external_gcd is True or external_gcd is None:
-        fdir = dirname(fpath)
-        gcd_fnames = [
-            f
-            for f in listdir(fdir)
-            if "gcd" in f.lower() and ".i3" in f.lower() and exists(join(fdir, f))
-        ]
-        if len(gcd_fnames) == 1:
-            fpaths.insert(0, join(fdir, gcd_fnames[0]))
-        elif (
-            external_gcd is True and len(gcd_fnames) == 0
-        ):  # pylint: disable=len-as-condition
-            raise ValueError('No GCD file found in directory "{}"'.format(fdir))
-        elif len(gcd_fnames) > 1:
-            raise ValueError(
-                'More than one GCD files found in directory "{}": {}'.format(
-                    fdir, gcd_fnames
-                )
-            )
+    # Subdirectory will be named same as i3 file (with ".i3" and any
+    # compression extensions like .bz2, .zst, etc. removed)
+    fname_parts = GENERIC_I3_FNAME_RE.match(basename(i3_fpath)).groupdict()
+    leafdir_basename = fname_parts["base"]
+    if outdir is None:
+        # Default to dir same root directory as I3 file
+        outdir = join(dirname(i3_fpath), leafdir_basename)
+    else:
+        outdir = join(outdir, leafdir_basename)
 
-    i3file_iterator = I3FrameSequence(fpaths)
+    i3file_md5_hex = get_file_md5(i3_fpath)
+    i3_fpaths = [i3_fpath]
+    if gcd is not None:
+        i3_fpaths = [gcd] + i3_fpaths
+    i3file_iterator = I3FrameSequence(i3_fpaths)
 
     events = []
     truths = []
@@ -1574,7 +1594,7 @@ def extract_events(
     for name in triggers:
         trigger_hierarchies[name] = []
 
-    def process_frame_buffer(frame_buffer):
+    def process_frame_buffer(frame_buffer, gcd_md5_hex):
         """Get event information from a set of frames that, together, should
         completely describe a single event.
 
@@ -1584,6 +1604,7 @@ def extract_events(
         Parameters
         ----------
         frame_buffer : list
+        gcd_md5_hex : length-32 string
 
         Out
         ---
@@ -1594,6 +1615,8 @@ def extract_events(
         trigger_hierarchies : OrderedDict
 
         """
+        gcd_md5_hex = gcd_md5_hex.strip().lower()
+        assert MD5_HEX_RE.match(gcd_md5_hex)
         num_qframes = 0
         for frame in frame_buffer:
             if frame.Stop == I3Frame.DAQ:
@@ -1623,7 +1646,7 @@ def extract_events(
             specs=I3EVENTHEADER_SPECS,
             allow_missing=False,
         )
-        event["sourcefile_sha256"] = np.uint64(int(sha256_hex[:16], base=16))
+        event["gcd_md5_hex"] = gcd_md5_hex
         if len(events) > 2 ** 32 - 1:
             raise ValueError(
                 "only using uint32 to store event index, but have event index of {}".format(
@@ -1639,7 +1662,7 @@ def extract_events(
             try:
                 event_truth = extract_truth(pframe)
             except:
-                sys.stderr.write("Failed to get truth from frame buffer")
+                sys.stderr.write("Failed to get truth from frame buffer\n")
                 raise
             truths.append(event_truth)
 
@@ -1664,18 +1687,17 @@ def extract_events(
                 extract_trigger_hierarchy(pframe, trigger_hierarchy_name)
             )
 
-    # Default to dir same path as I3 file but with ".i3<compr ext>" removed
-    if outdir is None:
-        fname_parts = GENERIC_I3_FNAME_RE.match(fpath).groupdict()
-        outdir = fname_parts["base"]
     mkdir(outdir)
 
-    # Write SHA-256 in format compatible with `sha256` Linux utility
-    with open(join(outdir, "sourcefile_sha256.txt"), "w") as sha_file:
-        sha_file.write("{}  {}\n".format(sha256_hex, fpath))
+    with open(join(outdir, "sourcefile_md5sum.txt"), "w") as md5sum_file:
+        md5sum_file.write("{}  {}\n".format(i3file_md5_hex, i3_fpath))
 
     frame_buffer = []
     frame_counter = 0
+
+    gcd_frames = OrderedDict([("g_frame", None), ("c_frame", None), ("d_frame", None)])
+    gcd_changed = False
+
     while i3file_iterator.more():
         try:
             frame = None
@@ -1689,17 +1711,30 @@ def extract_events(
             if frame is None:
                 break
 
-            frame_buffer.append(frame)
-
-            if frame.Stop == I3Frame.Physics:
-                process_frame_buffer(frame_buffer)
-            elif frame.Stop == I3Frame.DAQ:
-                frame_buffer = frame_buffer[-1:]
+            if frame.Stop in (I3Frame.Physics, I3Frame.DAQ):
+                if gcd_changed:
+                    gcd_md5_hex = extract_gcd_frames(retro_gcd_dir=retro_gcd_dir, **gcd_frames)
+                    gcd_changed = False
+                if frame.Stop == I3Frame.Physics:
+                    frame_buffer.append(frame)
+                    process_frame_buffer(frame_buffer, gcd_md5_hex=gcd_md5_hex)
+                    frame_buffer.pop()
+                elif frame.Stop == I3Frame.DAQ:
+                    frame_buffer = [frame]
+            elif frame.Stop == I3Frame.Geometry:
+                gcd_frames["g_frame"] = frame
+                gcd_changed = True
+            elif frame.Stop == I3Frame.Calibration:
+                gcd_frames["c_frame"] = frame
+                gcd_changed = True
+            elif frame.Stop == I3Frame.DetectorStatus:
+                gcd_frames["d_frame"] = frame
+                gcd_changed = True
 
         except Exception as err:
             sys.stderr.write(
                 'ERROR! file "{}", frame #{}, error: {}\n'.format(
-                    fpath, frame_counter + 1, err
+                    i3_fpath, frame_counter + 1, err
                 )
             )
             raise
@@ -1728,7 +1763,7 @@ def extract_events(
             assert not val, "'{}': {}".format(name, val)
         for key, val in trigger_hierarchies.items():
             assert not val, "'{}': {}".format(name, val)
-        sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(fpath))
+        sys.stderr.write('WARNING: No events found in i3 file "{}"\n'.format(i3_fpath))
 
     photon_series_dir = join(outdir, "photons")
     pulse_series_dir = join(outdir, "pulses")
@@ -1787,18 +1822,167 @@ def extract_events(
         )
 
 
+def extract_events(
+    i3_files,
+    retro_gcd_dir,
+    gcd=None,
+    outdir=None,
+    photons=tuple(),
+    pulses=tuple(),
+    recos=tuple(),
+    triggers=tuple(),
+    truth=False,
+    additional_keys=None,
+):
+    """Extract event information from an i3 file.
+
+    Parameters
+    ----------
+    i3_files : str or iterable thereof
+        Path(s) to I3 file(s). If a `gcd` is specified, it will apply to all i3
+        files specified that do not GCD frames embedded in them.
+
+    retro_gcd_dir : str
+        Path to directory containing Retro-extracted GCD files (each
+        subdirectory is named by the md5sum of the corresponding GCD file)
+
+    gcd : str or None
+        GCD information for the events _must_ be provided one way or another.
+        If GCD frames are embedded in the i3 file(s) passed via `i3_files`, then
+        nothing needs to be specified for `gcd`. Otherwise, `gcd` must be a
+        string specifying either a path to a GCD file or the MD5 sum derived
+        from storing the GCD frames (in that order, with no other frames) to an
+        (uncompressed) i3 file (see
+        `retro.i3processing.extract_gcd.extract_gcd_frames`); a GCD specified
+        in this way is applied to i3 files specified by the `i3_files` argument
+        except for those files containing embedded GCD frames (which supersede
+        the `gcd` argument).
+
+    outdir : str, optional
+        Directory in which to place generated leaf directory (named same as i3
+        file but with extensions removed). Default is same directory(ies) where
+        the i3 file(s) are stored
+
+    photons : None, str, or iterable of str
+        Names of photons series' to extract from each event
+
+    pulses : None, str, or iterable of str
+        Names of pulse series' to extract from each event
+
+    recos : None, str, or iterable of str
+        Names of reconstructions to extract from each event
+
+    triggers : None, str, or iterable of str
+        Names of trigger hierarchies to extract from each event
+
+    truth : bool
+        Whether or not Monte Carlo truth for the event should be extracted for
+        each event
+
+    additional_keys : str, iterable thereof, or None
+
+    Returns
+    -------
+    list of OrderedDict, one per event
+        Each dict contains key "meta" with sub-dict containing file metadata.
+        Depending on which arguments are provided, OrderedDicts for each named
+        key passed will appear as a key within the OrderedDicts named "pulses",
+        "recos", "photons", and "truth". E.g.:
+
+        .. python ::
+
+            {
+                'i3_metadata': {...},
+                'events': [{...}, {...}, ...],
+                'truth': [{'pdg_encoding': ..., 'daughters': [{...}, ...]}],
+                'photons': {
+                    'photons': [[...], [...], ...],
+                    'other_photons': [[...], [...], ...]
+                },
+                'pulse_series': {
+                    'SRTOfflinePulses': [[...], [...], ...],
+                    'WaveDeformPulses': [[...], [...], ...]
+                },
+                'recos': {
+                    'PegLeg8D': [{...}, ...],
+                    'Retro8D': [{...}, ...]
+                },
+                'triggers': {
+                    'I3TriggerHierarchy': [{...}, ...],
+                }
+            }
+
+    """
+    from retro.i3processing.extract_gcd import MD5_HEX_RE, extract_gcd_files
+
+    if isinstance(i3_files, string_types):
+        i3_files = [i3_files]
+
+    if gcd is None:
+        gcd_md5_hex = None
+    elif isinstance(gcd, string_types):
+        if MD5_HEX_RE.match(gcd.strip().lower()):
+            gcd_md5_hex = gcd.strip().lower()
+            gcd = None
+        else:
+            gcd_md5_hexs = extract_gcd_files(
+                gcd_files=gcd, retro_gcd_dir=retro_gcd_dir
+            )
+            assert len(gcd_md5_hexs) == 1
+            gcd_md5_hex = gcd_md5_hexs[0]
+    else:
+        raise TypeError("Cannot handle `gcd` arg of type {}".format(type(gcd)))
+
+    for i3_fpath in i3_files:
+        _extract_events_from_single_file(
+            i3_fpath=i3_fpath,
+            retro_gcd_dir=retro_gcd_dir,
+            gcd=gcd,
+            gcd_md5_hex=gcd_md5_hex,
+            outdir=outdir,
+            photons=photons,
+            pulses=pulses,
+            recos=recos,
+            triggers=triggers,
+            truth=truth,
+            additional_keys=additional_keys,
+        )
+
+
 def main(description=__doc__):
     """Script interface to `extract_events` function: Parse command line args
     and call function."""
     parser = ArgumentParser(description=description)
-    parser.add_argument("--fpath", required=True, help="""Path to i3 file""")
     parser.add_argument(
-        "--ignore-external-gcd",
-        action="store_true",
-        help="""Force _ignoring_ any GCD file(s) in the same directory as the
-        i3 file being extracted.""",
+        "--i3-files",
+        nargs="+",
+        required=True,
+        help="""Paths to i3 files to extract""",
     )
-    parser.add_argument("--outdir")
+    parser.add_argument(
+        "--retro-gcd-dir",
+        required=True,
+        help="""Directory into which to store any extracted GCD info""",
+    )
+    parser.add_argument(
+        "--gcd",
+        required=False,
+        default=None,
+        help="""Specify an external GCD file or md5sum (as returned by
+        `retro.i3processing.extract_gcd_frames`, i.e., the md5sum of an
+        uncompressed i3 file containing _only_ the G, C, and D frames). It is
+        not required to specify --gcd if the G, C, and D frames are embedded in
+        all files specified by --i3-files. Any GCD frames within said files
+        will also take precedent if --gcd _is_ specified.""",
+    )
+    parser.add_argument(
+        "--outdir",
+        required=False,
+        help="""Directory into which to store the extracted directories and
+        files. If not specified, the directory where each i3 file is stored is
+        used (a leaf directory is created with the same name as each i3 file
+        but with .i3 and any compression extensions removed)."""
+    )
     parser.add_argument(
         "--photons",
         nargs="+",
@@ -1823,17 +2007,19 @@ def main(description=__doc__):
         default=[],
         help="""Trigger hierarchy names to extract from each event""",
     )
-    parser.add_argument("--truth", action="store_true")
+    parser.add_argument(
+        "--truth",
+        action="store_true",
+        help="""Extract truth information from Monte Carlo events""",
+    )
     parser.add_argument(
         "--additional-keys",
         default=None,
         nargs="+",
-        help="Additional keys to extract from event I3 frame",
+        help="""Additional keys to extract from event I3 frame""",
     )
     args = parser.parse_args()
     kwargs = vars(args)
-    if kwargs.pop("ignore_external_gcd"):
-        kwargs["external_gcd"] = False
     extract_events(**kwargs)
 
 

@@ -32,7 +32,11 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from argparse import ArgumentParser
-from collections import Iterable, Mapping, OrderedDict
+from collections import OrderedDict
+try:
+    from collections import Iterable, Mapping
+except ImportError:
+    from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from operator import getitem
 from os import listdir, walk
@@ -41,6 +45,7 @@ import re
 import sys
 import time
 
+import numba
 import numpy as np
 from six import string_types
 
@@ -60,7 +65,8 @@ from retro.retro_types import (
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
-from retro.utils.misc import expand, nsort_key_func
+from retro.utils.data_mc_agreement import quantize_min_q_filter
+from retro.utils.misc import expand, nsort_key_func, quantize
 
 
 I3_FNAME_INFO_RE = re.compile(
@@ -82,7 +88,6 @@ def setup_dom_tables(
     gcd,
     norm_version='binvol2.5',
     use_sd_indices=const.ALL_STRS_DOMS,
-    step_length=1.0,
     num_phi_samples=None,
     ckv_sigma_deg=None,
     template_library=None,
@@ -99,7 +104,6 @@ def setup_dom_tables(
     gcd : str
     norm_version : str, optional
     use_sd_indices : sequence, optional
-    step_length : float, optional
     num_phi_samples : int, optional
     ckv_sigma_deg : float, optional
     template_library : str, optional
@@ -162,7 +166,7 @@ def setup_dom_tables(
 
                 shared_table_sd_indices = []
                 for string in strings:
-                    sd_idx = const.get_sd_idx(string=string, dom=dom)
+                    sd_idx = const.get_sd_idx(string=string, om=dom, pmt=0)
                     if sd_idx not in use_sd_indices:
                         continue
                     shared_table_sd_indices.append(sd_idx)
@@ -173,7 +177,6 @@ def setup_dom_tables(
                 dom_tables.load_table(
                     fpath=fpath,
                     sd_indices=shared_table_sd_indices,
-                    step_length=step_length,
                     mmap=mmap,
                 )
 
@@ -203,7 +206,6 @@ def setup_dom_tables(
             dom_tables.load_table(
                 fpath=dpath,
                 sd_indices=shared_table_sd_indices,
-                step_length=step_length,
                 mmap=mmap,
             )
 
@@ -353,6 +355,7 @@ def setup_discrete_hypo(cascade_kernel=None, track_kernel=None, track_time_step=
 
 def get_events(
     events_root,
+    gcd_dir,
     start=None,
     stop=None,
     step=None,
@@ -610,6 +613,10 @@ def get_events(
                     )
                     assert num_ps == num_events
                     iterators[pulse_series] = iter(pulse_serieses)
+                    #(
+                    #    quantize_min_q_filter(ps, qmin=0.4, quantum=0.05)
+                    #    for ps in iter(pulse_serieses)
+                    #)
 
                     num_tr, _, time_ranges = iterate_file(
                         fpath=join(
@@ -673,7 +680,7 @@ def get_events(
 
                 yield event
 
-            for key in file_iterator_tree.keys():
+            for key in list(file_iterator_tree.keys()):
                 del file_iterator_tree[key]
             del file_iterator_tree
 
@@ -749,6 +756,8 @@ def get_path(event, path):
         try:
             node = getitem(node, subpath)
         except:
+            if hasattr(event, "meta"):
+                sys.stderr.write("event.meta: {}\n".format(event.meta))
             sys.stderr.write(
                 "node = {} type = {}, subpath = {} type = {}\n".format(
                     node, type(node), subpath, type(subpath)
@@ -756,6 +765,9 @@ def get_path(event, path):
             )
             raise
     return node
+
+
+QUANTIZE_VEC = numba.vectorize(cache=True, target="cpu")(quantize.py_func)
 
 
 def get_hits(event, path, angsens_model=None):
@@ -787,8 +799,8 @@ def get_hits(event, path, angsens_model=None):
     series = get_path(event, path)
 
     if photons:
-        time_window_start = 0
-        time_window_stop = 0
+        time_window_start = 0.
+        time_window_stop = 0.
         if angsens_model is not None:
             if isinstance(angsens_model, string_types):
                 angsens_poly, _ = load_angsens_model(angsens_model)
@@ -857,8 +869,16 @@ def get_hits(event, path, angsens_model=None):
     offset = 0
 
     for (string, dom, pmt), p in series:
-        sd_idx = const.get_sd_idx(string=string, dom=dom, pmt=pmt)
+        # -- Filter the pulses -- #
+        # TODO: make filtering optional, specify kind of filtering by kwargs, etc.
+        p["charge"] = QUANTIZE_VEC(p["charge"], 0.05)
+        p = p[p["charge"] >= 0.3]
+
         num = len(p)
+        if num == 0:
+            continue
+
+        sd_idx = const.get_sd_idx(string=string, om=dom, pmt=pmt)
         sd_hits = np.empty(shape=num, dtype=HIT_T)
         sd_hits['time'] = p['time']
         if not photons:
@@ -871,6 +891,12 @@ def get_hits(event, path, angsens_model=None):
         hits.append(sd_hits)
         hits_indexer.append((sd_idx, offset, num))
         offset += num
+
+    if len(hits) == 0:
+        hits = np.empty(shape=0, dtype=HIT_T)
+        hits_indexer = np.empty(shape=0, dtype=SD_INDEXER_T)
+        hits_summary = np.empty(shape=0, dtype=HITS_SUMMARY_T)
+        return hits, hits_indexer, hits_summary
 
     hits = np.concatenate(hits) #, dtype=HIT_T)
     if hits.dtype != HIT_T:
@@ -1048,10 +1074,6 @@ def parse_args(
         )
         group.add_argument(
             '--template-library', default=None,
-        )
-        group.add_argument(
-            '--step-length', type=float, default=1.0,
-            help='''Step length used in the CLSim table generator.'''
         )
         group.add_argument(
             '--no-noise', action='store_true',

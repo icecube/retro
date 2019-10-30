@@ -19,7 +19,11 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict
+from collections import  OrderedDict
+try:
+    from collections import Iterable
+except ImportError:
+    from collections.abc import Iterable
 from glob import glob
 from os import listdir, walk
 from os.path import (
@@ -42,7 +46,7 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import join_struct_arrays, nsort_key_func
+from retro.utils.misc import expand, join_struct_arrays, mkdir, nsort_key_func
 
 
 EVENT_ID_FIELDS = [
@@ -192,7 +196,12 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
         else:
             expected_reco_names = [recos]
     else:
-        expected_reco_names = recos
+        assert isinstance(recos, Iterable)
+        expected_reco_names = list(recos)
+        for reco in expected_reco_names:
+            if reco == "all":
+                assert len(expected_reco_names) == 1
+                expected_reco_names = None
 
     if expected_reco_names:
         for reco_name in expected_reco_names:
@@ -223,6 +232,13 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
 
             this_events = np.load(join(dirpath, "events.npy"))
             if len(this_events) == 0:
+                paths_with_empty_events_file.append(dirpath)
+                continue
+
+            if (
+                "L5_oscNext_bool" in this_events.dtype.names
+                and np.count_nonzero(this_events["L5_oscNext_bool"]) == 0
+            ):
                 paths_with_empty_events_file.append(dirpath)
                 continue
 
@@ -333,6 +349,21 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
         all_events_to_process.append(this_events)
         all_dirs_concatenated.append(dirpath)
 
+    print(
+        "Paths with empty events files: {:d}, paths with non-empty events"
+        " files: {:d}, total: {:d}".format(
+            len(paths_with_empty_events_file),
+            len(paths_with_nonempty_events_file),
+            len(paths_with_empty_events_file) + len(paths_with_nonempty_events_file),
+        )
+    )
+    print(
+        "Paths with non-empty events files skipped due to missing reco(s):"
+        " {:d}".format(
+            len(paths_with_nonempty_events_file) - len(all_dirs_concatenated)
+        )
+    )
+
     if len(all_events_to_process) == 0:
         raise ValueError(
             "Found no events to concatenate recursively from path(s) {}".format(
@@ -382,8 +413,13 @@ def concatenate_recos_and_save(outfile, **kwargs):
         Arguments passed to `concatenate_recos`
 
     """
+    outfile = expand(outfile)
     out_array = concatenate_recos(**kwargs)
+    outdir = dirname(outfile)
+    if not isdir(outdir):
+        mkdir(outdir)
     np.save(outfile, out_array)
+    sys.stdout.write('Saved concatenated array to "{}"\n'.format(outfile))
 
 
 def main():
@@ -402,6 +438,7 @@ def main():
     )
     parser.add_argument(
         "--recos",
+        nargs="+",
         default=None,
         help="""Specify reco names to retrieve, or specify "all" to retrieve
         all recos present (at least those found in the first events/recos

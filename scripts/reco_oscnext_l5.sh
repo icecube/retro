@@ -114,8 +114,9 @@ $retro_dir/retro/reco.py \
     --agg-start "$START" \
     --agg-step $STEP \
     \
-    --pulses "SplitInIcePulses" \
+    --pulses "SRTTWOfflinePulsesDC" \
     --triggers "I3TriggerHierarchy" \
-    --hits "pulses/SplitInIcePulses"
+    --hits "pulses/SRTTWOfflinePulsesDC"
 
 wait
+    #--pulses "SplitInIcePulses" \

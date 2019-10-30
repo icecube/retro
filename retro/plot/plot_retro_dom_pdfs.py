@@ -32,7 +32,7 @@ if __name__ == '__main__' and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import load_pickle
-from retro.const import get_string_dom_pair, get_sd_idx
+from retro.const import get_string_om_pair, get_sd_idx
 from retro.utils.misc import expand
 
 
@@ -120,7 +120,7 @@ def plot_run_info(
         run_infos.append(run_info)
         pairs = []
         for sd_idx in run_info['sd_indices']:
-            pairs.append(get_string_dom_pair(sd_idx))
+            pairs.append(get_string_om_pair(sd_idx))
         all_string_dom_pairs.update(pairs)
         if data_or_sim_label is None:
             data_or_sim_label = (
@@ -491,7 +491,7 @@ def plot_run_info2(
     total_num_lines = 0
     for idx, sd_idx in enumerate(sd_indices):
         he = hit_exp[idx, :]
-        string, dom = get_string_dom_pair(sd_idx)
+        string, dom = get_string_om_pair(sd_idx)
         if string != only_string or np.sum(he) == 0:
             continue
         total_num_lines += 1
@@ -509,7 +509,7 @@ def plot_run_info2(
         he = hit_exp[idx, :]
         de = dom_exp[idx]
         he -= np.min(he)
-        string, dom = get_string_dom_pair(sd_idx)
+        string, dom = get_string_om_pair(sd_idx)
         if np.sum(he) == 0 or (string, dom) not in fwd_results:
             continue
         ref = fwd_results[(string, dom)]
@@ -539,7 +539,7 @@ def plot_run_info2(
 
     def innerplot(ax): # pylint: disable=missing-docstring
         for idx, sd_idx in enumerate(sd_indices):
-            string, dom = get_string_dom_pair(sd_idx)
+            string, dom = get_string_om_pair(sd_idx)
             he = hit_exp[idx, :]
             de = dom_exp[idx]
             if np.sum(he) > 0:
