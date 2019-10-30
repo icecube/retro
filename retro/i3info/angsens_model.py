@@ -61,6 +61,7 @@ def load_angsens_model(model):
     ]
     if 'I3_SRC' in os.environ:
         possible_dirs.append('$I3_SRC/ice-models/resources/models/angsens')
+        possible_dirs.append('$I3_SRC/ice-models/resources/models/angsens_flasher')
 
     possible_paths = []
     for model_name in models:

@@ -77,6 +77,7 @@ import re
 import struct
 from subprocess import Popen, PIPE
 import sys
+import six
 
 import enum
 import numba
@@ -118,7 +119,10 @@ class LazyLoader(object):
     def _load_data(self):
         sdata = open(self.datasource, "rb").read()
         self._sha256 = hashlib.sha256(sdata).hexdigest()
-        self._data = pickle.loads(sdata, encoding="latin1")
+        if six.PY2:
+            self._data = pickle.loads(sdata)
+        else:
+            self._data = pickle.loads(sdata, encoding="latin1")
 
     @property
     def datasource(self):
