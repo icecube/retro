@@ -132,4 +132,3 @@ $retro_dir/retro/reco.py \
     --hits "pulses/SRTTWOfflinePulsesDC" \
 
 wait
-    #--pulses "SplitInIcePulses" \
