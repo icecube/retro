@@ -77,9 +77,6 @@ from retro.utils.get_arg_names import get_arg_names
 from retro.utils.misc import sort_dict
 from retro.utils.stats import estimate_from_llhp
 
-from retro.i3processing.extract_events import extract_pulses, extract_trigger_hierarchy, extract_pulses, extract_photons, extract_metadata_from_frame, extract_reco, I3EVENTHEADER_SPECS, get_frame_item
-from retro.i3processing.retro_recos_to_i3files import make_I3_particles, extract_all_reco_info
-
 LLH_FUDGE_SUMMAND = -1000
 
 METHODS = set(
@@ -190,7 +187,7 @@ class Reco(object):
     Parameters
     ----------
     dom_tables_kw, tdi_tables_kw : mappings
-    As returned by `retro.init_obj.parse_args`
+        As returned by `retro.init_obj.parse_args`
     debug : bool
 
     """
@@ -228,7 +225,8 @@ class Reco(object):
         self.n_params = None
         self.n_opt_params = None
 
-    def __call__(self, frame, 
+    def __call__(self,
+            frame, 
             methods=['crs_prefit',],
             reco_pulse_series_name='SRTTWOfflinePulsesDC',
             seeding_recos=["L5_SPEFit11", ],
@@ -243,7 +241,8 @@ class Reco(object):
 
         Parameters
         ----------
-
+        frame : I3frame
+            this will be provided by the tray automatically
         methods : string or list of strings
             reco methods to be performed, e.g. `['crs_prefit',]`
         reco_pulse_series_name : string
@@ -255,11 +254,25 @@ class Reco(object):
         additional_keys : list of strings
             additional keys from the frame to load into the retro events object
         filter : string
-            expression a la `"event['header']['L5_oscNext_bool']"`, see `reco_event` method
+            expression a la `"event['header']['L5_oscNext_bool']"`, see `_reco_event` method
         point_estimator : string
             which point estimator to use for I3Particles output, on out of: ('max', 'mean', 'median')
 
+        Usage
+        -----
+
+        instantiate an object of this class and hand it directly to IceTray, e.g. ::
+
+           my_reco = Reco(**kwargs)
+           tray = I3Tray()
+           tray.AddModule('I3Reader', ...)
+           tray.Add(my_reco, "retro", **more_kwargs)
+           tray.AddModule("I3Writer", ...)
+
         '''
+        from retro.i3processing.extract_events import extract_pulses, extract_trigger_hierarchy, extract_pulses, extract_photons, extract_metadata_from_frame, extract_reco, I3EVENTHEADER_SPECS, get_frame_item
+        from retro.i3processing.retro_recos_to_i3files import make_I3_particles, extract_all_reco_info
+
         event = OrderedDict()
 
         header_info = get_frame_item(
@@ -328,7 +341,7 @@ class Reco(object):
             raise ValueError("Same reco specified multiple times")
 
         for method in methods:
-            status = self.reco_event(event, method=method, save_llhp=False, filter=filter, save_estimate=False)
+            status = self._reco_event(event, method=method, save_llhp=False, filter=filter, save_estimate=False)
 
             point_estimator = 'median'
             reco_name = "retro_" + method
@@ -361,7 +374,7 @@ class Reco(object):
         self.n_params = self.hypo_handler.n_params
         self.n_opt_params = self.hypo_handler.n_opt_params
 
-    def reco_event(self, event, method, save_llhp, filter, save_estimate=True):
+    def _reco_event(self, event, method, save_llhp, filter, save_estimate=True):
         """Recipes for performing different kinds of reconstructions.
 
         Parameters
@@ -850,7 +863,7 @@ class Reco(object):
 
             print('Running "{}" reconstruction'.format(method))
             try:
-                self.reco_event(event, method=method, save_llhp=save_llhp, filter=filter, save_estimate=True)
+                self._reco_event(event, method=method, save_llhp=save_llhp, filter=filter, save_estimate=True)
             except MissingOrInvalidPrefitError as error:
                 print(
                     'ERROR: event idx {}, reco method {}: "{}"; ignoring'

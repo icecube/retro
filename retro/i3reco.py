@@ -67,7 +67,7 @@ tray.AddModule('I3Reader', 'reader', FilenameList = other_kw['input_i3_file'])
 tray.Add(my_reco, "retro", 
     methods='crs_prefit',
     reco_pulse_series_name='SRTTWOfflinePulsesDC',
-    seeding_recos=["L5_SPEFit11", ],
+    seeding_recos=["L5_SPEFit11", "LineFit_DC"],
     triggers=['I3TriggerHierarchy'],
     additional_keys=['L5_oscNext_bool'],
     filter='event["header"]["L5_oscNext_bool"]',
