@@ -196,7 +196,7 @@ def setup_dom_tables(
             dpath = dom_tables_fname_proto.format(cluster_idx=cluster_idx)
             if not isdir(dpath):
                 print(
-                    'failed to find "{}" (this may inidicate that all exisiting'
+                    'failed to find "{}" (this may inidicate that all existing '
                     "tables are loaded)\n"
                     .format(dpath)
                 )

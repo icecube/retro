@@ -244,7 +244,7 @@ class Reco(object):
         additional_keys : list of strings
             additional keys from the frame to load into the retro events object
         filter : string
-            expression a la `"event["header"]["L5_oscNext_bool"]"`, see
+            expression a la `'event["header"]["L5_oscNext_bool"]'`, see
             `_reco_event` method
         point_estimator : string
             which point estimator to use for I3Particles output, on out of:
