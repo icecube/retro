@@ -129,7 +129,8 @@ $retro_dir/retro/reco.py \
     \
     --pulses "SRTTWOfflinePulsesDC" \
     --triggers "I3TriggerHierarchy" \
-    --hits "pulses/SRTTWOfflinePulsesDC"
+    --hits "pulses/SRTTWOfflinePulsesDC"\
+    --recos "L5_SPEFit11"\
 
 wait
     #--pulses "SplitInIcePulses" \

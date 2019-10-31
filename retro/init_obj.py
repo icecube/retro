@@ -194,7 +194,7 @@ def setup_dom_tables(
             cluster_idx += 1
             dpath = dom_tables_fname_proto.format(cluster_idx=cluster_idx)
             if not isdir(dpath):
-                print('failed to find', dpath)
+                print('failed to find', dpath, '\n(this may inidicate that all exisiting tables are loaded)')
                 break
 
             # TODO: make the omkeys field generic to all tables & place
