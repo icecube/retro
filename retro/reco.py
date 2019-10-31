@@ -78,7 +78,7 @@ from retro.utils.misc import sort_dict
 from retro.utils.stats import estimate_from_llhp
 
 from retro.i3processing.extract_events import extract_pulses, extract_trigger_hierarchy, extract_pulses, extract_photons, extract_metadata_from_frame, extract_reco, I3EVENTHEADER_SPECS, get_frame_item
-
+from retro.i3processing.retro_recos_to_i3files import make_I3_particles, extract_all_reco_info
 
 LLH_FUDGE_SUMMAND = -1000
 
@@ -228,11 +228,38 @@ class Reco(object):
         self.n_params = None
         self.n_opt_params = None
 
-    def __call__(self, frame, methods, events_kw, save_llhp, filter, save_estimate=False):
+    def __call__(self, frame, 
+            methods=['crs_prefit',],
+            reco_pulse_series_name='SRTTWOfflinePulsesDC',
+            seeding_recos=["L5_SPEFit11", ],
+            triggers=['I3TriggerHierarchy'],
+            additional_keys=[],
+            filter=[],
+            point_estimator='median'
+            ):
+
         '''
-        For I3Tray interface
+        Method to act as I3Tray Module
+
+        Parameters
+        ----------
+
+        methods : string or list of strings
+            reco methods to be performed, e.g. `['crs_prefit',]`
+        reco_pulse_series_name : string
+            name of pulse series, e.g. `'SRTTWOfflinePulsesDC'`
+        seeding_recos : list of strings
+            recos to load for seeding / constructing priors
+        triggers : list of strings
+            forgot what it does....time window? just set to `['I3TriggerHierarchy']`
+        additional_keys : list of strings
+            additional keys from the frame to load into the retro events object
+        filter : string
+            expression a la `"event['header']['L5_oscNext_bool']"`, see `reco_event` method
+        point_estimator : string
+            which point estimator to use for I3Particles output, on out of: ('max', 'mean', 'median')
+
         '''
-        #print(events_kw)
         event = OrderedDict()
 
         header_info = get_frame_item(
@@ -246,7 +273,6 @@ class Reco(object):
         for key, val in header_info.items():
             event['header'][key] = val
         event['pulses'] = OrderedDict()
-        event['photons'] = OrderedDict()
         event['recos'] = OrderedDict()
         event['triggers'] = OrderedDict()
 
@@ -266,37 +292,27 @@ class Reco(object):
         event.meta["agg_event_idx"] = None
 
 
-        if events_kw['pulses'] is not None:
-            for pulse_series_name in events_kw['pulses']:
-                pulses_list, time_range = extract_pulses(frame, pulse_series_name)
-                event['pulses'][pulse_series_name] = pulses_list
-                event['pulses'][pulse_series_name + "TimeRange"] = time_range
+        pulses_list, time_range = extract_pulses(frame, reco_pulse_series_name)
+        event['pulses'][reco_pulse_series_name] = pulses_list
+        event['pulses'][reco_pulse_series_name + "TimeRange"] = time_range
 
-        if events_kw['photons'] is not None:
-            for photon_name in events_kw['photons']:
-                event['photons'][photon_name] = extract_photons(frame, photon_name)
-
-        if events_kw['recos'] is not None:
-            for reco_name in events_kw['recos']:
+        if seeding_recos is not None:
+            for reco_name in seeding_recos:
                 event['recos'][reco_name] = extract_reco(frame, reco_name)
 
-        if events_kw['triggers'] is not None:
-            for trigger_hierarchy_name in events_kw['triggers']:
+        if triggers is not None:
+            for trigger_hierarchy_name in triggers:
                 event['triggers'][trigger_hierarchy_name] = extract_trigger_hierarchy(frame, trigger_hierarchy_name)
 
-        if events_kw['additional_keys'] is not None:
-            for frame_key in events_kw['additional_keys']:
+        if additional_keys is not None:
+            for frame_key in additional_keys:
                 event['header'][frame_key] = frame[frame_key].value
 
-        # this kosher?
-        hits_array, hits_indexer, hits_summary = init_obj.get_hits(event=event, path=['pulses', events_kw['pulses'][0]], angsens_model=None)
+        hits_array, hits_indexer, hits_summary = init_obj.get_hits(event=event, path=['pulses', reco_pulse_series_name], angsens_model=None)
         event['hits'] = hits_array
         event['hits_indexer'] = hits_indexer
         event['hits_summary'] = hits_summary
 
-
-        #print(event)
-        
         if isinstance(methods, string_types):
             methods = [methods]
 
@@ -312,8 +328,24 @@ class Reco(object):
             raise ValueError("Same reco specified multiple times")
 
         for method in methods:
-            self.reco_event(event, method=method, save_llhp=save_llhp, filter=filter, save_estimate=save_estimate)
+            status = self.reco_event(event, method=method, save_llhp=False, filter=filter, save_estimate=False)
 
+            point_estimator = 'median'
+            reco_name = "retro_" + method
+
+            # add to frame
+            if status == 0:
+                particles_identifiers = make_I3_particles(event["recos"]["retro_" + method][0], point_estimator=point_estimator)
+                for particle, identifier in particles_identifiers:
+                    key = "__".join([reco_name, point_estimator, identifier])
+                    print('adding %s to frame'%key)
+                    frame[key] = particle
+
+                all_reco_info = extract_all_reco_info(event["recos"]["retro_" + method][0], reco_name=reco_name)
+
+                for key, val in all_reco_info.items():
+                    print('adding %s to frame'%key)
+                    frame[key] = val
 
     def setup_hypo(self, **kwargs):
         """Setup hypothesis and record `n_params` and `n_opt_params`
@@ -365,7 +397,7 @@ class Reco(object):
                     event.meta["event_idx"]
                 )
             )
-            return
+            return -1
 
         if len(event["hits"]) < MIN_NUM_HITS:
             print(
@@ -373,8 +405,9 @@ class Reco(object):
                     MIN_NUM_HITS, event.meta["event_idx"]
                 )
             )
-            return
+            return -1
 
+        # ToDo: move quantiziation here (?)
 
         # simple 1-stage recos
         if method in ("multinest", "test", "truth", "crs", "scipy", "nlopt", "skopt"):
@@ -698,6 +731,8 @@ class Reco(object):
 
         else:
             raise ValueError("Unknown `Method` {}".format(method))
+
+        return 0
 
     def _print_non_fatal_exception(self, method):
         """Print to stderr a detailed message about a failure in reconstruction
@@ -2422,31 +2457,10 @@ def main(description=__doc__):
 
     start_time = time.time()
 
-    if len(events_kw['events_root']) == 1 and isfile(events_kw['events_root'][0]):
-        print('I3 file')
-        from icecube.oscNext.tools.processor import i3_processor
-        from icecube import dataclasses, icetray, dataio
-        from I3Tray import *
+    my_events = standalone_events(events_kw)
 
-        # not supported yet
-        other_kw.pop('redo_all')
-        other_kw.pop('redo_failed')
-
-        events_kw['additional_keys'] = ['L5_oscNext_bool']
-
-
-        tray = I3Tray()
-        tray.AddModule('I3Reader', 'reader', FilenameList = events_kw['events_root'])
-        tray.Add(my_reco, "retro", events_kw=events_kw, **other_kw)
-        tray.AddModule('TrashCan', 'GoHomeYouReDrunk')
-        tray.Execute(20)
-        tray.Finish()
-
-    else: # npy directory
-        my_events = standalone_events(events_kw)
-
-        for event in my_events.events:
-            my_reco.run(event, **other_kw)
+    for event in my_events.events:
+        my_reco.run(event, **other_kw)
 
     print("Total run time is {:.3f} s".format(time.time() - start_time))
 
