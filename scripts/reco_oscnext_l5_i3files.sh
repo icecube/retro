@@ -49,7 +49,7 @@ $retro_dir/retro/i3reco.py \
     --dom-tables-fname-proto "$proto" \
     --use-doms "all" \
     $tmpl_lib \
-    --input-i3-file $1\
-    --output-i3-file $2\
+    --input-i3-file "$1" \
+    --output-i3-file "$2" \
 
 wait

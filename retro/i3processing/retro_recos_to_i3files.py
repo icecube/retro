@@ -28,7 +28,7 @@ __all__ = [
     "NEUTRINO_ATTRS",
     "TRACK_ATTRS",
     "CASCADE_ATTRS",
-    "make_I3_particles",
+    "make_i3_particles",
     "extract_all_reco_info",
     "particle_from_reco",
     "populate_pframe",
@@ -37,7 +37,11 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict, Sequence
+from collections import OrderedDict
+try:
+    from collections.abc import Sequence
+except ImportError:
+    from collections import Sequence
 from copy import deepcopy
 from glob import glob
 from os import remove, walk
@@ -121,7 +125,8 @@ CASCADE_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Cascade)
 
 
 def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
-    """
+    """Create an I3Particle from part of a retro reco hypothesis.
+
     Parameters
     ----------
     reco : numpy.array of struct dtype
@@ -239,7 +244,8 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
 
 
 def setitem_pframe(frame, key, val, event_index, overwrite=False):
-    """Put value in frame, with wrapper for warn or error if the key is already present.
+    """Put value in frame, with wrapper for warn or error if the key is already
+    present.
 
     Parameters
     ----------
@@ -263,14 +269,13 @@ def setitem_pframe(frame, key, val, event_index, overwrite=False):
     frame[key] = val
 
 
-def make_I3_particles(reco, point_estimator):
-    ''' Populate I3Particles as a summary of the reco
+def make_i3_particles(reco, point_estimator):
+    """Populate I3Particles as a summary of the reco
 
-    This makes getting a quick (albeit incomplte) summary of retro reco
-    results "easy" and somewhat standard in comparison to other IceCube
-    recos which populate particles. Keep in mind that all info is NOT
-    able to be populated, here, though, so be sure to check the other
-    fields
+    This makes getting a quick (albeit incomplete) summary of retro reco
+    results "easy" and somewhat standard in comparison to other IceCube recos
+    which populate particles. Keep in mind that all info is NOT able to be
+    populated, here, though, so be sure to check the other fields
 
     Parameters
     ----------
@@ -281,8 +286,7 @@ def make_I3_particles(reco, point_estimator):
     -------
     particles_identifiers
 
-    '''
-
+    """
     fields_to_consume = set(reco.dtype.names)
 
     particles_identifiers = []
@@ -322,7 +326,7 @@ def make_I3_particles(reco, point_estimator):
 
 
 def extract_all_reco_info(reco, reco_name):
-    ''' Populate ALL Retro reco information
+    """Populate ALL Retro reco information
 
     Note we use length-one i3vector types because there aren't standard
     scalar types for anything besides I3Float, and if we want information
@@ -337,8 +341,7 @@ def extract_all_reco_info(reco, reco_name):
     -------
     all_reco_info : dict
 
-    '''
-
+    """
     all_reco_info = OrderedDict()
 
     for field in reco.dtype.names:
@@ -397,7 +400,7 @@ def extract_all_reco_info(reco, reco_name):
                 raise TypeError("Don't know how to handle type {}".format(val_type))
 
             val = i3type([pytype(val)])
-            
+
         all_reco_info[key] = val
 
     return all_reco_info
@@ -441,8 +444,7 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
         if "fit_status" in reco.dtype.names and reco["fit_status"] == FitStatus.NotSet:
             continue
 
-
-        particles_identifiers = make_I3_particles(reco, point_estimator)
+        particles_identifiers = make_i3_particles(reco, point_estimator)
 
         for particle, identifier in particles_identifiers:
             key = "__".join([reco_name, point_estimator, identifier])
@@ -455,11 +457,12 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
             setitem_pframe(pframe, key, val, event_index, overwrite=False)
 
 
-
 def retro_recos_to_i3files(
     eventsdir, point_estimator, recos=None, i3dir=None, overwrite=False
 ):
-    """
+    """Take retro recos found in .npy files / retro directory structure and
+    corresponding i3 files and generate new i3 files like the original but
+    populated with the retro reco information.
 
     Parameters
     ----------

@@ -77,12 +77,11 @@ import re
 import struct
 from subprocess import Popen, PIPE
 import sys
-import six
 
 import enum
 import numba
 import numpy as np
-from six import BytesIO, string_types
+from six import PY2, BytesIO, string_types
 from six.moves import map, range
 
 if __name__ == '__main__' and __package__ is None:
@@ -119,7 +118,7 @@ class LazyLoader(object):
     def _load_data(self):
         sdata = open(self.datasource, "rb").read()
         self._sha256 = hashlib.sha256(sdata).hexdigest()
-        if six.PY2:
+        if PY2:
             self._data = pickle.loads(sdata)
         else:
             self._data = pickle.loads(sdata, encoding="latin1")

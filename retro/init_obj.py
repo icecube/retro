@@ -65,7 +65,6 @@ from retro.retro_types import (
 from retro.tables.retro_5d_tables import (
     NORM_VERSIONS, TABLE_KINDS, Retro5DTables
 )
-from retro.utils.data_mc_agreement import quantize_min_q_filter
 from retro.utils.misc import expand, nsort_key_func, quantize
 
 
@@ -80,6 +79,8 @@ I3_FNAME_INFO_RE = re.compile(
     \.(?P<filenum>\d+)      # file number, e.g. 000000
     ''', (re.VERBOSE | re.IGNORECASE)
 )
+
+QUANTIZE_VEC = numba.vectorize(cache=True, target="cpu")(quantize.py_func)
 
 
 def setup_dom_tables(
@@ -194,7 +195,11 @@ def setup_dom_tables(
             cluster_idx += 1
             dpath = dom_tables_fname_proto.format(cluster_idx=cluster_idx)
             if not isdir(dpath):
-                print('failed to find', dpath, '\n(this may inidicate that all exisiting tables are loaded)')
+                print(
+                    'failed to find "{}" (this may inidicate that all existing '
+                    "tables are loaded)\n"
+                    .format(dpath)
+                )
                 break
 
             # TODO: make the omkeys field generic to all tables & place
@@ -613,10 +618,6 @@ def get_events(
                     )
                     assert num_ps == num_events
                     iterators[pulse_series] = iter(pulse_serieses)
-                    #(
-                    #    quantize_min_q_filter(ps, qmin=0.4, quantum=0.05)
-                    #    for ps in iter(pulse_serieses)
-                    #)
 
                     num_tr, _, time_ranges = iterate_file(
                         fpath=join(
@@ -727,7 +728,7 @@ def iterate_file(fpath, start=None, stop=None, step=None, mmap_mode=None):
         raise ValueError(fpath)
 
     num_events_in_file = len(events)
-    indices = range(num_events_in_file)[slicer]
+    indices = range(num_events_in_file)[slicer]  # pylint: disable=range-builtin-not-iterating
     sliced_events = events[slicer]
 
     return num_events_in_file, indices, sliced_events
@@ -765,9 +766,6 @@ def get_path(event, path):
             )
             raise
     return node
-
-
-QUANTIZE_VEC = numba.vectorize(cache=True, target="cpu")(quantize.py_func)
 
 
 def get_hits(event, path, angsens_model=None):
@@ -926,7 +924,7 @@ def get_hits(event, path, angsens_model=None):
             time_window_start,
             time_window_stop,
         ),
-        dtype=HITS_SUMMARY_T
+        dtype=HITS_SUMMARY_T,
     )
 
     return hits, hits_indexer, hits_summary
