@@ -80,6 +80,6 @@ tray.AddModule("I3Writer", "writer",
 )
 
 tray.AddModule('TrashCan', 'GoHomeYouReDrunk')
-tray.Execute(20)
+tray.Execute()
 tray.Finish()
 
