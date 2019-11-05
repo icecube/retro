@@ -407,7 +407,7 @@ def TabulateRetroSources(
     )
 
     medium_properties = parseIceModel(
-        expandvars('$I3_SRC/clsim/resources/ice/' + ice_model),
+        expandvars('$I3_SRC/ice-models/resources/models/' + ice_model),
         disableTilt=disable_tilt,
         disableAnisotropy=disable_anisotropy,
     )

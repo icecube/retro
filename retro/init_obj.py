@@ -80,7 +80,7 @@ I3_FNAME_INFO_RE = re.compile(
     ''', (re.VERBOSE | re.IGNORECASE)
 )
 
-QUANTIZE_VEC = numba.vectorize(cache=True, target="cpu")(quantize.py_func)
+QUANTIZE_VEC = numba.vectorize(cache=True, target="cpu")(quantize)
 
 
 def setup_dom_tables(

@@ -79,7 +79,6 @@ from subprocess import Popen, PIPE
 import sys
 
 import enum
-import numba
 import numpy as np
 from six import PY2, BytesIO, string_types
 from six.moves import map, range
@@ -1008,14 +1007,6 @@ def dict2struct(d):
     return array
 
 
-@numba.jit(
-    cache=True,
-    nopython=True,
-    nogil=True,
-    parallel=False,
-    error_model="numpy",
-    fastmath=True,
-)
 def quantize(x, qntm):
     """
     Parameters

@@ -407,6 +407,16 @@ GEO = load_pickle(
 )["geo"]
 
 
+numba_quantize = numba.jit(
+    cache=True,
+    nopython=True,
+    nogil=True,
+    parallel=False,
+    error_model="numpy",
+    fastmath=True,
+)(quantize)
+
+
 @numba.jit(cache=True, **JIT_KW)
 def get_dom_region(dom):
     """
@@ -616,7 +626,7 @@ def generate_filter_func(
                     pulse_time = pulse["time"]
 
                     if qntm > 0:
-                        pulse_charge = quantize(pulse_charge, qntm=qntm)
+                        pulse_charge = numba_quantize(pulse_charge, qntm=qntm)
 
                     if min_pulse_q > 0:
                         if pulse_charge < min_pulse_q:
