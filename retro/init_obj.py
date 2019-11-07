@@ -374,6 +374,8 @@ def get_events(
     triggers=None,
     angsens_model=None,
     hits=None,
+    hit_charge_quant=None,
+    min_hit_charge=None,
 ):
     """Iterate through a Retro events directory, getting events in a
     the form of a nested OrderedDict, with leaf nodes numpy structured arrays.
@@ -425,9 +427,13 @@ def get_events(
         detected photons (though without taking into account any further details of the
         DOM's ability to detect photons)
 
-    hits : string or sequence thereof, optional
+    hits : string
         Path to photon or pulse series to extract as ``event["hits"]`` field.
         Default is to not populate "hits".
+
+    hit_charge_quant : scalar, required if `hits` specified
+
+    min_hit_charge : scalar, required if `hits` specified
 
     Yields
     ------
@@ -492,6 +498,16 @@ def get_events(
 
     if hits is not None and not isinstance(hits, string_types):
         raise TypeError("`hits` is invalid type: {}".format(type(hits)))
+
+    if hits is not None:
+        if hit_charge_quant is None:
+            raise ValueError(
+                "`hit_charge_quant` must be specified if `hits` is specified"
+            )
+        if min_hit_charge is None:
+            raise ValueError(
+                "`min_hit_charge` must be specified if `hits` is specified"
+            )
 
     agg_event_idx = -1
     for events_root in events_roots:
@@ -661,7 +677,11 @@ def get_events(
 
                 if hits_ is not None:
                     hits_array, hits_indexer, hits_summary = get_hits(
-                        event=event, path=hits_, angsens_model=angsens_model
+                        event=event,
+                        path=hits_,
+                        hit_charge_quant=hit_charge_quant,
+                        min_hit_charge=min_hit_charge,
+                        angsens_model=angsens_model,
                     )
                     event['hits'] = hits_array
                     event['hits_indexer'] = hits_indexer
@@ -768,7 +788,7 @@ def get_path(event, path):
     return node
 
 
-def get_hits(event, path, angsens_model=None):
+def get_hits(event, path, hit_charge_quant, min_hit_charge, angsens_model=None):
     """From an event, take either pulses or photons (optionally applying
     weights to the latter for angular sensitivity) and create the three
     structured numpy arrays necessary for Retro to process the information as
@@ -776,9 +796,16 @@ def get_hits(event, path, angsens_model=None):
 
     Parameters
     ----------
-    event
+    event : mapping
 
-    path
+    path : string
+
+    hit_charge_quant : scalar >= 0
+        quantize charge in steps of this size; 0 disables quantization
+
+    min_hit_charge : scalar >= 0
+        filter out pulses with charge less than this value; 0 disables minimum
+        charge filtering
 
     angsens_model : str, numpy.polynomial.Polynomial, or None
         If specified and photons are extracted, weights for the photons will be
@@ -866,23 +893,24 @@ def get_hits(event, path, angsens_model=None):
     hits_indexer = []
     offset = 0
 
-    for (string, dom, pmt), p in series:
+    for (string, dom, pmt), hits_ in series:
         # -- Filter the pulses -- #
-        # TODO: make filtering optional, specify kind of filtering by kwargs, etc.
-        p["charge"] = QUANTIZE_VEC(p["charge"], 0.05)
-        p = p[p["charge"] >= 0.3]
+        if hit_charge_quant > 0:
+            hits_["charge"] = QUANTIZE_VEC(hits_["charge"], hit_charge_quant)
+        if min_hit_charge > 0:
+            hits_ = hits_[hits_["charge"] >= min_hit_charge]
 
-        num = len(p)
+        num = len(hits_)
         if num == 0:
             continue
 
         sd_idx = const.get_sd_idx(string=string, om=dom, pmt=pmt)
         sd_hits = np.empty(shape=num, dtype=HIT_T)
-        sd_hits['time'] = p['time']
+        sd_hits['time'] = hits_['time']
         if not photons:
-            sd_hits['charge'] = p['charge']
+            sd_hits['charge'] = hits_['charge']
         elif angsens_model:
-            sd_hits['charge'] = angsens_poly(p['coszen'])
+            sd_hits['charge'] = angsens_poly(hits_['coszen'])
         else:
             sd_hits['charge'] = 1
 
@@ -1197,6 +1225,18 @@ def parse_args(
             '--hits', default=None,
             help='''Path to item to use as "hits", e.g.
             "pulses/OfflinePulses".''',
+        )
+        group.add_argument(
+            '--hit-charge-quant',
+            type=float,
+            help="""Quantize hit (pulse or photon) charge in steps of this
+            value; specify 0 to disable quantization""",
+        )
+        group.add_argument(
+            '--min-hit-charge',
+            type=float,
+            help="""Remove hits with charge less than this value (after
+            quantization has been applied); specify 0 to keep all hits""",
         )
 
     args = parser.parse_args()

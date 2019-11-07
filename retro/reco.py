@@ -13,7 +13,6 @@ __all__ = [
     "CRS_STOP_FLAGS",
     "REPORT_AFTER",
     "CART_DIMS",
-    "MIN_NUM_HITS",
     "Reco",
     "get_multinest_meta",
     "main",
@@ -105,8 +104,6 @@ CRS_STOP_FLAGS = {
 REPORT_AFTER = 100
 
 CART_DIMS = ("x", "y", "z", "time")
-
-MIN_NUM_HITS = 8
 
 
 class StandaloneEvents(object):
@@ -218,6 +215,8 @@ class Reco(object):
         frame,
         methods,
         reco_pulse_series_name,
+        hit_charge_quant,
+        min_hit_charge,
         seeding_recos,
         triggers,
         additional_keys,
@@ -231,21 +230,27 @@ class Reco(object):
         frame : icecube.icetray.I3Frame
             this will be provided by the tray automatically
         methods : string or sequence of strings
-            reco methods to be performed, e.g. `["crs_prefit",]`
+            reco methods to be performed, e.g. `["crs_prefit"]`
         reco_pulse_series_name : string
-            name of pulse series, e.g. `"SRTTWOfflinePulsesDC"`
+            name of pulse series to use, e.g. `"SRTTWOfflinePulsesDC"`
+        hit_charge_quant : scalar >= 0
+            modify pulses in pulse series by quantizing their charge; specify 0
+            to disable quantization.
+        min_hit_charge : scalar >= 0
+            remove all pulses with charge less than this value (after
+            quantization has been applied); specify 0 to keep all pulses
         seeding_recos : list of strings
             recos to load for seeding / constructing priors
         triggers : list of strings
-            forgot what it does....time window? just set to `["I3TriggerHierarchy"]`
+            for purposes of obtaining time window, if this is used by a reco.
+            E.g., `["I3TriggerHierarchy"]`
         additional_keys : list of strings
             additional keys from the frame to load into the retro events object
         filter : string
-            expression a la `'event["header"]["L5_oscNext_bool"]'`, see
-            `_reco_event` method
-        point_estimator : string
-            which point estimator to use for I3Particles output, on out of:
-                ("max", "mean", "median")
+            expression as passed to method `_reco_event`, e.g.
+            `'event["header"]["L5_oscNext_bool"] and len(event['hits']) >= 8'`
+        point_estimator : string in {"max", "mean", "median"}
+            which point estimator to use for I3Particles output
 
         Usage
         -----
@@ -287,7 +292,6 @@ class Reco(object):
         event['recos'] = OrderedDict()
         event['triggers'] = OrderedDict()
 
-
         # who even knows what all this stuff is at this point
         # just ading keys and attributes (really?) to the dict until it's happy
         meta = OrderedDict(
@@ -323,6 +327,8 @@ class Reco(object):
         hits_array, hits_indexer, hits_summary = init_obj.get_hits(
             event=event,
             path=['pulses', reco_pulse_series_name],
+            hit_charge_quant=hit_charge_quant,
+            min_hit_charge=min_hit_charge,
             angsens_model=None,
         )
         event['hits'] = hits_array
@@ -356,14 +362,14 @@ class Reco(object):
             reco_name = "retro_" + method
 
             # add to frame
-            if status == 0:
+            if status == FitStatus.OK:
                 particles_identifiers = make_i3_particles(
                     event["recos"]["retro_" + method][0],
                     point_estimator=point_estimator,
                 )
                 for particle, identifier in particles_identifiers:
                     key = "__".join([reco_name, point_estimator, identifier])
-                    print('adding %s to frame'%key)
+                    #print('adding %s to frame'%key)
                     frame[key] = particle
 
                 all_reco_info = extract_all_reco_info(
@@ -372,7 +378,7 @@ class Reco(object):
                 )
 
                 for key, val in all_reco_info.items():
-                    print("adding {} = {} to frame".format(key, val))
+                    #print("adding {} = {} to frame".format(key, val))
                     frame[key] = val
 
     def setup_hypo(self, **kwargs):
@@ -402,7 +408,8 @@ class Reco(object):
             via `bool(eval(filter))`. Current event is accessible via the name
             `event` and numpy is named `np`. E.g. .. ::
 
-                filter="event['header']['L5_oscNext_bool']"
+                filter='event["header"]["L5_oscNext_bool"] and len(event["hits"]) >= 8'
+
         save_estimate : bool
             safe estimate to npy file
 
@@ -419,20 +426,12 @@ class Reco(object):
             filter = filter.strip()
             print("filter: '{}'".format(filter))
 
-        print("Running {} reconstructioni on event".format(method))
+        print("Running {} reconstruction on event".format(method))
 
         if filter and not eval(filter):  # pylint: disable=eval-used
             print(
                 "filter evaluates to False; skipping event (index {})".format(
                     event.meta["event_idx"]
-                )
-            )
-            return -1
-
-        if len(event["hits"]) < MIN_NUM_HITS:
-            print(
-                "fewer than {} hits found; skipping event (index {})".format(
-                    MIN_NUM_HITS, event.meta["event_idx"]
                 )
             )
             return -1
@@ -1592,17 +1591,25 @@ class Reco(object):
                 ("kwargs", kwargs),
             ]
         )
-        
+
         spherical_pairs = []
         cstd = []
-        for p in self.hypo_handler.opt_param_names:
-            if 'azimuth' in p:
-                p_zen = p.replace('azimuth', 'zenith')
-                assert p_zen in self.hypo_handler.all_param_names, 'Mising dimesnion %s in %s'%(p_zen, self.hypo_handler.all_param_names)
-                spherical_pairs.append([self.hypo_handler.all_param_names.index(p), self.hypo_handler.all_param_names.index(p_zen)])
-            elif not 'zenith' in p:
-                if p in min_vertex_std.keys():
-                    cstd.append(min_vertex_std[p])
+        for pname in self.hypo_handler.opt_param_names:
+            if 'azimuth' in pname:
+                p_zen = pname.replace('azimuth', 'zenith')
+                assert p_zen in self.hypo_handler.all_param_names, \
+                        'Mising dimesnion %s in %s' % (
+                            p_zen, self.hypo_handler.all_param_names
+                        )
+                spherical_pairs.append(
+                    [
+                        self.hypo_handler.all_param_names.index(pname),
+                        self.hypo_handler.all_param_names.index(p_zen),
+                    ]
+                )
+            elif 'zenith' not in pname:
+                if pname in min_vertex_std.keys():
+                    cstd.append(min_vertex_std[pname])
                 else:
                     cstd.append(-1)
 
@@ -1636,42 +1643,41 @@ class Reco(object):
 
             initial_points = np.vstack(initial_points)
 
-            fit = spherical_opt(func=func, 
-                                method='CRS2',
-                                initial_points=initial_points,
-                                spherical_indices=spherical_pairs,
-                                max_iter=max_iter,
-                                max_noimprovement=max_noimprovement,
-                                fstd=min_llh_std,
-                                cstd=cstd,
-                                meta=True,
-                                rand=rand,
-                                )
-
+            fit = spherical_opt(
+                func=func,
+                method='CRS2',
+                initial_points=initial_points,
+                spherical_indices=spherical_pairs,
+                max_iter=max_iter,
+                max_noimprovement=max_noimprovement,
+                fstd=min_llh_std,
+                cstd=cstd,
+                meta=True,
+                rand=rand,
+            )
 
             fit_status = FitStatus.OK
             stopping_flag = fit['stopping_flag']
             iter_num = fit['nit']
 
             vertex_std = np.full(
-                shape=1,	
-                fill_value=np.nan,	
-                dtype=[(d, np.float32) for d in min_vertex_std.keys()],	
-            )	
-            vertex_std_met_at_iter = np.full(	
-                shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()]	
+                shape=1,
+                fill_value=np.nan,
+                dtype=[(d, np.float32) for d in min_vertex_std.keys()],
+            )
+            vertex_std_met_at_iter = np.full(
+                shape=1, fill_value=-1, dtype=[(d, np.int32) for d in min_vertex_std.keys()]
             )
 
             idx = 0
-            for p in self.hypo_handler.opt_param_names:
-                if not 'zenith' in p or 'azimuth' in p:
-                    if p in min_vertex_std.keys():
-                        vertex_std[p] = fit['meta']['cstd'][idx]
-                        vertex_std_met_at_iter[p] = fit['meta']['cstd_met_at_iter'][idx]
+            for pname in self.hypo_handler.opt_param_names:
+                if 'zenith' not in pname or 'azimuth' in pname:
+                    if pname in min_vertex_std.keys():
+                        vertex_std[pname] = fit['meta']['cstd'][idx]
+                        vertex_std_met_at_iter[pname] = fit['meta']['cstd_met_at_iter'][idx]
                     else:
                         cstd.append(-1)
                     idx += 1
-
 
         except KeyboardInterrupt:
             raise
@@ -1979,7 +1985,7 @@ class Reco(object):
         n_live,
         maxiter,
         maxcall,
-        dlogz
+        dlogz,
     ):
         """Setup and run Dynesty on an event.
 
@@ -2270,7 +2276,7 @@ def main(description=__doc__):
         passed through `eval` and must produce a scalar value interpretable via
         `bool(eval(filter))`. Current event is accessible via the name `event`
         and numpy is named `np`. E.g.,
-        --filter='event["header"]["L5_oscNext_bool"]'"""
+        --filter='event["header"]["L5_oscNext_bool"] and len(event["hits"]) >= 8'"""
     )
 
     split_kwargs = init_obj.parse_args(
