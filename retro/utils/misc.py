@@ -115,6 +115,7 @@ class LazyLoader(object):
         self._is_loaded = False
 
     def _load_data(self):
+        sdata = open(self.datasource, "rb").read()
         self._sha256 = hashlib.sha256(sdata).hexdigest()
         if PY2:
             self._data = pickle.loads(sdata)

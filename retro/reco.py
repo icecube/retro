@@ -372,7 +372,7 @@ class Reco(object):
                 )
 
                 for key, val in all_reco_info.items():
-                    print("adding {} to frame".format(key))
+                    print("adding {} = {} to frame".format(key, val))
                     frame[key] = val
 
     def setup_hypo(self, **kwargs):
@@ -1644,7 +1644,8 @@ class Reco(object):
                                 max_noimprovement=max_noimprovement,
                                 fstd=min_llh_std,
                                 cstd=cstd,
-                                meta=True
+                                meta=True,
+                                rand=rand,
                                 )
 
 
