@@ -45,10 +45,10 @@ limitations under the License."""
 
 from collections import OrderedDict
 from copy import deepcopy
-import enum
 from os.path import abspath, basename, dirname, join
 import sys
 
+import enum
 import numpy as np
 from scipy import interpolate, stats
 from six import string_types
@@ -57,7 +57,7 @@ RETRO_DIR = dirname(dirname(abspath(__file__)))
 if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import GarbageInputError
+from retro import MissingOrInvalidPrefitError
 from retro.const import TWO_PI
 from retro.retro_types import FitStatus
 from retro.utils.misc import LazyLoader
@@ -217,7 +217,7 @@ def define_prior_from_prefit(
             break
 
     if reco is None:
-        raise ValueError(
+        raise MissingOrInvalidPrefitError(
             "Couldn't find a valid prefit reco from among {}".format(candidate_recos)
         )
 
@@ -249,7 +249,7 @@ def define_prior_from_prefit(
             raise
 
     if not np.isfinite(reco_val):
-        raise GarbageInputError(
+        raise MissingOrInvalidPrefitError(
             'dim_name "{}", reco "{}": reco val = {}'.format(dim_name, reco, reco_val)
         )
 
@@ -267,7 +267,7 @@ def define_prior_from_prefit(
             split_val = event["recos"][reco][split_by_reco_param]
 
         if not np.isfinite(split_val):
-            raise GarbageInputError(
+            raise MissingOrInvalidPrefitError(
                 'Reco "{}", split val "{}" = {}'.format(
                     reco, split_by_reco_param, split_val
                 )

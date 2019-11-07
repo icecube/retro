@@ -28,6 +28,8 @@ __all__ = [
     "NEUTRINO_ATTRS",
     "TRACK_ATTRS",
     "CASCADE_ATTRS",
+    "make_i3_particles",
+    "extract_all_reco_info",
     "particle_from_reco",
     "populate_pframe",
     "retro_recos_to_i3files",
@@ -35,7 +37,11 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict, Sequence
+from collections import OrderedDict
+try:
+    from collections.abc import Sequence
+except ImportError:
+    from collections import Sequence
 from copy import deepcopy
 from glob import glob
 from os import remove, walk
@@ -48,6 +54,7 @@ from os.path import (
     isfile,
     join,
     relpath,
+    splitext,
 )
 import sys
 
@@ -118,7 +125,8 @@ CASCADE_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Cascade)
 
 
 def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
-    """
+    """Create an I3Particle from part of a retro reco hypothesis.
+
     Parameters
     ----------
     reco : numpy.array of struct dtype
@@ -236,7 +244,8 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
 
 
 def setitem_pframe(frame, key, val, event_index, overwrite=False):
-    """Put value in frame, with wrapper for warn or error if the key is already present.
+    """Put value in frame, with wrapper for warn or error if the key is already
+    present.
 
     Parameters
     ----------
@@ -258,6 +267,143 @@ def setitem_pframe(frame, key, val, event_index, overwrite=False):
             )
         )
     frame[key] = val
+
+
+def make_i3_particles(reco, point_estimator):
+    """Populate I3Particles as a summary of the reco
+
+    This makes getting a quick (albeit incomplete) summary of retro reco
+    results "easy" and somewhat standard in comparison to other IceCube recos
+    which populate particles. Keep in mind that all info is NOT able to be
+    populated, here, though, so be sure to check the other fields
+
+    Parameters
+    ----------
+    reco
+    point_estimator
+
+    Returns
+    -------
+    particles_identifiers
+
+    """
+    fields_to_consume = set(reco.dtype.names)
+
+    particles_identifiers = []
+
+    particle, consumed_fields = particle_from_reco(
+        reco, kind="neutrino", field_format=None, point_estimator=point_estimator
+    )
+    particles_identifiers.append((particle, "neutrino"))
+    fields_to_consume -= consumed_fields
+
+    # TODO: make treatment recognize different track / cascade names, group
+    # like names together, and treat as separate tracks / cascades. For now
+    # we only have a single track and cascade, so not necessary, but this
+    # will eventually be an issue.
+
+    if any("track" in f for f in fields_to_consume):
+        particle, consumed_fields = particle_from_reco(
+            reco,
+            kind="track",
+            field_format="track_{field}",
+            point_estimator="median",
+        )
+        particles_identifiers.append((particle, "track"))
+        fields_to_consume -= consumed_fields
+
+    if any("cascade" in f for f in fields_to_consume):
+        particle, consumed_fields = particle_from_reco(
+            reco,
+            kind="cascade",
+            field_format="cascade_{field}",
+            point_estimator="median",
+        )
+        particles_identifiers.append((particle, "cascade"))
+        fields_to_consume -= consumed_fields
+
+    return particles_identifiers
+
+
+def extract_all_reco_info(reco, reco_name):
+    """Populate ALL Retro reco information
+
+    Note we use length-one i3vector types because there aren't standard
+    scalar types for anything besides I3Float, and if we want information
+    to live on, we don't want to have to maintain custom datatypes for
+    Retro inside the IceCube codebase, because who has time for that?
+
+    Parameters
+    ----------
+    reco
+
+    Returns
+    -------
+    all_reco_info : dict
+
+    """
+    all_reco_info = OrderedDict()
+
+    for field in reco.dtype.names:
+        key = "{}__{}".format(reco_name, field)
+        val = reco[field]
+        if hasattr(val, "dtype") and len(val.dtype) > 0:
+            # TODO: handle I3MapStringBool, I3MapStringInt?
+            val = I3MapStringDouble(list(zip(val.dtype.names, val.tolist())))
+        else:
+            val_type = getattr(val, "dtype", type(val))
+
+            # floating types
+            if val_type in (float, np.float64, np.float_, np.float):
+                i3type = I3VectorDouble
+                pytype = float
+            elif val_type in (np.float16, np.float32):
+                i3type = I3VectorFloat
+                pytype = float
+
+            # (signed) integer types
+            elif val_type in (
+                int,
+                np.int_,
+                np.int,
+                np.int64,
+                np.integer,
+                np.intp,
+                np.int0,
+            ):
+                i3type = I3VectorInt64
+                pytype = int
+            elif val_type in (np.int32,):
+                i3type = I3VectorInt
+                pytype = int
+            elif val_type in (np.int8, np.int16):
+                i3type = I3VectorShort
+                pytype = int
+
+            # unisgned integer types
+            elif val_type in (np.uint, np.uintp, np.uint64):
+                i3type = I3VectorUInt64
+                pytype = int
+            elif val_type in (np.uint8, np.uint16, np.uint32):
+                i3type = I3VectorUInt
+                pytype = int
+            elif val_type in (np.int8, np.int16):
+                i3type = I3VectorUShort
+                pytype = int
+
+            # boolean types
+            elif val_type in (bool, np.bool, np.bool_, np.bool8):
+                i3type = I3VectorBool
+                pytype = bool
+
+            else:
+                raise TypeError("Don't know how to handle type {}".format(val_type))
+
+            val = i3type([pytype(val)])
+
+        all_reco_info[key] = val
+
+    return all_reco_info
 
 
 def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
@@ -298,135 +444,48 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
         if "fit_status" in reco.dtype.names and reco["fit_status"] == FitStatus.NotSet:
             continue
 
-        # -- Populate I3Particles as a summary of the reco -- #
-
-        # This makes getting a quick (albeit incomplte) summary of retro reco
-        # results "easy" and somewhat standard in comparison to other IceCube
-        # recos which populate particles. Keep in mind that all info is NOT
-        # able to be populated, here, though, so be sure to check the other
-        # fields
-
-        fields_to_consume = set(reco.dtype.names)
-
-        particles_identifiers = []
-
-        particle, consumed_fields = particle_from_reco(
-            reco, kind="neutrino", field_format=None, point_estimator=point_estimator
-        )
-        particles_identifiers.append((particle, "neutrino"))
-        fields_to_consume -= consumed_fields
-
-        # TODO: make treatment recognize different track / cascade names, group
-        # like names together, and treat as separate tracks / cascades. For now
-        # we only have a single track and cascade, so not necessary, but this
-        # will eventually be an issue.
-
-        if any("track" in f for f in fields_to_consume):
-            particle, consumed_fields = particle_from_reco(
-                reco,
-                kind="track",
-                field_format="track_{field}",
-                point_estimator="median",
-            )
-            particles_identifiers.append((particle, "track"))
-            fields_to_consume -= consumed_fields
-
-        if any("cascade" in f for f in fields_to_consume):
-            particle, consumed_fields = particle_from_reco(
-                reco,
-                kind="cascade",
-                field_format="cascade_{field}",
-                point_estimator="median",
-            )
-            particles_identifiers.append((particle, "cascade"))
-            fields_to_consume -= consumed_fields
+        particles_identifiers = make_i3_particles(reco, point_estimator)
 
         for particle, identifier in particles_identifiers:
             key = "__".join([reco_name, point_estimator, identifier])
             setitem_pframe(pframe, key, particle, event_index, overwrite=False)
 
-        # -- Populate ALL Retro reco information -- #
 
-        # Note we use length-one i3vector types because there aren't standard
-        # scalar types for anything besides I3Float, and if we want information
-        # to live on, we don't want to have to maintain custom datatypes for
-        # Retro inside the IceCube codebase, because who has time for that?
+        all_reco_info = extract_all_reco_info(reco, reco_name)
 
-        for field in reco.dtype.names:
-            key = "{}__{}".format(reco_name, field)
-            val = reco[field]
-            if hasattr(val, "dtype") and len(val.dtype) > 0:
-                # TODO: handle I3MapStringBool, I3MapStringInt?
-                val = I3MapStringDouble(list(zip(val.dtype.names, val.tolist())))
-            else:
-                val_type = getattr(val, "dtype", type(val))
-
-                # floating types
-                if val_type in (float, np.float64, np.float_, np.float):
-                    i3type = I3VectorDouble
-                    pytype = float
-                elif val_type in (np.float16, np.float32):
-                    i3type = I3VectorFloat
-                    pytype = float
-
-                # (signed) integer types
-                elif val_type in (
-                    int,
-                    np.int_,
-                    np.int,
-                    np.int64,
-                    np.integer,
-                    np.intp,
-                    np.int0,
-                ):
-                    i3type = I3VectorInt64
-                    pytype = int
-                elif val_type in (np.int32,):
-                    i3type = I3VectorInt
-                    pytype = int
-                elif val_type in (np.int8, np.int16):
-                    i3type = I3VectorShort
-                    pytype = int
-
-                # unisgned integer types
-                elif val_type in (np.uint, np.uintp, np.uint64):
-                    i3type = I3VectorUInt64
-                    pytype = int
-                elif val_type in (np.uint8, np.uint16, np.uint32):
-                    i3type = I3VectorUInt
-                    pytype = int
-                elif val_type in (np.int8, np.int16):
-                    i3type = I3VectorUShort
-                    pytype = int
-
-                # boolean types
-                elif val_type in (bool, np.bool, np.bool_, np.bool8):
-                    i3type = I3VectorBool
-                    pytype = bool
-
-                else:
-                    raise TypeError("Don't know how to handle type {}".format(val_type))
-
-                val = i3type([pytype(val)])
-
+        for key, val in all_reco_info.items():
             setitem_pframe(pframe, key, val, event_index, overwrite=False)
 
 
 def retro_recos_to_i3files(
-    recos, eventsdir, point_estimator, i3dir=None, overwrite=False
+    eventsdir, point_estimator, recos=None, i3dir=None, overwrite=False
 ):
-    """
+    """Take retro recos found in .npy files / retro directory structure and
+    corresponding i3 files and generate new i3 files like the original but
+    populated with the retro reco information.
 
     Parameters
     ----------
-    recos : str or iterable thereof
     eventsdir : str
     point_estimator : str in {"mean", "median", "max"}
+    recos : str or iterable thereof, optional
+        If not specified, all "retro_*" recos found will be populated
     i3dir : str, optional
         If None or not specified, defaults to `eventsdir`
     overwrite : bool
 
     """
+    eventsdir = abspath(expanduser(expandvars(eventsdir)))
+    # If the leaf reco/events/truth dir "recos" was specified, must go one up
+    # to find events/truth
+    if basename(eventsdir) == "recos":
+        eventsdir = dirname(eventsdir)
+
+    if recos is None:
+        recos = [
+            splitext(basename(n))[0] for n in glob(join(eventsdir, "recos", "retro_*.npy"))
+        ]
+
     if isinstance(recos, string_types):
         recos = [recos]
     else:
@@ -436,12 +495,6 @@ def retro_recos_to_i3files(
             raise ValueError(
                 'Can only populate "retro_*" recos; "{}" is invalid'.format(reco)
             )
-
-    eventsdir = abspath(expanduser(expandvars(eventsdir)))
-    # If the leaf reco/events/truth dir "recos" was specified, must go one up
-    # to find events/truth
-    if basename(eventsdir) == "recos":
-        eventsdir = dirname(eventsdir)
 
     if i3dir is None:
         i3dir = eventsdir
@@ -524,21 +577,31 @@ def retro_recos_to_i3files(
                     )
                 )
 
+        # Collect frames into an event chain until we hit a physics frame, a
+        # second DAQ frame, or the end of the file.
+        #
+        # * If we have only a DAQ frame in the chain, create a new Physics
+        #   frame and populate the reco(s) to it.
+        #
+        # * If we have a Physics frame, populate the recos to that frame.
+        #
+        # * If we have no DAQ or Physics frames in the chain, we should be
+        #   done. Make sure we've accounted for all the recos in the npy files
+        #   and quit.
+        #
+        # When done with the chain, push all frames in the chain to the output file.
+        # physics frame, we have a new "event" to process; populate recos to
+        # that frame. Then, regardless of why we finished the event chain,
+        # write the frames in the chain out to the new i3 file.
+
         input_i3file = I3File(input_i3filepath, "r")
         output_i3file = I3File(output_i3filepath, "w")
 
         frame_buffer = []
+        chain_has_daq_frame = False
+        chain_has_physics_frame = False
         frame_counter = 0
         event_index = -1
-
-        # Collect frames until we hit a DAQ frame. Once we do, we start an
-        # "event chain," until we hit another DAQ or the end of the file. When
-        # we hit the end of the chain (i.e. the next DAQ frame or end of file),
-        # then we want to grab the last physics frame and augment it OR if
-        # there's no physics frame in the chain, we want to create a new one
-        # and append it to the chain. Flush the entire chain to the output
-        # file, and then create a new chain with the new-found DAQ frame (or
-        # quit if at end of file).
 
         try:
             while True:
@@ -554,32 +617,61 @@ def retro_recos_to_i3files(
                 else:
                     next_frame = None
 
-                # If no more frames or next frame is DAQ, current chain has
-                # ended. Populate the reco to the current chain, push the
-                # current chain's frames to the output file, and start a new
-                # chain with the next frame.
-                if next_frame is None or next_frame.Stop == I3Frame.DAQ:
-                    if frame_buffer:
-                        populate_pframe(
-                            event_index=event_index,
-                            frame_buffer=frame_buffer,
-                            recos_d=recos_d,
-                            point_estimator=point_estimator,
-                        )
+                # Current chain has ended and a new one will have to be started
+                # (or we're at the end of the file).
 
+                # Populate the reco to the current chain, push all of the
+                # current chain's frames to the output file, and start a new
+                # chain with the next frame (or quit if we're at the end of the
+                # file).
+                if (
+                    next_frame is None
+                    or next_frame.Stop == I3Frame.DAQ
+                    or (chain_has_physics_frame and next_frame.Stop == I3Frame.Physics)
+                ):
+                    if frame_buffer:
+                        # Events are identified as a chain with daq frame being
+                        # present with no physics frame, physics frame present
+                        # with no daq frame, or both being present (existence
+                        # of other frames is considered to be irrelevant)
+
+                        # TODO: oscNext v01.01 by L5, i3 file processing was
+                        # messed up, there were Q frames followed by I frames
+                        # and no associated P frame. Therefore we have to only
+                        # count chains with P frames in them as events, or else
+                        # the recos won't be put back in the right place /
+                        # indices run out.
+                        #if chain_has_daq_frame or chain_has_physics_frame:
+
+                        if chain_has_physics_frame:
+                            event_index += 1
+                            populate_pframe(
+                                event_index=event_index,
+                                frame_buffer=frame_buffer,
+                                recos_d=recos_d,
+                                point_estimator=point_estimator,
+                            )
+
+                        # Regardless if there was an event identified in the
+                        # chain, push all frames to the output file
                         for frame in frame_buffer:
                             output_i3file.push(frame)
 
+                    # No next frame indicates we hit the end of the file; quit
                     if next_frame is None:
                         break
 
+                    # Create a new chain, starting with the next frame
                     frame_buffer = [next_frame]
-                    event_index += 1
+                    chain_has_daq_frame = next_frame.Stop == I3Frame.DAQ
+                    chain_has_physics_frame = next_frame.Stop == I3Frame.Physics
 
                 # Otherwise, we have just another frame in the current chain;
                 # append it and move on.
                 else:
                     frame_buffer.append(next_frame)
+                    chain_has_daq_frame |= next_frame.Stop == I3Frame.DAQ
+                    chain_has_physics_frame |= next_frame.Stop == I3Frame.Physics
 
         except:
             output_i3file.close()
@@ -603,7 +695,7 @@ def main(description=__doc__):
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "--recos",
-        required=True,
+        default=None,
         nargs="+",
         help="""Reco names to populate to the i3 file(s)""",
     )

@@ -6,11 +6,11 @@ n_events=1
 base="/data/justin/retro/scans/upgoing_muon_evtidx${start_evt}_mie_notilt_tables_vs_lea_sim"
 mkdir -p "$base"
 
-events_base="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims100_step1"
+events_root="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-400_cz-1.0_az0_ice_spice_lea_holeice_as.9_gcd_md5_14bd15d0_geant_false_nsims100_step1"
 
 #hits="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1/photon_series/photons.pkl"
 #hits="~justin/src/retro/data/MuMinus_energy20_x0_y0_z-400_cz-1_az0_ice_spice_lea_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1_photon_series_photons0-9.pkl"
-hits="$events_base/photons/photons.pkl"
+hits="$events_root/photons/photons.pkl"
 hits_are_photons="--hits-are-photons"
 
 #proto="/fastio2/icecube/retro/tables/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
@@ -54,7 +54,7 @@ cscdescan="0-100:1"
 
 ~/src/retro/retro/scan_llh.py \
 	--outdir="$base/t_${tscan}_z_${zscan}" \
-	--events-base="$events_base" \
+	--events-root="$events_root" \
 	--start-idx=$start_evt \
 	--num-events=$n_events \
 	--time="$tscan" \

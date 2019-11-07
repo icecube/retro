@@ -28,8 +28,12 @@ from collections import Mapping, OrderedDict
 from os.path import abspath, dirname
 import sys
 
-from funcsigs import signature # use builtin `inspect` in python 3
-from six import string_types
+from six import PY2, string_types
+
+if PY2:
+    from funcsigs import signature
+else:
+    from inspect import signature
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(abspath(__file__)))

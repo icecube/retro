@@ -76,7 +76,11 @@ def combine_table_clusters(
     assert len(members) > 0
 
     omkeys = np.empty(len(members), dtype=OMKEY_T)
-    omkeys[['string', 'dom']] = members[['string', 'dom']]
+    if 'dom' in members.dtype.names:
+        omkeys[['string', 'om']] = members[['string', 'dom']]
+        omkeys[:]['pmt'] = 0
+    else:
+        omkeys[['string', 'om', 'pmt']] = members[['string', 'om', 'pmt']]
 
     table_fpaths = []
     names = members.dtype.names

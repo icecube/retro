@@ -10,7 +10,7 @@ from __future__ import absolute_import, division, print_function
 
 __all__ = [
     '__version__',
-    'GarbageInputError',
+    'MissingOrInvalidPrefitError',
     'NUMBA_AVAIL',
     'numba_jit',
     'RETRO_DIR',
@@ -45,7 +45,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from collections import namedtuple, OrderedDict, Iterable, Mapping, Sequence
+from collections import namedtuple, OrderedDict
+try:
+    from collections import Iterable, Mapping, Sequence
+except ImportError:
+    from collections.abc import Iterable, Mapping, Sequence
 from itertools import product
 import math
 from os import environ
@@ -65,8 +69,8 @@ __version__ = get_versions()['version']
 del get_versions
 
 
-class GarbageInputError(ValueError):
-    """Input value is bad"""
+class MissingOrInvalidPrefitError(ValueError):
+    """Prefit / seed fit missing or invalid"""
     pass
 
 
@@ -163,7 +167,12 @@ def load_pickle(path):
     obj
 
     """
-    with open(expanduser(expandvars(path)), 'rb') as fobj:
-        if PY2:
-            return pickle.load(fobj)
-        return pickle.load(fobj, encoding='latin1')
+    expanded_path = expanduser(expandvars(path))
+    try:
+        with open(expanded_path, 'rb') as fobj:
+            if PY2:
+                return pickle.load(fobj)
+            return pickle.load(fobj, encoding='latin1')
+    except:
+        sys.stderr.write('Failed to load pickle at path "{}"\n'.format(expanded_path))
+        raise

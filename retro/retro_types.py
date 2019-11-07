@@ -21,7 +21,11 @@ __all__ = [
     'TimePolCoord',
     'TimeSphCoord',
     'OMKEY_T',
-    'DOM_INFO_T',
+    'I3POSITION_T',
+    'I3DIRECTION_T',
+    'I3OMGEO_T',
+    'I3DOMCALIBRATION_T',
+    'DOMINFO_T',
     'EVT_DOM_INFO_T',
     'PULSE_T',
     'PHOTON_T',
@@ -30,6 +34,18 @@ __all__ = [
     'HITS_SUMMARY_T',
     'EVT_HIT_INFO_T',
     'ParticleType',
+    "EM_CASCADE_PTYPES",
+    "HADR_CASCADE_PTYPES",
+    "CASCADE_PTYPES",
+    "TRACK_PTYPES",
+    "INVISIBLE_PTYPES",
+    "ELECTRONS",
+    "MUONS",
+    "TAUS",
+    "NUES",
+    "NUMUS",
+    "NUTAUS",
+    "NEUTRINOS",
     'ParticleShape',
     'FitStatus',
     'LocationType',
@@ -38,7 +54,16 @@ __all__ = [
     'TriggerSourceID',
     'TriggerSubtypeID',
     'ExtractionError',
+    'OMType',
+    'CableType',
+    'DOMGain',
+    'TrigMode',
+    'LCMode',
+    'ToroidType',
     'TRIGGER_T',
+    'TRIGGERKEY_T',
+    'I3TRIGGERREADOUTCONFIG_T',
+    'I3TIME_T',
     'SRC_T',
     'TRACK_T',
     'INVALID_TRACK',
@@ -150,12 +175,117 @@ TimeSphCoord = namedtuple( # pylint: disable=invalid-name
 
 OMKEY_T = np.dtype(
     [
-        ('string', np.uint16),
-        ('dom', np.uint16),
+        ('string', np.int32),
+        ('om', np.uint32),
+        ('pmt', np.uint8),
     ]
 )
 
-DOM_INFO_T = np.dtype(
+I3POSITION_T = np.dtype(
+    [
+        ('x', np.float64),
+        ('y', np.float64),
+        ('z', np.float64),
+    ]
+)
+
+I3DIRECTION_T = np.dtype(
+    [
+        ('azimuth', np.float64),
+        ('zenith', np.float64),
+    ]
+)
+
+DOM_CAL_VERSION_T = np.dtype(
+    [
+        ('major', np.int8),
+        ('minor', np.int8),
+        ('rev', np.int8),
+    ]
+)
+
+I3OMGEO_T = np.dtype(
+    [
+        ('omkey', OMKEY_T),
+        ('omtype', np.uint8),
+        ('area', np.float64),
+        ('position', I3POSITION_T),
+        ('direction', I3DIRECTION_T),
+    ]
+)
+
+
+I3DOMCALIBRATION_T = np.dtype(
+    [
+        ('omkey', OMKEY_T),
+        #('atwd_beacon_baseline', <icecube.dataclasses._atwd_beacon_baseline_proxy>),
+        #('atwd_bin_calib_slope', <icecube.dataclasses._atwd_bin_calib_slope_proxy>),
+        #('atwd_delta_t', <icecube.dataclasses._atwd_gain_proxy>),
+        #('atwd_freq_fit', <icecube.dataclasses._atwd_freq_fit_proxy>),
+        #('atwd_gain', <icecube.dataclasses._atwd_gain_proxy>),
+        #('combined_spe_charge_distribution', <icecube.dataclasses.SPEChargeDistribution>),
+        ('dom_cal_version', DOM_CAL_VERSION_T),
+        ('dom_noise_decay_rate', np.float64),
+        ('dom_noise_rate', np.float64),  # 1/ns
+        ('dom_noise_scintillation_hits', np.float64),
+        ('dom_noise_scintillation_mean', np.float64),
+        ('dom_noise_scintillation_sigma', np.float64),
+        ('dom_noise_thermal_rate', np.float64),
+        #('fadc_baseline_fit', <icecube.dataclasses.LinearFit>),
+        ('fadc_beacon_baseline', np.float64),
+        ('fadc_delta_t', np.float64),
+        ('fadc_gain', np.float64),
+        ('front_end_impedance', np.float64),
+        #('hv_gain_fit', <icecube.dataclasses.LinearFit>),
+        ('is_mean_atwd_charge_valid', np.bool8),
+        ('is_mean_fadc_charge_valid', np.bool8),
+        ('mean_atwd_charge', np.float64),
+        ('mean_fadc_charge', np.float64),
+        #('mpe_disc_calib', <icecube.dataclasses.LinearFit>),
+        #('pmt_disc_calib', <icecube.dataclasses.LinearFit>),
+        ('relative_dom_eff', np.float64),
+        #('spe_disc_calib', <icecube.dataclasses.LinearFit>),
+        #('tau_parameters', <icecube.dataclasses.TauParam>),
+        ('temperature', np.float64),  # Kelvin
+        ('toroid_type', np.uint8),  # icecube.dataclasses.ToroidType.NEW_TOROID),
+        #('transit_time', <icecube.dataclasses.LinearFit>),
+    ]
+)
+
+
+I3DOMSTATUS_T = np.dtype(
+    [
+        ('omkey', OMKEY_T),
+        ('cable_type', np.int8),  # icecube.dataclasses.CableType
+        ('dac_fadc_ref', np.float64),
+        ('dac_trigger_bias_0', np.float64),
+        ('dac_trigger_bias_1', np.float64),
+        ('delta_compress', np.int8),  # icecube.dataclasses.OnOff
+        ('dom_gain_type', np.int8),  # icecube.dataclasses.DOMGain
+        ('fe_pedestal', np.float64),
+        # ('identity', <bound method I3DOMStatus.identity>) ... ???,
+        ('lc_mode', np.int8),  # icecube.dataclasses.LCMode
+        ('lc_span', np.uint32),
+        ('lc_window_post', np.float64),
+        ('lc_window_pre', np.float64),
+        ('mpe_threshold', np.float64),
+        ('n_bins_atwd_0', np.uint32),
+        ('n_bins_atwd_1', np.uint32),
+        ('n_bins_atwd_2', np.uint32),
+        ('n_bins_atwd_3', np.uint32),
+        ('n_bins_fadc', np.uint32),
+        ('pmt_hv', np.float64),
+        ('slc_active', np.bool8),
+        ('spe_threshold', np.float64),
+        ('status_atwd_a', np.int8),  # icecube.dataclasses.OnOff
+        ('status_atwd_b', np.int8),  # icecube.dataclasses.OnOff
+        ('status_fadc', np.int8),  # icecube.dataclasses.OnOff
+        ('trig_mode', np.int8),  # icecube.dataclasses.TrigMode
+        ('tx_mode', np.int8),  # icecube.dataclasses.LCMode
+    ]
+)
+
+DOMINFO_T = np.dtype(
     [
         ('sd_idx', np.uint32),
         ('operational', np.bool),
@@ -217,8 +347,8 @@ HITS_SUMMARY_T = np.dtype([
     ('latest_hit_time', np.float32),
     ('average_hit_time', np.float32),
     ('total_charge', np.float32),
-    ('total_num_hits', np.uint32),
-    ('total_num_doms_hit', np.uint32),
+    ('num_hits', np.uint32),
+    ('num_doms_hit', np.uint32),
     ('time_window_start', np.float32),
     ('time_window_stop', np.float32)
 ])
@@ -238,6 +368,18 @@ class InteractionType(enum.IntEnum):
     undefined = 0
     CC = 1
     NC = 2
+
+
+class OnOff(enum.IntEnum):
+    """enum OnOff from public/dataclasses/status/I3DOMStatus.h
+
+    Representable by np.int8.
+
+    """
+    # pylint: disable=invalid-name
+    Unknown = -1
+    Off = 0
+    On = 1
 
 
 class ParticleType(enum.IntEnum):
@@ -420,6 +562,94 @@ class ParticleType(enum.IntEnum):
     SMPMinus = -2000009501
 
 
+EM_CASCADE_PTYPES = (
+    ParticleType.EMinus,
+    ParticleType.EPlus,
+    ParticleType.Brems,
+    ParticleType.DeltaE,
+    ParticleType.PairProd,
+    ParticleType.Gamma,
+    ParticleType.Pi0,
+)
+"""Particle types parameterized as electromagnetic cascades,
+from clsim/python/GetHybridParameterizationList.py"""
+
+
+HADR_CASCADE_PTYPES = (
+    ParticleType.Hadrons,
+    ParticleType.Neutron,
+    ParticleType.PiPlus,
+    ParticleType.PiMinus,
+    ParticleType.K0_Long,
+    ParticleType.KPlus,
+    ParticleType.KMinus,
+    ParticleType.PPlus,
+    ParticleType.PMinus,
+    ParticleType.K0_Short,
+    ParticleType.Eta,
+    ParticleType.Lambda,
+    ParticleType.SigmaPlus,
+    ParticleType.Sigma0,
+    ParticleType.SigmaMinus,
+    ParticleType.Xi0,
+    ParticleType.XiMinus,
+    ParticleType.OmegaMinus,
+    ParticleType.NeutronBar,
+    ParticleType.LambdaBar,
+    ParticleType.SigmaMinusBar,
+    ParticleType.Sigma0Bar,
+    ParticleType.SigmaPlusBar,
+    ParticleType.Xi0Bar,
+    ParticleType.XiPlusBar,
+    ParticleType.OmegaPlusBar,
+    ParticleType.DPlus,
+    ParticleType.DMinus,
+    ParticleType.D0,
+    ParticleType.D0Bar,
+    ParticleType.DsPlus,
+    ParticleType.DsMinusBar,
+    ParticleType.LambdacPlus,
+    ParticleType.WPlus,
+    ParticleType.WMinus,
+    ParticleType.Z0,
+    ParticleType.NuclInt,
+    ParticleType.TauPlus,
+    ParticleType.TauMinus,
+)
+"""Particle types parameterized as hadronic cascades,
+from clsim/CLSimLightSourceToStepConverterPPC.cxx with addition of TauPlus and
+TauMinus"""
+
+
+CASCADE_PTYPES = EM_CASCADE_PTYPES + HADR_CASCADE_PTYPES
+"""Particle types classified as either EM or hadronic cascades"""
+
+
+TRACK_PTYPES = (ParticleType.MuPlus, ParticleType.MuMinus)
+"""Particle types classified as tracks"""
+
+
+INVISIBLE_PTYPES = (
+    ParticleType.Neutron,  # long decay time exceeds trigger window
+    ParticleType.K0,
+    ParticleType.K0Bar,
+    ParticleType.NuE,
+    ParticleType.NuEBar,
+    ParticleType.NuMu,
+    ParticleType.NuMuBar,
+    ParticleType.NuTau,
+    ParticleType.NuTauBar,
+)
+"""Invisible particles (at least to low-energy IceCube triggers)"""
+
+ELECTRONS = (ParticleType.EPlus, ParticleType.EMinus)
+MUONS = (ParticleType.MuPlus, ParticleType.MuMinus)
+TAUS = (ParticleType.TauPlus, ParticleType.TauMinus)
+NUES = (ParticleType.NuE, ParticleType.NuEBar)
+NUMUS = (ParticleType.NuMu, ParticleType.NuMuBar)
+NUTAUS = (ParticleType.NuTau, ParticleType.NuTauBar)
+NEUTRINOS = NUES + NUMUS + NUTAUS
+
 class ParticleShape(enum.IntEnum):
     """`I3Particle` property `shape`.
 
@@ -486,6 +716,11 @@ class TriggerConfigID(enum.IntEnum):
       $I3_SRC/trigger-sim/resources/scripts/print_trigger_configuration.py -g GCDFILE
 
     """
+    # I added "NONE" (code -1) since GCD file(s) were found with
+    # TriggerKey.source == 40 (GLOBAL), TriggerKey.type == 30 (THROUGHPUT), and
+    # TriggerKey.subtype == 0 (NO_SUBTYPE) have TriggerKey.config_id of None
+    NONE = -1
+
     SMT8_IN_ICE = 1006
     SMT3_DeepCore = 1011
     SMT6_ICE_TOP = 102
@@ -581,6 +816,75 @@ class ExtractionError(enum.IntEnum):
     NU_NC_OUTOING_NU_MISSING = 2
 
 
+class OMType(enum.IntEnum):
+    """`OMType` enum
+
+    Note this currently requires only uint8, i.e., [0, 255], for storage.
+
+    Scraped from dataclasses/public/dataclasses/geometry/I3OMGeo.h, 2019-06-26
+    SVN rev 167541
+    """
+    # pylint: disable=invalid-name
+    UnknownType = 0
+    AMANDA = 10
+    IceCube = 20
+    IceTop = 30
+    Scintillator = 40
+    IceAct = 50
+    # OMType > 100 are Gen2 R&D optical modules
+    PDOM = 110
+    DEgg = 120
+    mDOM = 130
+    WOM = 140
+    FOM = 150
+
+
+class CableType(enum.IntEnum):
+    """icecube.dataclasses.CableType"""
+    # pylint: disable=invalid-name
+    UnknownCableType = -1
+    Terminated = 0
+    Unterminated = 1
+
+
+class DOMGain(enum.IntEnum):
+    """icecube.dataclasses.DOMGain"""
+    # pylint: disable=invalid-name
+    UnknownGainType = -1
+    High = 0
+    Low = 1
+
+
+class TrigMode(enum.IntEnum):
+    """icecube.dataclasses.TrigMode"""
+    # pylint: disable=invalid-name
+    UnknownTrigMode = -1
+    TestPattern = 0
+    CPU = 1
+    SPE = 2
+    Flasher = 3
+    MPE = 4
+
+
+class LCMode(enum.IntEnum):
+    """icecube.dataclasses.LCMode"""
+    # pylint: disable=invalid-name
+    UnknownLCMode = -1
+    LCOff = 0
+    UpOrDown = 1
+    Up = 2
+    Down = 3
+    UpAndDown = 4
+    SoftLC = 5
+
+
+class ToroidType(enum.IntEnum):
+    """icecube.dataclasses.ToroidType"""
+    # pylint: disable=invalid-name
+    OLD_TOROID = 0
+    NEW_TOROID = 1
+
+
 TRIGGER_T = np.dtype([
     ('type', np.uint8),
     ('subtype', np.uint8),
@@ -590,6 +894,32 @@ TRIGGER_T = np.dtype([
     ('time', np.float32),
     ('length', np.float32)
 ])
+
+
+TRIGGERKEY_T = np.dtype(
+    [
+        ('source', np.uint8),
+        ('type', np.uint8),
+        ('subtype', np.uint8),
+        ('config_id', np.int32),
+    ]
+)
+"""icecube.dataclasses.TriggerKey"""
+
+
+I3TRIGGERREADOUTCONFIG_T = np.dtype(
+    [
+        ('readout_time_minus', np.float64),
+        ('readout_time_plus', np.float64),
+        ('readout_time_offset', np.float64),
+    ]
+)
+"""icecube.dataclasses.I3TriggerReadoutConfig"""
+
+
+I3TIME_T = np.dtype([("utc_year", np.int32), ("utc_daq_time", np.int64)])
+"""I3Time is defined internally by the year and daqTime (tenths of ns since the
+beginning of the year). See dataclasses/public/dataclasses/I3Time.h"""
 
 
 SRC_T = np.dtype([
@@ -623,6 +953,7 @@ NEUTRINO_T = np.dtype([
     ('length', np.float32),
 ])
 
+
 TRACK_T = np.dtype([
     ('pdg_encoding', np.int32),
     ('time', np.float32),
@@ -638,6 +969,7 @@ TRACK_T = np.dtype([
     ('stochastic_loss', np.float32),
     ('vis_em_equiv_stochastic_loss', np.float32),
 ])
+
 
 INVALID_TRACK = np.full(shape=1, fill_value=np.nan, dtype=TRACK_T)
 INVALID_TRACK['pdg_encoding'] = ParticleType.unknown

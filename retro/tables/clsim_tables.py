@@ -38,7 +38,8 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 from collections import OrderedDict
-from os.path import abspath, basename, dirname, isdir, isfile, join
+from os import listdir
+from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
 import re
 import sys
 from time import time
@@ -53,7 +54,12 @@ if __name__ == '__main__' and __package__ is None:
 from retro import DEBUG
 from retro.tables.retro_5d_tables import TABLE_NORM_KEYS, get_table_norm
 from retro.utils.misc import (
-    expand, force_little_endian, get_decompressd_fobj, hrlist2list, wstderr
+    expand,
+    force_little_endian,
+    get_decompressd_fobj,
+    hrlist2list,
+    set_explicit_dtype,
+    wstderr,
 )
 from retro.utils.geom import powerspace
 
@@ -70,6 +76,61 @@ MY_CLSIM_TABLE_KEYS = [
     'deltaphidir_bin_edges',
     'table',
 ]
+
+CUSTOM_KEYS = (
+    'table_shape',
+    'group_refractive_index',
+    'phase_refractive_index',
+    'binning',
+    'is_normed',
+    'table',
+    #'ckv_table',
+    #'t_indep_table',
+    #'table_norm',
+    #'t_indep_table_norm',
+)
+
+INFIX_KEYS = (
+    'retro',
+    'gcd_i3_md5',
+    'ice',
+    'angsens',
+    'hash',
+)
+
+GENERIC_KEYS = (
+    'parity',
+    'zenith',
+    'n_phase',
+    'energy',
+    'efficiency',
+    'n_group',
+    'level',
+    'geometry',
+    'azimuth',
+    'z',
+    'type',
+    'n_photons',
+    't_is_residual_time',
+    'disable_tilt',
+    'disable_anisotropy',
+    'string',
+    'dom',
+    'dom_x',
+    'dom_y',
+    'dom_z',
+    'dom_zenith',
+    'dom_azimuth',
+    'seed',
+    'n_events',
+)
+
+MANUALLY_SET_KEYS = (
+    'step_length',
+    'is_normed',
+    'table_norm',
+    't_indep_table_norm',
+)
 
 CLSIM_TABLE_FNAME_PROTO = [
     (
@@ -292,12 +353,7 @@ def interpret_clsim_table_fname(fname):
     return ordered_info
 
 
-def load_clsim_table_minimal(
-    fpath,
-    t_is_residual_time=None,
-    step_length=None,
-    mmap=False
-):
+def load_clsim_table_minimal(fpath, mmap=False, include_overflow=False):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Similar to the `load_clsim_table` function but the full table, including
@@ -311,34 +367,15 @@ def load_clsim_table_minimal(
         'zstandard', the file will be decompressed using the `python-zstandard`
         Python library before passing to `fits` for interpreting.
 
-    t_is_residual_time : bool, optional
-        Whether time dimension in table represents residual time. If a value is
-        passed and it doesn't match the key of the same name in the table, a
-        ValueError will be raised. If a value is passed and the key does not
-        exist in the table, this key will be added. If a value is not passed,
-        no modification to the loaded table will be made.
-
-    step_length : float, optional
-        Step length parameter used during tabulation of photons while
-        generating the table.
-
     mmap : bool, optional
         Whether to memory map the table
+
+    include_overflow : bool, optional
+        By default, overflow bins (if present) are removed
 
     Returns
     -------
     table : OrderedDict
-        Items include
-        - 'table_shape' : tuple of int
-        - 'table' : np.ndarray
-        - 't_indep_table' : np.ndarray (if available)
-        - 'n_photons' :
-        - 'phase_refractive_index' :
-        - 'r_bin_edges' :
-        - 'costheta_bin_edges' :
-        - 't_bin_edges' :
-        - 'costhetadir_bin_edges' :
-        - 'deltaphidir_bin_edges' :
 
     """
     t0 = time()
@@ -356,18 +393,26 @@ def load_clsim_table_minimal(
         else:
             mmap_mode = None
 
-        for key in MY_CLSIM_TABLE_KEYS + ['t_indep_table', 't_is_residual_time']:
-            fpath = join(indir, key + '.npy')
+        for rel_fpath in listdir(indir):
+            key, ext = splitext(rel_fpath)
+            abs_fpath = join(indir, rel_fpath)
+
+            if not (isfile(abs_fpath) and ext == '.npy'):
+                continue
+
             if DEBUG:
-                wstderr('    loading {} from "{}" ...'.format(key, fpath))
+                wstderr('    loading {} from "{}" ...'.format(key, abs_fpath))
+
             t1 = time()
-            if isfile(fpath):
-                table[key] = np.load(fpath, mmap_mode=mmap_mode)
-            elif key not in ['t_indep_table', 't_is_residual_time']:
-                raise ValueError(
-                    'Could not find file "{}" for loading table key "{}"'
-                    .format(fpath, key)
-                )
+            val = np.load(abs_fpath, mmap_mode=mmap_mode)
+
+            # Pull "small" things (less than 10 MiB) into memory so we don't
+            # have too many file handles open due to memory mapping
+            if mmap and val.nbytes < 10 * 1024**2:
+                val = np.copy(val)
+
+            table[key] = val
+
             if DEBUG:
                 wstderr(' ({} ms)\n'.format(np.round((time() - t1)*1e3, 3)))
 
@@ -379,12 +424,12 @@ def load_clsim_table_minimal(
             pf_table = fits.open(fobj, mode='readonly', memmap=mmap)
 
             header = pf_table[0].header  # pylint: disable=no-member
-            table['table_shape'] = pf_table[0].data.shape # pylint: disable=no-member
-            table['group_refractive_index'] = force_little_endian(
-                header['_i3_n_group']
+            table['table_shape'] = np.array(pf_table[0].data.shape, dtype=int)  # pylint: disable=no-member
+            table['group_refractive_index'] = set_explicit_dtype(
+                force_little_endian(header['_i3_n_group'])
             )
-            table['phase_refractive_index'] = force_little_endian(
-                header['_i3_n_phase']
+            table['phase_refractive_index'] = set_explicit_dtype(
+                force_little_endian(header['_i3_n_phase'])
             )
 
             n_dims = len(table['table_shape'])
@@ -402,41 +447,19 @@ def load_clsim_table_minimal(
                 be1 = header['_i3_{}_max'.format(axname)]
                 n_bins = header['_i3_{}_n_bins'.format(axname)]
                 power = header.get('_i3_{}_power'.format(axname), 1)
-                bin_edges = force_little_endian(
-                    pf_table[axnum + 1].data # pylint: disable=no-member
-                )
+                bin_edges = force_little_endian(pf_table[axnum + 1].data)  # pylint: disable=no-member
                 assert np.isclose(bin_edges[0], be0), '%f .. %f' % (be0, bin_edges[0])
                 assert np.isclose(bin_edges[-1], be1), '%f .. %f' % (be1, bin_edges[-1])
                 assert len(bin_edges) == n_bins + 1, '%d vs. %d' % (len(bin_edges), n_bins + 1)
-                assert np.allclose(bin_edges, powerspace(
-                    start=be0,
-                    stop=be1,
-                    num=n_bins + 1,
-                    power=power
-                ))
+                assert np.allclose(
+                    bin_edges,
+                    powerspace(start=be0, stop=be1, num=n_bins + 1, power=power),
+                )
                 axnames[axnum] = axname
                 binning[axnum] = bin_edges
 
             if not new_style:
                 if n_dims == 5:
-                    ## Space-time dimensions
-                    #table['r_bin_edges'] = force_little_endian(
-                    #    pf_table[1].data # meters # pylint: disable=no-member
-                    #)
-                    #table['costheta_bin_edges'] = force_little_endian(
-                    #    pf_table[2].data # pylint: disable=no-member
-                    #)
-                    #table['t_bin_edges'] = force_little_endian(
-                    #    pf_table[3].data # nanoseconds # pylint: disable=no-member
-                    #)
-
-                    ## Photon directionality
-                    #table['costhetadir_bin_edges'] = force_little_endian(
-                    #    pf_table[4].data # pylint: disable=no-member
-                    #)
-                    #table['deltaphidir_bin_edges'] = force_little_endian(
-                    #    pf_table[5].data # pylint: disable=no-member
-                    #)
                     axnames = ['r', 'costheta', 't', 'costhetadir', 'deltaphidir']
                 elif n_dims == 6:
                     axnames = ['r', 'costheta', 'phi', 't', 'costhetadir', 'deltaphidir']
@@ -445,73 +468,46 @@ def load_clsim_table_minimal(
                         '{}-dimensional table not handled for old-style CLSim'
                         ' tables'.format(n_dims)
                     )
-                binning = [force_little_endian(pf_table[i+1].data) for i in range(len(axnames))] # pylint: disable=no-member
+                binning = [force_little_endian(pf_table[i + 1].data).flat for i in range(len(axnames))] # pylint: disable=no-member
 
             for axnum, (axname, bin_edges) in enumerate(zip(axnames, binning)):
                 assert axname is not None, 'missing axis %d name' % axnum
                 assert bin_edges is not None, 'missing axis %d binning' % axnum
 
-            table['axnames'] = axnames
-            table['binning'] = binning
+            dtype = np.dtype([(axname, np.float64, dim.size) for axname, dim in zip(axnames, binning)])
+            table['binning'] = np.array(tuple(binning), dtype=dtype)
 
-            for keyroot in (
-                'parity',
-                'zenith',
-                'n_phase',
-                'energy',
-                'efficiency',
-                'n_group',
-                'level',
-                'geometry',
-                'azimuth',
-                'z',
-                'type',
-                'n_photons',
-                't_is_residual_time',
-                'disable_tilt',
-                'disable_anisotropy',
-                'string',
-                'dom',
-                'dom_x',
-                'dom_y',
-                'dom_z',
-                'dom_zenith',
-                'dom_azimuth',
-                'seed',
-                'n_events',
-            ):
+            for keyroot in GENERIC_KEYS:
                 keyname = '_i3_' + keyroot
                 if keyname in header:
-                    val = force_little_endian(
-                        header[keyname]
-                    )
+                    val = force_little_endian(header[keyname])
                     if keyroot in (
                         't_is_residual_time',
                         'disable_tilt',
                         'disable_anisotropy',
                     ):
-                        val = bool(val)
+                        val = np.bool8(val)
+                    else:
+                        val = set_explicit_dtype(val)
                     table[keyroot] = val
 
             # Get string values from keys that have a prefix preceded by the
             # value all in the key (I3 software had issues saving strings as
             # values in the header "dict" so the workaround was to store the
             # string value in this way)
-            for infix in (
-                'retro',
-                'gcd_i3_md5',
-                'ice',
-                'angsens',
-                'hash',
-            ):
+            for infix in INFIX_KEYS:
                 keyroot = '_i3_' + infix + '_'
                 for keyname in header.keys():
                     if not keyname.startswith(keyroot):
                         continue
                     val = keyname[len(keyroot):]
-                    table[infix] = val
+                    table[infix] = np.string0(val)
 
-            table['table'] = force_little_endian(pf_table[0].data) # pylint: disable=no-member
+            if include_overflow:
+                slicer = (slice(None),) * n_dims
+            else:
+                slicer = (slice(1, -1),) * n_dims
+            table['table'] = force_little_endian(pf_table[0].data[slicer])  # pylint: disable=no-member
 
             wstderr('    (load took {} s)\n'.format(np.round(time() - t0, 3)))
 
@@ -528,25 +524,19 @@ def load_clsim_table_minimal(
     else: # fpath is neither dir nor file
         raise ValueError('Table does not exist at path "{}"'.format(fpath))
 
-    if step_length is not None:
-        if 'step_length' in table:
-            assert step_length == table['step_length']
-        else:
-            table['step_length'] = step_length
+    if 'step_length' not in table:
+        table['step_length'] = 1
 
-    if t_is_residual_time is not None:
-        if 't_is_residual_time' in table:
-            assert t_is_residual_time == table['t_is_residual_time']
-        else:
-            table['t_is_residual_time'] = t_is_residual_time
+    if 't_is_residual_time' not in table:
+        table['t_is_residual_time'] = True
 
     if DEBUG:
         wstderr('  Total time to load: {} s\n'.format(np.round(time() - t0, 3)))
 
     return table
 
-def load_clsim_table(fpath, step_length, angular_acceptance_fract,
-                     quantum_efficiency):
+
+def load_clsim_table(fpath, angular_acceptance_fract, quantum_efficiency):
     """Load a CLSim table from disk (optionally compressed with zstd).
 
     Parameters
@@ -578,14 +568,43 @@ def load_clsim_table(fpath, step_length, angular_acceptance_fract,
     """
     table = OrderedDict()
 
-    table = load_clsim_table_minimal(fpath=fpath, step_length=step_length)
-    table['table_norm'] = get_table_norm(
-        angular_acceptance_fract=angular_acceptance_fract,
-        quantum_efficiency=quantum_efficiency,
-        step_length=step_length,
-        **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
-    )
-    table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
+    assert isfile(fpath)
+
+    table = load_clsim_table_minimal(fpath=fpath, include_overflow=True)
+    if 'is_normed' not in table:
+        table['is_normed'] = False
+    is_normed = table['is_normed']
+    if not is_normed:
+        table['table_norm'] = get_table_norm(
+            angular_acceptance_fract=angular_acceptance_fract,
+            quantum_efficiency=quantum_efficiency,
+            step_length=table['step_length'],
+            **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
+        )
+        table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
+
+    wstderr('Interpreting table...\n')
+    t0 = time()
+    n_dims = len(table['table_shape'])
+
+    # Cut off first and last bin in each dimension (underflow and
+    # overflow bins)
+    slice_wo_overflow = (slice(1, -1),) * n_dims
+    wstderr('    slicing to remove underflow/overflow bins...')
+    t0 = time()
+    table_wo_overflow = table['table'][slice_wo_overflow]
+    wstderr(' ({} ms)\n'.format(np.round((time() - t0)*1e3)))
+
+    wstderr('    slicing and summarizing underflow and overflow...')
+    is_normed = table['is_normed']
+    if not is_normed:
+        table['table_norm'] = get_table_norm(
+            angular_acceptance_fract=angular_acceptance_fract,
+            quantum_efficiency=quantum_efficiency,
+            step_length=table['step_length'],
+            **{k: table[k] for k in TABLE_NORM_KEYS if k != 'step_length'}
+        )
+        table['t_indep_table_norm'] = quantum_efficiency * angular_acceptance_fract
 
     wstderr('Interpreting table...\n')
     t0 = time()

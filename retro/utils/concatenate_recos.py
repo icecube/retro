@@ -4,8 +4,8 @@
 
 
 """
-Recursively search for and aggregate "slc*.{reco}.npy" reco files into a single
-"{reco}.npy" file (one file per leaf directory)
+Recursively search for events, truth, and recos .npy files, and aggregate into
+a single numpy array.
 """
 
 
@@ -19,7 +19,11 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import OrderedDict
+from collections import  OrderedDict
+try:
+    from collections import Iterable
+except ImportError:
+    from collections.abc import Iterable
 from glob import glob
 from os import listdir, walk
 from os.path import (
@@ -42,7 +46,7 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.utils.misc import join_struct_arrays, nsort_key_func
+from retro.utils.misc import expand, join_struct_arrays, mkdir, nsort_key_func
 
 
 EVENT_ID_FIELDS = [
@@ -82,22 +86,18 @@ def get_common_mask(event_ids, common_ids):
     """
     common_mask = np.empty(shape=event_ids.shape, dtype=np.bool8)
     for idx in numba.prange(len(event_ids)):  # pylint: disable=not-an-iterable
-        event_id = event_ids[idx]
+        e_id = event_ids[idx]
         event_id_is_common = False
-        for common_id in common_ids:
+        for c_id in common_ids:
             if (
-                event_id["run_id"] == common_id["run_id"]
-                and event_id["sub_run_id"] == common_id["sub_run_id"]
-                and event_id["event_id"] == common_id["event_id"]
-                and event_id["sub_event_id"] == common_id["sub_event_id"]
-                and event_id["start_time"]["utc_year"]
-                == common_id["start_time"]["utc_year"]
-                and event_id["start_time"]["utc_daq_time"]
-                == common_id["start_time"]["utc_daq_time"]
-                and event_id["end_time"]["utc_year"]
-                == common_id["end_time"]["utc_year"]
-                and event_id["end_time"]["utc_daq_time"]
-                == common_id["end_time"]["utc_daq_time"]
+                e_id["run_id"] == c_id["run_id"]
+                and e_id["sub_run_id"] == c_id["sub_run_id"]
+                and e_id["event_id"] == c_id["event_id"]
+                and e_id["sub_event_id"] == c_id["sub_event_id"]
+                and e_id["start_time"]["utc_year"] == c_id["start_time"]["utc_year"]
+                and e_id["start_time"]["utc_daq_time"] == c_id["start_time"]["utc_daq_time"]
+                and e_id["end_time"]["utc_year"] == c_id["end_time"]["utc_year"]
+                and e_id["end_time"]["utc_daq_time"] == c_id["end_time"]["utc_daq_time"]
             ):
                 event_id_is_common = True
                 break
@@ -159,7 +159,7 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
     Parameters
     ----------
     root_dirs : str or iterable thereof
-    recos : str or iterable thereof
+    recos : str or iterable thereof, or None
         Specify "all" to load all recos found in first "events/recos" dir
         encountered. Specify None to load no recos.
     allow_missing_recos : bool
@@ -189,18 +189,35 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
         )
 
     if recos is None:
-        recos = []
-    if isinstance(recos, string_types) and recos != "all":
-        recos = [recos]
+        expected_reco_names = []
+    elif isinstance(recos, string_types):
+        if recos == "all":
+            expected_reco_names = None
+        else:
+            expected_reco_names = [recos]
+    else:
+        assert isinstance(recos, Iterable)
+        expected_reco_names = list(recos)
+        for reco in expected_reco_names:
+            if reco == "all":
+                assert len(expected_reco_names) == 1
+                expected_reco_names = None
 
-    sys.stdout.write("`recos` to extract: {}\n".format(recos))
+    if expected_reco_names:
+        for reco_name in expected_reco_names:
+            assert isinstance(reco_name, string_types), str(reco_name)
 
-    paths_concatenated = []
-    all_events = None
-    all_truths = None
-    all_recos = OrderedDict()
+    sys.stdout.write("`recos` to extract: {}\n".format(expected_reco_names))
+
+    paths_with_empty_events_file = []
+    paths_with_nonempty_events_file = []
+    all_events = []
+    all_truths = []
+    all_recos = []
     total_num_events = 0
     events_dtype = None
+    has_truth = False
+    all_found_reco_names = set()
 
     for root_dir in root_dirs:
         for dirpath, dirs, files in walk(root_dir, followlinks=True):
@@ -213,102 +230,173 @@ def concatenate_recos(root_dirs, recos="all", allow_missing_recos=True):
             if "events.npy" not in files:
                 continue
 
-            paths_concatenated.append(dirpath)
+            this_events = np.load(join(dirpath, "events.npy"))
+            if len(this_events) == 0:
+                paths_with_empty_events_file.append(dirpath)
+                continue
 
-            events = np.load(join(dirpath, "events.npy"))
-            if all_events is None:
-                all_events = [events]
-                events_dtype = events.dtype
+            if (
+                "L5_oscNext_bool" in this_events.dtype.names
+                and np.count_nonzero(this_events["L5_oscNext_bool"]) == 0
+            ):
+                paths_with_empty_events_file.append(dirpath)
+                continue
+
+            paths_with_nonempty_events_file.append(dirpath)
+
+            if events_dtype is None:
+                events_dtype = this_events.dtype
             else:
-                if events.dtype != events_dtype:
+                if this_events.dtype != events_dtype:
                     raise TypeError(
-                        "events.dtype should be\n{}but dtype found is\n{}".format(
-                            events_dtype, events.dtype
+                        '"{}": events.dtype should be\n{}\nbut dtype found'
+                        "is\n{}".format(
+                            dirpath, events_dtype, this_events.dtype
                         )
                     )
-                all_events.append(events)
 
+            this_truths = None
             if "truth.npy" in files:
-                truth = np.load(join(dirpath, "truth.npy"))
-                assert len(truth) == len(events)
-                if all_truths is None:
-                    all_truths = [truth]
-                else:
-                    all_truths.append(truth)
-            elif all_truths is not None:
+                this_truths = np.load(join(dirpath, "truth.npy"))
+                has_truth = True
+                if len(this_truths) != len(this_events):
+                    raise ValueError(
+                        "len(this_truths) = {} != len(this_events) = {}, dir {}"
+                        .format(len(this_truths), len(this_events), dirpath)
+                    )
+            elif has_truth:
                 raise IOError(
                     '"truth.npy" exists in other directories but not in "{}"'.format(
                         dirpath
                     )
                 )
 
-            if recos == "all":
+            if expected_reco_names is None:
                 reco_fnames = sorted(listdir(join(dirpath, "recos")))
-                recos = [splitext(reco_fname)[0] for reco_fname in reco_fnames]
-                sys.stdout.write("`recos` specified as 'all'; found {}\n".format(recos))
+                this_expected_reco_names = [splitext(reco_fname)[0] for reco_fname in reco_fnames]
+            else:
+                this_expected_reco_names = expected_reco_names
+            all_found_reco_names.update(this_expected_reco_names)
 
-            for reco_name in recos:
-                fpath = join(dirpath, "recos", reco_name + ".npy")
-                if not isfile(fpath):
-                    if not allow_missing_recos:
-                        raise IOError(
-                            'Missing reco "{}" file at path "{}"'.format(
-                                reco_name, fpath
+            missing_recos = []
+            if this_expected_reco_names:
+                this_recos = OrderedDict()
+                for reco_name in this_expected_reco_names:
+                    fpath = join(dirpath, "recos", reco_name + ".npy")
+                    if not isfile(fpath):
+                        if not allow_missing_recos:
+                            raise ValueError(
+                                'Missing reco "{}" in dir "{}"'.format(
+                                    reco_name, dirpath
+                                )
+                            )
+                        missing_recos.append(reco_name)
+                        break
+                    reco = np.load(fpath)
+                    if len(reco) != len(this_events):
+                        raise ValueError(
+                            'reco "{}" len = {}, events len = {} in dir "{}"'.format(
+                                reco_name, len(reco), len(this_events), dirpath
                             )
                         )
-                    if total_num_events > 0 and reco_name in all_recos:
-                        raise IOError(
-                            'Reco "{}" missing from dir "{}"'.format(reco_name, dirpath)
-                        )
-                    continue
-                reco = np.load(fpath)
-                if len(reco) != len(events):
-                    raise ValueError(
-                        'reco "{}" len = {}, events len = {} in dir "{}"'.format(
-                            reco_name, len(reco), len(events), dirpath
-                        )
+                    this_recos[reco_name] = reco
+            else:
+                this_recos = None
+
+            if missing_recos:
+                print(
+                    'Missing recos {} in dir "{}", skipping'.format(
+                        missing_recos, dirpath
                     )
-                if reco_name in all_recos:
-                    all_recos[reco_name].append(reco)
+                )
+
+            all_events.append(this_events)
+            all_truths.append(this_truths)
+            all_recos.append(this_recos)
+            total_num_events += len(this_events)
+
+    # -- Loop through, validating the above -- #
+
+    all_dirs_concatenated = []
+    all_events_to_process = []
+    all_truths_to_process = []
+    all_recos_to_process = OrderedDict()
+
+    for dirpath, this_events, this_truths, this_recos in zip(
+        paths_with_nonempty_events_file,
+        all_events,
+        all_truths,
+        all_recos,
+    ):
+        if len(all_found_reco_names) > 0:
+            if this_recos is None or set(this_recos.keys()) != all_found_reco_names:
+                if allow_missing_recos:
+                    continue
                 else:
-                    if total_num_events > 0:
-                        raise IOError(
-                            'Reco "{}" found in current dir "{}" but was'
-                            " missing in another events directory".format(
-                                reco_name, dirpath
-                            )
-                        )
-                    all_recos[reco_name] = [reco]
+                    raise ValueError('"{}"'.format(dirpath))
 
-            total_num_events += len(events)
+            for reco_name, reco_vals in this_recos.items():
+                if reco_name not in all_recos_to_process:
+                    all_recos_to_process[reco_name] = []
+                all_recos_to_process[reco_name].append(reco_vals)
 
-    if total_num_events == 0:
+        if has_truth:
+            if this_truths is None:
+                raise ValueError('missing truth in dir "{}"'.format(dirpath))
+            else:
+                all_truths_to_process.append(this_truths)
+
+        all_events_to_process.append(this_events)
+        all_dirs_concatenated.append(dirpath)
+
+    print(
+        "Paths with empty events files: {:d}, paths with non-empty events"
+        " files: {:d}, total: {:d}".format(
+            len(paths_with_empty_events_file),
+            len(paths_with_nonempty_events_file),
+            len(paths_with_empty_events_file) + len(paths_with_nonempty_events_file),
+        )
+    )
+    print(
+        "Paths with non-empty events files skipped due to missing reco(s):"
+        " {:d}".format(
+            len(paths_with_nonempty_events_file) - len(all_dirs_concatenated)
+        )
+    )
+
+    if len(all_events_to_process) == 0:
         raise ValueError(
-            "Found no events to concatenate at path(s) {}".format(root_dirs)
+            "Found no events to concatenate recursively from path(s) {}".format(
+                root_dirs
+            )
         )
 
     # Create a single array with all extracted info; first-level dtype names
     # are all dtype names from `events` plus "truth" and the names of each reco
 
-    events = np.concatenate(all_events)
-    if all_truths is not None:
-        truth = np.concatenate(all_truths)
+    events = np.concatenate(all_events_to_process)
+    if has_truth:
+        truth = np.concatenate(all_truths_to_process)
         # Re-cast such that dtype is ["truth"][key_n] instead of just [key_n]
         truth = truth.view(dtype=np.dtype([("truth", truth.dtype)]))
     else:
         truth = None
 
-    recos = []
-    for rname, rvals in all_recos.items():
-        rvals = np.concatenate(rvals)
-        # Re-cast such that dtype is ["truth"][key_n] instead of just [key_n]
-        rvals = rvals.view(dtype=np.dtype([(rname, rvals.dtype)]))
-        recos.append(rvals)
+    if len(all_found_reco_names) == 0:
+        recos = None
+    else:
+        recos = []
+        for reco_name, reco_vals in all_recos_to_process.items():
+            reco_vals = np.concatenate(reco_vals)
+            # Re-cast such that dtype is ["truth"][key_n] instead of just [key_n]
+            reco_vals = reco_vals.view(dtype=np.dtype([(reco_name, reco_vals.dtype)]))
+            recos.append(reco_vals)
 
     to_join = [events]
     if truth is not None:
         to_join.append(truth)
-    to_join.extend(recos)
+    if recos is not None:
+        to_join.extend(recos)
 
     joined_concacatenated_array = join_struct_arrays(to_join)
 
@@ -325,8 +413,13 @@ def concatenate_recos_and_save(outfile, **kwargs):
         Arguments passed to `concatenate_recos`
 
     """
+    outfile = expand(outfile)
     out_array = concatenate_recos(**kwargs)
+    outdir = dirname(outfile)
+    if not isdir(outdir):
+        mkdir(outdir)
     np.save(outfile, out_array)
+    sys.stdout.write('Saved concatenated array to "{}"\n'.format(outfile))
 
 
 def main():
@@ -345,6 +438,7 @@ def main():
     )
     parser.add_argument(
         "--recos",
+        nargs="+",
         default=None,
         help="""Specify reco names to retrieve, or specify "all" to retrieve
         all recos present (at least those found in the first events/recos

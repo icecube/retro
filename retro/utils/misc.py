@@ -39,7 +39,11 @@ __all__ = [
     'RE_LEADING_INVALID',
     'make_valid_python_name',
     'join_struct_arrays',
+    'NSORT_RE',
     'nsort_key_func',
+    'set_explicit_dtype',
+    'dict2struct',
+    'quantize',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -58,10 +62,14 @@ See the License for the specific language governing permissions and
 limitations under the License.'''
 
 import base64
-from collections import Iterable, OrderedDict, Mapping, Sequence
+from collections import OrderedDict
+try:
+    from collections import Iterable, Mapping, Sequence
+except ImportError:
+    from collections.abc import Iterable, Mapping, Sequence
 import errno
 import hashlib
-from numbers import Number
+from numbers import Integral, Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
 import pickle
@@ -72,7 +80,7 @@ import sys
 
 import enum
 import numpy as np
-from six import BytesIO, string_types
+from six import PY2, BytesIO, string_types
 from six.moves import map, range
 
 if __name__ == '__main__' and __package__ is None:
@@ -107,9 +115,11 @@ class LazyLoader(object):
         self._is_loaded = False
 
     def _load_data(self):
-        with open(self.datasource, 'rb') as f:
-            self._sha256 = hashlib.sha256(f.read()).hexdigest()
-        self._data = load_pickle(self.datasource)
+        self._sha256 = hashlib.sha256(sdata).hexdigest()
+        if PY2:
+            self._data = pickle.loads(sdata)
+        else:
+            self._data = pickle.loads(sdata, encoding="latin1")
 
     @property
     def datasource(self):
@@ -845,9 +855,15 @@ def deduce_sph_pairs(param_names):
 
 
 RE_INVALID_CHARS = re.compile('[^0-9a-zA-Z_]')
+"""Invalid Python name if chars after first aren't one of 0-9, a-z, A-Z, or
+underscore"""
+
 RE_LEADING_INVALID = re.compile('^[^a-zA-Z_]+')
+"""Invalid Python name if first char isn't a-z or A-Z"""
+
+
 def make_valid_python_name(name):
-    """Make a name a valid Python identifier.
+    """Make a name a valid Python identifier by removing illegal chars.
 
     From user Triptych at http://stackoverflow.com/questions/3303312
 
@@ -894,6 +910,7 @@ def join_struct_arrays(arrays):
 
 NSORT_RE = re.compile(r'(\d+)')
 
+
 def nsort_key_func(s):
     """Use as the `key` argument to the `sorted` function or `sort` method.
 
@@ -912,6 +929,96 @@ def nsort_key_func(s):
         key.append(non_number)
         key.append(int(number))
     return key
+
+
+def set_explicit_dtype(x):
+    """Force `x` to have a numpy type if it doesn't already have one.
+
+    Parameters
+    ----------
+    x : numpy-typed object, bool, integer, float
+        If not numpy-typed, type is attempted to be inferred. Currently only
+        bool, int, and float are supported, where bool is converted to
+        np.bool8, integer is converted to np.int64, and float is converted to
+        np.float64. This ensures that full precision for all but the most
+        extreme cases is maintained for inferred types.
+
+    Returns
+    -------
+    x : numpy-typed object
+
+    Raises
+    ------
+    TypeError
+        In case the type of `x` is not already set or is not a valid inferred
+        type. As type inference can yield different results for different
+        inputs, rather than deal with everything, explicitly failing helps to
+        avoid inferring the different instances of the same object differently
+        (which will cause a failure later on when trying to concatenate the
+        types in a larger array).
+
+    """
+    if hasattr(x, "dtype"):
+        return x
+
+    # bools are numbers.Integral, so test for bool first
+    if isinstance(x, bool):
+        return np.bool8(x)
+
+    if isinstance(x, Integral):
+        x_new = np.int64(x)
+        assert x_new == x
+        return x_new
+
+    if isinstance(x, Number):
+        x_new = np.float64(x)
+        assert x_new == x
+        return x_new
+
+    if isinstance(x, string_types):
+        x_new = np.string0(x)
+        assert x_new == x
+        return x_new
+
+    raise TypeError("Type of argument is invalid: {}".format(type(x)))
+
+
+def dict2struct(d):
+    """Convert a dict with string keys and numpy-typed values into a numpy
+    array with struct dtype.
+
+    Parameters
+    ----------
+    d : OrderedMapping
+        The dict's keys are the names of the fields (strings) and the dict's
+        values are numpy-typed objects.
+
+    Returns
+    -------
+    array : numpy.array of struct dtype
+
+    """
+    dt_spec = OrderedDict()
+    for key, val in d.items():
+        d[key] = typed_val = set_explicit_dtype(val)
+        dt_spec[key] = typed_val.dtype
+    array = np.array(tuple(d.values()), dtype=dt_spec.items())
+    return array
+
+
+def quantize(x, qntm):
+    """
+    Parameters
+    ----------
+    x : scalar >= 0
+    qntm : scalar > 0
+
+    Returns
+    -------
+    q : scalar >= 0
+
+    """
+    return (np.float64(x) // qntm) * qntm + qntm / 2
 
 
 if __name__ == '__main__':

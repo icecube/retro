@@ -8,7 +8,7 @@ Physical constants and constant-for-us values
 from __future__ import absolute_import, division, print_function
 
 __all__ = [
-    'omkeys_to_sd_indices', 'get_sd_idx', 'get_string_dom_pair',
+    'omkeys_to_sd_indices', 'get_sd_idx', 'get_string_om_pair',
 
     # Constants
     'PI', 'TWO_PI', 'PI_BY_TWO', 'SPEED_OF_LIGHT_M_PER_NS', 'MUON_REST_MASS',
@@ -93,11 +93,17 @@ def omkeys_to_sd_indices(omkeys):
 
     """
     if 'pmt' in omkeys.dtype.names:
-        raise NotImplementedError("OMKey field 'pmt' not implemented")
-    return get_sd_idx(string=omkeys['string'], dom=omkeys['dom'])
+        pmt = omkeys['pmt']
+    else:
+        pmt = np.zeros(shape=np.shape(omkeys), dtype=retro_types.OMKEY_T['pmt'])
+    if 'dom' in omkeys.dtype.names:
+        om = omkeys['dom']
+    else:
+        om = omkeys['om']
+    return get_sd_idx(string=omkeys['string'], om=om, pmt=pmt)
 
 
-def get_sd_idx(string, dom, pmt=0):
+def get_sd_idx(string, om, pmt=0):
     """Get a single integer index from an IceCube string number (from 1 to 86)
     and DOM number (from 1 to 60).
 
@@ -105,7 +111,7 @@ def get_sd_idx(string, dom, pmt=0):
     ----------
     string : int in [1, 60]
         String number
-    dom : int in [1, 60]
+    om : int in [1, 60]
         DOM number
     pmt : int
         PMT number in the DOM; if == 0, then this is ignored.
@@ -115,12 +121,12 @@ def get_sd_idx(string, dom, pmt=0):
     sd_idx : int
 
     """
-    if pmt > 0:
+    if np.count_nonzero(pmt):
         raise NotImplementedError('PMT != 0 is not implemented')
-    return (dom - 1) * NUM_STRINGS + (string - 1)
+    return (om - 1) * NUM_STRINGS + (string - 1)
 
 
-def get_string_dom_pair(sd_idx):
+def get_string_om_pair(sd_idx):
     """Get an IceCube string number (1 to 86) and a DOM number (1 to 60) from
     the single-integer index (sd_idx).
 
@@ -131,13 +137,13 @@ def get_string_dom_pair(sd_idx):
     Returns
     -------
     string : int in [1, 86]
-    dom : int in [1, 60]
+    om : int in [1, 60]
 
     """
-    dom_idx, string_idx = divmod(sd_idx, NUM_STRINGS)
+    om_idx, string_idx = divmod(sd_idx, NUM_STRINGS)
     string = string_idx + 1
-    dom = dom_idx + 1
-    return string, dom
+    om = om_idx + 1
+    return string, om
 
 
 # -- Physical / mathematical constants -- #

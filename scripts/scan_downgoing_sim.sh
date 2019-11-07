@@ -11,7 +11,7 @@ mkdir -p "$base"
 #hits="~justin/src/retro/data/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1_photon_series_photons0-9.pkl"
 #hits_are_photons="--hits-are-photons"
 
-events_base="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1"
+events_root="/data/icecube/retro/sims/MuMinus_energy20_x0_y0_z-300_cz+1_az0_ice_spice_mie_holeice_as.h2-50cm_gcd_md5_14bd15d0_geant_false_nsims10000_step1"
 
 #proto="/fastio2/icecube/retro/tables/large_5d_notilt_string_{subdet}_depth_{depth_idx}"
 #tmpl_lib=""
@@ -117,7 +117,7 @@ cscdescan="0-100:1"
     --track-energy="$tetru" \
     --cascade-energy="$cetru" \
     \
-    --events-base="$events_base" \
+    --events-root="$events_root" \
     --start-idx=$start_evt \
     --num-events=$n_events \
     --photons "photons" \
