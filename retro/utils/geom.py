@@ -36,9 +36,6 @@ __all__ = [
     'rotate_point',
     'rotate_points',
     'add_vectors',
-    'fill_from_spher',
-    'fill_from_cart',
-    'reflect',
 ]
 
 __author__ = 'P. Eller, J.L. Lanfranchi'
@@ -1136,90 +1133,6 @@ def rotate_points(p_theta, p_phi, rot_theta, rot_phi, q_theta, q_phi):
         )
 
         q_phi[i] = q_phi[i] % (2 * math.pi)
-
-
-def fill_from_spher(s):
-    """Fill in the remaining values in SPHER_T type giving the two angles `zen` and
-    `az`.
-
-    Parameters
-    ----------
-    s : SPHER_T
-
-    """
-    s['sinzen'] = np.sin(s['zen'])
-    s['coszen'] = np.cos(s['zen'])
-    s['sinaz'] = np.sin(s['az'])
-    s['cosaz'] = np.cos(s['az'])
-    s['x'] = s['sinzen'] * s['cosaz']
-    s['y'] = s['sinzen'] * s['sinaz']
-    s['z'] = s['coszen']
-
-
-def fill_from_cart(s_vector):
-    """Fill in the remaining values in SPHER_T type giving the cart, coords. `x`, `y`
-    and `z`.
-
-    Parameters
-    ----------
-    s_vector : SPHER_T
-
-    """
-    for s in s_vector:
-        radius = np.sqrt(s['x']**2 + s['y']**2 + s['z']**2)
-        if radius != 0:
-            # make sure they're length 1
-            s['x'] /= radius
-            s['y'] /= radius
-            s['z'] /= radius
-            s['az'] = np.arctan2(s['y'], s['x']) % (2 * np.pi)
-            s['coszen'] = s['z']
-            s['zen'] = np.arccos(s['coszen'])
-            s['sinzen'] = np.sin(s['zen'])
-            s['sinaz'] = np.sin(s['az'])
-            s['cosaz'] = np.cos(s['az'])
-        else:
-            s['z'] = 1
-            s['az'] = 0
-            s['zen'] = 0
-            s['coszen'] = 1
-            s['sinzen'] = 0
-            s['cosaz'] = 1
-            s['sinaz'] = 0
-
-
-def reflect(old, centroid, new):
-    """Reflect the old point around the centroid into the new point on the sphere.
-
-    Parameters
-    ----------
-    old : SPHER_T
-    centroid : SPHER_T
-    new : SPHER_T
-
-    """
-    x = old['x']
-    y = old['y']
-    z = old['z']
-
-    ca = centroid['cosaz']
-    sa = centroid['sinaz']
-    cz = centroid['coszen']
-    sz = centroid['sinzen']
-
-    new['x'] = (
-        2*ca*cz*sz*z
-        + x*(ca*(-ca*cz**2 + ca*sz**2) - sa**2)
-        + y*(ca*sa + sa*(-ca*cz**2 + ca*sz**2))
-    )
-    new['y'] = (
-        2*cz*sa*sz*z
-        + x*(ca*sa + ca*(-cz**2*sa + sa*sz**2))
-        + y*(-ca**2 + sa*(-cz**2*sa + sa*sz**2))
-    )
-    new['z'] = 2*ca*cz*sz*x + 2*cz*sa*sz*y + z*(cz**2 - sz**2)
-
-    fill_from_cart(new)
 
 
 @numba_jit(**DFLT_NUMBA_JIT_KWARGS)
