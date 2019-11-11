@@ -1051,7 +1051,7 @@ class Reco(object):
         hits_indexer = event["hits_indexer"]
         hypo_handler = self.hypo_handler
         pegleg_muon_dt = hypo_handler.pegleg_kernel_kwargs.get("dt")
-        pegleg_muon_const_e_loss = False
+        pegleg_muon_const_e_loss = True
         dom_info = self.dom_tables.dom_info
         sd_idx_table_indexer = self.dom_tables.sd_idx_table_indexer
         if "truth" in event:
@@ -1216,7 +1216,6 @@ class Reco(object):
                     pegleg_idx=pegleg_idx,
                     dt=pegleg_muon_dt,
                     const_e_loss=pegleg_muon_const_e_loss,
-                    mmc=True,
                 )
                 additional_results.append(pegleg_result)
 
