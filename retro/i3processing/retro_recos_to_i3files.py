@@ -24,6 +24,9 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 
 __all__ = [
+    "GMS_LEN2EN",
+    "const_en2len",
+    "const_en_to_gms_en",
     "DEFAULT_I3PARTICLE_ATTRS",
     "NEUTRINO_ATTRS",
     "TRACK_ATTRS",
@@ -90,16 +93,28 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.muon_hypo import generate_gms_table_converters
+from retro.muon_hypo import TRACK_M_PER_GEV, generate_gms_table_converters
 from retro.retro_types import FitStatus
 from retro.utils.misc import nsort_key_func
+
+
+_, GMS_LEN2EN, _ = generate_gms_table_converters(losses="all")
+
+def const_en2len(energy):
+    return energy * TRACK_M_PER_GEV
+
+
+def const_en_to_gms_en(energy):
+    length = const_en2len(energy)
+    gms_energy_est = GMS_LEN2EN(length)
+    return gms_energy_est
 
 
 DEFAULT_I3PARTICLE_ATTRS = {
     "dir": dict(
         fields=["zenith", "azimuth"], func=lambda z, a: I3Direction(float(z), float(a))
     ),
-    "energy": dict(fields="energy", units=I3Units.GeV),
+    "energy": dict(fields="energy", func=const_en_to_gms_en, units=I3Units.GeV),
     "fit_status": dict(fields="fit_status", func=I3Particle.FitStatus),
     "length": dict(value=np.nan, units=I3Units.m),
     # "location_type" deprecated according to `dataclasses/resources/docs/particle.rst`
@@ -117,7 +132,7 @@ NEUTRINO_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Primary)
 
 TRACK_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
 TRACK_ATTRS["length"] = dict(
-    fields="energy", func=generate_gms_table_converters()[0], units=I3Units.m
+    fields="energy", func=const_en2len, units=I3Units.m
 )
 
 CASCADE_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
