@@ -214,7 +214,7 @@ def const_energy_loss_muon(
 
 
 # Create spline (for table_energy_loss_muon)
-with open(join(RETRO_DIR, 'data', 'dedx_total_e.csv'), 'r') as csvfile:
+with open(join(RETRO_DIR, 'retro_data', 'dedx_total_e.csv'), 'r') as csvfile:
     # pylint: disable=invalid-name
     reader = csv.reader(csvfile)
     rows = []
