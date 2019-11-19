@@ -1,6 +1,6 @@
 #!/bin/bash
 
-scripts_dir="$( dirname $0 )"
+scripts_dir="$( pwd $0 )"
 retro_dir="$( dirname $scripts_dir )"
 
 # -- Tables -- #
