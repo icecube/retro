@@ -318,7 +318,7 @@ def generate_gms_table_converters(losses="all"):
     if "all" in losses or set(losses) == set(m for m in VALID_MECHANISMS if m != "all"):
         losses = ("all",)
 
-    fpath = join(RETRO_DIR, "data", "muon_stopping_power_and_range_table_II-28.csv")
+    fpath = join(RETRO_DIR, "retro_data", "muon_stopping_power_and_range_table_II-28.csv")
     table = np.loadtxt(fpath, delimiter=",")
 
     kinetic_energy = table[:, 0] # (GeV)
@@ -427,7 +427,7 @@ def generate_min_energy_fit_converters(fit_data_path=None):
 
     """
     if fit_data_path is None:
-        fit_data_path = join(RETRO_DIR, "data", "muon_min_energy_vs_len_fit.csv")
+        fit_data_path = join(RETRO_DIR, "retro_data", "muon_min_energy_vs_len_fit.csv")
 
     en_len = np.loadtxt(fit_data_path, delimiter=", ")
 

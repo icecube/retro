@@ -102,7 +102,7 @@ if __name__ == '__main__' and __package__ is None:
 if 'RETRO_DATA_DIR' in environ:
     DATA_DIR = environ['RETRO_DATA_DIR']
 else:
-    DATA_DIR = join(RETRO_DIR, 'data')
+    DATA_DIR = join(RETRO_DIR, 'retro_data')
 
 
 # -- Datatype choices for consistency throughout code -- #
@@ -145,11 +145,11 @@ DFLT_ML_RECO_NAME = 'IC86_Dunkman_L6_PegLeg_MultiNest8D_NumuCC'
 DFLT_SPE_RECO_NAME = 'SPEFit2'
 """Default single photoelectron (SPE) reco to extract for an event"""
 
-DETECTOR_GEOM_FILE = join(RETRO_DIR, 'data', 'geo_array.npy')
+DETECTOR_GEOM_FILE = join(RETRO_DIR, 'retro_data', 'geo_array.npy')
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 
 DETECTOR_GCD_DICT_FILE = join(
-    dirname(dirname(abspath(__file__))), 'data', 'gcd_dict.pkl'
+    dirname(dirname(abspath(__file__))), 'retro_data', 'gcd_dict.pkl'
 )
 """Numpy .npy file containing detector geometry (DOM x, y, z coordinates)"""
 

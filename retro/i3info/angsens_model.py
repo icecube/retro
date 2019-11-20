@@ -57,7 +57,7 @@ def load_angsens_model(model):
 
     possible_dirs = [
         '.',
-        join(RETRO_DIR, 'data'),
+        join(RETRO_DIR, 'retro_data'),
     ]
     if 'I3_SRC' in os.environ:
         possible_dirs.append('$I3_SRC/ice-models/resources/models/angsens')
