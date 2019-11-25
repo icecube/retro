@@ -1686,15 +1686,15 @@ class Reco(object):
         fit_meta = OrderedDict(
             [
                 ("fit_status", np.int8(fit_status)),
-                ("iterations", np.uint32(iter_num)),
+                ("iterations", np.int32(iter_num)),
                 ("stopping_flag", np.int8(stopping_flag)),
                 ("llh_std", np.float32(fit['meta']['fstd'])),
-                ("no_improvement_counter", np.uint32(fit['meta']['no_improvement_counter'])),
+                ("no_improvement_counter", np.int32(fit['meta']['no_improvement_counter'])),
                 ('vertex_std', vertex_std),
                 ('vertex_std_met_at_iter', vertex_std_met_at_iter),
-                ("num_simplex_successes", np.uint32(fit['meta']['num_simplex_successes'])),
-                ("num_mutation_successes", np.uint32(fit['meta']['num_mutation_successes'])),
-                ('num_failures', np.uint32(fit['meta']['num_failures'])),
+                ("num_simplex_successes", np.int32(fit['meta']['num_simplex_successes'])),
+                ("num_mutation_successes", np.int32(fit['meta']['num_mutation_successes'])),
+                ('num_failures', np.int32(fit['meta']['num_failures'])),
                 ("run_time", np.float32(time.time() - t0)),
             ]
         )
