@@ -375,6 +375,14 @@ class Reco(object):
                     print("adding {} = {} to frame".format(key, val))
                     frame[key] = val
 
+            else:
+                reco = np.array([status], dtype=np.dtype([("fit_status", np.int8)]))
+                all_reco_info = extract_all_reco_info(reco, reco_name=reco_name)
+                for key, val in all_reco_info.items():
+                    print("adding {} = {} to frame".format(key, val))
+                    frame[key] = val
+
+
     def setup_hypo(self, **kwargs):
         """Setup hypothesis and record `n_params` and `n_opt_params`
         corresponding to the hypothesis.
@@ -419,7 +427,7 @@ class Reco(object):
             filter = filter.strip()
             print("filter: '{}'".format(filter))
 
-        print("Running {} reconstructioni on event".format(method))
+        print("Running {} reconstruction on event".format(method))
 
         if filter and not eval(filter):  # pylint: disable=eval-used
             print(
@@ -427,7 +435,7 @@ class Reco(object):
                     event.meta["event_idx"]
                 )
             )
-            return -1
+            return FitStatus.InsufficientHits.value
 
         if len(event["hits"]) < MIN_NUM_HITS:
             print(
@@ -435,7 +443,7 @@ class Reco(object):
                     MIN_NUM_HITS, event.meta["event_idx"]
                 )
             )
-            return -1
+            return FitStatus.Skipped.value
 
         # simple 1-stage recos
         if method in ("multinest", "test", "truth", "crs", "scipy", "nlopt", "skopt"):

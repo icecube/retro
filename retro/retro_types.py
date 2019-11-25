@@ -682,6 +682,7 @@ class FitStatus(enum.IntEnum):
     FailedToConverge = 30
     MissingSeed = 40
     InsufficientQuality = 50
+    Skipped = 60
 
 
 class LocationType(enum.IntEnum):
