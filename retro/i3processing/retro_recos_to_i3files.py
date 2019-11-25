@@ -81,8 +81,9 @@ from icecube.dataclasses import (  # pylint: disable=no-name-in-module
     I3VectorUInt,
     I3VectorUInt64,
     I3VectorBool,
+    I3Double,
 )
-from icecube.icetray import I3Frame, I3Units  # pylint: disable=no-name-in-module
+from icecube.icetray import I3Frame, I3Units , I3Int, I3Bool # pylint: disable=no-name-in-module
 from icecube.dataio import I3File  # pylint: disable=no-name-in-module
 
 
@@ -354,52 +355,55 @@ def extract_all_reco_info(reco, reco_name):
             val_type = getattr(val, "dtype", type(val))
 
             # floating types
-            if val_type in (float, np.float64, np.float_, np.float):
-                i3type = I3VectorDouble
-                pytype = float
-            elif val_type in (np.float16, np.float32):
-                i3type = I3VectorFloat
+            if val_type in (
+                    float, 
+                    np.float64,
+                    np.float_,
+                    np.float,
+                    np.float16,
+                    np.float32,
+                    ):
+
+                i3type = I3Double
                 pytype = float
 
-            # (signed) integer types
             elif val_type in (
-                int,
-                np.int_,
-                np.int,
-                np.int64,
-                np.integer,
-                np.intp,
-                np.int0,
-            ):
-                i3type = I3VectorInt64
-                pytype = int
-            elif val_type in (np.int32,):
-                i3type = I3VectorInt
-                pytype = int
-            elif val_type in (np.int8, np.int16):
-                i3type = I3VectorShort
+                    int,
+                    np.int_,
+                    np.int,
+                    np.int64,
+                    np.integer,
+                    np.intp,
+                    np.int0,
+                    np.int32,
+                    np.int8,
+                    np.int16,
+                    np.uint,
+                    np.uintp,
+                    np.uint64,
+                    np.uint8,
+                    np.uint16,
+                    np.uint32,
+                    ):
+
+                i3type = I3Int
                 pytype = int
 
-            # unisgned integer types
-            elif val_type in (np.uint, np.uintp, np.uint64):
-                i3type = I3VectorUInt64
-                pytype = int
-            elif val_type in (np.uint8, np.uint16, np.uint32):
-                i3type = I3VectorUInt
-                pytype = int
-            elif val_type in (np.int8, np.int16):
-                i3type = I3VectorUShort
-                pytype = int
+            # unisgned integer types and bools
+            elif val_type in (
+                    bool,
+                    np.bool,
+                    np.bool_,
+                    np.bool8,
+                    ):
 
-            # boolean types
-            elif val_type in (bool, np.bool, np.bool_, np.bool8):
-                i3type = I3VectorBool
+                i3type = I3Bool
                 pytype = bool
 
             else:
                 raise TypeError("Don't know how to handle type {}".format(val_type))
 
-            val = i3type([pytype(val)])
+            val = i3type(pytype(val))
 
         all_reco_info[key] = val
 
