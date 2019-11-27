@@ -75,17 +75,9 @@ from icecube.dataclasses import (  # pylint: disable=no-name-in-module
     I3Direction,
     I3MapStringDouble,
     I3Particle,
-    I3VectorFloat,
-    I3VectorDouble,
-    I3VectorShort,
-    I3VectorInt,
-    I3VectorInt64,
-    I3VectorUShort,
-    I3VectorUInt,
-    I3VectorUInt64,
-    I3VectorBool,
+    I3Double,
 )
-from icecube.icetray import I3Frame, I3Units  # pylint: disable=no-name-in-module
+from icecube.icetray import I3Frame, I3Units, I3Int, I3Bool  # pylint: disable=no-name-in-module
 from icecube.dataio import I3File  # pylint: disable=no-name-in-module
 
 
@@ -258,7 +250,7 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
     return particle, consumed_fields
 
 
-def setitem_pframe(frame, key, val, event_index, overwrite=False):
+def setitem_pframe(frame, key, val, event_index=None, overwrite=False):
     """Put value in frame, with wrapper for warn or error if the key is already
     present.
 
@@ -267,8 +259,9 @@ def setitem_pframe(frame, key, val, event_index, overwrite=False):
     frame
     key
     val
-    event_index
-    overwrite : bool
+    event_index : print-able object, optional
+        Some form of event identifier
+    overwrite : bool, optional
 
     """
     if key in frame:
@@ -277,9 +270,8 @@ def setitem_pframe(frame, key, val, event_index, overwrite=False):
                 "frame for event index {} has key '{}' already".format(event_index, key)
             )
         print(
-            "WARNING: frame for event index {} has key '{}' already; will be overwritten".format(
-                event_index, key
-            )
+            "WARNING: frame for event index {} has key '{}' already; will be"
+            " overwritten".format(event_index, key)
         )
     frame[key] = val
 
@@ -369,52 +361,53 @@ def extract_all_reco_info(reco, reco_name):
             val_type = getattr(val, "dtype", type(val))
 
             # floating types
-            if val_type in (float, np.float64, np.float_, np.float):
-                i3type = I3VectorDouble
-                pytype = float
-            elif val_type in (np.float16, np.float32):
-                i3type = I3VectorFloat
+            if val_type in (
+                float,
+                np.float,
+                np.float_,
+                np.float16,
+                np.float32,
+                np.float64,
+            ):
+                i3type = I3Double
                 pytype = float
 
-            # (signed) integer types
+            # integer types
             elif val_type in (
                 int,
-                np.int_,
                 np.int,
-                np.int64,
-                np.integer,
+                np.int_,
                 np.intp,
+                np.integer,
                 np.int0,
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint,
+                np.uintp,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
             ):
-                i3type = I3VectorInt64
-                pytype = int
-            elif val_type in (np.int32,):
-                i3type = I3VectorInt
-                pytype = int
-            elif val_type in (np.int8, np.int16):
-                i3type = I3VectorShort
-                pytype = int
-
-            # unisgned integer types
-            elif val_type in (np.uint, np.uintp, np.uint64):
-                i3type = I3VectorUInt64
-                pytype = int
-            elif val_type in (np.uint8, np.uint16, np.uint32):
-                i3type = I3VectorUInt
-                pytype = int
-            elif val_type in (np.int8, np.int16):
-                i3type = I3VectorUShort
+                i3type = I3Int
                 pytype = int
 
             # boolean types
-            elif val_type in (bool, np.bool, np.bool_, np.bool8):
-                i3type = I3VectorBool
+            elif val_type in (
+                bool,
+                np.bool,
+                np.bool_,
+                np.bool8,
+            ):
+                i3type = I3Bool
                 pytype = bool
 
             else:
                 raise TypeError("Don't know how to handle type {}".format(val_type))
 
-            val = i3type([pytype(val)])
+            val = i3type(pytype(val))
 
         all_reco_info[key] = val
 
@@ -454,8 +447,7 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
     for reco_name, recos in recos_d.items():
         reco = recos[event_index]
 
-        # -- Do not populate recos that were not performed -- #
-
+        # Do not populate recos that were not performed
         if "fit_status" in reco.dtype.names and reco["fit_status"] == FitStatus.NotSet:
             continue
 
@@ -464,7 +456,6 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
         for particle, identifier in particles_identifiers:
             key = "__".join([reco_name, point_estimator, identifier])
             setitem_pframe(pframe, key, particle, event_index, overwrite=False)
-
 
         all_reco_info = extract_all_reco_info(reco, reco_name)
 

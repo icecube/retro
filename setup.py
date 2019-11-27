@@ -59,8 +59,10 @@ setup(
     packages=find_packages(),
     include_dirs=[np.get_include()],
     package_data={
-        'retro.tables': '*.pyx'
+        'retro.tables': ['*.pyx',],
+        '' : ['*.csv', '*.pkl'],
     },
+    #data_files=[('retro_data', ['retro_data/*.csv',]),],
     ext_modules=cythonize(EXT_MODULES),
     zip_safe=False
 )

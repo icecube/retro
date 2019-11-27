@@ -153,7 +153,7 @@ for _dim in ("time", "x", "y", "z", "azimuth", "zenith", "coszen"):
         OSCNEXT_L5_V1_PRIORS[_dim][_reco] = LazyLoader(
             datasource=join(
                 RETRO_DIR,
-                "data",
+                "retro_data",
                 "priors",
                 "{reco}_{dim}_neg_error.pkl".format(reco=_reco, dim=_dim),
             )

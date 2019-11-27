@@ -130,7 +130,7 @@ $retro_dir/retro/reco.py \
     --pulses "SRTTWOfflinePulsesDC" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SRTTWOfflinePulsesDC" \
-    --hit-chage-quant 0.05 \
+    --hit-charge-quant 0.05 \
     --min-hit-charge 0.3 \
 
 wait
