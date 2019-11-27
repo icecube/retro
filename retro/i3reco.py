@@ -65,17 +65,23 @@ def main():
 
     tray = I3Tray()
 
-    tray.AddModule(_type="I3Reader", _name="reader", FilenameList=other_kw["input_i3_file"])
+    tray.AddModule(
+        _type="I3Reader",
+        _name="reader",
+        FilenameList=other_kw["input_i3_file"],
+    )
 
     tray.Add(
         _type=my_reco,
         _name="retro",
         methods="crs_prefit",
         reco_pulse_series_name="SRTTWOfflinePulsesDC",
+        hit_charge_quant=0.05,
+        min_hit_charge=0.3,
         seeding_recos=["L5_SPEFit11", "LineFit_DC"],
         triggers=["I3TriggerHierarchy"],
         additional_keys=["L5_oscNext_bool"],
-        filter='event["header"]["L5_oscNext_bool"]',
+        filter='event["header"]["L5_oscNext_bool"] and len(event["hits"]) >= 8',
         point_estimator="median",
     )
 

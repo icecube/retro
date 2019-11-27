@@ -24,6 +24,9 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 
 __all__ = [
+    "GMS_LEN2EN",
+    "const_en2len",
+    "const_en_to_gms_en",
     "DEFAULT_I3PARTICLE_ATTRS",
     "NEUTRINO_ATTRS",
     "TRACK_ATTRS",
@@ -72,18 +75,9 @@ from icecube.dataclasses import (  # pylint: disable=no-name-in-module
     I3Direction,
     I3MapStringDouble,
     I3Particle,
-    I3VectorFloat,
-    I3VectorDouble,
-    I3VectorShort,
-    I3VectorInt,
-    I3VectorInt64,
-    I3VectorUShort,
-    I3VectorUInt,
-    I3VectorUInt64,
-    I3VectorBool,
     I3Double,
 )
-from icecube.icetray import I3Frame, I3Units , I3Int, I3Bool # pylint: disable=no-name-in-module
+from icecube.icetray import I3Frame, I3Units, I3Int, I3Bool  # pylint: disable=no-name-in-module
 from icecube.dataio import I3File  # pylint: disable=no-name-in-module
 
 
@@ -91,16 +85,28 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.muon_hypo import generate_gms_table_converters
+from retro.muon_hypo import TRACK_M_PER_GEV, generate_gms_table_converters
 from retro.retro_types import FitStatus
 from retro.utils.misc import nsort_key_func
+
+
+_, GMS_LEN2EN, _ = generate_gms_table_converters(losses="all")
+
+def const_en2len(energy):
+    return energy * TRACK_M_PER_GEV
+
+
+def const_en_to_gms_en(energy):
+    length = const_en2len(energy)
+    gms_energy_est = GMS_LEN2EN(length)
+    return gms_energy_est
 
 
 DEFAULT_I3PARTICLE_ATTRS = {
     "dir": dict(
         fields=["zenith", "azimuth"], func=lambda z, a: I3Direction(float(z), float(a))
     ),
-    "energy": dict(fields="energy", units=I3Units.GeV),
+    "energy": dict(fields="energy", func=const_en_to_gms_en, units=I3Units.GeV),
     "fit_status": dict(fields="fit_status", func=I3Particle.FitStatus),
     "length": dict(value=np.nan, units=I3Units.m),
     # "location_type" deprecated according to `dataclasses/resources/docs/particle.rst`
@@ -118,7 +124,7 @@ NEUTRINO_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Primary)
 
 TRACK_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
 TRACK_ATTRS["length"] = dict(
-    fields="energy", func=generate_gms_table_converters()[0], units=I3Units.m
+    fields="energy", func=const_en2len, units=I3Units.m
 )
 
 CASCADE_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
@@ -244,7 +250,7 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
     return particle, consumed_fields
 
 
-def setitem_pframe(frame, key, val, event_index, overwrite=False):
+def setitem_pframe(frame, key, val, event_index=None, overwrite=False):
     """Put value in frame, with wrapper for warn or error if the key is already
     present.
 
@@ -253,8 +259,9 @@ def setitem_pframe(frame, key, val, event_index, overwrite=False):
     frame
     key
     val
-    event_index
-    overwrite : bool
+    event_index : print-able object, optional
+        Some form of event identifier
+    overwrite : bool, optional
 
     """
     if key in frame:
@@ -263,9 +270,8 @@ def setitem_pframe(frame, key, val, event_index, overwrite=False):
                 "frame for event index {} has key '{}' already".format(event_index, key)
             )
         print(
-            "WARNING: frame for event index {} has key '{}' already; will be overwritten".format(
-                event_index, key
-            )
+            "WARNING: frame for event index {} has key '{}' already; will be"
+            " overwritten".format(event_index, key)
         )
     frame[key] = val
 
@@ -356,47 +362,45 @@ def extract_all_reco_info(reco, reco_name):
 
             # floating types
             if val_type in (
-                    float, 
-                    np.float64,
-                    np.float_,
-                    np.float,
-                    np.float16,
-                    np.float32,
-                    ):
-
+                float,
+                np.float,
+                np.float_,
+                np.float16,
+                np.float32,
+                np.float64,
+            ):
                 i3type = I3Double
                 pytype = float
 
+            # integer types
             elif val_type in (
-                    int,
-                    np.int_,
-                    np.int,
-                    np.int64,
-                    np.integer,
-                    np.intp,
-                    np.int0,
-                    np.int32,
-                    np.int8,
-                    np.int16,
-                    np.uint,
-                    np.uintp,
-                    np.uint64,
-                    np.uint8,
-                    np.uint16,
-                    np.uint32,
-                    ):
-
+                int,
+                np.int,
+                np.int_,
+                np.intp,
+                np.integer,
+                np.int0,
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint,
+                np.uintp,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ):
                 i3type = I3Int
                 pytype = int
 
-            # unisgned integer types and bools
+            # boolean types
             elif val_type in (
-                    bool,
-                    np.bool,
-                    np.bool_,
-                    np.bool8,
-                    ):
-
+                bool,
+                np.bool,
+                np.bool_,
+                np.bool8,
+            ):
                 i3type = I3Bool
                 pytype = bool
 
@@ -443,8 +447,7 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
     for reco_name, recos in recos_d.items():
         reco = recos[event_index]
 
-        # -- Do not populate recos that were not performed -- #
-
+        # Do not populate recos that were not performed
         if "fit_status" in reco.dtype.names and reco["fit_status"] == FitStatus.NotSet:
             continue
 
@@ -453,7 +456,6 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
         for particle, identifier in particles_identifiers:
             key = "__".join([reco_name, point_estimator, identifier])
             setitem_pframe(pframe, key, particle, event_index, overwrite=False)
-
 
         all_reco_info = extract_all_reco_info(reco, reco_name)
 

@@ -113,7 +113,7 @@ fi
 #kernprof -l -v \
 $retro_dir/retro/reco.py \
     --method crs_prefit \
-    --filter 'event["header"]["L5_oscNext_bool"]' \
+    --filter 'event["header"]["L5_oscNext_bool"] and len(event["hits"]) >= 8' \
     \
     --gcd $gcd \
     --dom-tables-kind "$tblkind" \
@@ -130,5 +130,7 @@ $retro_dir/retro/reco.py \
     --pulses "SRTTWOfflinePulsesDC" \
     --triggers "I3TriggerHierarchy" \
     --hits "pulses/SRTTWOfflinePulsesDC" \
+    --hit-charge-quant 0.05 \
+    --min-hit-charge 0.3 \
 
 wait
