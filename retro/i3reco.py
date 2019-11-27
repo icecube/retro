@@ -77,7 +77,7 @@ def main():
         methods="crs_prefit",
         reco_pulse_series_name="SRTTWOfflinePulsesDC",
         hit_charge_quant=0.05,
-        min_hit_charge=0.3,
+        min_hit_charge=0.25,
         seeding_recos=["L5_SPEFit11", "LineFit_DC"],
         triggers=["I3TriggerHierarchy"],
         additional_keys=["L5_oscNext_bool"],
