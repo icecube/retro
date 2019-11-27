@@ -30,6 +30,7 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import bz2
 from collections import OrderedDict
 import gzip
+import zstandard
 import hashlib
 import os
 from os.path import abspath, basename, expanduser, expandvars, dirname, isfile, join, splitext
@@ -109,11 +110,15 @@ def extract_gcd(gcd_file, outdir=None):
     src_gcd_stripped = src_gcd_basename
     for _ in range(10):
         root, ext = splitext(src_gcd_stripped)
+        print("+++",root,ext)
         if ext == '.gz':
             compression.append('gz')
             src_gcd_stripped = root
         elif src_gcd_stripped.endswith('.bz2'):
             compression.append('bz2')
+            src_gcd_stripped = root
+        elif ext == '.zst':
+            compression.append('zst')
             src_gcd_stripped = root
         elif src_gcd_stripped.endswith('.i3'):
             parsed = True
@@ -141,6 +146,9 @@ def extract_gcd(gcd_file, outdir=None):
             decompressed = gzip.GzipFile(fileobj=BytesIO(decompressed)).read()
         elif comp_alg == 'bz2':
             decompressed = bz2.decompress(decompressed)
+        elif comp_alg == 'zst':
+            decompressor = zstandard.ZstdDecompressor()
+            decompressed = decompressor.decompress(decompressed, max_output_size=100000000l)
     decompressed_gcd_md5 = hashlib.md5(decompressed).hexdigest()
 
     from I3Tray import I3Units, OMKey # pylint: disable=import-error
