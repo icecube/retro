@@ -110,7 +110,6 @@ def extract_gcd(gcd_file, outdir=None):
     src_gcd_stripped = src_gcd_basename
     for _ in range(10):
         root, ext = splitext(src_gcd_stripped)
-        print("+++",root,ext)
         if ext == '.gz':
             compression.append('gz')
             src_gcd_stripped = root
