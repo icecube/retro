@@ -55,6 +55,7 @@ setup(
         'sobol_seq',
         'dynesty',
         'spherical_opt @ git+https://github.com/philippeller/spherical_opt.git',
+        'zstandard',
     ],
     packages=find_packages(),
     include_dirs=[np.get_include()],
