@@ -337,12 +337,14 @@ class Reco(object):
         event["hits_indexer"] = hits_indexer
         event["hits_summary"] = hits_summary
 
-        setitem_pframe(
-            frame=frame,
-            key="retro_num_hits__{}".format(reco_pulse_series_name),
-            val=I3Int(int(len(event["hits"]))),
-            overwrite=True,
-        )
+        # TODO: include this in future? if so, make sure a parallel item exists
+        # in .npy-based recos
+        #setitem_pframe(
+        #    frame=frame,
+        #    key="retro_num_hits__{}".format(reco_pulse_series_name),
+        #    val=I3Int(int(len(event["hits"]))),
+        #    overwrite=True,
+        #)
 
         if isinstance(methods, string_types):
             methods = [methods]
@@ -877,11 +879,6 @@ class Reco(object):
         for method in methods:
             reco_name = "retro_" + method
 
-            estimate_outf = join(
-                event.meta["events_root"],
-                "recos",
-                "{}.npy".format(reco_name),
-            )
             fit_status_outf = join(
                 event.meta["events_root"],
                 "recos",

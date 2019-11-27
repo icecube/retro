@@ -76,7 +76,7 @@ def main():
         _name="retro",
         methods="crs_prefit",
         reco_pulse_series_name="SRTTWOfflinePulsesDC",
-        hit_chage_quant=0.05,
+        hit_charge_quant=0.05,
         min_hit_charge=0.3,
         seeding_recos=["L5_SPEFit11", "LineFit_DC"],
         triggers=["I3TriggerHierarchy"],
