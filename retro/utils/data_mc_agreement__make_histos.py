@@ -401,7 +401,7 @@ REF_LOG_TICKS = np.array(
 GEO = load_pickle(
     join(
         RETRO_DIR,
-        "data",
+        "retro_data",
         "GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.pkl",
     )
 )["geo"]
