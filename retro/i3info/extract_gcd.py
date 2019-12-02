@@ -30,16 +30,17 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import bz2
 from collections import OrderedDict
 import gzip
-import zstandard
 import hashlib
 import os
-from os.path import abspath, basename, expanduser, expandvars, dirname, isfile, join, splitext
-from shutil import copyfile
+from os.path import (
+    abspath, expanduser, expandvars, dirname, isfile, join, split, splitext
+)
 import sys
 
 import numpy as np
-from six import BytesIO
+from six import PY2, BytesIO
 from six.moves import cPickle as pickle
+import zstandard
 
 if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -76,70 +77,106 @@ def extract_gcd(gcd_file, outdir=None):
 
     """
     gcd_file = expanduser(expandvars(gcd_file))
-    src_gcd_dir = dirname(gcd_file)
-    src_gcd_basename = basename(gcd_file)
-    src_gcd_stripped = src_gcd_basename.rstrip('.bz2').rstrip('.gz').rstrip('.i3').rstrip('.pkl')
+    src_gcd_dir, src_gcd_basename = split(gcd_file)
 
-    outfname = src_gcd_stripped + '.pkl'
-    data_dir_fpath = abspath(join(DATA_DIR, outfname))
+    # Strip all recognized extensions to find base file name's "stem," then
+    # attach ".pkl" extension to that
+    src_gcd_stripped = src_gcd_basename
+    while True:
+        src_gcd_stripped, ext = splitext(src_gcd_stripped)
+        if ext.lower().lstrip('.') not in ['i3', 'pkl', 'bz2', 'gz', 'zst']:
+            # reattach unknown "extension"; presumably it's actually part of
+            # the filename and not an extesion at all (or an extension we don't
+            # care about, or an empty string in the case that there is no dot
+            # remaining in the name)
+            src_gcd_stripped += ext
+            break
+    pkl_outfname = src_gcd_stripped + '.pkl'
 
-    outfpath = None
+    pkl_outfpath = None
     if outdir is not None:
         outdir = expanduser(expandvars(outdir))
         mkdir(outdir)
-        outfpath = join(outdir, outfname)
+        pkl_outfpath = join(outdir, pkl_outfname)
+        if isfile(pkl_outfpath):
+            return load_pickle(pkl_outfpath)
 
-        if isfile(data_dir_fpath) and data_dir_fpath != abspath(outfpath):
-            copyfile(data_dir_fpath, outfpath)
+    def save_pickle_if_appropriate(gcd_info):
+        if pkl_outfpath is not None:
+            with open(pkl_outfpath, 'wb') as fobj:
+                pickle.dump(gcd_info, fobj, protocol=pickle.HIGHEST_PROTOCOL)
 
-    if isfile(data_dir_fpath):
-        return load_pickle(data_dir_fpath)
-
-    if outfpath is not None and isfile(outfpath):
-        return load_pickle(outfpath)
-
+    # Look for existing extracted (pkl) version in choice directories
+    look_in_dirs = []
     if src_gcd_dir:
-        dirs = [src_gcd_dir]
+        look_in_dirs.append(src_gcd_dir)
+    look_in_dirs += ['.', DATA_DIR]
+    if 'I3_DATA' in os.environ:
+        look_in_dirs.append('$I3_DATA/GCD')
+    look_in_dirs = [expanduser(expandvars(d)) for d in look_in_dirs]
+
+    for look_in_dir in look_in_dirs:
+        uncompr_pkl_fpath = join(look_in_dir, pkl_outfname)
+        if isfile(uncompr_pkl_fpath):
+            gcd_info = load_pickle(uncompr_pkl_fpath)
+            save_pickle_if_appropriate(gcd_info)
+            return gcd_info
+
+    # If we couldn't find the already-extracted file, find the source file
+    # (if user doesn't specify a full path to the file, try in several possible
+    # directories)
+    if src_gcd_dir:
+        look_in_dirs = [src_gcd_dir]
     else:
-        dirs = ['.']
+        look_in_dirs = ['.', DATA_DIR]
         if 'I3_DATA' in os.environ:
-            dirs.append(expanduser(expandvars('$I3_DATA/GCD')))
+            look_in_dirs.append('$I3_DATA/GCD')
+    look_in_dirs = [expanduser(expandvars(d)) for d in look_in_dirs]
 
-    compression = []
-    parsed = False
-    src_gcd_stripped = src_gcd_basename
-    for _ in range(10):
-        root, ext = splitext(src_gcd_stripped)
-        if ext == '.gz':
-            compression.append('gz')
-            src_gcd_stripped = root
-        elif src_gcd_stripped.endswith('.bz2'):
-            compression.append('bz2')
-            src_gcd_stripped = root
-        elif ext == '.zst':
-            compression.append('zst')
-            src_gcd_stripped = root
-        elif src_gcd_stripped.endswith('.i3'):
-            parsed = True
-            src_gcd_stripped = root
+    src_fpath = None
+    for look_in_dir in look_in_dirs:
+        fpath = join(look_in_dir, src_gcd_basename)
+        if isfile(fpath):
+            src_fpath = fpath
             break
-        elif src_gcd_stripped.endswith('.pkl'):
-            for src_dir in dirs:
-                fpath = join(src_dir, src_gcd_stripped)
-                if isfile(fpath):
-                    gcd_info = load_pickle(fpath)
-                    if outdir is not None and outdir != src_gcd_dir:
-                        copyfile(fpath, outfpath)
-                    return gcd_info
 
-    if not parsed:
-        raise ValueError(
-            'Could not parse compression suffixes for GCD file "{}"'
-            .format(gcd_file)
+    if src_fpath is None:
+        raise IOError(
+            'Cannot find file "{}" in dir(s) {}'.format(src_gcd_basename, look_in_dirs)
         )
 
-    decompressed = open(gcd_file, 'rb').read()
-    source_gcd_md5 = hashlib.md5(decompressed).hexdigest()
+    # Figure out what compression algorithms are used on the file; final state
+    # will have `ext_lower` containing either "i3" or "pkl" indicating the
+    # basic type of file we have
+    compression = []
+    src_gcd_stripped = src_gcd_basename
+    while True:
+        src_gcd_stripped, ext = splitext(src_gcd_stripped)
+        ext_lower = ext.lower().lstrip('.')
+        if ext_lower in ['gz', 'bz2', 'zst']:
+            compression.append(ext_lower)
+        elif ext_lower in ['i3', 'pkl']:
+            break
+        else:
+            if ext:
+                raise IOError(
+                    'Unhandled extension "{}" found in GCD file "{}"'.format(
+                        ext, gcd_file
+                    )
+                )
+            raise IOError(
+                'Illegal filename "{}"; must have either ".i3" or ".pkl" extesion,'
+                " optionally followed by compression extension(s)".format(gcd_file)
+            )
+
+    with open(src_fpath, 'rb') as fobj:
+        decompressed = fobj.read()
+
+    # Don't hash a pickle file; all we care about is the hash of the original
+    # i3 file, which is a value already stored in the pickle file
+    if ext_lower == 'i3':
+        source_gcd_md5 = hashlib.md5(decompressed).hexdigest()
+
     for comp_alg in compression:
         if comp_alg == 'gz':
             decompressed = gzip.GzipFile(fileobj=BytesIO(decompressed)).read()
@@ -147,60 +184,69 @@ def extract_gcd(gcd_file, outdir=None):
             decompressed = bz2.decompress(decompressed)
         elif comp_alg == 'zst':
             decompressor = zstandard.ZstdDecompressor()
-            decompressed = decompressor.decompress(decompressed, max_output_size=100000000l)
+            decompressed = decompressor.decompress(
+                decompressed, max_output_size=100000000
+            )
+
+    if ext_lower == 'pkl':
+        if PY2:
+            gcd_info = pickle.loads(decompressed)
+        else:
+            gcd_info = pickle.loads(decompressed, encoding='latin1')
+        save_pickle_if_appropriate(gcd_info)
+        return gcd_info
+
+    # -- If we get here, we have an i3 file -- #
+
     decompressed_gcd_md5 = hashlib.md5(decompressed).hexdigest()
 
-    from I3Tray import I3Units, OMKey # pylint: disable=import-error
-    from icecube import dataclasses, dataio # pylint: disable=import-error, unused-variable
+    from I3Tray import I3Units, OMKey  # pylint: disable=import-error
+    from icecube import dataclasses, dataio  # pylint: disable=import-error, unused-variable, unused-import
 
     gcd = dataio.I3File(gcd_file) # pylint: disable=no-member
     frame = gcd.pop_frame()
 
-    # get detector geometry
-    key = 'I3Geometry'
-    while key not in frame.keys():
+    omgeo, dom_cal = None, None
+    while gcd.more() and (omgeo is None or dom_cal is None):
         frame = gcd.pop_frame()
-    omgeo = frame[key].omgeo
+        keys = list(frame.keys())
+        if 'I3Geometry' in keys:
+            omgeo = frame['I3Geometry'].omgeo
+        if 'I3Calibration' in keys:
+            dom_cal = frame['I3Calibration'].dom_cal
 
-    # get calibration
-    key = 'I3Calibration'
-    while key not in frame.keys():
-        frame = gcd.pop_frame()
-    dom_cal = frame[key].dom_cal
+    assert omgeo is not None
+    assert dom_cal is not None
 
     # create output dict
     gcd_info = OrderedDict()
     gcd_info['source_gcd_name'] = src_gcd_basename
     gcd_info['source_gcd_md5'] = source_gcd_md5
     gcd_info['source_gcd_i3_md5'] = decompressed_gcd_md5
-    gcd_info['geo'] = geo = np.zeros((N_STRINGS, N_DOMS, 3))
-    gcd_info['noise'] = noise = np.zeros((N_STRINGS, N_DOMS))
-    gcd_info['rde'] = rde = np.zeros((N_STRINGS, N_DOMS))
+    gcd_info['geo'] = np.full(shape=(N_STRINGS, N_DOMS, 3), fill_value=np.nan)
+    gcd_info['noise'] = np.full(shape=(N_STRINGS, N_DOMS), fill_value=np.nan)
+    gcd_info['rde'] = np.full(shape=(N_STRINGS, N_DOMS), fill_value=np.nan)
 
     for string_idx in range(N_STRINGS):
         for dom_idx in range(N_DOMS):
             omkey = OMKey(string_idx + 1, dom_idx + 1)
-            geo[string_idx, dom_idx, 0] = omgeo.get(omkey).position.x
-            geo[string_idx, dom_idx, 1] = omgeo.get(omkey).position.y
-            geo[string_idx, dom_idx, 2] = omgeo.get(omkey).position.z
+            om = omgeo.get(omkey)
+            gcd_info['geo'][string_idx, dom_idx, 0] = om.position.x
+            gcd_info['geo'][string_idx, dom_idx, 1] = om.position.y
+            gcd_info['geo'][string_idx, dom_idx, 2] = om.position.z
             try:
-                noise[string_idx, dom_idx] = (
+                gcd_info['noise'][string_idx, dom_idx] = (
                     dom_cal[omkey].dom_noise_rate / I3Units.hertz
                 )
             except KeyError:
-                noise[string_idx, dom_idx] = 0.0
+                gcd_info['noise'][string_idx, dom_idx] = 0.0
 
             try:
-                rde[string_idx, dom_idx] = dom_cal[omkey].relative_dom_eff
+                gcd_info['rde'][string_idx, dom_idx] = dom_cal[omkey].relative_dom_eff
             except KeyError:
-                gcd_info['rde'][string_idx, dom_idx] = 0.
+                gcd_info['rde'][string_idx, dom_idx] = 0.0
 
-    #print(np.mean(gcd_info['rde'][:80]))
-    #print(np.mean(gcd_info['rde'][79:]))
-
-    if outfpath is not None:
-        with open(outfpath, 'wb') as outfile:
-            pickle.dump(gcd_info, outfile, protocol=pickle.HIGHEST_PROTOCOL)
+    save_pickle_if_appropriate(gcd_info)
 
     return gcd_info
 

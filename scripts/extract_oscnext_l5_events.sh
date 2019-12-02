@@ -13,6 +13,9 @@
 if [ "$HOSTNAME" = "schwyz" ] || [ "$HOSTNAME" = "uri" ] || [ "$HOSTNAME" = "unterwalden" ] || [ "$HOSTNAME" = "luzern" ]; then
     retro_gcd_dir=/data/icecube/retro_gcd
     simulation_gcd="/data/icecube/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
+elif [[ "$HOSTNAME" == *".aci.ics.psu.edu" ]]; then
+    retro_gcd_dir=/gpfs/group/dfc13/default/retro_gcd
+    simulation_gcd="/gpfs/group/dfc13/default/gcd/mc/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
 else
     retro_gcd_dir=~/retro_gcd
     simulation_gcd="/data/sim/DeepCore/2018/pass2/gcd/GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
