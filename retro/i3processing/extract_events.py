@@ -547,6 +547,27 @@ def extract_reco(frame, reco):
             )
         )
 
+    # -- Retro recos -- #
+
+    elif reco.startswith("retro_"):
+        from icecube.dataclasses import I3MapStringDouble, I3Particle
+        reco_dict = OrderedDict()
+        for key in sorted(frame.keys()):
+            if not key.startswith(reco):
+                continue
+
+            value = frame[key]
+
+            if isinstance(value, I3Particle):
+                continue
+
+            if isinstance(value, I3MapStringDouble):
+                value = dict2struct(value)
+            else:
+                value = set_explicit_dtype(value)
+
+            reco_dict[key[len(reco) + 2 ::]] = value
+
     # -- Anything else assume it's a single I3Particle -- #
 
     else:
