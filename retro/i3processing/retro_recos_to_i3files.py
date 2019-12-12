@@ -88,25 +88,68 @@ if __name__ == "__main__" and __package__ is None:
 from retro.muon_hypo import TRACK_M_PER_GEV, generate_gms_table_converters
 from retro.retro_types import FitStatus
 from retro.utils.misc import nsort_key_func
+from retro.utils.cascade_energy_conversion import em2hadr
 
 
 _, GMS_LEN2EN, _ = generate_gms_table_converters(losses="all")
 
 def const_en2len(energy):
+    """Convert a track energy to length via low-energy best-fit constant.
+
+    Parameters
+    ----------
+    energy : scalar
+
+    Returns
+    -------
+    length : scalar
+
+    """
     return energy * TRACK_M_PER_GEV
 
 
 def const_en_to_gms_en(energy):
+    """Convert from a track energy (found from track length via low-energy
+    best-fit constant) to track energy from the GMS table.
+
+    Parameters
+    ----------
+    energy : scalar
+
+    Returns
+    -------
+    length : scalar
+
+    """
     length = const_en2len(energy)
     gms_energy_est = GMS_LEN2EN(length)
     return gms_energy_est
 
 
+def total_en(track_energy, cascade_energy):
+    """Compute total energy (GMS table track energy + hadronic cascade energy)
+    from track energy (found from track length via low-energy best-fit
+    constant) and EM cascade energy.
+
+    Parameters
+    ----------
+    track_energy
+    cascade_energy
+
+    Returns
+    -------
+    total_energy
+
+    """
+    return const_en_to_gms_en(track_energy) + em2hadr(cascade_energy)
+
+
 DEFAULT_I3PARTICLE_ATTRS = {
     "dir": dict(
-        fields=["zenith", "azimuth"], func=lambda z, a: I3Direction(float(z), float(a))
+        fields=["zenith", "azimuth"],
+        func=lambda zenith, azimuth: I3Direction(float(zenith), float(azimuth)),
     ),
-    "energy": dict(fields="energy", func=const_en_to_gms_en, units=I3Units.GeV),
+    "energy": dict(fields="energy", func=None, units=I3Units.GeV),
     "fit_status": dict(fields="fit_status", func=I3Particle.FitStatus),
     "length": dict(value=np.nan, units=I3Units.m),
     # "location_type" deprecated according to `dataclasses/resources/docs/particle.rst`
@@ -120,15 +163,20 @@ DEFAULT_I3PARTICLE_ATTRS = {
 }
 
 NEUTRINO_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
+NEUTRINO_ATTRS["energy"] = dict(
+    fields=["track_energy", "cascade_energy"], func=total_en, units=I3Units.GeV
+)
 NEUTRINO_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Primary)
 
 TRACK_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
 TRACK_ATTRS["length"] = dict(
     fields="energy", func=const_en2len, units=I3Units.m
 )
+TRACK_ATTRS["energy"] = dict(fields="energy", func=const_en_to_gms_en, units=I3Units.GeV)
 
 CASCADE_ATTRS = deepcopy(DEFAULT_I3PARTICLE_ATTRS)
 CASCADE_ATTRS["shape"] = dict(value=I3Particle.ParticleShape.Cascade)
+CASCADE_ATTRS["energy"] = dict(fields="energy", func=em2hadr, units=I3Units.GeV)
 
 
 def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
@@ -333,12 +381,8 @@ def make_i3_particles(reco, point_estimator):
 
 
 def extract_all_reco_info(reco, reco_name):
-    """Populate ALL Retro reco information
-
-    Note we use length-one i3vector types because there aren't standard
-    scalar types for anything besides I3Float, and if we want information
-    to live on, we don't want to have to maintain custom datatypes for
-    Retro inside the IceCube codebase, because who has time for that?
+    """Populate ALL Retro reco information to simple I3-typed fields in the
+    frame.
 
     Parameters
     ----------
