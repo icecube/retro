@@ -962,6 +962,11 @@ def set_explicit_dtype(x):
     if hasattr(x, "dtype"):
         return x
 
+    # "value" attribute is found in basic icecube.{dataclasses,icetray} dtypes
+    # such as I3Bool, I3Double, I3Int, and I3String
+    if hasattr(x, "value"):
+        x = x.value
+
     # bools are numbers.Integral, so test for bool first
     if isinstance(x, bool):
         return np.bool8(x)
@@ -981,10 +986,10 @@ def set_explicit_dtype(x):
         assert x_new == x
         return x_new
 
-    raise TypeError("Type of argument is invalid: {}".format(type(x)))
+    raise TypeError("Type of argument ({}) is invalid: {}".format(x, type(x)))
 
 
-def dict2struct(d):
+def dict2struct(d, set_explicit_dtype=set_explicit_dtype):
     """Convert a dict with string keys and numpy-typed values into a numpy
     array with struct dtype.
 
@@ -993,6 +998,12 @@ def dict2struct(d):
     d : OrderedMapping
         The dict's keys are the names of the fields (strings) and the dict's
         values are numpy-typed objects.
+
+    set_explicit_dtype : callable with one positional argument, optional
+        Provide a function for setting the numpy dtype of the value. Useful,
+        e.g., for icecube/icetray usage where special software must be present
+        (not required by this module) to do the work. If no specified,
+        the `set_explicit_dtype` function defined in this module is used.
 
     Returns
     -------
