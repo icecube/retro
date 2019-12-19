@@ -121,7 +121,7 @@ DEBUG = 0
 DFLT_NUMBA_JIT_KWARGS = dict(
     nopython=True,
     nogil=True,
-    fastmath=True,
+    fastmath=False,
     cache=True,
     error_model='numpy',
 )
@@ -129,7 +129,7 @@ DFLT_NUMBA_JIT_KWARGS = dict(
 PL_NUMBA_JIT_KWARGS = dict(
     nopython=True,
     nogil=True,
-    fastmath=True,
+    fastmath=False,
     cache=True,
     error_model='numpy',
     parallel=True,

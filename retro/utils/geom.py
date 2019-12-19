@@ -72,7 +72,7 @@ from retro.retro_types import TimeSphCoord
 from retro.utils.misc import hash_obj
 
 
-NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, fastmath=True, error_model="numpy")
+NUMBA_JIT_KWARGS = dict(nopython=True, nogil=True, fastmath=False, error_model="numpy")
 
 GEOM_FILE_PROTO = 'geom_{hash:s}.npy'
 """File containing detector geometry as a Numpy 5D array with coordinates
