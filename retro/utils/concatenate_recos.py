@@ -66,7 +66,7 @@ unique (at least in MC)"""
     nopython=True,
     nogil=True,
     parallel=True,
-    fastmath=True,
+    fastmath=False,
     error_model="numpy",
     cache=True,
 )

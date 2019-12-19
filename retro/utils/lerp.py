@@ -128,7 +128,7 @@ def generate_lerp(
         else:
             high_val = np.float(y_max)
 
-    @numba.jit(fastmath=True, cache=True, nogil=True)
+    @numba.jit(fastmath=False, cache=True, nogil=True)
     def scalar_lerp(x):
         """Linearly interpolate to find `y` from `x`.
 

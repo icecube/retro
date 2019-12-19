@@ -97,7 +97,7 @@ TRUE_TIME_WRT_DOM_INFO_T = np.dtype(
 )
 
 JIT_KW = dict(
-    nopython=True, nogil=True, parallel=False, error_model="numpy", fastmath=True
+    nopython=True, nogil=True, parallel=False, error_model="numpy", fastmath=False
 )
 
 DATA_DIR_INFOS = OrderedDict(
@@ -413,7 +413,7 @@ numba_quantize = numba.jit(
     nogil=True,
     parallel=False,
     error_model="numpy",
-    fastmath=True,
+    fastmath=False,
 )(quantize)
 
 
