@@ -16,7 +16,7 @@ import numba
 __all__ = ["NJIT_KW", "hf_vs_hadr_energy", "hf_vs_em_energy", "hadr2em", "em2hadr", "test"]
 
 
-NJIT_KW = dict(nopython=True, cache=True, nogil=True, error_model='numpy', fastmath=True)
+NJIT_KW = dict(nopython=True, cache=True, nogil=True, error_model='numpy', fastmath=False)
 
 @numba.jit(**NJIT_KW)
 def hf_vs_hadr_energy(hadr_energy):

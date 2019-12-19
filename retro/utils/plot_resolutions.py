@@ -222,7 +222,7 @@ def get_nu_flavints(array, flavints):
     return array[mask]
 
 
-@numba.jit(nopython=True, nogil=True, parallel=True, fastmath=True, error_model='numpy')
+@numba.jit(nopython=True, nogil=True, parallel=True, fastmath=False, error_model='numpy')
 def get_common_mask(event_ids, common_ids):
     mask = np.zeros(shape=event_ids.shape, dtype=np.bool8)
     for idx in numba.prange(len(event_ids)):

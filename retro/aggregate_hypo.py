@@ -209,7 +209,7 @@ class AggregateHypo(Hypo):
             for gens_num, gens in enumerate(pegleg_generators):
                 if not isinstance(gens, numba.targets.registry.CPUDispatcher):
                     try:
-                        gens = numba.njit(cache=True, fastmath=True, nogil=True)(gens)
+                        gens = numba.njit(cache=True, fastmath=False, nogil=True)(gens)
                     except:
                         print("failed to numba-jit-compile generator {}".format(gens))
                         raise
@@ -283,7 +283,7 @@ class AggregateHypo(Hypo):
                 print(py_pegleg_generators_str)
                 raise
 
-            pegleg_generators = numba_jit(fastmath=True, nogil=True, nopython=True)(
+            pegleg_generators = numba_jit(fastmath=False, nogil=True, nopython=True)(
                 py_pegleg_generators # pylint: disable=undefined-variable
             )
 
