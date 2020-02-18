@@ -28,7 +28,7 @@ if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import load_pickle
-from retro.retro_types import NEUTRINOS
+from retro.retro_types import NEUTRINOS, PULSE_T
 from retro.utils.misc import expand, mkdir, nsort_key_func
 
 
@@ -98,13 +98,6 @@ DOM_PULSES_IDX_T = np.dtype(
     ]
 )
 
-SIMPLE_PULSE_T = np.dtype(
-    [
-        ("charge", np.float32),
-        ("time", np.float32),
-    ]
-)
-
 DATA_DIRPATH_META_RE = re.compile(
     r"""
     oscNext_data_
@@ -161,7 +154,7 @@ def process_events_dir(events_dirpath, pulse_series):
 
     doms_array : numpy ndarray of dtype `DOM_PULSES_IDX_T`
 
-    pulses_array : numpy ndarray of dtype `SIMPLE_PULSE_T`
+    pulses_array : numpy ndarray of dtype `PULSE_T`
 
     """
     events_dirpath = expand(events_dirpath)
@@ -271,9 +264,11 @@ def process_events_dir(events_dirpath, pulse_series):
             doms_array[dom_rel_idx]["num_pulses"] = dom_num_pulses
             doms_array[dom_rel_idx]["charge"] = dom_charge
 
-            simple_dom_pulses = np.empty(shape=dom_num_pulses, dtype=SIMPLE_PULSE_T)
-            simple_dom_pulses["charge"] = dom_pulses["charge"]
+            simple_dom_pulses = np.empty(shape=dom_num_pulses, dtype=PULSE_T)
             simple_dom_pulses["time"] = dom_pulses["time"]
+            simple_dom_pulses["charge"] = dom_pulses["charge"]
+            simple_dom_pulses["width"] = dom_pulses["width"]
+            simple_dom_pulses["flags"] = dom_pulses["flags"]
 
             pulses_arrays.append(simple_dom_pulses)
             pulses_idx0 += dom_num_pulses
@@ -359,7 +354,7 @@ def produce_arrays(
     events_dirpaths = []
     for dirpath, dirs_, files in walk(indir, followlinks=True):
         dirs_.sort(key=nsort_key_func)
-        if not "events.npy" in files:  # not a "leaf" dir
+        if "events.npy" not in files:  # not a "leaf" dir
             continue
         events_dirpaths.append(dirpath)
 

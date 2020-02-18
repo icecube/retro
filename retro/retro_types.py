@@ -314,6 +314,7 @@ PULSE_T = np.dtype([
     ('time', np.float32),
     ('charge', np.float32),
     ('width', np.float32),
+    ('flags', np.uint8),  # icecube.dataclasses.I3RecoPulse.PulseFlags
 ])
 
 PHOTON_T = np.dtype([
@@ -649,6 +650,37 @@ NUES = (ParticleType.NuE, ParticleType.NuEBar)
 NUMUS = (ParticleType.NuMu, ParticleType.NuMuBar)
 NUTAUS = (ParticleType.NuTau, ParticleType.NuTauBar)
 NEUTRINOS = NUES + NUMUS + NUTAUS
+
+
+class PulseFlags(enum.IntEnum):
+    """Pulse flags.
+
+    Values corresponding with even powers of 2
+
+        LC = 1
+        ATWD = 2
+        FADC = 4
+
+    can be used to define a bit mask (i.e., multiple of {LC, ATWD, FADC} can be
+    simultaneously true).
+
+    If the LC bit is true, then the pulse comes from a hard local coincidence
+    (HLC) hit; otherwise, the hits are soft local coincidence (SLC). .. ::
+
+        is_hlc = (pulses["flags"] & PulseFlags.LC).astype(bool)
+        is_slc = np.logical_not((pulses["flags"] & PulseFlags.LC).astype(bool))
+
+    Scraped from dataclasses/public/dataclasses/physics/I3RecoPulse.h, 2020-02-18
+    """
+    # pylint: disable=invalid-name
+    LC = 1
+    ATWD = 2
+    LC_ATWD = 3
+    FADC = 4
+    LC_FADC = 5
+    ATWD_FADC = 6
+    LC_ATWD_FADC = 7
+
 
 class ParticleShape(enum.IntEnum):
     """`I3Particle` property `shape`.

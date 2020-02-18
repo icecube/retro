@@ -992,7 +992,7 @@ def get_true_time_relative_to_event_info(events, doms, pulses):
     ----------
     events : ndarray of dtype MC_DOMS_IDX_T
     doms : ndarray of dtype DOM_PULSES_IDX_T
-    pulses : ndarray of dtype SIMPLE_PULSE_T
+    pulses : ndarray of dtype PULSE_T
 
     Returns
     -------
@@ -1038,7 +1038,7 @@ def get_true_time_relative_to_dom_info(events, doms, pulses):
     ----------
     events : ndarray of dtype MC_DOMS_IDX_T
     doms : ndarray of dtype DOM_PULSES_IDX_T
-    pulses : ndarray of dtype SIMPLE_PULSE_T
+    pulses : ndarray of dtype PULSE_T
 
     Returns
     -------
