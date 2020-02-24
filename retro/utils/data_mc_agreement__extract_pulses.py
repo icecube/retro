@@ -157,138 +157,147 @@ def process_events_dir(events_dirpath, pulse_series):
     pulses_array : numpy ndarray of dtype `PULSE_T`
 
     """
-    events_dirpath = expand(events_dirpath)
-    basedir = basename(events_dirpath)
-    events = np.load(join(events_dirpath, "events.npy"), mmap_mode="r")
-    if len(events) == 0:
-        return None
+    try:
+        events_dirpath = expand(events_dirpath)
+        basedir = basename(events_dirpath)
+        events = np.load(join(events_dirpath, "events.npy"), mmap_mode="r")
+        if len(events) == 0:
+            return None
 
-    mask_vals = events["L5_oscNext_bool"]
-    valid_event_indices = np.argwhere(mask_vals).flatten()
-    num_valid_events = len(valid_event_indices)
-    if num_valid_events == 0:
-        return None
+        mask_vals = events["L5_oscNext_bool"]
+        valid_event_indices = np.argwhere(mask_vals).flatten()
+        num_valid_events = len(valid_event_indices)
+        if num_valid_events == 0:
+            return None
 
-    truth = None
-    weights = None
-    is_noise = False
-    if isfile(join(events_dirpath, "truth.npy")):  # is Monte Carlo simulation
-        is_data = False
-        truth = np.load(join(events_dirpath, "truth.npy"), mmap_mode="r")
-        weights = truth["weight"]
-        events_dtype = MC_DOMS_IDX_T
-        is_noise = "pdg_encoding" not in truth.dtype.names
-        match = MC_DIRPATH_META_RE.match(basedir)
-        if not match:
-            raise ValueError(events_dirpath)
-        finfo_d = match.groupdict()
-        finfo_d["dataset"] = int(finfo_d["dataset"])
-        finfo_d["file_id"] = int(finfo_d["file_id"])
-    else:  # is actual detector data
-        is_data = True
-        events_dtype = DATA_DOMS_IDX_T
-        match = DATA_DIRPATH_META_RE.match(basename(events_dirpath))
-        if not match:
-            raise ValueError(events_dirpath)
-        finfo_d = match.groupdict()
-        finfo_d["season"] = int(finfo_d["season"])
-        finfo_d["sub_run_id"] = int(finfo_d["sub_run_id"])
+        truth = None
+        weights = None
+        is_noise = False
+        if isfile(join(events_dirpath, "truth.npy")):  # is Monte Carlo simulation
+            is_data = False
+            truth = np.load(join(events_dirpath, "truth.npy"), mmap_mode="r")
+            weights = truth["weight"]
+            events_dtype = MC_DOMS_IDX_T
+            is_noise = "pdg_encoding" not in truth.dtype.names
+            match = MC_DIRPATH_META_RE.match(basedir)
+            if not match:
+                raise ValueError(events_dirpath)
+            finfo_d = match.groupdict()
+            finfo_d["dataset"] = int(finfo_d["dataset"])
+            finfo_d["file_id"] = int(finfo_d["file_id"])
+        else:  # is actual detector data
+            is_data = True
+            events_dtype = DATA_DOMS_IDX_T
+            match = DATA_DIRPATH_META_RE.match(basename(events_dirpath))
+            if not match:
+                raise ValueError(events_dirpath)
+            finfo_d = match.groupdict()
+            finfo_d["season"] = int(finfo_d["season"])
+            finfo_d["sub_run_id"] = int(finfo_d["sub_run_id"])
 
-    events_array = np.empty(shape=num_valid_events, dtype=events_dtype)
+        events_array = np.empty(shape=num_valid_events, dtype=events_dtype)
 
-    doms_arrays = []
-    pulses_arrays = []
+        doms_arrays = []
+        pulses_arrays = []
 
-    dom_idx0 = 0
-    pulses_idx0 = 0
+        dom_idx0 = 0
+        pulses_idx0 = 0
 
-    pulses = load_pickle(join(events_dirpath, "pulses", "{}.pkl".format(pulse_series)))
-    linefit_dc = np.load(join(events_dirpath, "recos", "LineFit_DC.npy"))
+        pulses = load_pickle(join(events_dirpath, "pulses", "{}.pkl".format(pulse_series)))
+        linefit_dc = np.load(join(events_dirpath, "recos", "LineFit_DC.npy"))
 
-    for rel_idx, valid_idx in enumerate(valid_event_indices):
-        events_array[rel_idx:rel_idx+1][COPY_ID_FIELDS] = events[valid_idx][COPY_ID_FIELDS]
-        events_array[rel_idx]["dom_idx0"] = dom_idx0
+        for rel_idx, valid_idx in enumerate(valid_event_indices):
+            events_array[rel_idx:rel_idx+1][COPY_ID_FIELDS] = events[valid_idx][COPY_ID_FIELDS]
+            events_array[rel_idx]["dom_idx0"] = dom_idx0
 
-        if is_data:
-            events_array[rel_idx:rel_idx+1][COPY_TIME_FIELDS] = (
-                events[valid_idx]["start_time"][COPY_TIME_FIELDS]
+            if is_data:
+                events_array[rel_idx:rel_idx+1][COPY_TIME_FIELDS] = (
+                    events[valid_idx]["start_time"][COPY_TIME_FIELDS]
+                )
+                events_array[rel_idx]["season"] = finfo_d["season"]
+                events_array[rel_idx]["actual_sub_run_id"] = finfo_d["sub_run_id"]
+            else:
+                events_array[rel_idx]["dataset"] = finfo_d["dataset"]
+                events_array[rel_idx]["file_id"] = finfo_d["file_id"]
+
+                events_array[rel_idx]["weight"] = weights[valid_idx]
+                if is_noise:
+                    true_pdg = 0
+                    true_energy = np.nan
+                    true_time = np.nan
+                else:
+                    true_pdg = truth[valid_idx]["pdg_encoding"]
+                    true_energy = truth[valid_idx]["energy"]
+                    true_time = truth[valid_idx]["time"]
+                events_array[rel_idx]["true_pdg"] = true_pdg
+                #if abs(true_pdg) >= 128:
+                #    print("true_pdg =", true_pdg)
+                #    raise ValueError("true_pdg = {}".format(true_pdg))
+                events_array[rel_idx]["true_energy"] = true_energy
+                events_array[rel_idx]["true_time"] = true_time
+
+                if true_pdg in NEUTRINOS:
+                    events_array[rel_idx]["true_int"] = truth[valid_idx]["InteractionType"]
+                else:
+                    events_array[rel_idx]["true_int"] = 0
+
+            event_pulses = pulses[valid_idx]
+
+            events_array[rel_idx]["num_hit_doms"] = num_hit_doms = len(event_pulses)
+            doms_array = np.empty(shape=num_hit_doms, dtype=DOM_PULSES_IDX_T)
+
+            event_num_pulses = 0
+            event_charge = 0.
+            for dom_rel_idx, (omkey, dom_pulses) in enumerate(event_pulses):
+                dom_num_pulses = len(dom_pulses)
+                if dom_num_pulses >= 2**8:
+                    print("dom_num_pulses =", dom_num_pulses)
+                    raise ValueError("dom_num_pulses = {}".format(dom_num_pulses))
+
+                dom_charge = np.sum(dom_pulses["charge"])
+
+                event_num_pulses += dom_num_pulses
+                event_charge += dom_charge
+
+                doms_array[dom_rel_idx]["string"] = omkey[0]
+                doms_array[dom_rel_idx]["om"] = omkey[1]
+                doms_array[dom_rel_idx]["pulses_idx0"] = pulses_idx0
+                doms_array[dom_rel_idx]["num_pulses"] = dom_num_pulses
+                doms_array[dom_rel_idx]["charge"] = dom_charge
+
+                simple_dom_pulses = np.empty(shape=dom_num_pulses, dtype=PULSE_T)
+                simple_dom_pulses["time"] = dom_pulses["time"]
+                simple_dom_pulses["charge"] = dom_pulses["charge"]
+                simple_dom_pulses["width"] = dom_pulses["width"]
+                simple_dom_pulses["flags"] = dom_pulses["flags"]
+
+                pulses_arrays.append(simple_dom_pulses)
+                pulses_idx0 += dom_num_pulses
+
+            if event_num_pulses >= 2**32:
+                print("event_num_pulses =", event_num_pulses)
+                raise ValueError("event_num_pulses = {}".format(event_num_pulses))
+
+            events_array[rel_idx]["num_pulses"] = event_num_pulses
+            events_array[rel_idx]["charge"] = event_charge
+
+            doms_arrays.append(doms_array)
+            dom_idx0 += num_hit_doms
+
+        events_array[COPY_LINEFIT_DC_DST_FIELDS] = (
+            linefit_dc[valid_event_indices][COPY_LINEFIT_DC_SRC_FIELDS]
+        )
+
+        doms_array = np.concatenate(doms_arrays)
+        pulses_array = np.concatenate(pulses_arrays)
+
+    except Exception:
+        print(
+            'Failed on events_dirpath = "{}", pulse_series = "{}"'.format(
+                events_dirpath, pulse_series
             )
-            events_array[rel_idx]["season"] = finfo_d["season"]
-            events_array[rel_idx]["actual_sub_run_id"] = finfo_d["sub_run_id"]
-        else:
-            events_array[rel_idx]["dataset"] = finfo_d["dataset"]
-            events_array[rel_idx]["file_id"] = finfo_d["file_id"]
-
-            events_array[rel_idx]["weight"] = weights[valid_idx]
-            if is_noise:
-                true_pdg = 0
-                true_energy = np.nan
-                true_time = np.nan
-            else:
-                true_pdg = truth[valid_idx]["pdg_encoding"]
-                true_energy = truth[valid_idx]["energy"]
-                true_time = truth[valid_idx]["time"]
-            events_array[rel_idx]["true_pdg"] = true_pdg
-            #if abs(true_pdg) >= 128:
-            #    print("true_pdg =", true_pdg)
-            #    raise ValueError("true_pdg = {}".format(true_pdg))
-            events_array[rel_idx]["true_energy"] = true_energy
-            events_array[rel_idx]["true_time"] = true_time
-
-            if true_pdg in NEUTRINOS:
-                events_array[rel_idx]["true_int"] = truth[valid_idx]["InteractionType"]
-            else:
-                events_array[rel_idx]["true_int"] = 0
-
-        event_pulses = pulses[valid_idx]
-
-        events_array[rel_idx]["num_hit_doms"] = num_hit_doms = len(event_pulses)
-        doms_array = np.empty(shape=num_hit_doms, dtype=DOM_PULSES_IDX_T)
-
-        event_num_pulses = 0
-        event_charge = 0.
-        for dom_rel_idx, (omkey, dom_pulses) in enumerate(event_pulses):
-            dom_num_pulses = len(dom_pulses)
-            if dom_num_pulses >= 2**8:
-                print("dom_num_pulses =", dom_num_pulses)
-                raise ValueError("dom_num_pulses = {}".format(dom_num_pulses))
-
-            dom_charge = np.sum(dom_pulses["charge"])
-
-            event_num_pulses += dom_num_pulses
-            event_charge += dom_charge
-
-            doms_array[dom_rel_idx]["string"] = omkey[0]
-            doms_array[dom_rel_idx]["om"] = omkey[1]
-            doms_array[dom_rel_idx]["pulses_idx0"] = pulses_idx0
-            doms_array[dom_rel_idx]["num_pulses"] = dom_num_pulses
-            doms_array[dom_rel_idx]["charge"] = dom_charge
-
-            simple_dom_pulses = np.empty(shape=dom_num_pulses, dtype=PULSE_T)
-            simple_dom_pulses["time"] = dom_pulses["time"]
-            simple_dom_pulses["charge"] = dom_pulses["charge"]
-            simple_dom_pulses["width"] = dom_pulses["width"]
-            simple_dom_pulses["flags"] = dom_pulses["flags"]
-
-            pulses_arrays.append(simple_dom_pulses)
-            pulses_idx0 += dom_num_pulses
-
-        if event_num_pulses >= 2**32:
-            print("event_num_pulses =", event_num_pulses)
-            raise ValueError("event_num_pulses = {}".format(event_num_pulses))
-
-        events_array[rel_idx]["num_pulses"] = event_num_pulses
-        events_array[rel_idx]["charge"] = event_charge
-
-        doms_arrays.append(doms_array)
-        dom_idx0 += num_hit_doms
-
-    events_array[COPY_LINEFIT_DC_DST_FIELDS] = (
-        linefit_dc[valid_event_indices][COPY_LINEFIT_DC_SRC_FIELDS]
-    )
-
-    doms_array = np.concatenate(doms_arrays)
-    pulses_array = np.concatenate(pulses_arrays)
+        )
+        raise
 
     return events_array, doms_array, pulses_array
 
@@ -351,16 +360,15 @@ def produce_arrays(
 
     # -- Find leaf directories to process -- #
 
-    events_dirpaths = []
-    for dirpath, dirs_, files in walk(indir, followlinks=True):
-        dirs_.sort(key=nsort_key_func)
-        if "events.npy" not in files:  # not a "leaf" dir
-            continue
-        events_dirpaths.append(dirpath)
-
     args = tuple()
-    for events_dirpath in events_dirpaths:
-        kwargs = dict(events_dirpath=events_dirpath, pulse_series=pulse_series)
+    for dirpath, dirs_, files in walk(indir, followlinks=True):
+        if "events.npy" in files:
+            dirs_.clear()
+        else:
+            dirs_.sort(key=nsort_key_func)
+            continue
+
+        kwargs = dict(events_dirpath=dirpath, pulse_series=pulse_series)
         if serial:
             result = process_events_dir(*args, **kwargs)
             concatenate_results(result)
