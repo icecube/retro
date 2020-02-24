@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, line-too-long
 
 """
 Extract information on events from an i3 file needed for running Retro Reco.
@@ -36,12 +36,18 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
-from collections import Mapping, OrderedDict
+from collections import OrderedDict
+try:
+    from collections import Mapping
+except ImportError:
+    from collections.abc import Mapping
+import errno
+import io
 import json
 from os.path import abspath, dirname, isdir, isfile, join
 import pickle
 import re
-from shutil import move, rmtree
+from shutil import copytree, rmtree
 import socket
 import sys
 from tempfile import mkdtemp
@@ -400,7 +406,7 @@ def extract_gcd_frames(g_frame, c_frame, d_frame, retro_gcd_dir, metadata=None):
         GCD is embedded in a data i3 file)
 
     """
-    from icecube.dataio import I3File
+    from icecube.dataio import I3File  # pylint: disable=import-outside-toplevel
 
     retro_gcd_dir = expand(retro_gcd_dir)
 
@@ -411,8 +417,8 @@ def extract_gcd_frames(g_frame, c_frame, d_frame, retro_gcd_dir, metadata=None):
     # Add a vaguely useful README to gcd root dir
     readme_fpath = join(retro_gcd_dir, "README")
     if not isfile(readme_fpath):
-        with file(readme_fpath, "w") as readme:
-            readme.write(GCD_README.strip() + "\n")
+        with io.open(readme_fpath, "w", encoding="utf-8") as fhandle:
+            fhandle.write(GCD_README.strip() + "\n")
 
     # Find md5sum of an uncompressed GCD file created by these G, C, & D frames
     tempdir_path = mkdtemp(suffix="gcd")
@@ -452,11 +458,9 @@ def extract_gcd_frames(g_frame, c_frame, d_frame, retro_gcd_dir, metadata=None):
         for key, val in gcd_info.items():
             if isinstance(val, Mapping):
                 if key == "I3DetectorStatus":
-                    pickle.dump(
-                        val,
-                        open(join(tempdir_path, key + ".pkl"), "wb"),
-                        protocol=pickle.HIGHEST_PROTOCOL,
-                    )
+                    key_fpath = join(tempdir_path, key + ".pkl")
+                    with io.open(key_fpath, "wb") as fhandle:
+                        pickle.dump(val, fhandle, protocol=pickle.HIGHEST_PROTOCOL)
                 else:
                     np.savez_compressed(join(tempdir_path, key + ".npz"), **val)
             else:
@@ -464,22 +468,21 @@ def extract_gcd_frames(g_frame, c_frame, d_frame, retro_gcd_dir, metadata=None):
                 np.save(join(tempdir_path, key + ".npy"), val)
 
         if metadata:
-            json.dump(
-                metadata,
-                file(join(tempdir_path, "metadata.json"), "w"),
-                sort_keys=False,
-                indent=4,
-            )
-    except:
+            metadata_fpath = join(tempdir_path, "metadata.json")
+            with open(metadata_fpath, "w") as fhandle:
+                json.dump(metadata, fhandle, sort_keys=False, indent=4)
+
+        try:
+            copytree(tempdir_path, this_gcd_dir_path)
+        except OSError as err:
+            if err.errno != errno.EEXIST:
+                raise
+
+    finally:
         try:
             rmtree(tempdir_path)
-        except KeyboardInterrupt:
-            raise
         except Exception:
             pass
-        raise
-    else:
-        move(tempdir_path, this_gcd_dir_path)
 
     return gcd_md5_hex
 
@@ -501,8 +504,8 @@ def extract_gcd_files(gcd_files, retro_gcd_dir, verbosity=0):
 
     """
     # Import here so module can be read without access to IceCube software
-    from icecube.dataio import I3File  # pylint: disable=no-name-in-module
-    from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module
+    from icecube.dataio import I3File  # pylint: disable=no-name-in-module, import-outside-toplevel
+    from icecube.icetray import I3Frame  # pylint: disable=no-name-in-module, import-outside-toplevel
 
     if isinstance(gcd_files, string_types):
         gcd_files = [gcd_files]
@@ -547,7 +550,7 @@ def extract_gcd_files(gcd_files, retro_gcd_dir, verbosity=0):
                 metadata=metadata,
                 **gcd_frames
             )
-        except:
+        except Exception:
             sys.stderr.write('failed to extract GCD file "{}"\n'.format(gcd_fpath))
             raise
         gcd_md5_hexs.append(gcd_md5_hex)
