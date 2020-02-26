@@ -12,7 +12,7 @@ __all__ = [
     "OSCNEXT_I3_FNAME_RE",
     "test_OSCNEXT_I3_FNAME_RE",
     "DATA_GCD_FNAME_RE",
-    "find_i3_files_to_extract",
+    "find_files_to_extract",
     "main",
 ]
 
@@ -188,7 +188,46 @@ DATA_GCD_FNAME_RE = re.compile(
 HOST = gethostname()
 
 
-def find_i3_files_to_extract(
+def find_data_gcds_in_dirs(rootdirs, recurse=True):
+    """Find data run GCD files in directories.
+
+    Parameters
+    ----------
+    rootdirs : str or sequence thereof
+    recurse : bool
+
+    Returns
+    -------
+    data_run_gcds : dict
+        Keys are <tuple>(<str>2-digit season, <str>run number) and values are
+        <str> path to corresponding GCD file
+
+    """
+    if isinstance(rootdirs, str):
+        rootdirs = [rootdirs]
+    rootdirs = [expand(rootdir) for rootdir in rootdirs]
+
+    data_run_gcds = {}
+    for rootdir in rootdirs:
+        for dirpath, dirs, files in walk(rootdir):
+            if recurse:
+                dirs.sort(key=nsort_key_func)
+            else:
+                del dirs[:]
+            files.sort(key=nsort_key_func)
+
+            for fname in files:
+                gcd_match = DATA_GCD_FNAME_RE.match(fname)
+                if gcd_match:
+                    gcd_groupdict = gcd_match.groupdict()
+                    data_run_gcds[
+                        (gcd_groupdict["season"], gcd_groupdict["run"])
+                    ] = join(dirpath, fname)
+
+    return data_run_gcds
+
+
+def find_files_to_extract(
     rootdirs, overwrite, find_gcd_in_dir=False, data_run_gcds=None
 ):
     """Find missing, bad, or old extracted pulse series and print the paths of
@@ -237,26 +276,14 @@ def find_i3_files_to_extract(
     if isinstance(find_gcd_in_dir, str):
         find_gcd_in_dir = expand(find_gcd_in_dir)
         assert isdir(find_gcd_in_dir), str(find_gcd_in_dir)
-
-        data_run_gcds = {}
-        for dirpath, dirs, files in walk(find_gcd_in_dir):
-            dirs.sort(key=nsort_key_func)
-            files.sort(key=nsort_key_func)
-
-            for fname in files:
-                gcd_match = DATA_GCD_FNAME_RE.match(fname)
-                if gcd_match:
-                    gcd_groupdict = gcd_match.groupdict()
-                    data_run_gcds[
-                        (gcd_groupdict["season"], gcd_groupdict["run"])
-                    ] = join(dirpath, fname)
+        data_run_gcds = find_data_gcds_in_dirs(find_gcd_in_dir, recurse=True)
 
     for rootdir in rootdirs:
         for dirpath, dirs, files in walk(rootdir, followlinks=True):
             if "events.npy" in files:
                 # No need to recurse into an existing retro events directory,
                 # so clear out remaining directories
-                dirs.clear()
+                del dirs[:]
                 continue
 
             dirs.sort(key=nsort_key_func)
@@ -265,18 +292,7 @@ def find_i3_files_to_extract(
             # If `find_gcd_in_dir` is True (i.e., not a string and not False),
             # look in current directory for all data-run GCD files
             if find_gcd_in_dir is True:
-                data_run_gcds = {}
-                other_files = []
-                for fname in files:
-                    gcd_match = DATA_GCD_FNAME_RE.match(fname)
-                    if gcd_match:
-                        gcd_groupdict = gcd_match.groupdict()
-                        data_run_gcds[
-                            (gcd_groupdict["season"], gcd_groupdict["run"])
-                        ] = join(dirpath, fname)
-                    else:
-                        other_files.append(fname)
-                files = other_files
+                data_run_gcds = find_data_gcds_in_dirs(dirpath, recurse=False)
 
             for fname in files:
                 fname_match = OSCNEXT_I3_FNAME_RE.match(fname)
@@ -360,14 +376,15 @@ def main(description=__doc__):
     #)
     parser.add_argument(
         "--pulses",
+        required=False,
         nargs="+",
         default=["SRTTWOfflinePulsesDC", "SplitInIcePulses"],
         help="""Pulse series names to extract from each event""",
     )
     parser.add_argument(
         "--recos",
+        required=False,
         nargs="+",
-        default=["LineFit_DC", "L5_SPEFit11"],
         help="""Reco names to extract from each event""",
     )
     parser.add_argument(
@@ -377,9 +394,9 @@ def main(description=__doc__):
         help="""Trigger hierarchy names to extract from each event""",
     )
     parser.add_argument(
-        "--truth",
+        "--no-truth",
         action="store_true",
-        help="""Extract truth information from Monte Carlo events""",
+        help="""Do not extract truth information from Monte Carlo events""",
     )
     parser.add_argument(
         "--additional-keys",
@@ -392,18 +409,48 @@ def main(description=__doc__):
 
     find_func_kwargs = {
         k: kwargs.pop(k)
-        for k in getargspec(find_i3_files_to_extract).args if k in kwargs
+        for k in getargspec(find_files_to_extract).args if k in kwargs
     }
-    for fpath, gcd_fpath, is_data in find_i3_files_to_extract(**find_func_kwargs):
+
+    no_truth = kwargs.pop("no_truth")
+
+    #data_gcd_dir = "/data/icecube/ana/LE/oscNext/pass2/data/level7_verification_sample_v01.04/IC86.11"
+
+    sim_gcd_fname = "GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
+    if HOST in ["schwyz", "luzern", "uri", "unterwalden"]:
+        sim_gcd_dir = "/data/icecube/gcd"
+    elif HOST.endswith(".aci.ics.psu.edu"):
+        sim_gcd_dir = "/gpfs/group/dfc13/default/gcd/mc"
+    else:  # wisconsin
+        sim_gcd_dir = "/data/sim/DeepCore/2018/pass2/gcd"
+    sim_gcd_fpath = join(expand(sim_gcd_dir), sim_gcd_fname)
+
+    for fpath, gcd_fpath, fname_groupdict in find_files_to_extract(
+        find_gcd_in_dir=True, **find_func_kwargs
+    ):
         extract_events_kwargs = deepcopy(kwargs)
         extract_events_kwargs["i3_files"] = [fpath]
+
+        is_data = fname_groupdict["kind"].lower() == "data"
         if is_data:
+            assert gcd_fpath is not None
             extract_events_kwargs["gcd"] = gcd_fpath
         else:
-            extract_events_kwargs["truth"] = (
-                not is_data and extract_events_kwargs["truth"]
-            )
-        extract_events(**extract_events_kwargs)
+            extract_events_kwargs["truth"] = not is_data and not no_truth
+            extract_events_kwargs["gcd"] = sim_gcd_fpath
+
+        if "recos" not in extract_events_kwargs:
+            level = int(fname_groupdict["level"])
+            recos = []
+            if level >= 5:
+                recos.extend(["LineFit_DC", "L5_SPEFit11"])
+            if level >= 6:
+                recos.append("retro")
+            extract_events_kwargs["recos"] = recos
+
+        print(extract_events_kwargs)
+        print("")
+        #extract_events(**extract_events_kwargs)
 
 
 if __name__ == "__main__":
