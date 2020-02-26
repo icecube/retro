@@ -41,7 +41,6 @@ from copy import deepcopy
 from operator import getitem
 from os import listdir, walk
 from os.path import abspath, dirname, isdir, isfile, join, splitext
-import re
 import sys
 import time
 
@@ -67,18 +66,6 @@ from retro.tables.retro_5d_tables import (
 )
 from retro.utils.misc import expand, nsort_key_func, quantize
 
-
-I3_FNAME_INFO_RE = re.compile(
-    r'''
-    Level(?P<proc_level>.+) # processing level e.g. 5p or 5pt (???)
-    _(?P<detector>[^.]+)    # detector, e.g. IC86
-    \.(?P<year>\d+)         # year
-    _(?P<generator>.+)      # generator, e.g. genie
-    _(?P<flavor>.+)         # flavor, e.g. nue
-    \.(?P<run>\d+)          # run, e.g. 012600
-    \.(?P<filenum>\d+)      # file number, e.g. 000000
-    ''', (re.VERBOSE | re.IGNORECASE)
-)
 
 QUANTIZE_VEC = numba.vectorize(cache=True, target="cpu")(quantize)
 
