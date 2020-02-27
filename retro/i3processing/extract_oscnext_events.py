@@ -19,6 +19,7 @@ __all__ = [
 from argparse import ArgumentParser
 from copy import deepcopy
 from inspect import getargspec
+from multiprocessing import Pool
 from os import walk
 from os.path import abspath, dirname, isdir, isfile, join
 import re
@@ -29,7 +30,7 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.i3processing.extract_events import extract_events
+from retro.i3processing.extract_events import ExceptionWrapper, wrapped_extract_events
 from retro.utils.misc import expand, nsort_key_func
 
 
@@ -49,6 +50,14 @@ OSCNEXT_I3_FNAME_RE = re.compile(
     """,
     flags=re.IGNORECASE | re.VERBOSE,
 )
+
+
+DATA_GCD_FNAME_RE = re.compile(
+    r".*_IC86\.20(?P<season>[0-9]+).*_data_Run(?P<run>[0-9]+).*GCD.*\.i3(\..*)*",
+    flags=re.IGNORECASE,
+)
+
+HOST = gethostname()
 
 
 def test_OSCNEXT_I3_FNAME_RE():
@@ -180,20 +189,12 @@ def test_OSCNEXT_I3_FNAME_RE():
             raise
 
 
-DATA_GCD_FNAME_RE = re.compile(
-    r".*_IC86\.20(?P<season>[0-9]+).*_data_Run(?P<run>[0-9]+).*GCD.*\.i3(\..*)*",
-    flags=re.IGNORECASE,
-)
-
-HOST = gethostname()
-
-
 def find_data_gcds_in_dirs(rootdirs, recurse=True):
     """Find data run GCD files in directories.
 
     Parameters
     ----------
-    rootdirs : str or sequence thereof
+    rootdirs : str or iterable thereof
     recurse : bool
 
     Returns
@@ -273,10 +274,11 @@ def find_files_to_extract(
 
     # If `find_gcd_in_dir` is a string, interpret as a directory and search for
     # GCD's in that directory (recursively)
+    found_data_run_gcds = None
     if isinstance(find_gcd_in_dir, str):
         find_gcd_in_dir = expand(find_gcd_in_dir)
         assert isdir(find_gcd_in_dir), str(find_gcd_in_dir)
-        data_run_gcds = find_data_gcds_in_dirs(find_gcd_in_dir, recurse=True)
+        found_data_run_gcds = find_data_gcds_in_dirs(find_gcd_in_dir, recurse=True)
 
     for rootdir in rootdirs:
         for dirpath, dirs, files in walk(rootdir, followlinks=True):
@@ -291,8 +293,9 @@ def find_files_to_extract(
 
             # If `find_gcd_in_dir` is True (i.e., not a string and not False),
             # look in current directory for all data-run GCD files
+            thisdir_data_run_gcds = None
             if find_gcd_in_dir is True:
-                data_run_gcds = find_data_gcds_in_dirs(dirpath, recurse=False)
+                thisdir_data_run_gcds = find_data_gcds_in_dirs(dirpath, recurse=False)
 
             for fname in files:
                 fname_match = OSCNEXT_I3_FNAME_RE.match(fname)
@@ -313,10 +316,17 @@ def find_files_to_extract(
                 fpath = join(dirpath, fname)
 
                 gcd_fpath = None
-                if find_gcd_in_dir and fname_groupdict["kind"] == "data":
-                    gcd_fpath = data_run_gcds.get(
-                        (fname_groupdict["season"], fname_groupdict["run"]), None,
-                    )
+                if fname_groupdict["kind"] == "data":
+                    key = (fname_groupdict["season"], fname_groupdict["run"])
+
+                    if data_run_gcds:
+                        gcd_fpath = data_run_gcds.get(key, None)
+
+                    if gcd_fpath is None and found_data_run_gcds:
+                        gcd_fpath = found_data_run_gcds.get(key, None)
+
+                    if gcd_fpath is None and thisdir_data_run_gcds:
+                        gcd_fpath = thisdir_data_run_gcds.get(key, None)
 
                 yield fpath, gcd_fpath, fname_groupdict
 
@@ -324,6 +334,26 @@ def find_files_to_extract(
 def main(description=__doc__):
     """Script interface to `extract_events` function: Parse command line args
     and call function."""
+
+    dflt = {}
+    if HOST in ["schwyz", "luzern", "uri", "unterwalden"]:
+        sim_gcd_dir = "/data/icecube/gcd"
+        dflt["retro_gcd_dir"] = "/data/icecube/retro_gcd"
+        dflt["data_gcd_dir"] = None
+    elif HOST.endswith(".aci.ics.psu.edu"):
+        sim_gcd_dir = "/gpfs/group/dfc13/default/gcd/mc"
+        dflt["retro_gcd_dir"] = "/gpfs/group/dfc13/default/retro_gcd"
+        dflt["data_gcd_dir"] = None
+    else:  # wisconsin
+        sim_gcd_dir = "/data/sim/DeepCore/2018/pass2/gcd"
+        dflt["retro_gcd_dir"] = "~/retro_gcd"
+        dflt["data_gcd_dir"] = None
+
+    dflt["sim_gcd"] = join(
+        expand(sim_gcd_dir),
+        "GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz",
+    )
+
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "--rootdirs",
@@ -338,36 +368,37 @@ def main(description=__doc__):
         (existing files will not be deleted, so excess objects not specified
         here will not be removed)""",
     )
-    #parser.add_argument(
-    #    "--retro-gcd-dir",
-    #    required=True,
-    #    help="""Directory into which to store any extracted GCD info""",
-    #)
-    #parser.add_argument(
-    #    "--find-gcd-in-dir",
-    #    action="store_true",
-    #    help="""Search for data run's GCD file in same directory as data from
-    #    the run (i3 file(s)) is found""",
-    #)
-    #parser.add_argument(
-    #    "--gcd",
-    #    required=False,
-    #    default=None,
-    #    help="""Specify an external GCD file or md5sum (as returned by
-    #    `retro.i3processing.extract_gcd_frames`, i.e., the md5sum of an
-    #    uncompressed i3 file containing _only_ the G, C, and D frames). It is
-    #    not required to specify --gcd if the G, C, and D frames are embedded in
-    #    all files specified by --i3-files. Any GCD frames within said files
-    #    will also take precedent if --gcd _is_ specified.""",
-    #)
-    #parser.add_argument(
-    #    "--outdir",
-    #    required=False,
-    #    help="""Directory into which to store the extracted directories and
-    #    files. If not specified, the directory where each i3 file is stored is
-    #    used (a leaf directory is created with the same name as each i3 file
-    #    but with .i3 and any compression extensions removed)."""
-    #)
+    parser.add_argument(
+        "--retro-gcd-dir",
+        required=False,
+        default=dflt.get("retro_gcd_dir", None),
+        help="""Directory into which to store any extracted GCD info""",
+    )
+    parser.add_argument(
+        "--sim-gcd",
+        required=False,
+        default=dflt.get("sim_gcd", None),
+        help="""Specify an external GCD file or md5sum (as returned by
+        `retro.i3processing.extract_gcd_frames`, i.e., the md5sum of an
+        uncompressed i3 file containing _only_ the G, C, and D frames). It is
+        not required to specify --gcd if the G, C, and D frames are embedded in
+        all files specified by --i3-files. Any GCD frames within said files
+        will also take precedent if --gcd _is_ specified.""",
+    )
+    parser.add_argument(
+        "--data-gcd-dir",
+        required=False,
+        default=dflt.get("data_gcd_dir", None),
+        help="""If data GCDs all live in one directory, specify it here.""",
+    )
+    parser.add_argument(
+        "--outdir",
+        required=False,
+        help="""Directory into which to store the extracted directories and
+        files. If not specified, the directory where each i3 file is stored is
+        used (a leaf directory is created with the same name as each i3 file
+        but with .i3 and any compression extensions removed)."""
+    )
     #parser.add_argument(
     #    "--photons",
     #    nargs="+",
@@ -385,7 +416,9 @@ def main(description=__doc__):
         "--recos",
         required=False,
         nargs="+",
-        help="""Reco names to extract from each event""",
+        help="""Reco names to extract from each event. If not specified,
+        "L5_SPEFit11", "LineFit_DC", and "retro_crs_prefit" (if the file name
+        matches L6 processing or above) are extracted.""",
     )
     parser.add_argument(
         "--triggers",
@@ -413,20 +446,19 @@ def main(description=__doc__):
     }
 
     no_truth = kwargs.pop("no_truth")
+    data_gcd_dir = kwargs.pop("data_gcd_dir", None)
+    sim_gcd = kwargs.pop("sim_gcd", None)
 
-    #data_gcd_dir = "/data/icecube/ana/LE/oscNext/pass2/data/level7_verification_sample_v01.04/IC86.11"
+    if data_gcd_dir:
+        data_run_gcds = find_data_gcds_in_dirs(data_gcd_dir)
+    else:
+        data_run_gcds = None
 
-    sim_gcd_fname = "GeoCalibDetectorStatus_AVG_55697-57531_PASS2_SPE_withScaledNoise.i3.gz"
-    if HOST in ["schwyz", "luzern", "uri", "unterwalden"]:
-        sim_gcd_dir = "/data/icecube/gcd"
-    elif HOST.endswith(".aci.ics.psu.edu"):
-        sim_gcd_dir = "/gpfs/group/dfc13/default/gcd/mc"
-    else:  # wisconsin
-        sim_gcd_dir = "/data/sim/DeepCore/2018/pass2/gcd"
-    sim_gcd_fpath = join(expand(sim_gcd_dir), sim_gcd_fname)
+    pool = Pool()
 
+    requests = []
     for fpath, gcd_fpath, fname_groupdict in find_files_to_extract(
-        find_gcd_in_dir=True, **find_func_kwargs
+        find_gcd_in_dir=True, data_run_gcds=data_run_gcds, **find_func_kwargs
     ):
         extract_events_kwargs = deepcopy(kwargs)
         extract_events_kwargs["i3_files"] = [fpath]
@@ -437,7 +469,7 @@ def main(description=__doc__):
             extract_events_kwargs["gcd"] = gcd_fpath
         else:
             extract_events_kwargs["truth"] = not is_data and not no_truth
-            extract_events_kwargs["gcd"] = sim_gcd_fpath
+            extract_events_kwargs["gcd"] = sim_gcd
 
         if "recos" not in extract_events_kwargs:
             level = int(fname_groupdict["level"])
@@ -451,6 +483,21 @@ def main(description=__doc__):
         print(extract_events_kwargs)
         print("")
         #extract_events(**extract_events_kwargs)
+        requests.append(
+            (
+                extract_events_kwargs,
+                pool.apply_async(
+                    wrapped_extract_events, tuple(), extract_events_kwargs
+                ),
+            )
+        )
+
+    failures = []
+    for extract_events_kwargs, async_result in requests:
+        result = async_result.get()
+        if isinstance(result, ExceptionWrapper):
+            print("{}:\n{}".format(extract_events_kwargs["i3_files"], result.tb))
+            failures.append((extract_events_kwargs, result.tb))
 
 
 if __name__ == "__main__":

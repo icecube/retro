@@ -58,7 +58,7 @@ import re
 import sys
 
 import numpy as np
-from six import string_types
+from six import PY2, string_types
 
 if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -1969,6 +1969,28 @@ def extract_events(
             truth=truth,
             additional_keys=additional_keys,
         )
+
+
+class ExceptionWrapper(object):
+    """From https://stackoverflow.com/a/26096355/9632900, user rocksportrocker"""
+    def __init__(self, err):
+        self.err = err
+        __,  __, self.tb = sys.exc_info()
+
+    def re_raise(self):
+        if PY2:
+            raise self.err, None, self.tb
+        else:
+            raise self.err.with_traceback(self.tb)
+
+
+def wrapped_extract_events(*args, **kwargs):
+    """`extract_events` function wrapped in a try/except that keeps full
+    traceback information. Use if calling from multiprocessing module."""
+    try:
+        extract_events(*args, **kwargs)
+    except Exception as err:
+        return ExceptionWrapper(err)
 
 
 def main(description=__doc__):
