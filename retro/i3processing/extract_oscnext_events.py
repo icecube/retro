@@ -19,6 +19,7 @@ __all__ = [
 from argparse import ArgumentParser
 from copy import deepcopy
 from inspect import getargspec
+from itertools import chain
 from multiprocessing import Pool
 from os import walk
 from os.path import abspath, dirname, isdir, isfile, join
@@ -30,7 +31,7 @@ if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro.i3processing.extract_events import ExceptionWrapper, wrapped_extract_events
+from retro.i3processing.extract_events import wrapped_extract_events
 from retro.utils.misc import expand, nsort_key_func
 
 
@@ -471,7 +472,7 @@ def main(description=__doc__):
             extract_events_kwargs["truth"] = not is_data and not no_truth
             extract_events_kwargs["gcd"] = sim_gcd
 
-        if "recos" not in extract_events_kwargs:
+        if "recos" not in extract_events_kwargs or not extract_events_kwargs["recos"]:
             level = int(fname_groupdict["level"])
             recos = []
             if level >= 5:
@@ -480,9 +481,6 @@ def main(description=__doc__):
                 recos.append("retro")
             extract_events_kwargs["recos"] = recos
 
-        print(extract_events_kwargs)
-        print("")
-        #extract_events(**extract_events_kwargs)
         requests.append(
             (
                 extract_events_kwargs,
@@ -492,12 +490,19 @@ def main(description=__doc__):
             )
         )
 
-    failures = []
+    failed_i3_files = []
     for extract_events_kwargs, async_result in requests:
-        result = async_result.get()
-        if isinstance(result, ExceptionWrapper):
-            print("{}:\n{}".format(extract_events_kwargs["i3_files"], result.tb))
-            failures.append((extract_events_kwargs, result.tb))
+        retval = async_result.get()
+        if not retval:
+            failed_i3_files.append(extract_events_kwargs["i3_files"])
+
+    if failed_i3_files:
+        for failure in chain(*failed_i3_files):
+            print('"{}"'.format(failure))
+
+    print("\n{} failures out of {} i3 files found that needed to be extracted".format(
+        len(failed_i3_files), len(requests))
+    )
 
 
 if __name__ == "__main__":

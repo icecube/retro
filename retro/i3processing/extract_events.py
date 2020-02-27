@@ -56,6 +56,7 @@ from os.path import abspath, basename, dirname, join
 import pickle
 import re
 import sys
+import traceback
 
 import numpy as np
 from six import PY2, string_types
@@ -1590,6 +1591,11 @@ def _extract_events_from_single_file(
     else:
         outdir = join(outdir, leafdir_basename)
 
+    photons = photons if photons else tuple()
+    pulses = pulses if pulses else tuple()
+    recos = recos if recos else tuple()
+    triggers = triggers if triggers else tuple()
+
     i3file_md5_hex = get_file_md5(i3_fpath)
     i3_fpaths = [i3_fpath]
     if gcd is not None:
@@ -1971,26 +1977,15 @@ def extract_events(
         )
 
 
-class ExceptionWrapper(object):
-    """From https://stackoverflow.com/a/26096355/9632900, user rocksportrocker"""
-    def __init__(self, err):
-        self.err = err
-        __,  __, self.tb = sys.exc_info()
-
-    def re_raise(self):
-        if PY2:
-            raise self.err, None, self.tb
-        else:
-            raise self.err.with_traceback(self.tb)
-
-
 def wrapped_extract_events(*args, **kwargs):
     """`extract_events` function wrapped in a try/except that keeps full
     traceback information. Use if calling from multiprocessing module."""
     try:
         extract_events(*args, **kwargs)
     except Exception as err:
-        return ExceptionWrapper(err)
+        traceback.print_exc(file=sys.stderr)
+        return False
+    return True
 
 
 def main(description=__doc__):
