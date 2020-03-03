@@ -59,7 +59,7 @@ import sys
 import traceback
 
 import numpy as np
-from six import PY2, string_types
+from six import string_types
 
 if __name__ == "__main__" and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
@@ -1591,10 +1591,10 @@ def _extract_events_from_single_file(
     else:
         outdir = join(outdir, leafdir_basename)
 
-    photons = photons if photons else tuple()
-    pulses = pulses if pulses else tuple()
-    recos = recos if recos else tuple()
-    triggers = triggers if triggers else tuple()
+    photons = formatinput(photons)
+    pulses = formatinput(pulses)
+    recos = formatinput(recos)
+    triggers = formatinput(triggers)
 
     i3file_md5_hex = get_file_md5(i3_fpath)
     i3_fpaths = [i3_fpath]
@@ -1850,6 +1850,31 @@ def _extract_events_from_single_file(
         )
 
 
+def formatinput(val):
+    """Turn strings into lists of strings, strip leading and trailing
+    whitespace in strings, and ignore empty strings or any object that
+    bool(obj) evaluates to False
+
+    Parameters
+    ----------
+    val
+
+    Returns
+    -------
+    formatted_val
+
+    """
+    if isinstance(val, str):
+        val = [val]
+    if isinstance(val, Iterable):
+        val = [x for x in val if (x.strip() if isinstance(x, str) else x)]
+    elif val is None:
+        val = []
+    else:
+        raise ValueError('`val` type {}; `val` = "{}"'.format(type(val), str(val)))
+    return val
+
+
 def extract_events(
     i3_files,
     retro_gcd_dir,
@@ -1982,7 +2007,7 @@ def wrapped_extract_events(*args, **kwargs):
     traceback information. Use if calling from multiprocessing module."""
     try:
         extract_events(*args, **kwargs)
-    except Exception as err:
+    except Exception:
         traceback.print_exc(file=sys.stderr)
         return False
     return True

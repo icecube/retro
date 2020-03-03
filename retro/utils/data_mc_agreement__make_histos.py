@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, import-outside-toplevel, too-many-nested-blocks, bad-continuation, line-too-long, too-many-locals
 
 """
 Modify, analyze, and make distribution plots from data & MC events_array.npy,
@@ -50,6 +50,7 @@ __all__ = [
 ]
 
 from argparse import ArgumentParser
+from ast import literal_eval
 from collections import OrderedDict
 from copy import deepcopy
 import inspect
@@ -97,163 +98,125 @@ TRUE_TIME_WRT_DOM_INFO_T = np.dtype(
 )
 
 JIT_KW = dict(
-    nopython=True, nogil=True, parallel=False, error_model="numpy", fastmath=False
+    nopython=True, nogil=True, parallel=False, error_model="numpy", fastmath=True
 )
 
 DATA_DIR_INFOS = OrderedDict(
     [
-        ((12, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.12")),
-        ((13, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.13")),
-        ((14, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.14")),
-        ((15, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.15")),
-        ((16, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.16")),
-        ((17, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.17")),
-        ((18, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.18")),
+        ((12, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.12")),
+        ((13, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.13")),
+        ((14, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.14")),
+        ((15, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.15")),
+        ((16, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.16")),
+        ((17, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.17")),
+        ((18, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.18")),
+
+        ((13, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.13")),
+        ((14, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.14")),
+        ((17, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.17")),
+        ((18, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.18")),
     ]
 )
 
 MC_DIR_INFOS = OrderedDict(
     [
         # GENIE nue
-        (
-            (120000, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120000", num_files=601),
-        ),
-        (
-            (120001, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120001", num_files=602),
-        ),
-        (
-            (120002, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120002", num_files=602),
-        ),
-        (
-            (120003, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120003", num_files=602),
-        ),
-        (
-            (120004, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120004", num_files=602),
-        ),
+        ((120000, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120000", num_files=601)),
+        ((120001, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120001", num_files=602)),
+        ((120002, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120002", num_files=602)),
+        ((120003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120003", num_files=602)),
+        ((120004, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120004", num_files=602)),
+        ((120000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/120000", num_files=624)),
         # GENIE numu
-        (
-            (140000, (1, 3)),
-            dict(
-                path="ana/LE/oscNext/pass2/genie/level5_v01.03/140000", num_files=1494
-            ),
-        ),
-        (
-            (140001, (1, 3)),
-            dict(
-                path="ana/LE/oscNext/pass2/genie/level5_v01.03/140001", num_files=1520
-            ),
-        ),
-        (
-            (140002, (1, 3)),
-            dict(
-                path="ana/LE/oscNext/pass2/genie/level5_v01.03/140002", num_files=1520
-            ),
-        ),
-        (
-            (140003, (1, 3)),
-            dict(
-                path="ana/LE/oscNext/pass2/genie/level5_v01.03/140003", num_files=1520
-            ),
-        ),
-        (
-            (140004, (1, 3)),
-            dict(
-                path="ana/LE/oscNext/pass2/genie/level5_v01.03/140004", num_files=1520
-            ),
-        ),
+        ((140000, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140000", num_files=1494)),
+        ((140001, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140001", num_files=1520)),
+        ((140002, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140002", num_files=1520)),
+        ((140003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140003", num_files=1520)),
+        ((140004, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140004", num_files=1520)),
+        ((140000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/140000", num_files=1495)),
         # GENIE nutau
-        (
-            (160000, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160000", num_files=335),
-        ),
-        (
-            (160001, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160001", num_files=350),
-        ),
-        (
-            (160002, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160002", num_files=345),
-        ),
-        (
-            (160003, (1, 3)),
-            dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160003", num_files=345),
-        ),
+        ((160000, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160000", num_files=335)),
+        ((160001, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160001", num_files=350)),
+        ((160002, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160002", num_files=345)),
+        ((160003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160003", num_files=345)),
+        ((160000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/160000", num_files=324)),
         # muongun sets
-        (
-            (139011, (1, 3)),
-            dict(
-                path="ana/LE/oscNext/pass2/muongun/level5_v01.03/139011", num_files=2996
-            ),
-        ),
+        ((139011, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/muongun/level5_v01.03/139011", num_files=2996)),
+        ((139011, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/muongun/level5_v01.04/139011", num_files=19989)),
         # Noise sets
-        (
-            (888003, (1, 3)),
-            dict(
-                path="ana/LE/oscNext/pass2/noise/level5_v01.03/888003/", num_files=5000
-            ),
-        ),
+        ((888003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/noise/level5_v01.03/888003/", num_files=5000)),
+        ((888003, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/noise/level5_v01.04/888003/", num_files=5000)),
     ]
 )
 
 MC_SET_SPECS = OrderedDict(
     [
         (
-            "test",
-            dict(nue=(120000, (1, 3)), mu=(139011, (1, 3)), noise=(888003, (1, 3))),
+            "l5v1.3_test",
+            dict(
+                nue=(120000, 5, (1, 3)),
+                mu=(139011, 5, (1, 3)),
+                noise=(888003, 5, (1, 3)),
+            )
         ),
         (
-            "baseline",
+            "l5v1.3_baseline",
             dict(
-                nue=(120000, (1, 3)),
-                numu=(140000, (1, 3)),
-                nutau=(160000, (1, 3)),
-                mu=(139011, (1, 3)),
-                noise=(888003, (1, 3)),
+                nue=(120000, 5, (1, 3)),
+                numu=(140000, 5, (1, 3)),
+                nutau=(160000, 5, (1, 3)),
+                mu=(139011, 5, (1, 3)),
+                noise=(888003, 5, (1, 3)),
             ),
         ),
         (
-            "dom_eff_0.9",
+            "l5v1.4_baseline",
             dict(
-                nue=(120001, (1, 3)),
-                numu=(140001, (1, 3)),
-                nutau=(160001, (1, 3)),
-                mu=(139011, (1, 3)),
-                noise=(888003, (1, 3)),
+                nue=(120000, 5, (1, 4)),
+                numu=(140000, 5, (1, 4)),
+                nutau=(160000, 5, (1, 4)),
+                mu=(139011, 5, (1, 4)),
+                noise=(888003, 5, (1, 4)),
             ),
         ),
         (
-            "dom_eff_0.95",
+            "l5v1.3_dom_eff_0.9",
             dict(
-                nue=(120002, (1, 3)),
-                numu=(140002, (1, 3)),
-                nutau=(160002, (1, 3)),
-                mu=(139011, (1, 3)),
-                noise=(888003, (1, 3)),
+                nue=(120001, 5, (1, 3)),
+                numu=(140001, 5, (1, 3)),
+                nutau=(160001, 5, (1, 3)),
+                mu=(139011, 5, (1, 3)),
+                noise=(888003, 5, (1, 3)),
             ),
         ),
         (
-            "dom_eff_1.05",
+            "l5v1.3_dom_eff_0.95",
             dict(
-                nue=(120003, (1, 3)),
-                numu=(140003, (1, 3)),
-                nutau=(160003, (1, 3)),
-                mu=(139011, (1, 3)),
-                noise=(888003, (1, 3)),
+                nue=(120002, 5, (1, 3)),
+                numu=(140002, 5, (1, 3)),
+                nutau=(160002, 5, (1, 3)),
+                mu=(139011, 5, (1, 3)),
+                noise=(888003, 5, (1, 3)),
             ),
         ),
         (
-            "dom_eff_1.1",
+            "l5v1.3_dom_eff_1.05",
             dict(
-                nue=(120004, (1, 3)),
-                numu=(140004, (1, 3)),
-                nutau=(160003, (1, 3)),
-                mu=(139011, (1, 3)),
-                noise=(888003, (1, 3)),
+                nue=(120003, 5, (1, 3)),
+                numu=(140003, 5, (1, 3)),
+                nutau=(160003, 5, (1, 3)),
+                mu=(139011, 5, (1, 3)),
+                noise=(888003, 5, (1, 3)),
+            ),
+        ),
+        (
+            "l5v1.3_dom_eff_1.1",
+            dict(
+                nue=(120004, 5, (1, 3)),
+                numu=(140004, 5, (1, 3)),
+                nutau=(160003, 5, (1, 3)),
+                mu=(139011, 5, (1, 3)),
+                noise=(888003, 5, (1, 3)),
             ),
         ),
     ]
@@ -272,6 +235,8 @@ _HIST_EDGES = OrderedDict(
         ("charge_per_pulse", np.logspace(np.log10(1e-2), np.log10(2200), NUM_BINS + 1)),
         ("time_diffs_within_event", np.linspace(0, 13000, NUM_BINS + 1)),
         ("time_diffs_within_dom", np.linspace(0, 13000, NUM_BINS + 1)),
+        #("time_diffs_within_event", np.linspace(0, 1000, NUM_BINS + 1)),
+        #("time_diffs_within_dom", np.linspace(0, 1000, NUM_BINS + 1)),
     ]
 )
 HIST_EDGES = numba.typed.Dict.empty(
@@ -394,7 +359,7 @@ REF_LOG_TICKLABELS = [
 ]
 
 REF_LOG_TICKS = np.array(
-    [eval(tl) for tl in REF_LOG_TICKLABELS]  # pylint: disable=eval-used
+    [eval(tl) for tl in REF_LOG_TICKLABELS]
 )
 
 
@@ -407,13 +372,13 @@ GEO = load_pickle(
 )["geo"]
 
 
-numba_quantize = numba.jit(
+numba_quantize = numba.jit(  # pylint: disable=invalid-name
     cache=True,
     nopython=True,
     nogil=True,
     parallel=False,
     error_model="numpy",
-    fastmath=False,
+    fastmath=True,
 )(quantize)
 
 
@@ -450,12 +415,12 @@ def get_dom_region(dom):
 
 
 def generate_filter_func(
-    fixed_pulse_q=0,
+    #fixed_pulse_q=0,
     qntm=0,
     min_pulse_q=0,
     min_evt_p=1,
-    min_evt_dt=0,
-    max_evt_dt=0,
+    #min_evt_dt=0,
+    #max_evt_dt=0,
     # min_evt_t_fract=0,
     # max_evt_t_fract=0,
     # t_fract_window=0,
@@ -463,21 +428,23 @@ def generate_filter_func(
     # max_evt_q_t_qtl=0,
     min_dom_p=1,
     # min_dom_dt=0,
-    max_dom_dt=0,
-    integ_t=0,
-    i3=True,
-    dc=True,
+    #max_dom_dt=0,
+    #integ_t=0,
+    #i3=True,
+    #dc=True,
+    slc=True,
+    hlc=True,
     z_regions=(0, 1, 2),
 ):
     """
     Parameters
     ----------
-    fixed_pulse_q : float >= 0
+    #fixed_pulse_q : float >= 0
     qntm : float >= 0
     min_pulse_q : float >= 0
     min_evt_p : int >= 1
-    min_evt_dt : float >= 0
-    max_evt_dt : float >= 0
+    #min_evt_dt : float >= 0
+    #max_evt_dt : float >= 0
     # min_evt_t_fract
     # max_evt_t_fract
     # t_fract_window
@@ -485,13 +452,15 @@ def generate_filter_func(
     # max_evt_q_t_qtl : 0 < float <= 1
     min_dom_p : int >= 1
     # min_dom_dt : float >= 0
-    max_dom_dt : float >= 0
-        Time in ns. If set to 0, no max-delta-time limit is set for accepting
-        pulses
-    integ_t : float >= 0
-        Integration time in ns. If 0, no integration is performed.
-    i3 : bool
-    dc : bool
+    #max_dom_dt : float >= 0
+    #    Time in ns. If set to 0, no max-delta-time limit is set for accepting
+    #    pulses
+    #integ_t : float >= 0
+    #    Integration time in ns. If 0, no integration is performed.
+    #i3 : bool
+    #dc : bool
+    hlc : bool
+    slc : bool
     z_regions : int or tuple of int
 
     Returns
@@ -499,6 +468,11 @@ def generate_filter_func(
     filter_arrays : callable
 
     """
+    fixed_pulse_q = 0
+    min_evt_dt = max_evt_dt = 0
+    min_dom_dt = max_dom_dt = 0
+    integ_t = 0
+
     assert fixed_pulse_q >= 0
     assert qntm >= 0
     assert min_pulse_q >= 0
@@ -509,10 +483,11 @@ def generate_filter_func(
     # assert 0 <= min_evt_q_t_qtl < 1
     # assert 0 < max_evt_q_t_qtl <= 1
     assert min_dom_p >= 1
-    # assert 0 <= min_dom_dt <= max_dom_dt
+    assert 0 <= min_dom_dt <= max_dom_dt
     assert max_dom_dt >= 0
     assert integ_t >= 0
-    assert i3 or dc
+    #assert i3 or dc
+    assert hlc or slc
 
     if np.isscalar(z_regions):
         z_regions = [z_regions]
@@ -559,9 +534,14 @@ def generate_filter_func(
                 for dom in doms[
                     event["dom_idx0"] : event["dom_idx0"] + event["num_hit_doms"]
                 ]:
-                    event_pulse_t0 = min(
-                        event_pulse_t0, pulses[dom["pulses_idx0"]]["time"]
-                    )
+                    for pulse in pulses[
+                        dom["pulses_idx0"] : dom["pulses_idx0"] + dom["num_pulses"]
+                    ]:
+                        is_hlc = bool(pulse["flags"] & 1)
+                        is_slc = not is_hlc
+                        if not (hlc and is_hlc or slc and is_slc):
+                            continue
+                        event_pulse_t0 = min(event_pulse_t0, pulse["time"])
 
             # if min_evt_t_fract > 0 or max_evt_t_fract > 0:
             #     event_first_dom = doms[int(event["dom_idx0"])]
@@ -581,9 +561,11 @@ def generate_filter_func(
             ]:
                 is_dc, z_region = get_dom_region(dom)
 
-                is_ic = not is_dc
+                #is_ic = not is_dc
 
-                if not ((dc and is_dc or i3 and is_ic) and z_region in z_regions):
+                #if not ((dc and is_dc or i3 and is_ic) and z_region in z_regions):
+                #    continue
+                if z_region not in z_regions:
                     continue
 
                 # `total_num_pulses` can increment in loop over pulses; need to know
@@ -591,7 +573,14 @@ def generate_filter_func(
                 # array (if the DOM is to be recorded)
                 new_doms_pulses_idx0 = total_num_pulses
 
-                dom_pulse_t0 = pulses[dom["pulses_idx0"]]["time"]
+                dom_pulse_t0 = np.inf
+                if min_dom_dt > 0 or max_dom_dt > 0:
+                    for pulse in pulses[
+                        dom["pulses_idx0"] : dom["pulses_idx0"] + dom["num_pulses"]
+                    ]:
+                        dom_pulse_t0 = min(dom_pulse_t0, pulse["time"])
+
+                #dom_pulse_t0 = pulses[dom["pulses_idx0"]]["time"]
 
                 dom_num_pulses = 0
                 # dom_num_orig_pulses = 0
@@ -606,24 +595,29 @@ def generate_filter_func(
                 for pulse in pulses[
                     dom["pulses_idx0"] : dom["pulses_idx0"] + dom["num_pulses"]
                 ]:
-                    # if min_dom_dt > 0:
-                    #     if (pulse["time"] - dom_pulse_t0) < min_dom_dt:
-                    #         continue
-
-                    if max_dom_dt > 0:
-                        if (pulse["time"] - dom_pulse_t0) >= max_dom_dt:
-                            continue
-
-                    if min_evt_dt > 0:
-                        if (pulse["time"] - event_pulse_t0) < min_evt_dt:
-                            continue
-
-                    if max_evt_dt > 0:
-                        if (pulse["time"] - event_pulse_t0) >= max_evt_dt:
-                            continue
+                    is_hlc = bool(pulse["flags"] & 1)
+                    is_slc = not is_hlc
+                    if not (hlc and is_hlc or slc and is_slc):
+                        continue
 
                     pulse_charge = pulse["charge"]
                     pulse_time = pulse["time"]
+
+                    if min_dom_dt > 0:
+                        if (pulse_time - dom_pulse_t0) < min_dom_dt:
+                            continue
+
+                    if max_dom_dt > 0:
+                        if (pulse_time - dom_pulse_t0) >= max_dom_dt:
+                            continue
+
+                    if min_evt_dt > 0:
+                        if (pulse_time - event_pulse_t0) < min_evt_dt:
+                            continue
+
+                    if max_evt_dt > 0:
+                        if (pulse_time - event_pulse_t0) >= max_evt_dt:
+                            continue
 
                     if qntm > 0:
                         pulse_charge = numba_quantize(pulse_charge, qntm=qntm)
@@ -666,9 +660,9 @@ def generate_filter_func(
                         new_pulses[total_num_pulses]["charge"] = pulse_charge
                         new_pulses[total_num_pulses]["time"] = pulse_time
 
-                        dom_num_pulses += 1
-                        total_num_pulses += 1
-                        dom_charge += pulse_charge
+                    dom_num_pulses += 1
+                    total_num_pulses += 1
+                    dom_charge += pulse_charge
 
                 if integ_pulse_total_q > 0:
                     new_pulses[total_num_pulses]["charge"] = integ_pulse_total_q
@@ -1096,7 +1090,7 @@ def get_histo_fname_prefix(pulse_series, processing_kw, set_key=None):
         kw[key] = integer_if_integral(val)
 
     if not isinstance(kw["z_regions"], int):
-        if len(kw["z_regions"]) == 0:
+        if len(kw["z_regions"]) == 0:  # pylint: disable=no-else-raise
             raise ValueError()
         elif len(kw["z_regions"]) == 1:
             kw["z_regions"] = kw["z_regions"][0]
@@ -1400,7 +1394,7 @@ def plot(
 
     data_data = OrderedDict()
     for season in only_seasons:
-        season_num, _ = season
+        season_num, _, _ = season
         season_num_str = "IC86.{:02d}".format(season_num)
         data_sets_d[season_num_str] = season
         data_data[season_num_str] = load_histos(
@@ -1698,12 +1692,12 @@ def parse_args(description=__doc__):
     # Add "processing_kw" (i.e., args to `generate_filter_func`)
     for subp in [populate_sp, plot_sp, plot_vtx_sp]:
         subp.add_argument("--pulse-series", type=str, required=True)
-        subp.add_argument("--fixed-pulse-q", type=float, default=0)
+        #subp.add_argument("--fixed-pulse-q", type=float, default=0)
         subp.add_argument("--qntm", type=float, default=0)
         subp.add_argument("--min-pulse-q", type=float, default=0)
         subp.add_argument("--min-evt-p", type=int, default=1)
-        subp.add_argument("--min-evt-dt", type=float, default=0)
-        subp.add_argument("--max-evt-dt", type=float, default=0)
+        #subp.add_argument("--min-evt-dt", type=float, default=0)
+        #subp.add_argument("--max-evt-dt", type=float, default=0)
         # subp.add_argument("--min-evt-t-fract", type=float, default=0)
         # subp.add_argument("--max-evt-t-fract", type=float, default=0)
         # subp.add_argument("--t-fract-window", type=float, default=0)
@@ -1711,19 +1705,26 @@ def parse_args(description=__doc__):
         # subp.add_argument("--max-evt-q-t-qtl", type=float, default=1)
         subp.add_argument("--min-dom-p", type=int, default=1)
         # subp.add_argument("--min-dom-dt", type=float, default=0)
-        subp.add_argument("--max-dom-dt", type=float, default=0)
-        subp.add_argument("--integ-t", type=float, default=0)
-        subp.add_argument("--no-i3", action="store_true")
-        subp.add_argument("--no-dc", action="store_true")
+        #subp.add_argument("--max-dom-dt", type=float, default=0)
+        #subp.add_argument("--integ-t", type=float, default=0)
+        #subp.add_argument("--no-i3", action="store_true")
+        #subp.add_argument("--no-dc", action="store_true")
+        subp.add_argument("--no-hlc", action="store_true")
+        subp.add_argument("--no-slc", action="store_true")
         subp.add_argument("--z-regions", nargs="+", type=int)
 
     args = parser.parse_args()
     kwargs = vars(args)
 
-    if "no_i3" in kwargs:
-        kwargs["i3"] = not kwargs.pop("no_i3")
-    if "no_dc" in kwargs:
-        kwargs["dc"] = not kwargs.pop("no_dc")
+    #if "no_i3" in kwargs:
+    #    kwargs["i3"] = not kwargs.pop("no_i3")
+    #if "no_dc" in kwargs:
+    #    kwargs["dc"] = not kwargs.pop("no_dc")
+
+    if "no_hlc" in kwargs:
+        kwargs["hlc"] = not kwargs.pop("no_hlc")
+    if "no_slc" in kwargs:
+        kwargs["slc"] = not kwargs.pop("no_slc")
 
     return kwargs
 
@@ -1745,8 +1746,13 @@ def main():
         assert isdir(kwargs["root_data_dir"])
 
     if "set_key" in kwargs:
-        kwargs["set_key"] = eval(kwargs["set_key"])  # pylint: disable=eval-used
+        print("set_key:", kwargs["set_key"])
+        kwargs["set_key"] = literal_eval(kwargs["set_key"])
         assert kwargs["set_key"] in DATA_DIR_INFOS or kwargs["set_key"] in MC_DIR_INFOS
+
+    if "only_seasons" in kwargs:
+        kwargs["only_seasons"] = literal_eval(kwargs["only_seasons"])
+        assert kwargs["only_seasons"] in DATA_DIR_INFOS
 
     processing_kw = OrderedDict(
         (k, kwargs.pop(k)) for k in inspect.getfullargspec(generate_filter_func).args
