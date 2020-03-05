@@ -54,8 +54,18 @@ OSCNEXT_I3_FNAME_RE = re.compile(
 
 
 DATA_GCD_FNAME_RE = re.compile(
-    r".*_IC86\.20(?P<season>[0-9]+).*_data_Run(?P<run>[0-9]+).*GCD.*\.i3(\..*)*",
-    flags=re.IGNORECASE,
+    r"""
+    Level(?P<level>[0-9]+)
+    (pass(?P<pass>[0-9]+))?
+    _IC86\.(?P<year>[0-9]+)
+    _data
+    _Run(?P<run>[0-9]+)
+    .*GCD.*
+    \.i3
+    (\..*)?
+    """,
+    flags=re.IGNORECASE | re.VERBOSE,
+
 )
 
 HOST = gethostname()
@@ -222,9 +232,13 @@ def find_data_gcds_in_dirs(rootdirs, recurse=True):
                 gcd_match = DATA_GCD_FNAME_RE.match(fname)
                 if gcd_match:
                     gcd_groupdict = gcd_match.groupdict()
-                    data_run_gcds[
-                        (gcd_groupdict["season"], gcd_groupdict["run"])
-                    ] = join(dirpath, fname)
+                    # get 2 digit year
+                    year = "{:02d}".format(int(gcd_groupdict["year"]) % 2000)
+                    key = (year, gcd_groupdict["run"])
+                    # prefer "levelXpassY_* gcd files
+                    if key in data_run_gcds and gcd_groupdict["pass"] is None:
+                        continue
+                    data_run_gcds[key] = join(dirpath, fname)
 
     return data_run_gcds
 
@@ -253,7 +267,7 @@ def find_files_to_extract(
         difficult to logically ascertain which GCD was used for a MC run and
         where it exists.
 
-    gcd_dict : dict or None, optional
+    data_run_gcds : dict or None, optional
         Keys must be <tuple>(<str>2-digit IC86 season, <str>Run number). Each
         value is a string full path to the corresponding GCD file.
 
@@ -478,7 +492,7 @@ def main(description=__doc__):
             if level >= 5:
                 recos.extend(["LineFit_DC", "L5_SPEFit11"])
             if level >= 6:
-                recos.append("retro")
+                recos.append("retro_crs_prefit")
             extract_events_kwargs["recos"] = recos
 
         requests.append(
