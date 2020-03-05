@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals, try-except-raise
+# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals, try-except-raise, import-outside-toplevel
 
 """
 Reco class for performing reconstructions
@@ -692,6 +692,104 @@ class Reco(object):
             self.setup_hypo(
                 cascade_kernel="scaling_aligned_one_dim",
                 track_kernel="pegleg",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_CRS_MN)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_multinest(
+                importance_sampling=True,
+                max_modes=1,
+                const_eff=True,
+                n_live=250,
+                evidence_tol=0.02,
+                sampling_eff=0.5,
+                max_iter=10000,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=save_estimate,
+            )
+
+        elif method == "emily_ref":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="table_energy_loss",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_CRS_MN)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_multinest(
+                importance_sampling=True,
+                max_modes=1,
+                const_eff=True,
+                n_live=250,
+                evidence_tol=0.02,
+                sampling_eff=0.5,
+                max_iter=10000,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=save_estimate,
+            )
+
+        elif method == "emily_test":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="table_energy_loss_secondary_light",
                 track_time_step=1.0,
             )
 

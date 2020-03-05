@@ -21,6 +21,7 @@ __all__ = [
     'pegleg_muon',
     'const_energy_loss_muon',
     'table_energy_loss_muon',
+    'table_energy_loss_secondary_light_muon',
     'stopping_table_energy_loss_muon',
     'pegleg_eval',
 ]
@@ -56,11 +57,13 @@ from retro.const import (
     SPEED_OF_LIGHT_M_PER_NS, TRACK_M_PER_GEV, TRACK_PHOTONS_PER_M,
     SRC_CKV_BETA1, EMPTY_SOURCES
 )
+from retro.hypo.muon_secondaries_light_output import MuonSecondariesLightOutput
 from retro.retro_types import SRC_T
 
 
 MUON_KINDS = sorted([k[:-len('_muon')] for k in __all__ if k.endswith('_muon')])
 ALL_REALS = (-np.inf, np.inf)
+SECONDARIES = MuonSecondariesLightOutput()
 
 
 def pegleg_muon(time, x, y, z, track_azimuth, track_zenith, dt, n_segments=10000):
@@ -328,6 +331,71 @@ def table_energy_loss_muon(
     sources['dir_phi'] = opposite_azimuth
     sources['dir_cosphi'] = dir_cosphi
     sources['dir_sinphi'] = dir_sinphi
+
+    return sources
+
+
+def table_energy_loss_secondary_light_muon(
+    time,
+    x,
+    y,
+    z,
+    track_energy,
+    track_azimuth,
+    track_zenith,
+    dt,
+):
+    """Discrete-time track hypothesis that calculates dE/dx as the muon travels
+    using splined tabulated data.
+
+    Use as a hypo_kernel with DiscreteHypo class.
+
+    Parameters
+    ----------
+    time : float
+        Particle vertex (start) time in nanoseconds from trigger time
+
+    x, y, z : float
+        Particle vertex location in meters (in IceCube coordinate system)
+
+    track_azimuth, track_zenith : float
+        Angle from which particle arrived in radians
+
+    dt : float
+        Time step in nanoseconds
+
+    Returns
+    -------
+    sources : shape (n_sources,) numpy.ndarray, dtype SRC_T
+
+    """
+    sources = table_energy_loss_muon(
+        time,
+        x,
+        y,
+        z,
+        track_energy,
+        track_azimuth,
+        track_zenith,
+        dt,
+    )
+    # TODO: Some stuff duplicated here from `table_energy_loss_muon` function,
+    # can we find a way to not duplicate?
+    segment_length = dt * SPEED_OF_LIGHT_M_PER_NS
+    length = MULEN_INTERP(track_energy)
+
+    sampled_dt = np.arange(dt*0.5, length/SPEED_OF_LIGHT_M_PER_NS, dt)
+    # At least one segment
+    if len(sampled_dt) == 0:
+        sampled_dt = np.array([length/2./SPEED_OF_LIGHT_M_PER_NS])
+    segment_offsets = sampled_dt * SPEED_OF_LIGHT_M_PER_NS
+
+    sources['photons'] += SECONDARIES.get_light_output(
+        muon_starting_energy=track_energy,
+        total_track_length=length,
+        segment_positions=segment_offsets,
+        segment_lengths=np.full_like(segment_offsets, fill_value=segment_length),
+    )
 
     return sources
 

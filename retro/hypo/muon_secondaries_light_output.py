@@ -195,7 +195,7 @@ def test3():
             segment_positions = np.linspace(0, total_track_length, 1000)
             segment_lengths = np.full_like(
                 segment_positions,
-                fill_value=segment_positions[1] - segment_positions[0],
+                fill_value=5, #segment_positions[1] - segment_positions[0],
             )
             ax.plot(
                 segment_positions,
