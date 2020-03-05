@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, wrong-import-order
 
 """
 Extract information on events from an i3 file needed for running Retro Reco.
@@ -24,8 +24,8 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 
 __all__ = [
-    "FILENAME_INFO_RE",
     "GENERIC_I3_FNAME_RE",
+    "I3_FNAME_INFO_RE",
     "START_END_TIME_SPEC",
     "I3PARTICLE_SPECS",
     "MissingPhysicsFrameError",
@@ -56,6 +56,7 @@ from os.path import abspath, basename, dirname, join
 import pickle
 import re
 import sys
+import traceback
 
 import numpy as np
 from six import string_types
@@ -100,7 +101,18 @@ from retro.utils.misc import (
 from retro.utils.geom import cart2sph_np, sph2cart_np
 
 
-FILENAME_INFO_RE = re.compile(
+GENERIC_I3_FNAME_RE = re.compile(
+    r"""
+    ^                 # Anchor to beginning of string
+    (?P<base>.*)      # Any number of any character
+    (?P<i3ext>\.i3)   # Must have ".i3" as extension
+    (?P<compext>\..*) # Optional extension indicating compression
+    $                 # End of string
+    """,
+    (re.VERBOSE | re.IGNORECASE),
+)
+
+I3_FNAME_INFO_RE = re.compile(
     r"""
     Level(?P<proc_level>.+) # processing level e.g. 5p or 5pt (???)
     _(?P<detector>[^.]+)    # detector, e.g. IC86
@@ -109,17 +121,6 @@ FILENAME_INFO_RE = re.compile(
     _(?P<flavor>.+)         # flavor, e.g. nue
     \.(?P<run>\d+)          # run, e.g. 012600
     \.(?P<filenum>\d+)      # file number, e.g. 000000
-    """,
-    (re.VERBOSE | re.IGNORECASE),
-)
-
-GENERIC_I3_FNAME_RE = re.compile(
-    r"""
-    ^                 # Anchor to beginning of string
-    (?P<base>.*)      # Any number of any character
-    (?P<i3ext>\.i3)   # Must have ".i3" as extension
-    (?P<compext>\..*) # Optional extension indicating compression
-    $                 # End of string
     """,
     (re.VERBOSE | re.IGNORECASE),
 )
@@ -290,6 +291,7 @@ DST_PARAM_SPECS = OrderedDict(
     ]
 )
 
+
 class MissingPhysicsFrameError(Exception):
     """Processing a frame buffer via the `process_frame_buffer` closure
     (function) defined within ::func::`extract_events` requires a physics
@@ -312,7 +314,7 @@ def extract_file_metadata(fname):
 
     """
     fname = basename(fname)
-    finfo_match = next(FILENAME_INFO_RE.finditer(fname))
+    finfo_match = next(I3_FNAME_INFO_RE.finditer(fname))
     if not finfo_match:
         raise ValueError('Could not interpret file path "%s"' % fname)
 
@@ -693,7 +695,7 @@ def extract_pulses(frame, pulse_series_name):
     for (string, dom, pmt), pinfo in pulse_series:
         pls = []
         for pulse in pinfo:
-            pls.append((pulse.time, pulse.charge, pulse.width))
+            pls.append((pulse.time, pulse.charge, pulse.width, pulse.flags))
         pls = np.array(pls, dtype=PULSE_T)
 
         pulses_list.append(((string, dom, pmt), pls))
@@ -1589,6 +1591,11 @@ def _extract_events_from_single_file(
     else:
         outdir = join(outdir, leafdir_basename)
 
+    photons = formatinput(photons)
+    pulses = formatinput(pulses)
+    recos = formatinput(recos)
+    triggers = formatinput(triggers)
+
     i3file_md5_hex = get_file_md5(i3_fpath)
     i3_fpaths = [i3_fpath]
     if gcd is not None:
@@ -1843,6 +1850,31 @@ def _extract_events_from_single_file(
         )
 
 
+def formatinput(val):
+    """Turn strings into lists of strings, strip leading and trailing
+    whitespace in strings, and ignore empty strings or any object that
+    bool(obj) evaluates to False
+
+    Parameters
+    ----------
+    val
+
+    Returns
+    -------
+    formatted_val
+
+    """
+    if isinstance(val, str):
+        val = [val]
+    if isinstance(val, Iterable):
+        val = [x for x in val if (x.strip() if isinstance(x, str) else x)]
+    elif val is None:
+        val = []
+    else:
+        raise ValueError('`val` type {}; `val` = "{}"'.format(type(val), str(val)))
+    return val
+
+
 def extract_events(
     i3_files,
     retro_gcd_dir,
@@ -1968,6 +2000,17 @@ def extract_events(
             truth=truth,
             additional_keys=additional_keys,
         )
+
+
+def wrapped_extract_events(*args, **kwargs):
+    """`extract_events` function wrapped in a try/except that keeps full
+    traceback information. Use if calling from multiprocessing module."""
+    try:
+        extract_events(*args, **kwargs)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        return False
+    return True
 
 
 def main(description=__doc__):
