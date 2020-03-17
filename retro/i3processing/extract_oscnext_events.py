@@ -20,7 +20,7 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from copy import deepcopy
 from inspect import getargspec
 from itertools import chain
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from os import walk
 from os.path import abspath, basename, dirname, isdir, isfile, join
 import re
@@ -398,14 +398,17 @@ def main(description=__doc__):
         sim_gcd_dir = "/data/icecube/gcd"
         dflt["retro_gcd_dir"] = "/data/icecube/retro_gcd"
         dflt["data_gcd_dir"] = "/data/icecube/gcd"
+        dflt["procs"] = cpu_count()
     elif hostname.endswith(".aci.ics.psu.edu"):
         sim_gcd_dir = "/gpfs/group/dfc13/default/gcd/mc"
         dflt["retro_gcd_dir"] = "/gpfs/group/dfc13/default/retro_gcd"
         dflt["data_gcd_dir"] = None
+        dflt["procs"] = 1
     else:  # wisconsin?
         sim_gcd_dir = "/data/sim/DeepCore/2018/pass2/gcd"
         dflt["retro_gcd_dir"] = "~/retro_gcd"
         dflt["data_gcd_dir"] = None
+        dflt["procs"] = 1
         raise ValueError("Unknown host: {}".format(hostname))
 
     dflt["sim_gcd"] = join(
@@ -499,6 +502,12 @@ def main(description=__doc__):
         nargs="+",
         help="""Additional keys to extract from event I3 frame""",
     )
+    parser.add_argument(
+        "--procs",
+        default=dflt["procs"],
+        type=int,
+        help="""Number of (sub)processes to use for converting files""",
+    )
     args = parser.parse_args()
     kwargs = vars(args)
 
@@ -510,13 +519,14 @@ def main(description=__doc__):
     no_truth = kwargs.pop("no_truth")
     data_gcd_dir = kwargs.pop("data_gcd_dir", None)
     sim_gcd = kwargs.pop("sim_gcd", None)
+    procs = kwargs.pop("procs", None)
 
     if data_gcd_dir:
         data_run_gcds = find_data_gcds_in_dirs(data_gcd_dir)
     else:
         data_run_gcds = None
 
-    pool = Pool()
+    pool = Pool(procs)
     requests = []
     for fpath, gcd_fpath, fname_groupdict in find_files_to_extract(
         find_gcd_in_dir=True, data_run_gcds=data_run_gcds, **find_func_kwargs
