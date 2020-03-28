@@ -334,7 +334,7 @@ def extract_file_metadata(fname):
     return file_info
 
 
-def auto_get_frame_item(frame, key):
+def auto_get_frame_item(frame, key, subpaths=None):
     from icecube import dataclasses, icetray, recclasses
 
     type_specs = {
@@ -350,9 +350,13 @@ def auto_get_frame_item(frame, key):
         icetray.I3Bool: np.bool8,
     }
 
-    if key in ADVANCED_KEY_SPECS:
-        pass
-    elif isinstance(key, tuple(type_specs.keys())):
+    #if key in ADVANCED_KEY_SPECS:
+    #    pass
+    parent = frame[key]
+    parent_t = type(parent)
+    if parent_t in type_specs:
+        type_spec = type_specs[parent_t]
+    else:
         pass
 
 

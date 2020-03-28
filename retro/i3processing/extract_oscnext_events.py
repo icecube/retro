@@ -498,7 +498,7 @@ def main(description=__doc__):
     )
     parser.add_argument(
         "--additional-keys",
-        default="L5_oscNext_bool",
+        default=None,
         nargs="+",
         help="""Additional keys to extract from event I3 frame""",
     )
@@ -526,6 +526,12 @@ def main(description=__doc__):
     else:
         data_run_gcds = None
 
+    kwargs["additional_keys"] = kwargs.pop("additional_keys", None)
+    if not kwargs["additional_keys"]:
+        from processing.samples.oscNext.verification.general_mc_data_harvest_and_plot import (
+            L5_VARS, L6_VARS, L7_VARS
+        )
+
     pool = Pool(procs)
     requests = []
     for fpath, gcd_fpath, fname_groupdict in find_files_to_extract(
@@ -543,14 +549,25 @@ def main(description=__doc__):
             extract_events_kwargs["truth"] = not is_data and not no_truth
             extract_events_kwargs["gcd"] = sim_gcd
 
+        level = int(fname_groupdict["level"])
+
         if "recos" not in extract_events_kwargs or not extract_events_kwargs["recos"]:
-            level = int(fname_groupdict["level"])
             recos = []
             if level >= 5:
                 recos.extend(["LineFit_DC", "L5_SPEFit11"])
             if level >= 6:
                 recos.append("retro_crs_prefit")
             extract_events_kwargs["recos"] = recos
+
+        if not extract_events_kwargs["additional_keys"]:
+            additional_keys = []
+            if level >= 5:
+                additional_keys.extend(L5_VARS.keys())
+            if level >= 6:
+                additional_keys.extend(L6_VARS.keys())
+            if level >= 7:
+                additional_keys.extend(L7_VARS.keys())
+            extract_events_kwargs["additional_keys"] = sorted(additional_keys)
 
         requests.append(
             (
@@ -566,6 +583,8 @@ def main(description=__doc__):
         retval = async_result.get()
         if not retval:
             failed_i3_files.append(extract_events_kwargs["i3_files"])
+
+    pool.close()
 
     if failed_i3_files:
         for failure in chain(*failed_i3_files):
