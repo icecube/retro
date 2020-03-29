@@ -87,7 +87,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const, load_pickle
+from retro import const
 
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
@@ -989,7 +989,7 @@ def set_explicit_dtype(x):
     raise TypeError("Type of argument ({}) is invalid: {}".format(x, type(x)))
 
 
-def dict2struct(d, set_explicit_dtype=set_explicit_dtype):
+def dict2struct(d, set_explicit_dtype_func=set_explicit_dtype, only_keys=None):
     """Convert a dict with string keys and numpy-typed values into a numpy
     array with struct dtype.
 
@@ -999,22 +999,35 @@ def dict2struct(d, set_explicit_dtype=set_explicit_dtype):
         The dict's keys are the names of the fields (strings) and the dict's
         values are numpy-typed objects.
 
-    set_explicit_dtype : callable with one positional argument, optional
+    set_explicit_dtype_func : callable with one positional argument, optional
         Provide a function for setting the numpy dtype of the value. Useful,
         e.g., for icecube/icetray usage where special software must be present
         (not required by this module) to do the work. If no specified,
         the `set_explicit_dtype` function defined in this module is used.
+
+    only_keys : str, sequence thereof, or None; optional
+        Only extract one or more keys; pass None to extract all keys (default)
 
     Returns
     -------
     array : numpy.array of struct dtype
 
     """
+    if only_keys and isinstance(only_keys, str):
+        only_keys = [only_keys]
+
+    out_vals = []
     dt_spec = OrderedDict()
+
     for key, val in d.items():
-        d[key] = typed_val = set_explicit_dtype(val)
-        dt_spec[key] = typed_val.dtype
-    array = np.array(tuple(d.values()), dtype=dt_spec.items())
+        if only_keys and key not in only_keys:
+            continue
+        val = set_explicit_dtype_func(val)
+        out_vals.append(val)
+        dt_spec[key] = val.dtype
+
+    array = np.array(tuple(out_vals), dtype=list(dt_spec.items()))
+
     return array
 
 

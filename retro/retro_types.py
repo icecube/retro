@@ -64,6 +64,9 @@ __all__ = [
     'TRIGGERKEY_T',
     'I3TRIGGERREADOUTCONFIG_T',
     'I3TIME_T',
+    'I3PARTICLEID_T',
+    'I3PARTICLE_T',
+    'FLAT_PARTICLE_T',
     'SRC_T',
     'TRACK_T',
     'INVALID_TRACK',
@@ -953,6 +956,41 @@ I3TRIGGERREADOUTCONFIG_T = np.dtype(
 I3TIME_T = np.dtype([("utc_year", np.int32), ("utc_daq_time", np.int64)])
 """I3Time is defined internally by the year and daqTime (tenths of ns since the
 beginning of the year). See dataclasses/public/dataclasses/I3Time.h"""
+
+
+I3PARTICLEID_T = np.dtype(
+    [
+        ("majorID", np.uint64),
+        ("minorID", np.int32),
+    ]
+)
+"""dataclasses/public/dataclasses/physics/I3ParticleID.h"""
+
+I3PARTICLE_T = np.dtype(
+    [
+        ("id", I3PARTICLEID_T),
+        ("pdg_encoding", np.int32),
+        ("shape", np.uint8),
+        ("pos", I3POSITION_T),
+        ("dir", I3DIRECTION_T),
+        ("time", np.float64),
+        ("energy", np.float64),
+        ("length", np.float64),
+        ("speed", np.float64),
+        ("fit_status", np.int8),
+        ("location_type", np.uint8),
+    ]
+)
+"""dataclasses/public/dataclasses/physics/I3Particle.h"""
+
+
+FLAT_PARTICLE_T = np.dtype(
+    [
+        ("level", np.uint8),
+        ("parent_idx", np.int16),
+        ("particle", I3PARTICLE_T),
+    ]
+)
 
 
 SRC_T = np.dtype([

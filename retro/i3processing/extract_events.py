@@ -201,30 +201,39 @@ MILLIPEDE_FIT_PARAMS_SPECS = OrderedDict(
 )
 """See millipede/private/millipede/converter/MillipedeFitParamsConverter.cxx"""
 
-HIT_MULTIPLICITY_SPECS = OrderedDict(
+# HIT_MULTIPLICITY_SPECS = OrderedDict(
+#     [
+#         ("n_hit_doms", dict(dtype=np.int32, default=-1)),
+#         ("n_hit_doms_one_pulse", dict(dtype=np.int32, default=-1)),
+#         ("n_hit_strings", dict(dtype=np.int32, default=-1)),
+#         ("n_pulses", dict(dtype=np.int32, default=-1)),
+#     ]
+# )
+
+HIT_MULTIPLICITY_VALUES_SPECS = OrderedDict(
     [
-        ("n_hit_doms", dict(dtype=np.int32, default=-1)),
-        ("n_hit_doms_one_pulse", dict(dtype=np.int32, default=-1)),
-        ("n_hit_strings", dict(dtype=np.int32, default=-1)),
-        ("n_pulses", dict(dtype=np.int32, default=-1)),
+        ("n_hit_strings", dict(dtype=np.uint32, default=0)),
+        ("n_hit_doms", dict(dtype=np.uint32, default=0)),
+        ("n_hit_doms_one_pulse", dict(dtype=np.uint32, default=0)),
+        ("n_pulses", dict(dtype=np.uint64, default=0)),
     ]
 )
 
-HIT_STATISTICS_SPECS = OrderedDict(
+HIT_STATISTICS_VALUES_SPECS = OrderedDict(
     [
-        ("cog_x", dict(path="cog.x", dtype=np.float32, default=-1)),
-        ("cog_y", dict(path="cog.y", dtype=np.float32, default=-1)),
-        ("cog_z", dict(path="cog.z", dtype=np.float32, default=-1)),
-        ("cog_z_sigma", dict(dtype=np.float32, default=np.nan)),
-        ("max_pulse_time", dict(dtype=np.float32, default=np.nan)),
-        ("min_pulse_time", dict(dtype=np.float32, default=np.nan)),
-        ("q_max_doms", dict(dtype=np.float32, default=np.nan)),
-        ("q_tot_pulses", dict(dtype=np.float32, default=np.nan)),
-        ("z_max", dict(dtype=np.float32, default=np.nan)),
-        ("z_mean", dict(dtype=np.float32, default=np.nan)),
-        ("z_min", dict(dtype=np.float32, default=np.nan)),
-        ("z_sigma", dict(dtype=np.float32, default=np.nan)),
-        ("z_travel", dict(dtype=np.float32, default=np.nan)),
+        ("cog_x", dict(path="cog.x", dtype=np.float64, default=-1)),
+        ("cog_y", dict(path="cog.y", dtype=np.float64, default=-1)),
+        ("cog_z", dict(path="cog.z", dtype=np.float64, default=-1)),
+        ("cog_z_sigma", dict(dtype=np.float64, default=np.nan)),
+        ("max_pulse_time", dict(dtype=np.float64, default=np.nan)),
+        ("min_pulse_time", dict(dtype=np.float64, default=np.nan)),
+        ("q_max_doms", dict(dtype=np.float64, default=np.nan)),
+        ("q_tot_pulses", dict(dtype=np.float64, default=np.nan)),
+        ("z_max", dict(dtype=np.float64, default=np.nan)),
+        ("z_mean", dict(dtype=np.float64, default=np.nan)),
+        ("z_min", dict(dtype=np.float64, default=np.nan)),
+        ("z_sigma", dict(dtype=np.float64, default=np.nan)),
+        ("z_travel", dict(dtype=np.float64, default=np.nan)),
     ]
 )
 
@@ -291,6 +300,26 @@ DST_PARAM_SPECS = OrderedDict(
     ]
 )
 
+FILL_RATIO_INFO_SPECS = OrderedDict(
+    [
+        ("energy_distance", dict(dtype=np.float64)),
+        ("fill_radius_from_energy", dict(dtype=np.float64)),
+        ("fill_radius_from_mean", dict(dtype=np.float64)),
+        ("fill_radius_from_mean_plus_rms", dict(dtype=np.float64)),
+        ("fill_radius_from_rms", dict(dtype=np.float64)),
+        ("fill_ratio_from_energy", dict(dtype=np.float64)),
+        ("fill_ratio_from_mean", dict(dtype=np.float64)),
+        ("fill_ratio_from_mean_plus_rms", dict(dtype=np.float64)),
+        ("fill_ratio_from_rms", dict(dtype=np.float64)),
+        ("fillradius_from_nch", dict(dtype=np.float64)),
+        ("fillratio_from_nch", dict(dtype=np.float64)),
+        ("hit_count", dict(dtype=np.int32)),
+        ("mean_distance", dict(dtype=np.float64)),
+        ("nch_distance", dict(dtype=np.float64)),
+        ("rms_distance", dict(dtype=np.float64)),
+    ]
+)
+
 
 class MissingPhysicsFrameError(Exception):
     """Processing a frame buffer via the `process_frame_buffer` closure
@@ -334,12 +363,12 @@ def extract_file_metadata(fname):
     return file_info
 
 
-def auto_get_frame_item(frame, key, subpaths=None):
+def i3type_to_np(value, ):
     from icecube import dataclasses, icetray, recclasses
 
     type_specs = {
-        recclasses.I3HitMultiplicityValues: HIT_MULTIPLICITY_SPECS,
-        recclasses.I3HitStatisticsValues: HIT_STATISTICS_SPECS,
+        recclasses.I3HitMultiplicityValues: HIT_MULTIPLICITY_VALUES_SPECS,
+        recclasses.I3HitStatisticsValues: HIT_STATISTICS_VALUES_SPECS,
         dataclasses.I3TimeWindow: TIME_WINDOW_SPECS,
         dataclasses.I3Particle: I3PARTICLE_SPECS,
         recclasses.I3CLastFitParams: CLAST_FIT_PARAMS_SPECS,
@@ -347,17 +376,96 @@ def auto_get_frame_item(frame, key, subpaths=None):
         recclasses.I3DipoleFitParams: DIPOLE_FIT_PARAMS_SPECS,
         recclasses.I3StartStopParams: START_STOP_PARAMS_SPECS,
         recclasses.I3DST16: DST_PARAM_SPECS,
-        icetray.I3Bool: np.bool8,
+        recclasses.I3FillRatioInfo: FILL_RATIO_INFO_SPECS,
     }
 
-    #if key in ADVANCED_KEY_SPECS:
-    #    pass
-    parent = frame[key]
-    parent_t = type(parent)
-    if parent_t in type_specs:
-        type_spec = type_specs[parent_t]
-    else:
-        pass
+    map_types = {
+        dataclasses.I3MapStringDouble: (str, np.float64),
+        dataclasses.I3MapStringInt: (str, np.int32),
+    }
+
+    scalar_types = {
+        icetray.I3Bool: np.bool8,
+        icetray.I3Int: np.int32,
+        dataclasses.I3Double: np.float64,
+    }
+
+    value = frame[key]
+    frame_t = type(value)
+
+    dtype = scalar_types.get(frame_t, None)
+    if dtype:
+        return dtype(value)
+
+    map_spec = map_types.get(frame_t, None)
+    if map_spec:
+        sub_key_t, sub_val_t = map_spec
+        return dict2struct(value, set_explicit_dtype=sub_val_t, only_keys=subpaths)
+
+    specs = type_specs.get(frame_t, None)
+    if specs:
+        if subpaths:
+            specs = OrderedDict([(k, v) for k, v in specs.items() if k in subpaths])
+        return get_frame_item(frame, key, specs, allow_missing=False)
+
+    raise TypeError("Unhandled type {} at key '{}'".format(frame_t, key))
+
+
+
+
+
+def auto_get_frame_item(frame, key, subpaths=None):
+    from icecube import dataclasses, icetray, recclasses
+
+    type_specs = {
+        recclasses.I3HitMultiplicityValues: HIT_MULTIPLICITY_VALUES_SPECS,
+        recclasses.I3HitStatisticsValues: HIT_STATISTICS_VALUES_SPECS,
+        dataclasses.I3TimeWindow: TIME_WINDOW_SPECS,
+        dataclasses.I3Particle: I3PARTICLE_SPECS,
+        recclasses.I3CLastFitParams: CLAST_FIT_PARAMS_SPECS,
+        recclasses.I3FiniteCuts: FINITE_CUTS_SPECS,
+        recclasses.I3DipoleFitParams: DIPOLE_FIT_PARAMS_SPECS,
+        recclasses.I3StartStopParams: START_STOP_PARAMS_SPECS,
+        recclasses.I3DST16: DST_PARAM_SPECS,
+        recclasses.I3FillRatioInfo: FILL_RATIO_INFO_SPECS,
+    }
+
+    map_types = {
+        dataclasses.I3MapStringDouble: (str, np.float64),
+        dataclasses.I3MapStringInt: (str, np.int32),
+    }
+
+    scalar_types = {
+        icetray.I3Bool: np.bool8,
+        icetray.I3Int: np.int32,
+        dataclasses.I3Double: np.float64,
+    }
+
+    frame_val = frame[key]
+    frame_t = type(frame_val)
+
+    dtype = scalar_types.get(frame_t, None)
+    if dtype:
+        return dtype(frame_val)
+
+    map_spec = map_types.get(frame_t, None)
+    if map_spec:
+        sub_key_t, sub_val_t = map_spec
+        return dict2struct(frame_val, set_explicit_dtype=sub_val_t)
+        #sub_dict = OrderedDict()
+        #for sub_key, sub_val in frame_val.items():
+        #    if subpaths and sub_key not in subpaths:
+        #        continue
+        #    sub_dict[sub_key_t(sub_key)] = sub_val_t(sub_val)
+        #return sub_dict
+
+    specs = type_specs.get(frame_t, None)
+    if specs:
+        if subpaths:
+            specs = OrderedDict([(k, v) for k, v in specs.items() if k in subpaths])
+        return get_frame_item(frame, key, specs, allow_missing=False)
+
+    raise TypeError("Unhandled type {} at key '{}'".format(frame_t, key))
 
 
 def get_frame_item(frame, key, specs, allow_missing):
@@ -1494,6 +1602,7 @@ def _extract_events_from_single_file(
     triggers=tuple(),
     truth=False,
     additional_keys=None,
+    retrieve_events=True,
 ):
     """Extract event information from an i3 file.
 
@@ -1531,6 +1640,8 @@ def _extract_events_from_single_file(
         each event
 
     additional_keys : str, iterable thereof, or None
+
+    retrieve_events : bool, optional
 
     Returns
     -------
@@ -1608,6 +1719,7 @@ def _extract_events_from_single_file(
 
     events = []
     truths = []
+    misc = []
 
     photons_d = OrderedDict()
     for name in photons:
@@ -1636,7 +1748,7 @@ def _extract_events_from_single_file(
         Parameters
         ----------
         frame_buffer : list
-        gcd_md5_hex : length-32 string
+        gcd_md5_hex : length-32 string or None
 
         Out
         ---
@@ -1647,8 +1759,10 @@ def _extract_events_from_single_file(
         trigger_hierarchies : OrderedDict
 
         """
-        gcd_md5_hex = gcd_md5_hex.strip().lower()
-        assert MD5_HEX_RE.match(gcd_md5_hex)
+        if retrieve_events:
+            gcd_md5_hex = gcd_md5_hex.strip().lower()
+            assert MD5_HEX_RE.match(gcd_md5_hex)
+
         num_qframes = 0
         for frame in frame_buffer:
             if frame.Stop == I3Frame.DAQ:
@@ -1672,23 +1786,26 @@ def _extract_events_from_single_file(
         if num_qframes == 0:
             raise ValueError("Found a physics (P) frame but no DAQ (Q) frame")
 
-        event = get_frame_item(
-            frame=frame,
-            key="I3EventHeader",
-            specs=I3EVENTHEADER_SPECS,
-            allow_missing=False,
-        )
-        event["gcd_md5_hex"] = gcd_md5_hex
-        if len(events) > 2 ** 32 - 1:
-            raise ValueError(
-                "only using uint32 to store event index, but have event index of {}".format(
-                    len(events)
-                )
+        if retrieve_events: 
+            event = get_frame_item(
+                frame=frame,
+                key="I3EventHeader",
+                specs=I3EVENTHEADER_SPECS,
+                allow_missing=False,
             )
-        event["index"] = np.uint32(len(events))
+            event["gcd_md5_hex"] = gcd_md5_hex
+            if len(events) > 2 ** 32 - 1:
+                raise ValueError(
+                    "only using uint32 to store event index, but have event index of {}".format(
+                        len(events)
+                    )
+                )
+            event["index"] = np.uint32(len(events))
 
-        if "TimeShift" in pframe:
-            event["TimeShift"] = pframe["TimeShift"].value
+            if "TimeShift" in pframe:
+                event["TimeShift"] = pframe["TimeShift"].value
+
+            events.append(event)
 
         if truth:
             try:
@@ -1699,9 +1816,7 @@ def _extract_events_from_single_file(
             truths.append(event_truth)
 
         for frame_key in additional_keys:
-            event[frame_key] = pframe[frame_key].value
-
-        events.append(event)
+            misc.append(auto_get_frame_item(frame, frame_key))
 
         for photon_name in photons:
             photons_d[photon_name].append(extract_photons(pframe, photon_name))
@@ -1730,6 +1845,8 @@ def _extract_events_from_single_file(
     gcd_frames = OrderedDict([("g_frame", None), ("c_frame", None), ("d_frame", None)])
     gcd_changed = False
 
+    gcd_md5_hex = None
+
     while i3file_iterator.more():
         try:
             frame = None
@@ -1745,11 +1862,18 @@ def _extract_events_from_single_file(
 
             if frame.Stop in (I3Frame.Physics, I3Frame.DAQ):
                 if gcd_changed:
-                    gcd_md5_hex = extract_gcd_frames(retro_gcd_dir=retro_gcd_dir, **gcd_frames)
+                    if retrieve_events:
+                        gcd_md5_hex = extract_gcd_frames(
+                            retro_gcd_dir=retro_gcd_dir, **gcd_frames
+                        )
                     gcd_changed = False
                 if frame.Stop == I3Frame.Physics:
                     frame_buffer.append(frame)
-                    process_frame_buffer(frame_buffer, gcd_md5_hex=gcd_md5_hex)
+                    process_frame_buffer(
+                        frame_buffer,
+                        gcd_md5_hex=gcd_md5_hex,
+                        retrieve_events=retrieve_events,
+                    )
                     frame_buffer.pop()
                 elif frame.Stop == I3Frame.DAQ:
                     frame_buffer = [frame]
