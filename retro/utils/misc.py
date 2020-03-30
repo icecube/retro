@@ -989,15 +989,17 @@ def set_explicit_dtype(x):
     raise TypeError("Type of argument ({}) is invalid: {}".format(x, type(x)))
 
 
-def dict2struct(d, set_explicit_dtype_func=set_explicit_dtype, only_keys=None):
+def dict2struct(mapping, set_explicit_dtype_func=set_explicit_dtype, only_keys=None):
     """Convert a dict with string keys and numpy-typed values into a numpy
     array with struct dtype.
 
     Parameters
     ----------
-    d : OrderedMapping
+    mapping : Mapping
         The dict's keys are the names of the fields (strings) and the dict's
-        values are numpy-typed objects.
+        values are numpy-typed objects. If `mapping` is an OrderedMapping,
+        produce struct with fields in that order; otherwise, sort the keys for
+        producing the dict.
 
     set_explicit_dtype_func : callable with one positional argument, optional
         Provide a function for setting the numpy dtype of the value. Useful,
@@ -1017,18 +1019,20 @@ def dict2struct(d, set_explicit_dtype_func=set_explicit_dtype, only_keys=None):
         only_keys = [only_keys]
 
     out_vals = []
-    dt_spec = OrderedDict()
+    dt_spec = []
 
-    for key, val in d.items():
+    keys = mapping.keys()
+    if not isinstance(mapping, OrderedDict):
+        keys.sort()
+
+    for key in keys:
         if only_keys and key not in only_keys:
             continue
-        val = set_explicit_dtype_func(val)
+        val = set_explicit_dtype_func(mapping[key])
         out_vals.append(val)
-        dt_spec[key] = val.dtype
+        dt_spec.append((key, val.dtype))
 
-    array = np.array(tuple(out_vals), dtype=list(dt_spec.items()))
-
-    return array
+    return np.array(tuple(out_vals), dtype=dt_spec)
 
 
 def quantize(x, qntm):

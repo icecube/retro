@@ -380,8 +380,9 @@ def i3type_to_np(value, ):
     }
 
     map_types = {
-        dataclasses.I3MapStringDouble: (str, np.float64),
-        dataclasses.I3MapStringInt: (str, np.int32),
+        dataclasses.I3MapStringDouble: np.float64,
+        dataclasses.I3MapStringInt: np.int32,
+        dataclasses.I3MapStringBool: np.bool8,
     }
 
     scalar_types = {
