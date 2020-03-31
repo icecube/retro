@@ -41,8 +41,6 @@ __all__ = [
     'join_struct_arrays',
     'NSORT_RE',
     'nsort_key_func',
-    'set_explicit_dtype',
-    'dict2struct',
     'quantize',
 ]
 
@@ -69,7 +67,7 @@ except ImportError:
     from collections.abc import Iterable, Mapping, Sequence
 import errno
 import hashlib
-from numbers import Integral, Number
+from numbers import Number
 from os import makedirs
 from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
 import pickle
@@ -930,109 +928,6 @@ def nsort_key_func(s):
         key.append(non_number)
         key.append(int(number))
     return key
-
-
-def set_explicit_dtype(x):
-    """Force `x` to have a numpy type if it doesn't already have one.
-
-    Parameters
-    ----------
-    x : numpy-typed object, bool, integer, float
-        If not numpy-typed, type is attempted to be inferred. Currently only
-        bool, int, and float are supported, where bool is converted to
-        np.bool8, integer is converted to np.int64, and float is converted to
-        np.float64. This ensures that full precision for all but the most
-        extreme cases is maintained for inferred types.
-
-    Returns
-    -------
-    x : numpy-typed object
-
-    Raises
-    ------
-    TypeError
-        In case the type of `x` is not already set or is not a valid inferred
-        type. As type inference can yield different results for different
-        inputs, rather than deal with everything, explicitly failing helps to
-        avoid inferring the different instances of the same object differently
-        (which will cause a failure later on when trying to concatenate the
-        types in a larger array).
-
-    """
-    if hasattr(x, "dtype"):
-        return x
-
-    # "value" attribute is found in basic icecube.{dataclasses,icetray} dtypes
-    # such as I3Bool, I3Double, I3Int, and I3String
-    if hasattr(x, "value"):
-        x = x.value
-
-    # bools are numbers.Integral, so test for bool first
-    if isinstance(x, bool):
-        return np.bool8(x)
-
-    if isinstance(x, Integral):
-        x_new = np.int64(x)
-        assert x_new == x
-        return x_new
-
-    if isinstance(x, Number):
-        x_new = np.float64(x)
-        assert x_new == x
-        return x_new
-
-    if isinstance(x, string_types):
-        x_new = np.string0(x)
-        assert x_new == x
-        return x_new
-
-    raise TypeError("Type of argument ({}) is invalid: {}".format(x, type(x)))
-
-
-def dict2struct(mapping, set_explicit_dtype_func=set_explicit_dtype, only_keys=None):
-    """Convert a dict with string keys and numpy-typed values into a numpy
-    array with struct dtype.
-
-    Parameters
-    ----------
-    mapping : Mapping
-        The dict's keys are the names of the fields (strings) and the dict's
-        values are numpy-typed objects. If `mapping` is an OrderedMapping,
-        produce struct with fields in that order; otherwise, sort the keys for
-        producing the dict.
-
-    set_explicit_dtype_func : callable with one positional argument, optional
-        Provide a function for setting the numpy dtype of the value. Useful,
-        e.g., for icecube/icetray usage where special software must be present
-        (not required by this module) to do the work. If no specified,
-        the `set_explicit_dtype` function defined in this module is used.
-
-    only_keys : str, sequence thereof, or None; optional
-        Only extract one or more keys; pass None to extract all keys (default)
-
-    Returns
-    -------
-    array : numpy.array of struct dtype
-
-    """
-    if only_keys and isinstance(only_keys, str):
-        only_keys = [only_keys]
-
-    out_vals = []
-    dt_spec = []
-
-    keys = mapping.keys()
-    if not isinstance(mapping, OrderedDict):
-        keys.sort()
-
-    for key in keys:
-        if only_keys and key not in only_keys:
-            continue
-        val = set_explicit_dtype_func(mapping[key])
-        out_vals.append(val)
-        dt_spec.append((key, val.dtype))
-
-    return np.array(tuple(out_vals), dtype=dt_spec)
 
 
 def quantize(x, qntm):
