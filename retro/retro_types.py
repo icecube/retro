@@ -91,18 +91,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.'''
 
-from collections import namedtuple, OrderedDict
-try:
-    from collections.abc import Sequence
-except ImportError:
-    from collections import Sequence
-from copy import deepcopy
-
-from numbers import Integral, Number
-
+from collections import namedtuple
 import enum
 import numpy as np
-from six import string_types
 
 Event = namedtuple( # pylint: disable=invalid-name
     typename='Event',
@@ -184,6 +175,7 @@ TimeSphCoord = namedtuple( # pylint: disable=invalid-name
 )
 """Time and spherical coordinate: t, r, theta, phi."""
 
+
 OMKEY_T = np.dtype(
     [
         ('string', np.int32),
@@ -192,6 +184,7 @@ OMKEY_T = np.dtype(
     ]
 )
 """icetray/public/icetray/OMKey.h"""
+
 
 I3POSITION_T = np.dtype(
     [
@@ -202,6 +195,7 @@ I3POSITION_T = np.dtype(
 )
 """dataclasses/public/dataclasses/I3Position.h"""
 
+
 I3DIRECTION_T = np.dtype(
     [
         ('zenith', np.float64),
@@ -210,13 +204,6 @@ I3DIRECTION_T = np.dtype(
 )
 """dataclasses/public/dataclasses/I3Direction.h"""
 
-DOMCALVERSION_T = np.dtype(
-    [
-        ('major', np.int8),
-        ('minor', np.int8),
-        ('rev', np.int8),
-    ]
-)
 
 I3OMGEO_T = np.dtype(
     [
@@ -230,42 +217,151 @@ I3OMGEO_T = np.dtype(
 """dataclasses/public/dataclasses/geometry/I3OMGeo.h"""
 
 
-I3DOMCALIBRATION_T = np.dtype(
+DOMCALVERSION_T = np.dtype(
     [
-        ('omkey', OMKEY_T),
-        #('atwd_beacon_baseline', <icecube.dataclasses._atwd_beacon_baseline_proxy>),
-        #('atwd_bin_calib_slope', <icecube.dataclasses._atwd_bin_calib_slope_proxy>),
-        #('atwd_delta_t', <icecube.dataclasses._atwd_gain_proxy>),
-        #('atwd_freq_fit', <icecube.dataclasses._atwd_freq_fit_proxy>),
-        #('atwd_gain', <icecube.dataclasses._atwd_gain_proxy>),
-        #('combined_spe_charge_distribution', <icecube.dataclasses.SPEChargeDistribution>),
-        ('dom_cal_version', DOMCALVERSION_T),
-        ('dom_noise_decay_rate', np.float64),
-        ('dom_noise_rate', np.float64),  # 1/ns
-        ('dom_noise_scintillation_hits', np.float64),
-        ('dom_noise_scintillation_mean', np.float64),
-        ('dom_noise_scintillation_sigma', np.float64),
-        ('dom_noise_thermal_rate', np.float64),
-        #('fadc_baseline_fit', <icecube.dataclasses.LinearFit>),
-        ('fadc_beacon_baseline', np.float64),
-        ('fadc_delta_t', np.float64),
-        ('fadc_gain', np.float64),
-        ('front_end_impedance', np.float64),
-        #('hv_gain_fit', <icecube.dataclasses.LinearFit>),
-        ('is_mean_atwd_charge_valid', np.bool8),
-        ('is_mean_fadc_charge_valid', np.bool8),
-        ('mean_atwd_charge', np.float64),
-        ('mean_fadc_charge', np.float64),
-        #('mpe_disc_calib', <icecube.dataclasses.LinearFit>),
-        #('pmt_disc_calib', <icecube.dataclasses.LinearFit>),
-        ('relative_dom_eff', np.float64),
-        #('spe_disc_calib', <icecube.dataclasses.LinearFit>),
-        #('tau_parameters', <icecube.dataclasses.TauParam>),
-        ('temperature', np.float64),  # Kelvin
-        ('toroid_type', np.uint8),  # icecube.dataclasses.ToroidType.NEW_TOROID),
-        #('transit_time', <icecube.dataclasses.LinearFit>),
+        ('major', np.int8),
+        ('minor', np.int8),
+        ('rev', np.int8),
     ]
 )
+
+
+LINEARFIT_T = np.dtype(
+    [
+        ('slope', np.float64),
+        ('intercept', np.float64),
+    ]
+)
+"""dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
+
+
+#QUADRATICFIT_T = np.dtype(
+#    [
+#        ('quadFitA', np.float64),
+#        ('quadFitB', np.float64),
+#        ('quadFitC', np.float64),
+#    ]
+#)
+#"""dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
+
+
+SPECHARGEDISTRIBUTION_T = np.dtype(
+    [
+        ('exp1_amp', np.float64),
+        ('exp1_width', np.float64),
+        ('exp2_amp', np.float64),
+        ('exp2_width', np.float64),
+        ('gaus_amp', np.float64),
+        ('gaus_mean', np.float64),
+        ('gaus_width', np.float64),
+        ('compensation_factor', np.float64),
+        ('slc_gaus_mean', np.float64),
+        ('is_valid', np.bool8),
+    ]
+)
+"""dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
+
+
+TAUPARAM_T = np.dtype(
+    [
+        ('p0', np.float64),
+        ('p1', np.float64),
+        ('p2', np.float64),
+        ('p3', np.float64),
+        ('p4', np.float64),
+        ('p5', np.float64),
+        ('tau_frac', np.float64),
+    ]
+)
+"""dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
+
+
+I3DOMCALIBRATION_T = np.dtype(
+    [
+        #('omkey', OMKEY_T),
+        ('temperature', np.float64),  # Kelvin
+        ('fadc_gain', np.float64),
+        ('fadc_baseline_fit', LINEARFIT_T),
+        ('fadc_beacon_baseline', np.float64),
+        ('fadc_delta_t', np.float64),
+        ('front_end_impedance', np.float64),
+        ('tau_parameters', TAUPARAM_T),
+        # where are ampGains_[3]?
+        #('atwd_gain', <icecube.dataclasses._atwd_gain_proxy>),
+        #('atwd_delta_t', <icecube.dataclasses._atwd_gain_proxy>),
+
+        #('atwd_freq_fit', <icecube.dataclasses._atwd_freq_fit_proxy>),
+        #('atwd_bin_calib_slope', <icecube.dataclasses._atwd_bin_calib_slope_proxy>),
+
+        ('transit_time', LINEARFIT_T),
+        ('hv_gain_fit', LINEARFIT_T),
+
+        ('dom_cal_version', DOMCALVERSION_T),
+
+        #('atwd_beacon_baseline', <icecube.dataclasses._atwd_beacon_baseline_proxy>),
+        ('spe_disc_calib', LINEARFIT_T),
+        ('mpe_disc_calib', LINEARFIT_T),
+        ('pmt_disc_calib', LINEARFIT_T),
+
+        ('relative_dom_eff', np.float64),
+
+        ('dom_noise_rate', np.float64),  # 1/ns
+        ('dom_noise_thermal_rate', np.float64),
+        ('dom_noise_decay_rate', np.float64),
+        ('dom_noise_scintillation_mean', np.float64),
+        ('dom_noise_scintillation_sigma', np.float64),
+        ('dom_noise_scintillation_hits', np.float64),
+
+        ('combined_spe_charge_distribution', SPECHARGEDISTRIBUTION_T),
+
+        ('mean_atwd_charge', np.float64),
+        ('mean_fadc_charge', np.float64),
+
+        ('toroid_type', np.uint8),  # icecube.dataclasses.ToroidType.NEW_TOROID),
+        ('is_mean_atwd_charge_valid', np.bool8),
+        ('is_mean_fadc_charge_valid', np.bool8),
+    ]
+)
+"""dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
+
+
+FLAT_I3DOMCALIBRATION_T = np.dtype(
+    [
+        ('omkey', OMKEY_T),
+        ('dom_cal', I3DOMCALIBRATION_T),
+    ]
+)
+
+
+I3VEMCALIBRATION_T = np.dtype(
+    [
+        ('pe_per_vem', np.float64),
+        ('mu_peak_width', np.float64),
+        ('hglg_cross_over', np.float64),
+        ('corr_factor', np.float64),
+    ]
+)
+"""dataclasses/public/dataclasses/calibration/I3VEMCalibration.h"""
+
+
+FLAT_I3VEMCALIBRATION_T = np.dtype(
+    [
+        ('omkey', OMKEY_T),
+        ('vem_cal', I3VEMCALIBRATION_T),
+    ]
+)
+
+
+# TODO
+# I3CALIBRATION_T = np.dtype(
+#     [
+#         ('start_time', I3TIME_T),
+#         ('end_time', I3TIME_T),
+#         ('dom_cal', I3DOMCALIBRATIONMAP_T),
+#         ('vem_cal', I3VEMCALIBRATIONMAP_T),
+#     ]
+# )
+# """dataclasses/public/dataclasses/calibration/I3Calibration.h"""
 
 
 I3DOMSTATUS_T = np.dtype(
@@ -1467,6 +1563,25 @@ I3TIMECHARACTERISTICSVALUES_T = np.dtype(
 """recclasses/public/recclasses/I3TimeCharacteristicsValues.h"""
 
 
+I3LOGLIKELIHOODFITPARAMS_T = np.dtype(
+    [
+        ('logl', np.float64),
+        ('rlogl', np.float64),
+        ('ndof', np.int32),
+        ('nmini', np.int32),
+    ]
+)
+"""gulliver.I3LogLikelihoodFitParams"""
+
+
+START_AND_LENGTH_T = np.dtype(
+    [
+        ('start', np.uint64),
+        ('length', np.uint16),
+    ]
+)
+
+
 SRC_T = np.dtype([
     ('kind', np.uint32),
     ('time', np.float32),
@@ -1550,493 +1665,3 @@ NO_CASCADE['energy'] = 0
 NO_CASCADE['em_equiv_energy'] = 0
 NO_CASCADE['hadr_equiv_energy'] = 0
 NO_CASCADE['hadr_fraction'] = np.nan
-
-
-def set_explicit_dtype(x):
-    """Force `x` to have a numpy type if it doesn't already have one.
-
-    Parameters
-    ----------
-    x : numpy-typed object, bool, integer, float
-        If not numpy-typed, type is attempted to be inferred. Currently only
-        bool, int, and float are supported, where bool is converted to
-        np.bool8, integer is converted to np.int64, and float is converted to
-        np.float64. This ensures that full precision for all but the most
-        extreme cases is maintained for inferred types.
-
-    Returns
-    -------
-    x : numpy-typed object
-
-    Raises
-    ------
-    TypeError
-        In case the type of `x` is not already set or is not a valid inferred
-        type. As type inference can yield different results for different
-        inputs, rather than deal with everything, explicitly failing helps to
-        avoid inferring the different instances of the same object differently
-        (which will cause a failure later on when trying to concatenate the
-        types in a larger array).
-
-    """
-    if hasattr(x, "dtype"):
-        return x
-
-    # "value" attribute is found in basic icecube.{dataclasses,icetray} dtypes
-    # such as I3Bool, I3Double, I3Int, and I3String
-    if hasattr(x, "value"):
-        x = x.value
-
-    # bools are numbers.Integral, so test for bool first
-    if isinstance(x, bool):
-        return np.bool8(x)
-
-    if isinstance(x, Integral):
-        x_new = np.int64(x)
-        assert x_new == x
-        return x_new
-
-    if isinstance(x, Number):
-        x_new = np.float64(x)
-        assert x_new == x
-        return x_new
-
-    if isinstance(x, string_types):
-        x_new = np.string0(x)
-        assert x_new == x
-        return x_new
-
-    raise TypeError("Type of argument ({}) is invalid: {}".format(x, type(x)))
-
-
-def dict2struct(mapping, set_explicit_dtype_func=set_explicit_dtype, only_keys=None):
-    """Convert a dict with string keys and numpy-typed values into a numpy
-    array with struct dtype.
-
-    Parameters
-    ----------
-    mapping : Mapping
-        The dict's keys are the names of the fields (strings) and the dict's
-        values are numpy-typed objects. If `mapping` is an OrderedMapping,
-        produce struct with fields in that order; otherwise, sort the keys for
-        producing the dict.
-
-    set_explicit_dtype_func : callable with one positional argument, optional
-        Provide a function for setting the numpy dtype of the value. Useful,
-        e.g., for icecube/icetray usage where special software must be present
-        (not required by this module) to do the work. If no specified,
-        the `set_explicit_dtype` function defined in this module is used.
-
-    only_keys : str, sequence thereof, or None; optional
-        Only extract one or more keys; pass None to extract all keys (default)
-
-    Returns
-    -------
-    array : numpy.array of struct dtype
-
-    """
-    if only_keys and isinstance(only_keys, str):
-        only_keys = [only_keys]
-
-    out_vals = []
-    dt_spec = []
-
-    keys = mapping.keys()
-    if not isinstance(mapping, OrderedDict):
-        keys.sort()
-
-    for key in keys:
-        if only_keys and key not in only_keys:
-            continue
-        val = set_explicit_dtype_func(mapping[key])
-        out_vals.append(val)
-        dt_spec.append((key, val.dtype))
-
-    return np.array(tuple(out_vals), dtype=dt_spec)
-
-
-def attrs2np(obj, dtype, convert_to_ndarray=True):
-    """Extract attributes of an object (and optionally, recursively, attributes
-    of those attributes, etc.) into a numpy.ndarray based on the specification
-    provided by `dtype`.
-
-    Parameters
-    ----------
-    obj
-    dtype : numpy.dtype
-    convert_to_ndarray : bool, optional
-
-    Returns
-    -------
-    vals : shape-(1,) numpy.ndarray of dtype `dtype`
-
-    """
-    vals = []
-    if isinstance(dtype, np.dtype):
-        descr = dtype.descr
-    elif isinstance(dtype, Sequence):
-        descr = dtype
-    else:
-        raise TypeError("{}".format(dtype))
-
-    for name, sub_dtype in descr:
-        val = getattr(obj, name)
-        if isinstance(sub_dtype, (str, np.dtype)):
-            vals.append(val)
-        elif isinstance(sub_dtype, Sequence):
-            vals.append(attrs2np(val, sub_dtype, convert_to_ndarray=False))
-        else:
-            raise TypeError("{}".format(sub_dtype))
-
-    # Numpy converts tuples correctly; lists are interpreted differently
-    vals = tuple(vals)
-
-    if convert_to_ndarray:
-        vals = np.array([vals], dtype=dtype)
-
-    return vals
-
-
-def getters2np(obj, dtype, fmt="{}"):
-    """
-
-    Examples
-    --------
-    To get all of the values of an I3PortiaEvent: .. ::
-
-        getters2np(frame["PoleEHESummaryPulseInfo"], dtype=I3PORTIAEVENT_T, fmt="Get{}")
-
-    """
-    from icecube import icetray
-    vals = []
-    for n in dtype.names:
-        attr_name = fmt.format(n)
-        attr = getattr(obj, attr_name)
-        val = attr()
-        if isinstance(val, icetray.OMKey):
-            val = attrs2np(val, dtype=OMKEY_T)
-        vals.append(val)
-
-    return np.array([tuple(vals)], dtype=dtype)
-
-
-def mapscalarattrs2np(mapping, dtype):
-    """Convert a mapping (containing string keys and scalar-typed values) to a
-    single-element Numpy array from the values of `mapping`, using keys
-    defined by `dtype.names`.
-
-    Use this function if you already know the `dtype` you want to use. Use
-    `retro.utils.misc.dict2struct` directly if you do not know the dtype(s) of
-    the mapping's values ahead of time.
-
-
-    Parameters
-    ----------
-    mapping : mapping from strings to scalars
-
-    dtype : numpy.dtype
-        If scalar dtype, convert via `utils.dict2struct`. If structured dtype,
-        convert keys specified by the struct field names and values are
-        converted according to the corresponding type.
-
-
-    Returns
-    -------
-    array : shape-(1,) numpy.ndarray of dtype `dtype`
-
-
-    See Also
-    --------
-    dict2struct
-        Convert from a mapping to a numpy.ndarray, dynamically building `dtype`
-        as you go (i.e., this is not known a priori)
-
-    """
-    if hasattr(dtype, "names"):  # structured dtype
-        vals = tuple(mapping[name] for name in dtype.names)
-    else:  # scalar dtype
-        vals = tuple(mapping[key] for key in sorted(mapping.keys()))
-    return np.array([vals], dtype=dtype)
-
-
-def flatten_mctree(
-    mctree,
-    parent=None,
-    parent_idx=-1,
-    level=0,
-    max_level=-1,
-    flat_particles=deepcopy([]),
-    convert_to_ndarray=True,
-):
-    """Flatten an I3MCTree into a sequence of particles with additional
-    metadata "level" and "parent" for easily reconstructing / navigating the
-    tree structure if need be.
-
-    Parameters
-    ----------
-    mctree : icecube.dataclasses.I3MCTree
-        Tree to flatten into a numpy array
-
-    parent : icecube.dataclasses.I3Particle, optional
-
-    parent_idx : int, optional
-
-    level : int, optional
-
-    max_level : int, optional
-        Recurse to but not beyond `max_level` depth within the tree. Primaries
-        are level 0, secondaries level 1, tertiaries level 2, etc. Set to
-        negative value to capture all levels.
-
-    flat_particles : appendable sequence
-
-    convert_to_ndarray : bool, optional
-
-
-    Returns
-    -------
-    flat_particles : list of tuples or ndarray of dtype `FLAT_PARTICLE_T`
-
-
-    Examples
-    --------
-    This is a recursive function, with defaults defined for calling simply for
-    the typical use case of flattening an entire I3MCTree and producing a
-    numpy.ndarray with the results. .. ::
-
-        flat_particles = flatten_mctree(frame["I3MCTree"])
-
-    """
-    if max_level < 0 or level <= max_level:
-        if parent:
-            daughters = mctree.get_daughters(parent)
-        else:
-            level = 0
-            parent_idx = -1
-            daughters = mctree.get_primaries()
-
-        if daughters:
-            # Record index before we started appending
-            idx0 = len(flat_particles)
-
-            # First append all daughters found
-            for daughter in daughters:
-                np_particle = attrs2np(daughter, I3PARTICLE_T)
-                flat_particles.append((level, parent_idx, np_particle))
-
-            # Now recurse, appending any granddaughters (daughters to these
-            # daughters) at the end
-            for daughter_idx, daughter in enumerate(daughters, start=idx0):
-                flatten_mctree(
-                    mctree=mctree,
-                    parent=daughter,
-                    parent_idx=daughter_idx,
-                    level=level + 1,
-                    max_level=max_level,
-                    flat_particles=flat_particles,
-                    convert_to_ndarray=False,
-                )
-
-    if convert_to_ndarray:
-        flat_particles = np.array(flat_particles, dtype=FLAT_PARTICLE_T)
-
-    return flat_particles
-
-
-class ConvertI3ToNumpy(object):
-    """
-    Methods for converting frame objects to Numpy typed objects
-    """
-    __slots__ = [
-        "dataclasses",
-        "i3_scalars",
-        "custom_funcs",
-        "getters",
-        "mapping_str_scalar",
-        "mapping_str_attrs",
-        "mapping_str_attrs",
-        "attrs",
-        "frame",
-    ]
-    def __init__(self):
-        from icecube import icetray, dataclasses, recclasses, simclasses, millipede  # pylint: disable=unused-variable
-
-        try:
-            from icecube import santa
-        except ImportError:
-            santa = None
-
-        try:
-            from icecube import genie_icetray
-        except ImportError:
-            genie_icetray = None
-
-        # try:
-        #     from icecube import tpx
-        # except ImportError:
-        #     tpx = None
-
-        self.dataclasses = dataclasses
-
-        self.i3_scalars = {
-            icetray.I3Bool: np.bool8,
-            icetray.I3Int: np.int32,
-            dataclasses.I3Double: np.float64,
-            dataclasses.I3String: np.string0,
-        }
-
-        self.custom_funcs = {
-            dataclasses.I3MCTree: flatten_mctree,
-            dataclasses.I3RecoPulseSeriesMap: self.flatten_pulse_series,
-            dataclasses.I3RecoPulseSeriesMapMask: self.flatten_pulse_series,
-            dataclasses.I3TriggerHierarchy: self.flatten_trigger_hierarchy,
-            dataclasses.I3MapKeyVectorDouble: None,
-            dataclasses.I3VectorI3Particle: None,
-        }
-
-        self.getters = {
-            recclasses.I3PortiaEvent: (I3PORTIAEVENT_T, "Get{}"),
-        }
-
-        self.mapping_str_scalar = {
-            dataclasses.I3MapStringDouble: np.float64,
-            dataclasses.I3MapStringInt: np.int32,
-            dataclasses.I3MapStringBool: np.bool8,
-        }
-
-        self.mapping_str_attrs = {
-            dataclasses.I3FilterResultMap: I3FILTERRESULT_T,
-        }
-
-        self.attrs = {
-            icetray.I3RUsage: I3RUSAGE_T,
-            dataclasses.I3Position: I3POSITION_T,
-            dataclasses.I3Particle: I3PARTICLE_T,
-            dataclasses.I3TimeWindow: I3TIMEWINDOW_T,
-            dataclasses.I3EventHeader: I3EVENTHEADER_T,
-            dataclasses.I3SuperDSTTrigger: I3SUPERDSTTRIGGER_T,
-            recclasses.I3DipoleFitParams: I3DIPOLEFITPARAMS_T,
-            recclasses.I3LineFitParams: I3LINEFITPARAMS_T,
-            recclasses.I3FillRatioInfo: I3FILLRATIOINFO_T,
-            recclasses.I3FiniteCuts: I3FINITECUTS_T,
-            recclasses.I3DirectHitsValues: I3DIRECTHITSVALUES_T,
-            recclasses.I3HitStatisticsValues: I3HITSTATISTICSVALUES_T,
-            recclasses.I3HitMultiplicityValues: I3HITMULTIPLICITYVALUES_T,
-            recclasses.I3TensorOfInertiaFitParams: I3TENSOROFINERTIAFITPARAMS_T,
-            recclasses.I3Veto: I3VETO_T,
-            recclasses.I3CLastFitParams: I3CLASTFITPARAMS_T,
-            recclasses.I3CscdLlhFitParams: I3CSCDLLHFITPARAMS_T,
-            recclasses.I3StartStopParams: I3STARTSTOPPARAMS_T,
-            recclasses.I3TrackCharacteristicsValues: I3TRACKCHARACTERISTICSVALUES_T,
-            recclasses.I3TimeCharacteristicsValues: I3TIMECHARACTERISTICSVALUES_T,
-            dataclasses.I3FilterResult: I3FILTERRESULT_T,
-            recclasses.I3DST16: I3DST16_T,
-            recclasses.CramerRaoParams: CRAMERRAOPARAMS_T,
-        }
-
-        if genie_icetray:
-            self.attrs[genie_icetray.I3GENIEResultDict] = I3GENIERESULTDICT_SCALARS_T
-
-        if santa:
-            self.attrs[santa.I3SantaFitParams] = I3SANTAFITPARAMS_T
-
-        self.frame = None
-
-    def flatten_pulse_series(self, obj, frame=None):
-        """Flatten a pulse series into a 1D array of ((<OMKEY_T>), <PULSE_T>)"""
-        if isinstance(
-            obj,
-            (
-                self.dataclasses.I3RecoPulseSeriesMapMask,
-                self.dataclasses.I3RecoPulseSeriesMapUnion,
-            ),
-        ):
-            if frame is None:
-                frame = self.frame
-            obj = obj.apply(frame)
-
-        flat_pulses = []
-        for omkey, pulses in obj.items():
-            omkey = (omkey.string, omkey.om, omkey.pmt)
-            for pulse in pulses:
-                flat_pulses.append(
-                    (omkey, attrs2np(pulse, dtype=PULSE_T, convert_to_ndarray=False))
-                )
-
-        return np.array(flat_pulses, dtype=FLAT_PULSE_T)
-
-    def flatten_trigger_hierarchy(self, obj):
-        """Flatten a trigger hierarchy into a linear sequence of triggers,
-        labeled such that the original hiercarchy can be recreated
-
-        Parameters
-        ----------
-        obj : I3TriggerHierarchy
-
-        Returns
-        -------
-        flat_triggers : shape-(N-trigers,) numpy.ndarray of dtype FLAT_TRIGGER_T
-
-        """
-        if hasattr(obj, "items"):
-            iterattr = obj.items if hasattr(obj, "items") else obj.iteritems
-
-        level_tups = []
-        flat_triggers = []
-
-        for level_tup, trigger in iterattr():
-            level = len(level_tup) - 1
-            if level == 0:
-                parent_idx = -1
-            else:
-                parent_idx = level_tups.index(level_tup[:-1])
-            #trigger_np = attrs2np(trigger, TRIGGER_T, convert_to_ndarray=False)
-            key = trigger.key
-            flat_triggers.append(
-                (
-                    level,
-                    parent_idx,
-                    (
-                        trigger.time,
-                        trigger.length,
-                        trigger.fired,
-                        (
-                            key.source,
-                            key.type,
-                            key.subtype,
-                            key.config_id or 0,
-                        ),
-                    ),
-                )
-            )
-
-        return np.array(flat_triggers, dtype=FLAT_TRIGGER_T)
-
-    def convert(self, obj):
-        obj_t = type(obj)
-
-        dtype = self.i3_scalars.get(obj_t, None)
-        if dtype:
-            return dtype(obj.value)
-
-        func = self.custom_funcs.get(obj_t, None)
-        if func:
-            return func(obj)
-
-        dtype_fmt = self.getters.get(obj_t, None)
-        if dtype_fmt:
-            return getters2np(obj, dtype=dtype_fmt[0], fmt=dtype_fmt[1])
-
-        dtype = self.mapping_str_scalar.get(obj_t, None)
-        if dtype:
-            return dict2struct(obj, set_explicit_dtype_func=dtype)
-
-        dtype = self.mapping_str_attrs.get(obj_t, None)
-        if dtype:
-            return mapscalarattrs2np(obj, dtype)
-
-        dtype = self.attrs.get(obj_t, None)
-        if dtype:
-            return attrs2np(obj, dtype)
-
-        raise TypeError("Unhandled type {}, obj={}".format(obj_t, obj))

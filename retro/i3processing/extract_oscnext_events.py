@@ -8,13 +8,7 @@ Find and extract oscNext events to retro (native python/numpy-friendly) format.
 
 from __future__ import absolute_import, division, print_function
 
-__all__ = [
-    "OSCNEXT_I3_FNAME_RE",
-    "test_OSCNEXT_I3_FNAME_RE",
-    "DATA_GCD_FNAME_RE",
-    "find_files_to_extract",
-    "main",
-]
+__all__ = ["find_files_to_extract", "main"]
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from copy import deepcopy
@@ -23,7 +17,6 @@ from itertools import chain
 from multiprocessing import Pool, cpu_count
 from os import walk
 from os.path import abspath, basename, dirname, isdir, isfile, join
-import re
 from socket import gethostname
 import sys
 
@@ -32,215 +25,10 @@ if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro.i3processing.extract_events import wrapped_extract_events
+from retro.i3processing.extract_common import (
+    OSCNEXT_I3_FNAME_RE, DATA_GCD_FNAME_RE, find_gcds_in_dirs
+)
 from retro.utils.misc import expand, nsort_key_func
-
-
-OSCNEXT_I3_FNAME_RE = re.compile(
-    r"""
-    (?P<basename>oscNext_(?P<kind>\S+?)
-        (_IC86\.(?P<season>[0-9]+))?       #  only present for data
-        _level(?P<level>[0-9]+)
-        .*?                                #  other infixes, e.g. "addvars"
-        _v(?P<levelver>[0-9.]+)
-        _pass(?P<pass>[0-9]+)
-        (_Run|\.)(?P<run>[0-9]+)           # data run pfxd by "_Run", MC by "."
-        ((_Subrun|\.)(?P<subrun>[0-9]+))?  # data subrun pfxd by "_Subrun", MC by "."
-    )
-    \.i3
-    (?P<compr_exts>(\..*)*)
-    """,
-    flags=re.IGNORECASE | re.VERBOSE,
-)
-
-
-DATA_GCD_FNAME_RE = re.compile(
-    r"""
-    Level(?P<level>[0-9]+)
-    (pass(?P<pass>[0-9]+))?
-    _IC86\.(?P<year>[0-9]+)
-    _data
-    _Run(?P<run>[0-9]+)
-    .*GCD.*
-    \.i3
-    (\..*)?
-    """,
-    flags=re.IGNORECASE | re.VERBOSE,
-
-)
-
-
-def test_OSCNEXT_I3_FNAME_RE():
-    """Unit tests for OSCNEXT_I3_FNAME_RE."""
-    # pylint: disable=line-too-long
-    test_cases = [
-        (
-            "oscNext_data_IC86.12_level5_v01.04_pass2_Run00120028_Subrun00000000.i3.zst",
-            {
-                'basename': 'oscNext_data_IC86.12_level5_v01.04_pass2_Run00120028_Subrun00000000',
-                'compr_exts': '.zst',
-                'kind': 'data',
-                'level': '5',
-                'pass': '2',
-                'levelver': '01.04',
-                #'misc': '',
-                'run': '00120028',
-                'season': '12',
-                'subrun': '00000000',
-            },
-        ),
-        (
-            "oscNext_data_IC86.18_level7_addvars_v01.04_pass2_Run00132761.i3.zst",
-            {
-                'basename': 'oscNext_data_IC86.18_level7_addvars_v01.04_pass2_Run00132761',
-                'compr_exts': '.zst',
-                'kind': 'data',
-                'level': '7',
-                'pass': '2',
-                'levelver': '01.04',
-                #'misc': 'addvars',
-                'run': '00132761',
-                'season': '18',
-                'subrun': None,
-            },
-        ),
-        (
-            "oscNext_genie_level5_v01.01_pass2.120000.000216.i3.zst",
-            {
-                'basename': 'oscNext_genie_level5_v01.01_pass2.120000.000216',
-                'compr_exts': '.zst',
-                'kind': 'genie',
-                'level': '5',
-                'pass': '2',
-                'levelver': '01.01',
-                #'misc': '',
-                'run': '120000',
-                'season': None,
-                'subrun': '000216',
-            },
-        ),
-        (
-            "oscNext_noise_level7_v01.03_pass2.888003.000000.i3.zst",
-            {
-                'basename': 'oscNext_noise_level7_v01.03_pass2.888003.000000',
-                'compr_exts': '.zst',
-                'kind': 'noise',
-                'level': '7',
-                'pass': '2',
-                'levelver': '01.03',
-                #'misc': '',
-                'run': '888003',
-                'season': None,
-                'subrun': '000000',
-            },
-        ),
-        (
-            "oscNext_muongun_level5_v01.04_pass2.139011.000000.i3.zst",
-            {
-                'basename': 'oscNext_muongun_level5_v01.04_pass2.139011.000000',
-                'compr_exts': '.zst',
-                'kind': 'muongun',
-                'level': '5',
-                'pass': '2',
-                'levelver': '01.04',
-                #'misc': '',
-                'run': '139011',
-                'season': None,
-                'subrun': '000000',
-            },
-        ),
-        (
-            "oscNext_corsika_level5_v01.03_pass2.20788.000000.i3.zst",
-            {
-                'basename': 'oscNext_corsika_level5_v01.03_pass2.20788.000000',
-                'compr_exts': '.zst',
-                'kind': 'corsika',
-                'level': '5',
-                'pass': '2',
-                'levelver': '01.03',
-                #'misc': '',
-                'run': '20788',
-                'season': None,
-                'subrun': '000000',
-            }
-        ),
-    ]
-
-    for test_input, expected_output in test_cases:
-        try:
-            match = OSCNEXT_I3_FNAME_RE.match(test_input)
-            groupdict = match.groupdict()
-
-            ref_keys = set(expected_output.keys())
-            actual_keys = set(groupdict.keys())
-            if actual_keys != ref_keys:
-                excess = actual_keys.difference(ref_keys)
-                missing = ref_keys.difference(actual_keys)
-                err_msg = []
-                if excess:
-                    err_msg.append("excess keys: " + str(sorted(excess)))
-                if missing:
-                    err_msg.append("missing keys: " + str(sorted(missing)))
-                if err_msg:
-                    raise ValueError("; ".join(err_msg))
-
-            err_msg = []
-            for key, ref_val in expected_output.items():
-                actual_val = groupdict[key]
-                if actual_val != ref_val:
-                    err_msg.append(
-                        '"{key}": actual_val = "{actual_val}"'
-                        ' but ref_val = "{ref_val}"'.format(
-                            key=key, actual_val=actual_val, ref_val=ref_val
-                        )
-                    )
-            if err_msg:
-                raise ValueError("; ".join(err_msg))
-        except Exception:
-            sys.stderr.write('Failure on test input = "{}"\n'.format(test_input))
-            raise
-
-
-def find_data_gcds_in_dirs(dirs, recurse=True):
-    """Find data run GCD files in directories.
-
-    Parameters
-    ----------
-    dirs : str or iterable thereof
-    recurse : bool
-
-    Returns
-    -------
-    data_run_gcds : dict
-        Keys are <tuple>(<str>2-digit season, <str>run number) and values are
-        <str> path to corresponding GCD file
-
-    """
-    if isinstance(dirs, str):
-        dirs = [dirs]
-    dirs = [expand(rootdir) for rootdir in dirs]
-
-    data_run_gcds = {}
-    for rootdir in dirs:
-        for dirpath, subdirs, files in walk(rootdir):
-            if recurse:
-                subdirs.sort(key=nsort_key_func)
-            else:
-                del subdirs[:]
-            files.sort(key=nsort_key_func)
-
-            for fname in files:
-                gcd_match = DATA_GCD_FNAME_RE.match(fname)
-                if gcd_match:
-                    gcd_groupdict = gcd_match.groupdict()
-                    # get 2 digit year
-                    year = "{:02d}".format(int(gcd_groupdict["year"]) % 2000)
-                    key = (year, gcd_groupdict["run"])
-                    # prefer "levelXpassY_* gcd files
-                    if key in data_run_gcds and gcd_groupdict["pass"] is None:
-                        continue
-                    data_run_gcds[key] = join(dirpath, fname)
-
-    return data_run_gcds
 
 
 def find_files_to_extract(
@@ -293,7 +81,9 @@ def find_files_to_extract(
     if isinstance(find_gcd_in_dir, str):
         find_gcd_in_dir = expand(find_gcd_in_dir)
         assert isdir(find_gcd_in_dir), str(find_gcd_in_dir)
-        found_data_run_gcds = find_data_gcds_in_dirs(find_gcd_in_dir, recurse=True)
+        found_data_run_gcds = find_gcds_in_dirs(
+            find_gcd_in_dir, gcd_fname_re=DATA_GCD_FNAME_RE, recurse=True
+        )
 
 
     def get_i3_events_file_info(dirpath, fname):
@@ -380,7 +170,9 @@ def find_files_to_extract(
             # look in current directory for all data-run GCD files
             thisdir_data_run_gcds = None
             if find_gcd_in_dir is True:
-                thisdir_data_run_gcds = find_data_gcds_in_dirs(dirpath, recurse=False)
+                thisdir_data_run_gcds = find_gcds_in_dirs(
+                    dirpath, gcd_fname_re=DATA_GCD_FNAME_RE, recurse=False
+                )
 
             for fname in files:
                 retval = get_i3_events_file_info(dirpath=dirpath, fname=fname)
@@ -522,7 +314,9 @@ def main(description=__doc__):
     procs = kwargs.pop("procs", None)
 
     if data_gcd_dir:
-        data_run_gcds = find_data_gcds_in_dirs(data_gcd_dir)
+        data_run_gcds = find_gcds_in_dirs(
+            data_gcd_dir, gcd_fname_re=DATA_GCD_FNAME_RE
+        )
     else:
         data_run_gcds = None
 
@@ -598,5 +392,4 @@ def main(description=__doc__):
 
 
 if __name__ == "__main__":
-    test_OSCNEXT_I3_FNAME_RE()
     main()

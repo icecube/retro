@@ -79,7 +79,8 @@ from retro.retro_types import (
     TriggerSubtypeID,
     TriggerConfigID,
 )
-from retro.utils.misc import dict2struct, expand, get_file_md5, mkdir
+from retro.utils.misc import expand, get_file_md5, mkdir
+from retro.i3processing.extract_common import dict2struct
 from retro.i3processing.extract_events import START_END_TIME_SPEC, get_frame_item
 
 
