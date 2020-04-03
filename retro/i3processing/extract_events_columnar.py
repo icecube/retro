@@ -23,22 +23,27 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License."""
 
-__all__ = []
+__all__ = [
+    "construct_arrays",
+    "index_and_cat_scalar_arrays",
+    "cat_vector_arrays",
+    "ConvertI3ToNumpy",
+]
 
 from argparse import ArgumentParser
 from collections import OrderedDict
 
 try:
-    from collections import Mapping, Sequence
-except ImportError:
     from collections.abc import Mapping, Sequence
+except ImportError:
+    from collections import Mapping, Sequence
 from glob import glob
 from os import listdir
 from os.path import abspath, basename, dirname, isdir, isfile, join
 import re
 import sys
 
-import numba
+#import numba
 import numpy as np
 from six import string_types
 
@@ -106,15 +111,15 @@ def construct_arrays(data, delete_while_filling=False):
         # `key`), the "valid" mask array is omitted
         scalar_arrays[key] = dict(data=np.empty(shape=num_frames, dtype=dtype))
 
-    # `vector_arrays` contains "data" and "scalar_index" arrays.
-    # `scalar_index` has the same number of entries as the scalar arrays,
+    # `vector_arrays` contains "data" and "index" arrays.
+    # `index` has the same number of entries as the scalar arrays,
     # and each entry points into the corresponding `data` array to
     # determine which vector data correspond to this scalar datum
 
     for key, (length, dtype) in vector_dtypes.items():
         vector_arrays[key] = dict(
             data=np.empty(shape=length, dtype=dtype),
-            scalar_index=np.empty(shape=num_frames, dtype=rt.START_AND_LENGTH_T),
+            index=np.empty(shape=num_frames, dtype=rt.START_AND_LENGTH_T),
         )
 
     # Fill the arrays
@@ -132,24 +137,24 @@ def construct_arrays(data, delete_while_filling=False):
                     del frame_d[key]
 
         for key, array_d in vector_arrays.items():
-            scalar_index = array_d["scalar_index"]
+            index = array_d["index"]
             if frame_idx == 0:
                 prev_start = 0
                 prev_length = 0
             else:
-                prev_start, prev_length = scalar_index[frame_idx - 1]
+                prev_start, prev_length = index[frame_idx - 1]
 
             start = int(prev_start + prev_length)
 
             val = frame_d.get(key, None)
             if val is None:
-                scalar_index[frame_idx] = (start, 0)
+                index[frame_idx] = (start, 0)
             else:
                 length = len(val)
-                scalar_index[frame_idx] = (start, length)
+                index[frame_idx] = (start, length)
                 array_d["data"][start : start + length] = val
                 if delete_while_filling:
-                    del scalar_index, frame_d[key]
+                    del index, frame_d[key]
 
     return scalar_arrays, vector_arrays
 
@@ -198,7 +203,7 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
 
     for category, array_dicts in category_array_map.items():
         array_length = None
-        for key, array_d in array_dicts:
+        for key, array_d in array_dicts.items():
             data = array_d["data"]
             valid = array_d.get("valid", None)
 
@@ -231,23 +236,34 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
                     )
                 )
 
+        if array_length is None:
+            array_length = 0
+
+        print("category:", category, "array_length:", array_length, "total length", total_length)
         category_array_lengths[category] = array_length
         total_length += array_length
+        print("category:", category, "total length", total_length)
+
+    print(category_array_lengths)
 
     # Create the index; use numba.typed.Dict for direct use in Numba
 
     categories = np.array(list(category_array_map.keys()), dtype=category_dtype)
     category_dtype = categories.dtype
-    index = numba.typed.Dict.empty(
-        key_type=numba.from_dtype(category_dtype),
-        value_type=numba.from_dtype(rt.START_AND_LENGTH_T),
-    )
+    #index = numba.typed.Dict.empty(
+    #    key_type=numba.from_dtype(category_dtype),
+    #    value_type=numba.from_dtype(rt.START_AND_LENGTH_T),
+    #)
+    index = OrderedDict()
 
     # Populate the index
 
     start = 0
     for category, array_length in zip(categories, category_array_lengths.values()):
-        index[category] = (start, array_length)
+        value = np.array([(start, array_length)], dtype=rt.START_AND_LENGTH_T)[0]
+        index[category] = value
+        # TODO: numba.typed.Dict fails:
+        # print("value:", value, "ntd value:", index[category])
         start += array_length
 
     # Record keys that are missing in one or more categories
@@ -272,7 +288,7 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
             valid = None
 
         for category, array_dicts in category_array_map.items():
-            start_and_length = index[category_dtype(category)]
+            start_and_length = index[category]
             start = start_and_length["start"]
             stop = start + start_and_length["length"]
 
@@ -310,9 +326,9 @@ def cat_vector_arrays(category_array_map):
     data_total_lengths = {}
 
     for category, array_dicts in category_array_map.items():
-        for key, array_d in array_dicts:
+        for key, array_d in array_dicts.items():
             data = array_d["data"]
-            index = array_d["index"]
+            scalar_index = array_d["scalar_index"]
 
             dtype = data.dtype
             existing_dtype = key_dtypes.get(key, None)
@@ -327,7 +343,7 @@ def cat_vector_arrays(category_array_map):
                     )
                 )
 
-            index_total_lengths[key] += len(index)
+            index_total_lengths[key] += len(scalar_index)
             data_total_lengths[key] += len(data)
 
     # Concatenate arrays from all categories for each key
@@ -344,7 +360,7 @@ def cat_vector_arrays(category_array_map):
             if array_d is None:
                 raise NotImplementedError("TODO")
 
-            index_ = array_d["index"]
+            index_ = array_d["scalar_index"]
             data_ = array_d["data"]
 
             data_length = len(data_)
@@ -569,15 +585,14 @@ class ConvertI3ToNumpy(object):
             assert int(groupdict["run"]) == run_int
             subrun_int = int(groupdict["subrun"])
             subrun_filepaths.append((subrun_int, join(path, basepath)))
-        subrun_filepaths.sort(key=nsort_key_func)
+        subrun_filepaths.sort()
 
         scalar_arrays = OrderedDict()
         vector_arrays = OrderedDict()
 
         for subrun, fpath in subrun_filepaths:
-            frames_dicts = self.extract_files(paths=[gcd_path, fpath], keys=keys)
-            scalar_arrays[subrun], vector_arrays[subrun] = construct_arrays(
-                frames_dicts
+            scalar_arrays[subrun], vector_arrays[subrun] = self.extract_files(
+                paths=[gcd_path, fpath], keys=keys
             )
 
         # Ensure sorting by subrun
@@ -596,23 +611,30 @@ class ConvertI3ToNumpy(object):
 
         Returns
         -------
-        extracted_data
+        scalar_arrays
+        vector_arrays
 
         """
         if isinstance(paths, str):
             paths = [paths]
         paths = [expand(path) for path in paths]
-        i3file_iterator = self.dataio.I3FrameSequence(paths)
+        i3file_iterator = self.dataio.I3FrameSequence()
+        try:
+            extracted_data = []
+            for path in paths:
+                i3file_iterator.add_file(path)
+                while i3file_iterator.more():
+                    frame = i3file_iterator.pop_frame()
+                    if frame.Stop != self.icetray.I3Frame.Physics:
+                        continue
+                    data = self.extract_frame(frame=frame, keys=keys)
+                    extracted_data.append(data)
+                #i3file_iterator.close_last_file()
+        finally:
+            i3file_iterator.close()
 
-        extracted_data = []
-        while i3file_iterator.more():
-            frame = i3file_iterator.pop_frame()
-            if frame.Stop != self.icetray.I3Frame.Physics:
-                continue
-            data = self.extract_frame(frame=frame, keys=keys)
-            extracted_data.append(data)
-
-        return extracted_data
+        #return extracted_data
+        return construct_arrays(extracted_data)
 
     def extract_frame(self, frame, keys=None):
         """Extract icetray frame objects to numpy typed objects
@@ -1120,3 +1142,28 @@ class ConvertI3ToNumpy(object):
             return np.array([vals], dtype=rt.I3DOMCALIBRATION_T)[0]
 
         return vals, rt.I3DOMCALIBRATION_T
+
+
+def main():
+    """Main"""
+    # pylint: disable=line-too-long
+    #from processing.samples.oscNext.verification.general_mc_data_harvest_and_plot import ALL_OSCNEXT_VARIABLES
+    mykeys = """L5_SPEFit11 LineFit_DC I3TriggerHierarchy SRTTWOfflinePulsesDC
+    SRTTWOfflinePulsesDCTimeRange SplitInIcePulses SplitInIcePulsesTimeRange
+    L5_oscNext_bool I3EventHeader I3TriggerHierarchy I3GenieResultDict
+    I3MCTree""".split()
+    all_keys = mykeys #sorted(set([k.split(".")[0] for k in ALL_OSCNEXT_VARIABLES.keys()] + mykeys))
+
+    parser = ArgumentParser()
+    parser.add_argument("--paths", nargs="+")
+    datafiles = sorted(glob("/data/icecube/ana/LE/oscNext/pass2/data/level5_v01.04/IC86.14/Run00124566/oscNext_*.i3.zst"))
+    gcd_path = "/data/icecube/gcd/Level2pass2_IC86.2014_data_Run00124566_0410_53_89_GCD.i3.zst"
+
+    cnv = ConvertI3ToNumpy()
+    return cnv.extract_files([gcd_path] + datafiles, keys=all_keys)
+
+
+if __name__ == "__main__":
+    OUT = main()
+    #sa, va = main()
+    #print(next(iter(sa.items())), next(iter(va.items())))
