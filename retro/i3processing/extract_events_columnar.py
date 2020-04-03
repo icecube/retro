@@ -27,6 +27,7 @@ __all__ = []
 
 from argparse import ArgumentParser
 from collections import OrderedDict
+
 try:
     from collections import Mapping, Sequence
 except ImportError:
@@ -48,12 +49,321 @@ if __name__ == "__main__" and __package__ is None:
 from retro import retro_types as rt
 from retro.utils.misc import expand, mkdir, nsort_key_func
 from retro.i3processing.extract_common import (
-    DATA_GCD_FNAME_RE, OSCNEXT_I3_FNAME_RE, dict2struct, find_gcds_in_dirs, maptype2np
+    DATA_GCD_FNAME_RE,
+    OSCNEXT_I3_FNAME_RE,
+    dict2struct,
+    find_gcds_in_dirs,
+    maptype2np,
 )
 
 
 RUN_DIR_RE = re.compile(r"(?P<pfx>Run)?(?P<run>[0-9]+)", flags=re.IGNORECASE)
 """Matches MC run dirs, e.g. '140000' & data run dirs, e.g. 'Run00125177'"""
+
+
+def construct_arrays(data, delete_while_filling=False):
+    """Construct arrays to collect same-key scalars / vectors across frames
+
+    Returns
+    -------
+    scalar_arrays : dict
+    vector_arrays : dict
+
+    """
+    if isinstance(data, Mapping):
+        data = [data]
+
+    # Get type and size info
+
+    scalar_dtypes = {}
+    vector_dtypes = {}
+
+    num_frames = len(data)
+    for frame_d in data:
+        # Must get all vector values for all frames to get both dtype and
+        # total length, but only need to get a scalar value once to get its
+        # dtype
+        for key in set(frame_d.keys()).difference(scalar_dtypes.keys()):
+            val = frame_d[key]
+            # if val is None:
+            #    continue
+            dtype = val.dtype
+
+            if np.isscalar(val):
+                scalar_dtypes[key] = dtype
+            else:
+                if key not in vector_dtypes:
+                    vector_dtypes[key] = [0, dtype]  # length, type
+                vector_dtypes[key][0] += len(val)
+
+    # Construct empty arrays
+
+    scalar_arrays = {}
+    vector_arrays = {}
+
+    for key, dtype in scalar_dtypes.items():
+        # Until we know we need one (i.e., when an event is missing this
+        # `key`), the "valid" mask array is omitted
+        scalar_arrays[key] = dict(data=np.empty(shape=num_frames, dtype=dtype))
+
+    # `vector_arrays` contains "data" and "scalar_index" arrays.
+    # `scalar_index` has the same number of entries as the scalar arrays,
+    # and each entry points into the corresponding `data` array to
+    # determine which vector data correspond to this scalar datum
+
+    for key, (length, dtype) in vector_dtypes.items():
+        vector_arrays[key] = dict(
+            data=np.empty(shape=length, dtype=dtype),
+            scalar_index=np.empty(shape=num_frames, dtype=rt.START_AND_LENGTH_T),
+        )
+
+    # Fill the arrays
+
+    for frame_idx, frame_d in enumerate(data):
+        for key, array_d in scalar_arrays.items():
+            val = frame_d.get(key, None)
+            if val is None:
+                if "valid" not in array_d:
+                    array_d["valid"] = np.ones(shape=num_frames, dtype=np.bool8)
+                array_d["valid"][frame_idx] = False
+            else:
+                array_d["data"][frame_idx] = val
+                if delete_while_filling:
+                    del frame_d[key]
+
+        for key, array_d in vector_arrays.items():
+            scalar_index = array_d["scalar_index"]
+            if frame_idx == 0:
+                prev_start = 0
+                prev_length = 0
+            else:
+                prev_start, prev_length = scalar_index[frame_idx - 1]
+
+            start = int(prev_start + prev_length)
+
+            val = frame_d.get(key, None)
+            if val is None:
+                scalar_index[frame_idx] = (start, 0)
+            else:
+                length = len(val)
+                scalar_index[frame_idx] = (start, length)
+                array_d["data"][start : start + length] = val
+                if delete_while_filling:
+                    del scalar_index, frame_d[key]
+
+    return scalar_arrays, vector_arrays
+
+
+def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
+    """A given scalar array might or might not be present in each tup
+
+    Parameters
+    ----------
+    category_array_map : OrderedDict
+        Keys are the categories (e.g., run number or subrun number), values
+        are the scalar array dicts (containing keys "data" and, optionally,
+        "valid", and values are the actual Numpy arrays)
+
+    category_dtype : numpy.dtype or None, optional
+        If None, use numpy type inferred by the operation .. ::
+
+            np.array(list(category_array_map.keys())).dtype
+
+    Returns
+    -------
+    index : numba.typed.Dict
+        Keys are of type `category_dtype`, values are of type
+        `retro.retro_types.START_AND_LENGTH_T`.
+
+    arrays : dict of dicts containing arrays
+
+    """
+    # Datatype of each data array (same key must have same dtype regardless
+    # of which category)
+    key_dtypes = OrderedDict()
+
+    # All data arrays in one category have same length as one another;
+    # record this length for each category
+    category_array_lengths = OrderedDict()
+
+    # Data arrays (and any valid arrays) will have this length
+    total_length = 0
+
+    # Record any keys that, for any category, already have a valid array
+    # created, as these keys will require valid arrays to be created and
+    # filled
+    keys_with_valid_arrays = set()
+
+    # Get and validate metadata about arrays
+
+    for category, array_dicts in category_array_map.items():
+        array_length = None
+        for key, array_d in array_dicts:
+            data = array_d["data"]
+            valid = array_d.get("valid", None)
+
+            if array_length is None:
+                array_length = len(data)
+            elif len(data) != array_length:
+                raise ValueError(
+                    "category={}, key={}, ref len={}, this len={}".format(
+                        category, key, array_length, len(data)
+                    )
+                )
+
+            if valid is not None:
+                keys_with_valid_arrays.add(key)
+                if len(valid) != array_length:
+                    raise ValueError(
+                        "category={}, key={}, ref len={}, this len={}".format(
+                            category, key, array_length, len(data)
+                        )
+                    )
+
+            dtype = data.dtype
+            existing_dtype = key_dtypes.get(key, None)
+            if existing_dtype is None:
+                key_dtypes[key] = dtype
+            elif dtype != existing_dtype:
+                raise TypeError(
+                    "category={}, key={}, dtype={}, existing_dtype={}".format(
+                        category, key, dtype, existing_dtype
+                    )
+                )
+
+        category_array_lengths[category] = array_length
+        total_length += array_length
+
+    # Create the index; use numba.typed.Dict for direct use in Numba
+
+    categories = np.array(list(category_array_map.keys()), dtype=category_dtype)
+    category_dtype = categories.dtype
+    index = numba.typed.Dict.empty(
+        key_type=numba.from_dtype(category_dtype),
+        value_type=numba.from_dtype(rt.START_AND_LENGTH_T),
+    )
+
+    # Populate the index
+
+    start = 0
+    for category, array_length in zip(categories, category_array_lengths.values()):
+        index[category] = (start, array_length)
+        start += array_length
+
+    # Record keys that are missing in one or more categories
+
+    all_keys = set(key_dtypes.keys())
+    keys_with_missing_data = set()
+    for category, array_dicts in category_array_map.items():
+        keys_with_missing_data.update(all_keys.difference(array_dicts.keys()))
+
+    # Create and populate `data` arrays and any necessary `valid` arrays
+
+    keys_requiring_valid_array = set.union(
+        keys_with_missing_data, keys_with_valid_arrays
+    )
+
+    arrays = OrderedDict()
+    for key, dtype in key_dtypes.items():
+        data = np.empty(shape=total_length, dtype=dtype)
+        if key in keys_requiring_valid_array:
+            valid = np.empty(shape=total_length, dtype=np.bool8)
+        else:
+            valid = None
+
+        for category, array_dicts in category_array_map.items():
+            start_and_length = index[category_dtype(category)]
+            start = start_and_length["start"]
+            stop = start + start_and_length["length"]
+
+            key_arrays = array_dicts.get(key, None)
+            if key_arrays is None:
+                valid[start:stop] = False
+                continue
+
+            data[start:stop] = key_arrays["data"]
+            if "valid" in key_arrays:
+                valid[start:stop] = key_arrays["valid"]
+
+        arrays[key] = dict(data=data)
+        if valid is not None:
+            arrays[key]["valid"] = valid
+
+    return index, arrays
+
+
+def cat_vector_arrays(category_array_map):
+    """Concatenate vector arrays
+
+    Parameters
+    ----------
+    category_array_map : mapping
+
+    Returns
+    -------
+    arrays
+
+    """
+    key_dtypes = OrderedDict()
+
+    index_total_lengths = {}
+    data_total_lengths = {}
+
+    for category, array_dicts in category_array_map.items():
+        for key, array_d in array_dicts:
+            data = array_d["data"]
+            index = array_d["index"]
+
+            dtype = data.dtype
+            existing_dtype = key_dtypes.get(key, None)
+            if existing_dtype is None:
+                key_dtypes[key] = dtype
+                index_total_lengths[key] = 0
+                data_total_lengths[key] = 0
+            elif dtype != existing_dtype:
+                raise TypeError(
+                    "category={}, key={}, dtype={}, existing_dtype={}".format(
+                        category, key, dtype, existing_dtype
+                    )
+                )
+
+            index_total_lengths[key] += len(index)
+            data_total_lengths[key] += len(data)
+
+    # Concatenate arrays from all categories for each key
+
+    arrays = OrderedDict()
+    for key, dtype in key_dtypes.items():
+        index = np.empty(shape=index_total_lengths[key], dtype=rt.START_AND_LENGTH_T)
+        data = np.empty(shape=data_total_lengths[key], dtype=dtype)
+
+        index_start = 0
+        data_start = 0
+        for category, array_dicts in category_array_map.items():
+            array_d = array_dicts.get(key, None)
+            if array_d is None:
+                raise NotImplementedError("TODO")
+
+            index_ = array_d["index"]
+            data_ = array_d["data"]
+
+            data_length = len(data_)
+            data_stop = data_start + data_length
+            data[data_start:data_stop] = data_
+
+            index_length = len(index_)
+            index_stop = index_start + index_length
+            index[index_start:index_stop] = index_[:]
+
+            if data_start != 0:
+                index[index_start:index_stop]["start"] += data_start
+
+            data_start = data_stop
+            index_start = index_stop
+
+        arrays[key] = dict(data=data, index=index)
+
+    return arrays
 
 
 class ConvertI3ToNumpy(object):
@@ -78,7 +388,7 @@ class ConvertI3ToNumpy(object):
     ]
 
     def __init__(self):
-        # pylint: disable=unused-variable, unused-import, import-outside-toplevel
+        # pylint: disable=unused-variable, unused-import
         from icecube import icetray, dataio, dataclasses, recclasses, simclasses
 
         try:
@@ -113,20 +423,18 @@ class ConvertI3ToNumpy(object):
         }
 
         self.custom_funcs = {
-            dataclasses.I3MCTree: self.flatten_mctree,
-            dataclasses.I3RecoPulseSeries: self.flatten_pulse_series,
-            dataclasses.I3RecoPulseSeriesMap: self.flatten_pulse_series,
-            dataclasses.I3RecoPulseSeriesMapMask: self.flatten_pulse_series,
-            dataclasses.I3RecoPulseSeriesMapUnion: self.flatten_pulse_series,
-            dataclasses.I3SuperDSTTriggerSeries: self.seq_of_same_type,
-            dataclasses.I3TriggerHierarchy: self.flatten_trigger_hierarchy,
-            dataclasses.I3VectorI3Particle: self.singleton_seq_to_scalar,
+            dataclasses.I3MCTree: self.extract_flat_mctree,
+            dataclasses.I3RecoPulseSeries: self.extract_flat_pulse_series,
+            dataclasses.I3RecoPulseSeriesMap: self.extract_flat_pulse_series,
+            dataclasses.I3RecoPulseSeriesMapMask: self.extract_flat_pulse_series,
+            dataclasses.I3RecoPulseSeriesMapUnion: self.extract_flat_pulse_series,
+            dataclasses.I3SuperDSTTriggerSeries: self.extract_seq_of_same_type,
+            dataclasses.I3TriggerHierarchy: self.extract_flat_trigger_hierarchy,
+            dataclasses.I3VectorI3Particle: self.extract_singleton_seq_to_scalar,
             dataclasses.I3DOMCalibration: self.extract_i3domcalibration,
         }
 
-        self.getters = {
-            recclasses.I3PortiaEvent: (rt.I3PORTIAEVENT_T, "Get{}"),
-        }
+        self.getters = {recclasses.I3PortiaEvent: (rt.I3PORTIAEVENT_T, "Get{}")}
 
         self.mapping_str_simple_scalar = {
             dataclasses.I3MapStringDouble: np.float64,
@@ -136,13 +444,11 @@ class ConvertI3ToNumpy(object):
 
         self.mapping_str_structured_scalar = {}
         if genie_icetray:
-            self.mapping_str_structured_scalar[genie_icetray.I3GENIEResultDict] = (
-                rt.I3GENIERESULTDICT_SCALARS_T
-            )
+            self.mapping_str_structured_scalar[
+                genie_icetray.I3GENIEResultDict
+            ] = rt.I3GENIERESULTDICT_SCALARS_T
 
-        self.mapping_str_attrs = {
-            dataclasses.I3FilterResultMap: rt.I3FILTERRESULT_T,
-        }
+        self.mapping_str_attrs = {dataclasses.I3FilterResultMap: rt.I3FILTERRESULT_T}
 
         self.attrs = {
             icetray.I3RUsage: rt.I3RUSAGE_T,
@@ -180,9 +486,9 @@ class ConvertI3ToNumpy(object):
             recclasses.CramerRaoParams: rt.CRAMERRAOPARAMS_T,
         }
         if millipede:
-            self.attrs[millipede.gulliver.I3LogLikelihoodFitParams] = (
-                rt.I3LOGLIKELIHOODFITPARAMS_T
-            )
+            self.attrs[
+                millipede.gulliver.I3LogLikelihoodFitParams
+            ] = rt.I3LOGLIKELIHOODFITPARAMS_T
         if santa:
             self.attrs[santa.I3SantaFitParams] = rt.I3SANTAFITPARAMS_T
 
@@ -191,31 +497,31 @@ class ConvertI3ToNumpy(object):
 
         self.unhandled_types = set(
             [
-                #dataclasses.I3Geometry,
-                #dataclasses.I3Calibration,
-                #dataclasses.I3DetectorStatus,
-                #dataclasses.I3DOMLaunchSeriesMap,
-                #dataclasses.I3MapKeyVectorDouble,
-                #dataclasses.I3RecoPulseSeriesMapApplySPECorrection,
-                #dataclasses.I3SuperDST,
-                #dataclasses.I3TimeWindowSeriesMap,
-                #dataclasses.I3VectorDouble,
-                #dataclasses.I3VectorOMKey,
-                #dataclasses.I3VectorTankKey,
-                #dataclasses.I3MapKeyDouble,
-                #recclasses.I3DSTHeader16,
+                # dataclasses.I3Geometry,
+                # dataclasses.I3Calibration,
+                # dataclasses.I3DetectorStatus,
+                # dataclasses.I3DOMLaunchSeriesMap,
+                # dataclasses.I3MapKeyVectorDouble,
+                # dataclasses.I3RecoPulseSeriesMapApplySPECorrection,
+                # dataclasses.I3SuperDST,
+                # dataclasses.I3TimeWindowSeriesMap,
+                # dataclasses.I3VectorDouble,
+                # dataclasses.I3VectorOMKey,
+                # dataclasses.I3VectorTankKey,
+                # dataclasses.I3MapKeyDouble,
+                # recclasses.I3DSTHeader16,
             ]
         )
-        #if tpx:
+        # if tpx:
         #    self.unhandled_types.add(tpx.I3TopPulseInfoSeriesMap)
 
         self.frame = None
         self.failed_keys = set()
 
-    def extract_season(self, path, gcd_paths=None, keys=None):
+    def extract_season(self, path, gcd_path=None, keys=None):
         """E.g., data/level7_v01.04/IC86.14"""
-        if gcd_paths is None:
-            gcd_paths = find_gcds_in_dirs(path, gcd_fname_re=DATA_GCD_FNAME_RE)
+        path = expand(path)
+        assert isdir(path), path
 
     def extract_run(self, path, gcd_path=None, keys=None):
         """E.g. .. ::
@@ -231,7 +537,7 @@ class ConvertI3ToNumpy(object):
         assert isdir(path), path
 
         match = RUN_DIR_RE.match(basename(path))
-        assert match
+        assert match, 'path not a run directory? "{}"'.format(basename(path))
         groupdict = match.groupdict()
 
         is_data = groupdict["pfx"] is not None
@@ -249,6 +555,7 @@ class ConvertI3ToNumpy(object):
             gcd_path = expand(gcd_path)
             if not isfile(gcd_path):
                 assert isdir(gcd_path)
+                # TODO: use DATA_GCD_FNAME_RE
                 gcd_path = glob(join(gcd_path, "*Run{}*GCD*.i3*".format(run_str)))
                 assert len(gcd_path) == 1, gcd_path
                 gcd_path = expand(gcd_path[0])
@@ -269,15 +576,15 @@ class ConvertI3ToNumpy(object):
 
         for subrun, fpath in subrun_filepaths:
             frames_dicts = self.extract_files(paths=[gcd_path, fpath], keys=keys)
-            scalar_arrays[subrun], vector_arrays[subrun] = self.construct_arrays(frames_dicts)
+            scalar_arrays[subrun], vector_arrays[subrun] = construct_arrays(
+                frames_dicts
+            )
 
         # Ensure sorting by subrun
-        subrun_scalar_index, scalar_arrays = self.index_and_concatenate_scalar_arrays(
-            scalar_arrays
-        )
-        vector_arrays = self.index_and_concatenate_vector_arrays(vector_arrays)
+        subrun_scalar_index, scalar_arrays = index_and_cat_scalar_arrays(scalar_arrays)
+        vector_arrays = cat_vector_arrays(vector_arrays)
 
-        return index, scalar_arrays, vector_arrays
+        return subrun_scalar_index, scalar_arrays, vector_arrays
 
     def extract_files(self, paths, keys=None):
         """Extract info from one or more i3 file(s)
@@ -334,7 +641,7 @@ class ConvertI3ToNumpy(object):
             except Exception:
                 if auto_mode:
                     self.failed_keys.add(key)
-                #else:
+                # else:
                 #    extracted_data[key] = None
                 continue
 
@@ -344,7 +651,7 @@ class ConvertI3ToNumpy(object):
                 print("failed on key {}".format(key))
                 raise
 
-            #if auto_mode and np_value is None:
+            # if auto_mode and np_value is None:
             if np_value is None:
                 continue
 
@@ -382,15 +689,11 @@ class ConvertI3ToNumpy(object):
 
         dtype_fmt = self.getters.get(obj_t, None)
         if dtype_fmt:
-            return self.getters2np(obj, *dtype_fmt, to_numpy=to_numpy)
+            return self.extract_getters(obj, *dtype_fmt, to_numpy=to_numpy)
 
         dtype = self.mapping_str_simple_scalar.get(obj_t, None)
         if dtype:
-            return dict2struct(
-                obj,
-                set_explicit_dtype_func=dtype,
-                to_numpy=to_numpy,
-            )
+            return dict2struct(obj, set_explicit_dtype_func=dtype, to_numpy=to_numpy)
 
         dtype = self.mapping_str_structured_scalar.get(obj_t, None)
         if dtype:
@@ -398,11 +701,11 @@ class ConvertI3ToNumpy(object):
 
         dtype = self.mapping_str_attrs.get(obj_t, None)
         if dtype:
-            return self.mapscalarattrs2np(obj, to_numpy=to_numpy)
+            return self.extract_mapscalarattrs(obj, to_numpy=to_numpy)
 
         dtype = self.attrs.get(obj_t, None)
         if dtype:
-            return self.attrs2np(obj, dtype, to_numpy=to_numpy)
+            return self.extract_attrs(obj, dtype, to_numpy=to_numpy)
 
         func = self.custom_funcs.get(obj_t, None)
         if func:
@@ -414,7 +717,7 @@ class ConvertI3ToNumpy(object):
         return None
 
     @staticmethod
-    def flatten_trigger_hierarchy(obj, to_numpy=True):
+    def extract_flat_trigger_hierarchy(obj, to_numpy=True):
         """Flatten a trigger hierarchy into a linear sequence of triggers,
         labeled such that the original hiercarchy can be recreated
 
@@ -440,7 +743,7 @@ class ConvertI3ToNumpy(object):
                 parent_idx = -1
             else:
                 parent_idx = level_tups.index(level_tup[:-1])
-            #info_tup, _ = self.attrs2np(trigger, TRIGGER_T, to_numpy=False)
+            # info_tup, _ = self.extract_attrs(trigger, TRIGGER_T, to_numpy=False)
             key = trigger.key
             flat_triggers.append(
                 (
@@ -450,12 +753,7 @@ class ConvertI3ToNumpy(object):
                         trigger.time,
                         trigger.length,
                         trigger.fired,
-                        (
-                            key.source,
-                            key.type,
-                            key.subtype,
-                            key.config_id or 0,
-                        ),
+                        (key.source, key.type, key.subtype, key.config_id or 0),
                     ),
                 )
             )
@@ -465,7 +763,7 @@ class ConvertI3ToNumpy(object):
 
         return flat_triggers, rt.FLAT_TRIGGER_T
 
-    def flatten_mctree(
+    def extract_flat_mctree(
         self,
         mctree,
         parent=None,
@@ -511,7 +809,7 @@ class ConvertI3ToNumpy(object):
         the typical use case of flattening an entire I3MCTree and producing a
         numpy.ndarray with the results. .. ::
 
-            flat_particles = flatten_mctree(frame["I3MCTree"])
+            flat_particles = extract_flat_mctree(frame["I3MCTree"])
 
         """
         if flat_particles is None:
@@ -531,7 +829,7 @@ class ConvertI3ToNumpy(object):
 
                 # First append all daughters found
                 for daughter in daughters:
-                    info_tup, _ = self.attrs2np(
+                    info_tup, _ = self.extract_attrs(
                         daughter, rt.I3PARTICLE_T, to_numpy=False
                     )
                     flat_particles.append((level, parent_idx, info_tup))
@@ -539,7 +837,7 @@ class ConvertI3ToNumpy(object):
                 # Now recurse, appending any granddaughters (daughters to these
                 # daughters) at the end
                 for daughter_idx, daughter in enumerate(daughters, start=idx0):
-                    self.flatten_mctree(
+                    self.extract_flat_mctree(
                         mctree=mctree,
                         parent=daughter,
                         parent_idx=daughter_idx,
@@ -554,7 +852,7 @@ class ConvertI3ToNumpy(object):
 
         return flat_particles, rt.FLAT_PARTICLE_T
 
-    def flatten_pulse_series(self, obj, frame=None, to_numpy=True):
+    def extract_flat_pulse_series(self, obj, frame=None, to_numpy=True):
         """Flatten a pulse series into a 1D array of ((<OMKEY_T>), <PULSE_T>)
 
         Parameters
@@ -583,7 +881,9 @@ class ConvertI3ToNumpy(object):
         for omkey, pulses in obj.items():
             omkey = (omkey.string, omkey.om, omkey.pmt)
             for pulse in pulses:
-                info_tup, _ = self.attrs2np(pulse, dtype=rt.PULSE_T, to_numpy=False)
+                info_tup, _ = self.extract_attrs(
+                    pulse, dtype=rt.PULSE_T, to_numpy=False
+                )
                 flat_pulses.append((omkey, info_tup))
 
         if to_numpy:
@@ -591,7 +891,7 @@ class ConvertI3ToNumpy(object):
 
         return flat_pulses, rt.FLAT_PULSE_T
 
-    def singleton_seq_to_scalar(self, seq, to_numpy=True):
+    def extract_singleton_seq_to_scalar(self, seq, to_numpy=True):
         """Extract a sole object from a sequence and treat it as a scalar.
         E.g., I3VectorI3Particle that, by construction, contains just one
         particle
@@ -611,7 +911,7 @@ class ConvertI3ToNumpy(object):
         assert len(seq) == 1
         return self.extract_object(seq[0], to_numpy=to_numpy)
 
-    def attrs2np(self, obj, dtype, to_numpy=True):
+    def extract_attrs(self, obj, dtype, to_numpy=True):
         """Extract attributes of an object (and optionally, recursively, attributes
         of those attributes, etc.) into a numpy.ndarray based on the specification
         provided by `dtype`.
@@ -644,7 +944,7 @@ class ConvertI3ToNumpy(object):
             elif isinstance(subdtype, Sequence):
                 out = self.extract_object(val, to_numpy=False)
                 if out is None:
-                    out = self.attrs2np(val, subdtype, to_numpy=False)
+                    out = self.extract_attrs(val, subdtype, to_numpy=False)
                 assert out is not None, "{}: {} {}".format(name, subdtype, val)
                 info_tup, _ = out
                 vals.append(info_tup)
@@ -659,7 +959,7 @@ class ConvertI3ToNumpy(object):
 
         return vals, dtype
 
-    def mapscalarattrs2np(self, mapping, subdtype=None, to_numpy=True):
+    def extract_mapscalarattrs(self, mapping, subdtype=None, to_numpy=True):
         """Convert a mapping (containing string keys and scalar-typed values)
         to a single-element Numpy array from the values of `mapping`, using
         keys defined by `subdtype.names`.
@@ -716,7 +1016,7 @@ class ConvertI3ToNumpy(object):
 
         return out_vals, out_dtype
 
-    def getters2np(self, obj, dtype, fmt="Get{}", to_numpy=True):
+    def extract_getters(self, obj, dtype, fmt="Get{}", to_numpy=True):
         """Convert an object whose data has to be extracted via methods that
         behave like getters (e.g., .`xyz = get_xyz()`).
 
@@ -733,7 +1033,7 @@ class ConvertI3ToNumpy(object):
         --------
         To get all of the values of an I3PortiaEvent: .. ::
 
-            getters2np(frame["PoleEHESummaryPulseInfo"], dtype=rt.I3PORTIAEVENT_T, fmt="Get{}")
+            extract_getters(frame["PoleEHESummaryPulseInfo"], dtype=rt.I3PORTIAEVENT_T, fmt="Get{}")
 
         """
         vals = []
@@ -750,8 +1050,8 @@ class ConvertI3ToNumpy(object):
                         )
                     )
                 val, _ = out
-            #if isinstance(val, self.icetray.OMKey):
-            #    val = self.attrs2np(val, dtype=rt.OMKEY_T, to_numpy=False)
+            # if isinstance(val, self.icetray.OMKey):
+            #    val = self.extract_attrs(val, dtype=rt.OMKEY_T, to_numpy=False)
             vals.append(val)
 
         vals = tuple(vals)
@@ -761,7 +1061,7 @@ class ConvertI3ToNumpy(object):
 
         return vals, dtype
 
-    def seq_of_same_type(self, seq, to_numpy=True):
+    def extract_seq_of_same_type(self, seq, to_numpy=True):
         """Convert a sequence of objects, all of the same type, to a numpy array of
         that type.
 
@@ -820,288 +1120,3 @@ class ConvertI3ToNumpy(object):
             return np.array([vals], dtype=rt.I3DOMCALIBRATION_T)[0]
 
         return vals, rt.I3DOMCALIBRATION_T
-
-    @staticmethod
-    def construct_arrays(data, delete_while_filling=False):
-        """Construct arrays to collect same-key scalars / vectors across frames
-
-        Returns
-        -------
-        scalar_arrays : dict
-        vector_arrays : dict
-
-        """
-        if isinstance(data, Mapping):
-            data = [data]
-
-        # Get type and size info
-
-        scalar_dtypes = {}
-        vector_dtypes = {}
-
-        num_frames = len(data)
-        for frame_d in data:
-            # Must get all vector values for all frames to get both dtype and
-            # total length, but only need to get a scalar value once to get its
-            # dtype
-            for key in set(frame_d.keys()).difference(scalar_dtypes.keys()):
-                val = frame_d[key]
-                #if val is None:
-                #    continue
-                dtype = val.dtype
-
-                if np.isscalar(val):
-                    scalar_dtypes[key] = dtype
-                else:
-                    if key not in vector_dtypes:
-                        vector_dtypes[key] = [0, dtype]  # length, type
-                    vector_dtypes[key][0] += len(val)
-
-        # Construct empty arrays
-
-        scalar_arrays = {}
-        vector_arrays = {}
-
-        for key, dtype in scalar_dtypes.items():
-            # Until we know we need one (i.e., when an event is missing this
-            # `key`), the "valid" mask array is omitted
-            scalar_arrays[key] = dict(data=np.empty(shape=num_frames, dtype=dtype))
-
-        # `vector_arrays` contains "data" and "scalar_index" arrays.
-        # `scalar_index` has the same number of entries as the scalar arrays,
-        # and each entry points into the corresponding `data` array to
-        # determine which vector data correspond to this scalar datum
-
-        for key, (length, dtype) in vector_dtypes.items():
-            vector_arrays[key] = dict(
-                data=np.empty(shape=length, dtype=dtype),
-                scalar_index=np.empty(shape=num_frames, dtype=rt.START_AND_LENGTH_T),
-            )
-
-        # Fill the arrays
-
-        for frame_idx, frame_d in enumerate(data):
-            for key, array_d in scalar_arrays.items():
-                val = frame_d.get(key, None)
-                if val is None:
-                    if "valid" not in array_d:
-                        array_d["valid"] = np.ones(shape=num_frames, dtype=np.bool8)
-                    array_d["valid"][frame_idx] = False
-                else:
-                    array_d["data"][frame_idx] = val
-                    if delete_while_filling:
-                        del frame_d[key]
-
-            for key, array_d in vector_arrays.items():
-                scalar_index = array_d["scalar_index"]
-                if frame_idx == 0:
-                    prev_start = 0
-                    prev_length = 0
-                else:
-                    prev_start, prev_length = scalar_index[frame_idx - 1]
-
-                start = int(prev_start + prev_length)
-
-                val = frame_d.get(key, None)
-                if val is None:
-                    scalar_index[frame_idx] = (start, 0)
-                else:
-                    length = len(val)
-                    scalar_index[frame_idx] = (start, length)
-                    array_d["data"][start : start + length] = val
-                    if delete_while_filling:
-                        del scalar_index, frame_d[key]
-
-        return scalar_arrays, vector_arrays
-
-    @staticmethod
-    def index_and_concatenate_scalar_arrays(category_array_map, category_dtype=None):
-        """A given scalar array might or might not be present in each tup
-
-        Parameters
-        ----------
-        category_array_map : OrderedDict
-            Keys are the categories (e.g., run number or subrun number), values
-            are the scalar array dicts (containing keys "data" and, optionally,
-            "valid", and values are the actual Numpy arrays)
-
-        category_dtype : numpy.dtype or None, optional
-            If None, use numpy type inferred by the operation .. ::
-
-                np.array(list(category_array_map.keys())).dtype
-
-        Returns
-        -------
-        index : numba.typed.Dict
-            Keys are of type `category_dtype`, values are of type
-            `retro.retro_types.START_AND_LENGTH_T`.
-
-        arrays : dict of dicts containing arrays
-
-        """
-        # Datatype of each data array (same key must have same dtype regardless
-        # of which category)
-        key_dtypes = OrderedDict()
-
-        # All data arrays in one category have same length as one another;
-        # record this length for each category
-        category_array_lengths = OrderedDict()
-
-        # Data arrays (and any valid arrays) will have this length
-        total_length = 0
-
-        # Record any keys that, for any category, already have a valid array
-        # created, as these keys will require valid arrays to be created and
-        # filled
-        keys_with_valid_arrays = set()
-
-        # Get and validate metadata about arrays
-
-        for category, array_dicts in category_array_map.items():
-            array_length = None
-            for key, array_d in array_dicts:
-                data = array_d["data"]
-                valid = array_d.get("valid", None)
-
-                if array_length is None:
-                    array_length = len(data)
-                elif len(data) != array_length:
-                    raise ValueError(
-                        "category={}, key={}, ref len={}, this len={}".format(
-                            category, key, array_length, len(data)
-                        )
-                    )
-
-                if valid is not None:
-                    keys_with_valid_arrays.add(key)
-                    if len(valid) != array_length:
-                        raise ValueError(
-                            "category={}, key={}, ref len={}, this len={}".format(
-                                category, key, array_length, len(data)
-                            )
-                        )
-
-                dtype = data.dtype
-                existing_dtype = key_dtypes.get(key, None)
-                if existing_dtype is None:
-                    key_dtypes[key] = dtype
-                elif dtype != existing_dtype:
-                    raise TypeError(
-                        "category={}, key={}, dtype={}, existing_dtype={}".format(
-                            category, key, dtype, existing_dtype
-                        )
-                    )
-
-            category_array_lengths[category] = array_length
-            total_length += array_length
-
-        # Create the index; use numba.typed.Dict for direct use in Numba
-
-        categories = np.array(list(category_array_map.keys()), dtype=category_dtype)
-        category_dtype = categories.dtype
-        index = numba.typed.Dict.empty(
-            key_type=numba.from_dtype(category_dtype),
-            value_type=numba.from_dtype(rt.START_AND_LENGTH_T),
-        )
-
-        # Populate the index
-
-        start = 0
-        for category, array_length in zip(categories, category_array_lengths.values()):
-            index[category] = (start, array_length)
-            start += array_length
-
-        # Record keys that are missing in one or more categories
-
-        all_keys = set(key_dtypes.keys())
-        keys_with_missing_data = set()
-        for category, array_dicts in category_array_map.items():
-            keys_with_missing_data.update(all_keys.difference(array_dicts.keys()))
-
-        # Create and populate `data` arrays and any necessary `valid` arrays
-
-        keys_requiring_valid_array = set.union(
-            keys_with_missing_data, keys_with_valid_arrays
-        )
-
-        arrays = OrderedDict()
-        for key, dtype in key_dtypes.items():
-            data = np.empty(shape=total_length, dtype=dtype)
-            if key in keys_requiring_valid_array:
-                valid = np.empty(shape=total_length, dtype=np.bool8)
-            else:
-                valid = None
-
-            for category, array_dicts in category_array_map.items():
-                start_and_length = index[category_dtype(category)]
-                start = start_and_length["start"]
-                stop = start + start_and_length["length"]
-
-                key_arrays = array_dicts.get(key, None)
-                if key_arrays is None:
-                    valid[start:stop] = False
-                    continue
-
-                data[start:stop] = key_arrays["data"]
-                if "valid" in key_arrays:
-                    valid[start:stop] = key_arrays["valid"]
-
-            arrays[key] = dict(data=data)
-            if valid is not None:
-                arrays[key]["valid"] = valid
-
-        return index, arrays
-
-    @staticmethod
-    def index_and_concatenate_vector_arrays(category_array_map):
-        key_dtypes = OrderedDict()
-        #category_array_lengths
-
-        index_total_lengths = {}
-        data_total_lengths = {}
-
-        for category, array_dicts in category_array_map.items():
-            for key, array_d in array_dicts:
-                data = array_d["data"]
-                index = array_d["index"]
-
-                dtype = data.dtype
-                existing_dtype = key_dtypes.get(key, None)
-                if existing_dtype is None:
-                    key_dtypes[key] = dtype
-                    index_total_lengths[key] = 0
-                    data_total_lengths[key] = 0
-                elif dtype != existing_dtype:
-                    raise TypeError(
-                        "category={}, key={}, dtype={}, existing_dtype={}".format(
-                            category, key, dtype, existing_dtype
-                        )
-                    )
-
-                index_total_lengths[key] = += len(index)
-                data_total_lengths[key] += len(data)
-
-        starts = {}
-        for key, dtype in key_dtypes.items():
-            index = np.empty(shape=index_total_lengths[key], dtype=START_AND_LENGTH_T)
-            data = np.empty(shape=data_total_lengths[key], dtype=dtype)
-
-            index_start = 0
-            data_start = 0
-            for category, array_dicts in category_array_map.items():
-                array_d = array_dicts.get(key, None)
-                if array_d is None:
-                    raise NotImplementedError("TODO")
-                index_ = array_d["index"]
-                data_ = array_d["data"]
-                
-                data
-
-
-
-
-        pass
-        #    for key, arrays in vector_arrays.items():
-        #        data = arrays["data"]
-        #    vector_keys.update(vector_arrays.keys())
-        #    vector_array_tups.append((subrun, vector_arrays))
