@@ -1582,6 +1582,14 @@ START_AND_LENGTH_T = np.dtype(
 )
 
 
+START_STOP_T = np.dtype(
+    [
+        ('start', np.uint64),
+        ('stop', np.uint64),
+    ]
+)
+
+
 SRC_T = np.dtype([
     ('kind', np.uint32),
     ('time', np.float32),
