@@ -41,9 +41,12 @@ from glob import glob
 from os import listdir
 from os.path import abspath, basename, dirname, isdir, isfile, join
 import re
+from shutil import rmtree
 import sys
+from tempfile import mkdtemp
+import time
 
-#import numba
+# import numba
 import numpy as np
 from six import string_types
 
@@ -52,22 +55,29 @@ if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import retro_types as rt
-from retro.utils.misc import expand, mkdir, nsort_key_func
+from retro.utils.misc import expand, mkdir
 from retro.i3processing.extract_common import (
     DATA_GCD_FNAME_RE,
     OSCNEXT_I3_FNAME_RE,
     dict2struct,
-    find_gcds_in_dirs,
     maptype2np,
 )
+
+# TODO: parallelize
 
 
 RUN_DIR_RE = re.compile(r"(?P<pfx>Run)?(?P<run>[0-9]+)", flags=re.IGNORECASE)
 """Matches MC run dirs, e.g. '140000' & data run dirs, e.g. 'Run00125177'"""
 
 
-def construct_arrays(data, delete_while_filling=False):
+def construct_arrays(data, delete_while_filling=False, outdir=None):
     """Construct arrays to collect same-key scalars / vectors across frames
+
+    Parameters
+    ----------
+    data : dict or sequence thereof
+    delete_while_filling : bool
+    outdir : str
 
     Returns
     -------
@@ -77,6 +87,10 @@ def construct_arrays(data, delete_while_filling=False):
     """
     if isinstance(data, Mapping):
         data = [data]
+
+    if isinstance(outdir, string_types):
+        outdir = expand(outdir)
+        mkdir(outdir)
 
     # Get type and size info
 
@@ -106,10 +120,23 @@ def construct_arrays(data, delete_while_filling=False):
     scalar_arrays = {}
     vector_arrays = {}
 
+    scalar_arrays_paths = {}
+    vector_arrays_paths = {}
+
     for key, dtype in scalar_dtypes.items():
         # Until we know we need one (i.e., when an event is missing this
         # `key`), the "valid" mask array is omitted
-        scalar_arrays[key] = dict(data=np.empty(shape=num_frames, dtype=dtype))
+        if outdir is not None:
+            dpath = join(outdir, key)
+            mkdir(dpath)
+            data_array_path = join(dpath, "data.npy")
+            scalar_arrays_paths[key] = dict(data=data_array_path)
+            data_array = np.lib.format.open_memmap(
+                data_array_path, mode="w+", shape=(num_frames,), dtype=dtype
+            )
+        else:
+            data_array = np.empty(shape=(num_frames,), dtype=dtype)
+        scalar_arrays[key] = dict(data=data_array)
 
     # `vector_arrays` contains "data" and "index" arrays.
     # `index` has the same number of entries as the scalar arrays,
@@ -117,10 +144,24 @@ def construct_arrays(data, delete_while_filling=False):
     # determine which vector data correspond to this scalar datum
 
     for key, (length, dtype) in vector_dtypes.items():
-        vector_arrays[key] = dict(
-            data=np.empty(shape=length, dtype=dtype),
-            index=np.empty(shape=num_frames, dtype=rt.START_STOP_T),
-        )
+        if outdir is not None:
+            dpath = join(outdir, key)
+            mkdir(dpath)
+            data_array_path = join(dpath, "data.npy")
+            index_array_path = join(dpath, "index.npy")
+            vector_arrays_paths[key] = dict(
+                data=data_array_path, index=index_array_path
+            )
+            data_array = np.lib.format.open_memmap(
+                data_array_path, mode="w+", shape=(length,), dtype=dtype
+            )
+            index_array = np.lib.format.open_memmap(
+                index_array_path, mode="w+", shape=(num_frames,), dtype=rt.START_STOP_T,
+            )
+        else:
+            data_array = np.empty(shape=(length,), dtype=dtype)
+            index_array = np.empty(shape=(num_frames,), dtype=rt.START_STOP_T)
+        vector_arrays[key] = dict(data=data_array, index=index_array)
 
     # Fill the arrays
 
@@ -129,7 +170,20 @@ def construct_arrays(data, delete_while_filling=False):
             val = frame_d.get(key, None)
             if val is None:
                 if "valid" not in array_d:
-                    array_d["valid"] = np.ones(shape=num_frames, dtype=np.bool8)
+                    if outdir is not None:
+                        dpath = join(outdir, key)
+                        valid_array_path = join(dpath, "valid.npy")
+                        scalar_arrays_paths[key]["valid"] = valid_array_path
+                        valid_array = np.lib.format.open_memmap(
+                            valid_array_path,
+                            mode="w+",
+                            shape=(num_frames,),
+                            dtype=np.bool8,
+                        )
+                        valid_array[:] = True
+                    else:
+                        valid_array = np.ones(shape=(num_frames,), dtype=np.bool8)
+                    array_d["valid"] = valid_array
                 array_d["valid"][frame_idx] = False
             else:
                 array_d["data"][frame_idx] = val
@@ -139,10 +193,9 @@ def construct_arrays(data, delete_while_filling=False):
         for key, array_d in vector_arrays.items():
             index = array_d["index"]
             if frame_idx == 0:
-                prev_start = 0
                 prev_stop = 0
             else:
-                prev_start, prev_stop = index[frame_idx - 1]
+                prev_stop = index[frame_idx - 1]["stop"]
 
             start = int(prev_stop)
 
@@ -153,14 +206,20 @@ def construct_arrays(data, delete_while_filling=False):
                 length = len(val)
                 stop = start + length
                 index[frame_idx] = (start, stop)
-                array_d["data"][start : stop] = val[:]
+                array_d["data"][start:stop] = val[:]
                 if delete_while_filling:
                     del index, frame_d[key]
+
+    if outdir is not None:
+        del scalar_arrays, vector_arrays
+        return scalar_arrays_paths, vector_arrays_paths
 
     return scalar_arrays, vector_arrays
 
 
-def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
+def index_and_cat_scalar_arrays(
+    category_array_map, category_dtype=None, category_name=None, outdir=None
+):
     """A given scalar array might or might not be present in each tup
 
     Parameters
@@ -175,6 +234,8 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
 
             np.array(list(category_array_map.keys())).dtype
 
+    outdir : str or None, optional
+
     Returns
     -------
     index : numba.typed.Dict
@@ -184,6 +245,10 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
     arrays : dict of dicts containing arrays
 
     """
+    if outdir is not None:
+        outdir = expand(outdir)
+        mkdir(outdir)
+
     # Datatype of each data array (same key must have same dtype regardless
     # of which category)
     key_dtypes = OrderedDict()
@@ -207,6 +272,11 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
         for key, array_d in array_dicts.items():
             data = array_d["data"]
             valid = array_d.get("valid", None)
+
+            if isinstance(data, string_types):
+                data = np.load(data, mmap_mode="r")
+            if isinstance(valid, string_types):
+                valid = np.load(valid, mmap_mode="r")
 
             if array_length is None:
                 array_length = len(data)
@@ -240,7 +310,14 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
         if array_length is None:
             array_length = 0
 
-        print("category:", category, "array_length:", array_length, "total length", total_length)
+        print(
+            "category:",
+            category,
+            "array_length:",
+            array_length,
+            "total length",
+            total_length,
+        )
         category_array_lengths[category] = array_length
         total_length += array_length
         print("category:", category, "total length", total_length)
@@ -251,20 +328,35 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
 
     categories = np.array(list(category_array_map.keys()), dtype=category_dtype)
     category_dtype = categories.dtype
-    #index = numba.typed.Dict.empty(
+    # index = numba.typed.Dict.empty(
     #    key_type=numba.from_dtype(category_dtype),
     #    value_type=numba.from_dtype(rt.START_AND_LENGTH_T),
-    #)
-    index = OrderedDict()
+    # )
+    # index = OrderedDict()
+    index_dtype = np.dtype([("category", category_dtype), ("index", rt.START_STOP_T)])
+    if outdir is not None:
+        if category_name is None:
+            category_name = "category"
+        index = np.lib.format.open_memmap(
+            join(outdir, category_name + "__scalar_index.npy"),
+            mode="w+",
+            shape=(len(categories),),
+            dtype=index_dtype,
+        )
+    else:
+        index = np.empty(shape=(len(categories),), dtype=index_dtype)
 
     # Populate the index
 
     start = 0
-    for category, array_length in zip(categories, category_array_lengths.values()):
-        #value = np.array([(start, array_length)], dtype=rt.START_AND_LENGTH_T)[0]
+    for i, (category, array_length) in enumerate(
+        zip(categories, category_array_lengths.values())
+    ):
+        # value = np.array([(start, array_length)], dtype=rt.START_AND_LENGTH_T)[0]
         stop = start + array_length
         value = np.array([(start, stop)], dtype=rt.START_STOP_T)[0]
-        index[category] = value
+        # index[category] = value
+        index[i] = (category, value)
         # TODO: numba.typed.Dict fails:
         # print("value:", value, "ntd value:", index[category])
         start = stop
@@ -284,23 +376,48 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
 
     arrays = OrderedDict()
     for key, dtype in key_dtypes.items():
-        data = np.empty(shape=total_length, dtype=dtype)
+        if outdir is not None:
+            dpath = join(outdir, key)
+            mkdir(dpath)
+            data = np.lib.format.open_memmap(
+                join(dpath, "data.npy"), mode="w+", shape=(total_length,), dtype=dtype
+            )
+        else:
+            data = np.empty(shape=(total_length,), dtype=dtype)
+
         if key in keys_requiring_valid_array:
-            valid = np.empty(shape=total_length, dtype=np.bool8)
+            if outdir is not None:
+                dpath = join(outdir, key)
+                mkdir(dpath)
+                valid = np.lib.format.open_memmap(
+                    join(dpath, "valid.npy"),
+                    mode="w+",
+                    shape=(total_length,),
+                    dtype=np.bool8,
+                )
+            else:
+                valid = np.empty(shape=(total_length,), dtype=np.bool8)
         else:
             valid = None
 
         for category, array_dicts in category_array_map.items():
-            start, stop = index[category]
+            start, stop = index[index["category"] == category][0]["index"]
 
             key_arrays = array_dicts.get(key, None)
             if key_arrays is None:
                 valid[start:stop] = False
                 continue
 
+            data_ = key_arrays["data"]
+            if isinstance(data_, string_types):
+                data_ = np.load(data_, mmap_mode="r")
             data[start:stop] = key_arrays["data"]
-            if "valid" in key_arrays:
-                valid[start:stop] = key_arrays["valid"]
+
+            valid_ = key_arrays.get("valid", None)
+            if valid_ is not None:
+                if isinstance(valid_, string_types):
+                    valid_ = np.load(valid_, mmap_mode="r")
+                valid[start:stop] = valid_
 
         arrays[key] = dict(data=data)
         if valid is not None:
@@ -309,18 +426,22 @@ def index_and_cat_scalar_arrays(category_array_map, category_dtype=None):
     return index, arrays
 
 
-def cat_vector_arrays(category_array_map):
+def cat_vector_arrays(category_array_map, outdir=None):
     """Concatenate vector arrays
 
     Parameters
     ----------
     category_array_map : mapping
+    outdir : str or None, optional
 
     Returns
     -------
     arrays
 
     """
+    if outdir is not None:
+        outdir = expand(outdir)
+
     key_dtypes = OrderedDict()
 
     index_total_lengths = {}
@@ -329,7 +450,7 @@ def cat_vector_arrays(category_array_map):
     for category, array_dicts in category_array_map.items():
         for key, array_d in array_dicts.items():
             data = array_d["data"]
-            scalar_index = array_d["index"]
+            index = array_d["index"]
 
             dtype = data.dtype
             existing_dtype = key_dtypes.get(key, None)
@@ -344,15 +465,31 @@ def cat_vector_arrays(category_array_map):
                     )
                 )
 
-            index_total_lengths[key] += len(scalar_index)
+            index_total_lengths[key] += len(index)
             data_total_lengths[key] += len(data)
 
     # Concatenate arrays from all categories for each key
 
     arrays = OrderedDict()
     for key, dtype in key_dtypes.items():
-        index = np.empty(shape=index_total_lengths[key], dtype=rt.START_STOP_T)
-        data = np.empty(shape=data_total_lengths[key], dtype=dtype)
+        if outdir is not None:
+            dpath = join(outdir, key)
+            mkdir(dpath)
+            index = np.lib.format.open_memmap(
+                join(dpath, "index.npy"),
+                mode="w+",
+                dtype=rt.START_STOP_T,
+                shape=(index_total_lengths[key],),
+            )
+            data = np.lib.format.open_memmap(
+                join(dpath, "data.npy"),
+                mode="w+",
+                dtype=dtype,
+                shape=(data_total_lengths[key],),
+            )
+        else:
+            index = np.empty(shape=(index_total_lengths[key],), dtype=rt.START_STOP_T)
+            data = np.empty(shape=(data_total_lengths[key],), dtype=dtype)
 
         index_start = 0
         data_start = 0
@@ -384,7 +521,7 @@ def cat_vector_arrays(category_array_map):
     return arrays
 
 
-def extract_run(path, gcd_path=None, keys=None):
+def extract_run(path, outdir=None, gcd_path=None, keys=None, overwrite=False):
     """E.g. .. ::
 
         data/level7_v01.04/IC86.14/Run00125177
@@ -393,10 +530,24 @@ def extract_run(path, gcd_path=None, keys=None):
     Note that what can be considered "subruns" for both data and MC are
     represented as files in both, at least for this version of oscNext.
 
+    Parameters
+    ----------
+    path : str
+    outdir : str
+    gcd_path : str or None, optional
+    keys : str, iterable thereof, or None; optional
+    overwrite : bool, optional
+
     """
     from I3Tray import I3Tray
+
     path = expand(path)
     assert isdir(path), path
+
+    parent_dirs = [path]
+    for _ in range(3):
+        parent_dirs.insert(0, dirname(parent_dirs[0]))
+    rel_dirs = [basename(d) for d in parent_dirs]
 
     match = RUN_DIR_RE.match(basename(path))
     assert match, 'path not a run directory? "{}"'.format(basename(path))
@@ -409,8 +560,11 @@ def extract_run(path, gcd_path=None, keys=None):
 
     if is_mc:
         print("is_mc")
-        assert isinstance(gcd_path, string_types) and isfile(expand(gcd_path))
+        assert isinstance(gcd_path, string_types) and isfile(expand(gcd_path)), str(
+            gcd_path
+        )
         gcd_path = expand(gcd_path)
+        full_outdir = join(outdir, *rel_dirs[-3:])
     else:
         print("is_data")
         if gcd_path is None:
@@ -423,6 +577,32 @@ def extract_run(path, gcd_path=None, keys=None):
             gcd_path = glob(join(gcd_path, "*Run{}*GCD*.i3*".format(run_str)))
             assert len(gcd_path) == 1, gcd_path
             gcd_path = expand(gcd_path[0])
+        full_outdir = join(outdir, *rel_dirs[-4:])
+
+    print("full_outdir:", full_outdir)
+    mkdir(full_outdir)
+
+    if not overwrite:
+        existing_keys = set(listdir(full_outdir))
+        redundant_keys = existing_keys.intersection(keys)
+        if redundant_keys:
+            print("will not extract existing keys:", sorted(redundant_keys))
+            keys = [k for k in keys if k not in redundant_keys]
+    if is_data:
+        mc_only_keys = set(["I3MCWeightDict", "I3MCTree", "I3GenieResultDict"])
+        invalid_keys = mc_only_keys.intersection(keys)
+        if invalid_keys:
+            print(
+                "MC-only keys {} were specified but this is data, so these will be skipped.".format(
+                    sorted(invalid_keys)
+                )
+            )
+        keys = [k for k in keys if k not in mc_only_keys]
+    print("keys remaining to extract:", keys)
+
+    if len(keys) == 0:
+        print("nothing to do!")
+        return
 
     subrun_filepaths = []
     for basepath in listdir(path):
@@ -433,45 +613,73 @@ def extract_run(path, gcd_path=None, keys=None):
         assert int(groupdict["run"]) == run_int
         subrun_int = int(groupdict["subrun"])
         subrun_filepaths.append((subrun_int, join(path, basepath)))
+    # Ensure sorting by subrun
     subrun_filepaths.sort()
 
-    cnv = ConvertI3ToNumpy()
+    converter = ConvertI3ToNumpy()
 
     if is_mc:
+        t0 = time.time()
         scalar_arrays = OrderedDict()
         vector_arrays = OrderedDict()
 
-        for subrun, fpath in subrun_filepaths:
-            print(fpath)
-            paths = [gcd_path, fpath]
+        tempdirs = []
+        try:
+            for subrun, fpath in subrun_filepaths:
+                t00 = time.time()
+                print(fpath)
+                paths = [gcd_path, fpath]
 
-            tray = I3Tray()
-            tray.AddModule(_type="I3Reader", _name="reader", FilenameList=paths)
-            tray.Add(_type=cnv, _name="ConvertI3ToNumpy", keys=keys)
-            tray.Execute()
-            tray.Finish()
-            scalar_arrays[subrun], vector_arrays[subrun] = cnv.finalize_icetray()
-            del tray
+                tempdir = mkdtemp()
+                print("tempdir:", tempdir)
+                tempdirs.append(tempdir)
 
-        # Ensure sorting by subrun
-        subrun_scalar_index, scalar_arrays = index_and_cat_scalar_arrays(scalar_arrays)
-        vector_arrays = cat_vector_arrays(vector_arrays)
+                tray = I3Tray()
+                tray.AddModule(_type="I3Reader", _name="reader", FilenameList=paths)
+                tray.Add(_type=converter, _name="ConvertI3ToNumpy", keys=keys)
+                tray.Execute()
+                tray.Finish()
+                sa, va = converter.finalize_icetray(outdir=tempdir)
+                scalar_arrays[subrun] = sa
+                vector_arrays[subrun] = va
+                del tray
+                t11 = time.time()
+                print("{} s to extract {}".format(t11 - t00, fpath))
 
-        return subrun_scalar_index, scalar_arrays, vector_arrays
+            del converter
 
-    # is_data
-    paths = [gcd_path] + [p[1] for p in subrun_filepaths]
+            index_and_cat_scalar_arrays(
+                scalar_arrays, outdir=full_outdir, category_name="subrun"
+            )
+            cat_vector_arrays(vector_arrays, outdir=full_outdir)
 
-    tray = I3Tray()
-    tray.AddModule(_type="I3Reader", _name="reader", FilenameList=paths)
-    tray.Add(_type=cnv, _name="ConvertI3ToNumpy", keys=keys)
-    tray.Execute()
-    tray.Finish()
-    scalar_arrays, vector_arrays = cnv.finalize_icetray()
-    del tray
+        finally:
+            for tempdir in tempdirs:
+                try:
+                    rmtree(tempdir)
+                except Exception:
+                    pass
 
-    return scalar_arrays, vector_arrays
+        print("{} s to extract run path {}".format(time.time() - t0, path))
+        # return scalar_arrays, vector_arrays, subrun_scalar_index
 
+    else:  # is_data
+        paths = [gcd_path] + [fpath for _, fpath in subrun_filepaths]
+
+        tray = I3Tray()
+        tray.AddModule(_type="I3Reader", _name="reader", FilenameList=paths)
+        tray.Add(_type=converter, _name="ConvertI3ToNumpy", keys=keys)
+        tray.Execute()
+        tray.Finish()
+        del tray
+        converter.finalize_icetray(outdir=full_outdir)
+        del converter
+
+        # return scalar_arrays, vector_arrays, None
+
+
+def run_icetray_converter():
+    pass
 
 
 class ConvertI3ToNumpy(object):
@@ -633,8 +841,8 @@ class ConvertI3ToNumpy(object):
         self.frame_data.append(frame_data)
         return False
 
-    def finalize_icetray(self):
-        scalar_arrays, vector_arrays = construct_arrays(self.frame_data)
+    def finalize_icetray(self, outdir=None):
+        scalar_arrays, vector_arrays = construct_arrays(self.frame_data, outdir=outdir)
         del self.frame_data[:]
         return scalar_arrays, vector_arrays
 
@@ -642,68 +850,6 @@ class ConvertI3ToNumpy(object):
         """E.g., data/level7_v01.04/IC86.14"""
         path = expand(path)
         assert isdir(path), path
-
-    def extract_run(self, path, gcd_path=None, keys=None):
-        """E.g. .. ::
-
-            data/level7_v01.04/IC86.14/Run00125177
-            genie/level7_v01.04/140000
-
-        Note that what can be considered "subruns" for both data and MC are
-        represented as files in both, at least for this version of oscNext.
-
-        """
-        path = expand(path)
-        assert isdir(path), path
-
-        match = RUN_DIR_RE.match(basename(path))
-        assert match, 'path not a run directory? "{}"'.format(basename(path))
-        groupdict = match.groupdict()
-
-        is_data = groupdict["pfx"] is not None
-        is_mc = not is_data
-        run_str = groupdict["run"]
-        run_int = int(groupdict["run"].lstrip("0"))
-
-        if is_mc:
-            assert isinstance(gcd_path, string_types) and isfile(expand(gcd_path))
-            gcd_path = expand(gcd_path)
-        else:
-            if gcd_path is None:
-                gcd_path = path
-            assert isinstance(gcd_path, string_types)
-            gcd_path = expand(gcd_path)
-            if not isfile(gcd_path):
-                assert isdir(gcd_path)
-                # TODO: use DATA_GCD_FNAME_RE
-                gcd_path = glob(join(gcd_path, "*Run{}*GCD*.i3*".format(run_str)))
-                assert len(gcd_path) == 1, gcd_path
-                gcd_path = expand(gcd_path[0])
-
-        subrun_filepaths = []
-        for basepath in listdir(path):
-            match = OSCNEXT_I3_FNAME_RE.match(basepath)
-            if not match:
-                continue
-            groupdict = match.groupdict()
-            assert int(groupdict["run"]) == run_int
-            subrun_int = int(groupdict["subrun"])
-            subrun_filepaths.append((subrun_int, join(path, basepath)))
-        subrun_filepaths.sort()
-
-        scalar_arrays = OrderedDict()
-        vector_arrays = OrderedDict()
-
-        for subrun, fpath in subrun_filepaths:
-            scalar_arrays[subrun], vector_arrays[subrun] = self.extract_files(
-                paths=[gcd_path, fpath], keys=keys
-            )
-
-        # Ensure sorting by subrun
-        subrun_scalar_index, scalar_arrays = index_and_cat_scalar_arrays(scalar_arrays)
-        vector_arrays = cat_vector_arrays(vector_arrays)
-
-        return subrun_scalar_index, scalar_arrays, vector_arrays
 
     def extract_files(self, paths, keys=None):
         """Extract info from one or more i3 file(s)
@@ -1247,117 +1393,31 @@ class ConvertI3ToNumpy(object):
         return vals, rt.I3DOMCALIBRATION_T
 
 
-def save_arrays(
-    outdir, scalar_arrays, vector_arrays, scalar_index=None, scalar_index_name=None
-):
-    outdir = expand(outdir)
-    mkdir(outdir)
-    sa_dir = join(outdir, "scalar_arrays")
-    va_dir = join(outdir, "vector_arrays")
-    mkdir(sa_dir)
-    mkdir(va_dir)
-
-    if scalar_index is not None:
-        if scalar_index_name is None:
-            scalar_index_name = "scalar_index"
-        si_fpath = join(outdir, scalar_index_name) + ".npy"
-        np.save(si_fpath, scalar_index)
-
-    for key, array_d in scalar_arrays.items():
-        sa_fpath = join(outdir, "scalar_arrays", key) + ".npz"
-        out_ordered = OrderedDict()
-        for k in ["data", "valid"]:
-            if k in array_d:
-                out_ordered[k] = array_d[k]
-        np.savez_compressed(sa_fpath, **out_ordered)
-
-    for key, array_d in vector_arrays.items():
-        va_fpath = join(outdir, "vector_arrays", key) + ".npz"
-        out_ordered = OrderedDict()
-        for k in ["data", "index"]:
-            if k in array_d:
-                out_ordered[k] = array_d[k]
-        np.savez_compressed(va_fpath, **out_ordered)
-
-
-
 def main_i3():
     """Run via icetray"""
     # pylint: disable=line-too-long
 
-    #from processing.samples.oscNext.verification.general_mc_data_harvest_and_plot import ALL_OSCNEXT_VARIABLES
+    from processing.samples.oscNext.verification.general_mc_data_harvest_and_plot import (
+        ALL_OSCNEXT_VARIABLES,
+    )
+
     mykeys = """L5_SPEFit11 LineFit_DC I3TriggerHierarchy SRTTWOfflinePulsesDC
     SRTTWOfflinePulsesDCTimeRange SplitInIcePulses SplitInIcePulsesTimeRange
     L5_oscNext_bool I3EventHeader I3TriggerHierarchy I3GenieResultDict
     I3MCTree""".split()
-    keys = mykeys #sorted(set([k.split(".")[0] for k in ALL_OSCNEXT_VARIABLES.keys()] + mykeys))
+    keys = sorted(set([k.split(".")[0] for k in ALL_OSCNEXT_VARIABLES.keys()] + mykeys))
+    # keys = mykeys
 
     parser = ArgumentParser()
+    parser.add_argument("--outdir", required=True)
     parser.add_argument("--path", required=True)
     parser.add_argument("--gcd-path", default=None)
     parser.add_argument("--keys", nargs="+", default=keys)
+    parser.add_argument("--overwrite", action="store_true")
     kwargs = vars(parser.parse_args())
 
-    out = extract_run(**kwargs)
-
-    base_outdir = "/scratch/jlanfranchi"
-
-    indir = abspath(expand(kwargs["path"]))
-    indir_base = basename(indir)
-    p1_dir = basename(dirname(indir))
-    p2_dir = basename(dirname(dirname(indir)))
-    p3_dir = basename(dirname(dirname(dirname(indir))))
-
-
-    if len(out) == 2:
-        # data/level<level>/IC86.xx/RunYYYY
-        outdir = join(base_outdir, p3_dir, p2_dir, p1_dir, indir_base)
-        print(outdir)
-        scalar_index = None
-        scalar_index_name = None
-        scalar_arrays, vector_arrays = out
-    else:
-        # genie/level7_v01.04/120000/
-        outdir = join(base_outdir, p2_dir, p1_dir, indir_base)
-        print(outdir)
-        scalar_index_name = "subrun_index"
-        scalar_index, scalar_arrays, vector_arrays = out
-
-    save_arrays(
-        outdir=outdir,
-        scalar_arrays=scalar_arrays,
-        vector_arrays=vector_arrays,
-        scalar_index=scalar_index,
-        scalar_index_name=scalar_index_name,
-    )
-
-    return scalar_index, scalar_arrays, vector_arrays
-
-
-def main():
-    """Main"""
-    # pylint: disable=line-too-long
-    #from processing.samples.oscNext.verification.general_mc_data_harvest_and_plot import ALL_OSCNEXT_VARIABLES
-    mykeys = """L5_SPEFit11 LineFit_DC I3TriggerHierarchy SRTTWOfflinePulsesDC
-    SRTTWOfflinePulsesDCTimeRange SplitInIcePulses SplitInIcePulsesTimeRange
-    L5_oscNext_bool I3EventHeader I3TriggerHierarchy I3GenieResultDict
-    I3MCTree""".split()
-    all_keys = mykeys #sorted(set([k.split(".")[0] for k in ALL_OSCNEXT_VARIABLES.keys()] + mykeys))
-
-    parser = ArgumentParser()
-    parser.add_argument("--paths", nargs="+")
-    #datafiles = sorted(glob("/data/icecube/ana/LE/oscNext/pass2/data/level5_v01.04/IC86.14/Run00124566/oscNext_*.i3.zst"))
-    #gcd_path = "/data/icecube/gcd/Level2pass2_IC86.2014_data_Run00124566_0410_53_89_GCD.i3.zst"
-    datafiles = sorted(glob("/data/ana/LE/oscNext/pass2/data/level7_v01.04/IC86.14/Run00124566/oscNext_*.i3.zst"))
-    gcd_path = "/data/ana/LE/oscNext/pass2/data/level7_v01.04/IC86.14/Run00124566/Level2pass2_IC86.2014_data_Run00124566_0410_53_89_GCD.i3.zst"
-
-    cnv = ConvertI3ToNumpy()
-    return cnv.extract_files([gcd_path] + datafiles, keys=all_keys)
+    extract_run(**kwargs)
 
 
 if __name__ == "__main__":
-    OUT = main_i3()
-    if len(OUT) == 2:
-        SA, VA = OUT
-    else:
-        SI, SA, VA = OUT
+    main_i3()
