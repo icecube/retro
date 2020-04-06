@@ -32,7 +32,7 @@ __all__ = [
     "LEGAL_ARRAY_NAMES",
     "extract_run",
     "combine_season_runs",
-    "collect_array_paths",
+    "find_array_paths",
     "construct_arrays",
     "index_and_concatenate_arrays",
     "load_contained_paths",
@@ -48,7 +48,8 @@ try:
 except ImportError:
     from collections import Mapping, MutableMapping, MutableSequence, Sequence
 from glob import glob
-from os import listdir
+from multiprocessing import Pool, cpu_count
+from os import listdir, walk
 from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
 import re
 from shutil import rmtree
@@ -72,7 +73,7 @@ from retro.i3processing.extract_common import (
     maptype2np,
 )
 
-# TODO: parallelize
+# TODO: optional npz compression of key dirs
 
 
 RUN_DIR_RE = re.compile(r"(?P<pfx>Run)?(?P<run>[0-9]+)", flags=re.IGNORECASE)
@@ -91,8 +92,46 @@ LEGAL_ARRAY_NAMES = ("data", "index", "valid")
 extracted from an I3 file)"""
 
 
+def compress(path, keep=False, keys=None):
+    path = expand(path)
+    assert isdir(path)
+    if isinstance(keys, string_types):
+        keys = [keys]
+    print(path, keep, keys)
+
+    array_fnames = {n: "{}.npy".format(n) for n in LEGAL_ARRAY_NAMES}
+
+    for dirpath, dirs, files in walk(path):
+        dirs.sort(key=nsort_key_func)
+        if "data.npy" not in files or dirs or set(files).difference(array_fnames.values()):
+            continue
+
+        if keys is not None and basename(dirpath) not in keys:
+            continue
+
+        print("compressing {}".format(dirpath))
+        array_d = OrderedDict()
+        for array_name, array_fname in array_fnames.items():
+            if array_fname in files:
+                array_d[array_name] = np.load(join(dirpath, array_fname))
+        np.savez_compressed(dirpath + ".npz", **array_d)
+        del dirs[:]
+        del files[:]
+        if not keep:
+            print("removing", dirpath)
+            rmtree(dirpath)
+
+
 def extract_run(
-    path, outdir=None, gcd_path=None, keys=None, overwrite=False, mmap=True,
+    path,
+    outdir=None,
+    tempdir=None,
+    gcd=None,
+    keys=None,
+    overwrite=False,
+    mmap=True,
+    keep_tempfiles_on_fail=False,
+    procs=cpu_count(),
 ):
     """E.g. .. ::
 
@@ -106,15 +145,25 @@ def extract_run(
     ----------
     path : str
     outdir : str
-    gcd_path : str or None, optional
+    tempdir : str or None, optional
+        Intermediate arrays will be written to this directory.
+    gcd : str or None, optional
     keys : str, iterable thereof, or None; optional
     overwrite : bool, optional
+    mmap : bool, optional
+    keep_tempfiles_on_fail : bool, optional
 
     """
-    from I3Tray import I3Tray
-
     path = expand(path)
     assert isdir(path), path
+
+    outdir = expand(outdir)
+    if tempdir is None:
+        tempdir = "/tmp"
+    tempdir = expand(tempdir)
+
+    if isinstance(keys, string_types):
+        keys = [keys]
 
     parent_dirs = [path]
     for _ in range(3):
@@ -132,49 +181,53 @@ def extract_run(
 
     if is_mc:
         print("is_mc")
-        assert isinstance(gcd_path, string_types) and isfile(expand(gcd_path)), str(
-            gcd_path
-        )
-        gcd_path = expand(gcd_path)
-        full_outdir = join(outdir, *rel_dirs[-3:])
+        assert isinstance(gcd, string_types) and isfile(expand(gcd)), str(gcd)
+        gcd = expand(gcd)
+        rel_subdir = join(*rel_dirs[-3:])
     else:
         print("is_data")
-        if gcd_path is None:
-            gcd_path = path
-        assert isinstance(gcd_path, string_types)
-        gcd_path = expand(gcd_path)
-        if not isfile(gcd_path):
-            assert isdir(gcd_path)
+        if gcd is None:
+            gcd = path
+        assert isinstance(gcd, string_types)
+        gcd = expand(gcd)
+        if not isfile(gcd):
+            assert isdir(gcd)
             # TODO: use DATA_GCD_FNAME_RE
-            gcd_path = glob(join(gcd_path, "*Run{}*GCD*.i3*".format(run_str)))
-            assert len(gcd_path) == 1, gcd_path
-            gcd_path = expand(gcd_path[0])
-        full_outdir = join(outdir, *rel_dirs[-4:])
+            gcd = glob(join(gcd, "*Run{}*GCD*.i3*".format(run_str)))
+            assert len(gcd) == 1, gcd
+            gcd = expand(gcd[0])
+        rel_subdir = join(*rel_dirs[-4:])
+
+    full_outdir = join(outdir, rel_subdir)
+    full_tempdir = join(tempdir, rel_subdir)
 
     print("full_outdir:", full_outdir)
     mkdir(full_outdir)
+    print("full_tempdir:", full_tempdir)
+    mkdir(full_tempdir)
 
-    if not overwrite:
-        existing_keys = set(listdir(full_outdir))
-        redundant_keys = existing_keys.intersection(keys)
-        if redundant_keys:
-            print("will not extract existing keys:", sorted(redundant_keys))
-            keys = [k for k in keys if k not in redundant_keys]
-    if is_data:
-        mc_only_keys = set(["I3MCWeightDict", "I3MCTree", "I3GenieResultDict"])
-        invalid_keys = mc_only_keys.intersection(keys)
-        if invalid_keys:
-            print(
-                "MC-only keys {} were specified but this is data, so these will be skipped.".format(
-                    sorted(invalid_keys)
+    if keys is not None:
+        if not overwrite:
+            existing_keys = set((x.split(".npz")[0] for x in listdir(full_outdir)))
+            redundant_keys = existing_keys.intersection(keys)
+            if redundant_keys:
+                print("will not extract existing keys:", sorted(redundant_keys))
+                keys = [k for k in keys if k not in redundant_keys]
+        if is_data:
+            mc_only_keys = set(["I3MCWeightDict", "I3MCTree", "I3GENIEResultDict"])
+            invalid_keys = mc_only_keys.intersection(keys)
+            if invalid_keys:
+                print(
+                    "MC-only keys {} were specified but this is data, so these will be skipped.".format(
+                        sorted(invalid_keys)
+                    )
                 )
-            )
-        keys = [k for k in keys if k not in mc_only_keys]
-    print("keys remaining to extract:", keys)
+            keys = [k for k in keys if k not in mc_only_keys]
+        print("keys remaining to extract:", keys)
 
-    if len(keys) == 0:
-        print("nothing to do!")
-        return
+        if len(keys) == 0:
+            print("nothing to do!")
+            return
 
     subrun_filepaths = []
     for basepath in sorted(listdir(path), key=nsort_key_func):
@@ -188,60 +241,72 @@ def extract_run(
     # Ensure sorting by subrun
     subrun_filepaths.sort()
 
-    converter = ConvertI3ToNumpy()
-
+    t0 = time.time()
     if is_mc:
-        t0 = time.time()
         arrays = OrderedDict()
+        requests = OrderedDict()
 
-        tempdirs = []
+
+        subrun_tempdirs = []
+        pool = None
+        if procs > 1:
+            pool = Pool(procs)
         try:
             for subrun, fpath in subrun_filepaths:
-                t00 = time.time()
                 print(fpath)
-                paths = [gcd_path, fpath]
+                paths = [gcd, fpath]
 
-                tempdir = mkdtemp()
-                tempdirs.append(tempdir)
+                subrun_tempdir = join(full_tempdir, "subrun{}".format(subrun))
+                mkdir(subrun_tempdir)
+                subrun_tempdirs.append(subrun_tempdir)
 
-                tray = I3Tray()
-                tray.AddModule(_type="I3Reader", _name="reader", FilenameList=paths)
-                tray.Add(_type=converter, _name="ConvertI3ToNumpy", keys=keys)
-                tray.Execute()
-                tray.Finish()
-                arrays[subrun] = converter.finalize_icetray(outdir=tempdir)
-                del tray
-                print("{} s to extract {}".format(time.time() - t00, fpath))
-
-            del converter
+                kw = dict(paths=paths, outdir=subrun_tempdir, keys=keys)
+                if procs == 1:
+                    arrays[subrun] = run_icetray_converter(**kw)
+                else:
+                    requests[subrun] = pool.apply_async(
+                        run_icetray_converter,  # func
+                        tuple(),  # args
+                        kw,  # kwds
+                        # callback
+                        # error_callback
+                    )
+            if procs > 1:
+                for key, result in requests.items():
+                    arrays[key] = result.get()
 
             index_and_concatenate_arrays(
                 arrays, category_name="subrun", outdir=full_outdir, mmap=mmap,
             )
 
-        finally:
-            for tempdir in tempdirs:
+        except Exception:
+            if not keep_tempfiles_on_fail:
+                for subrun_tempdir in subrun_tempdirs:
+                    try:
+                        rmtree(subrun_tempdir)
+                    except Exception as err:
+                        print(err)
+
+        else:
+            for subrun_tempdir in subrun_tempdirs:
                 try:
-                    rmtree(tempdir)
-                except Exception:
-                    pass
+                    rmtree(subrun_tempdir)
+                except Exception as err:
+                    print(err)
+
+        finally:
+            if pool is not None:
+                pool.close()
+                pool.join()
 
     else:  # is_data
-        paths = [gcd_path] + [fpath for _, fpath in subrun_filepaths]
-
-        tray = I3Tray()
-        tray.AddModule(_type="I3Reader", _name="reader", FilenameList=paths)
-        tray.Add(_type=converter, _name="ConvertI3ToNumpy", keys=keys)
-        tray.Execute()
-        tray.Finish()
-        del tray
-        converter.finalize_icetray(outdir=full_outdir)
-        del converter
+        paths = [gcd] + [fpath for _, fpath in subrun_filepaths]
+        run_icetray_converter(paths=paths, outdir=full_outdir, keys=keys)
 
     print("{} s to extract run path {}".format(time.time() - t0, path))
 
 
-def combine_season_runs(path, outdir, mmap):
+def combine_season_runs(path, outdir, keys=None, mmap=True):
     """
     Parameters
     ----------
@@ -250,6 +315,10 @@ def combine_season_runs(path, outdir, mmap):
 
     outdir : str
         Store concatenated arrays to this directory
+
+    keys : str, iterable thereof, or None; optional
+        Only preserver these keys. If None, preserve all keys found in all
+        subpaths
 
     mmap : bool
         Note that if `mmap` is True, ``load_contained_paths`` will be called
@@ -286,7 +355,7 @@ def combine_season_runs(path, outdir, mmap):
     existing_category_indexes = OrderedDict()
 
     for run_int, run_dir in run_dirs:
-        arrays[run_int], csi = collect_array_paths(run_dir)
+        arrays[run_int], csi = find_array_paths(run_dir)
         if csi:
             existing_category_indexes[run_int] = csi
 
@@ -302,7 +371,7 @@ def combine_season_runs(path, outdir, mmap):
     )
 
 
-def collect_array_paths(path):
+def find_array_paths(path):
     """
     Parameters
     ----------
@@ -683,8 +752,8 @@ def index_and_concatenate_arrays(
         category_scalar_array_lengths[category] = scalar_array_length
         total_scalar_length += scalar_array_length
         print(
-            'category {}, "{}": scalar array len={}, total scalar array len={}'.format(
-                n, category, scalar_array_length, total_scalar_length
+            'category {}, {}={}: scalar array len={}, total scalar array len={}'.format(
+                n, category_name, category, scalar_array_length, total_scalar_length
             )
         )
 
@@ -782,17 +851,17 @@ def index_and_concatenate_arrays(
                     join(dpath, "index.npy"),
                     mode="w+",
                     shape=(total_scalar_length,),
-                    dtype=np.bool8,
+                    dtype=rt.START_STOP_T,
                 )
             else:
                 index = np.empty(shape=(total_scalar_length,), dtype=np.bool8)
 
         # Fill chunks of the big arrays from each category
 
-        vector_start = 0
+        vector_start = vector_stop = 0
         for category, array_dicts in category_array_map.items():
             scalar_start, scalar_stop = category_index[
-                category_index["category"] == category
+                category_index[category_name] == category
             ][0]["index"]
 
             key_arrays = array_dicts.get(key, None)
@@ -805,10 +874,10 @@ def index_and_concatenate_arrays(
             if key not in vector_keys:  # scalar data
                 data[scalar_start:scalar_stop] = data_
             else:  # vector data
-                # N.b.: x[:] copies values to a new array in memory, necessary
-                # if mmaped file AND necessary because we don't want to modify
+                # N.b.: copy values to a new array in memory, necessary if
+                # mmaped file AND necessary because we don't want to modify
                 # original array
-                index_ = key_arrays["index"][:]
+                index_ = np.copy(key_arrays["index"])
 
                 vector_stop = vector_start + len(data_)
 
@@ -819,13 +888,13 @@ def index_and_concatenate_arrays(
 
                 data[vector_start:vector_stop] = data_
 
+                vector_start = vector_stop
+
             valid_ = key_arrays.get("valid", None)
             if valid_ is not None:
                 valid[scalar_start:scalar_stop] = valid_
             elif valid is not None:
                 valid[scalar_start:scalar_stop] = True
-
-            vector_start = vector_stop
 
         concatenated_arrays[key] = OrderedDict()
         concatenated_arrays[key]["data"] = data
@@ -891,7 +960,7 @@ def load_contained_paths(obj, inplace=False, mmap=False):
             assert isinstance(obj, MutableMapping)
             out_d = obj
         else:
-            obj = OrderedDict()
+            out_d = OrderedDict()
         for key in obj.keys():
             out_d[key] = load_contained_paths(obj[key], **my_kwargs)
         obj = out_d
@@ -907,109 +976,23 @@ def load_contained_paths(obj, inplace=False, mmap=False):
     return obj
 
 
-# def cat_vector_arrays(category_array_map, outdir=None, mmap=True):
-#    """Concatenate vector arrays
-#
-#    Parameters
-#    ----------
-#    category_array_map : mapping
-#    outdir : str or None, optional
-#
-#    Returns
-#    -------
-#    arrays
-#
-#    """
-#    if outdir is not None:
-#        outdir = expand(outdir)
-#    load_contained_paths_kw = dict(mmap=mmap, inplace=not mmap)
-#
-#    key_dtypes = OrderedDict()
-#
-#    index_total_lengths = {}
-#    data_total_lengths = {}
-#
-#    for category, array_dicts in category_array_map.items():
-#        for key, array_d in array_dicts.items():
-#            array_d = load_contained_paths(array_d, **load_contained_paths_kw)
-#
-#            data = array_d["data"]
-#            index = array_d["index"]
-#
-#            dtype = data.dtype
-#            existing_dtype = key_dtypes.get(key, None)
-#            if existing_dtype is None:
-#                key_dtypes[key] = dtype
-#                index_total_lengths[key] = 0
-#                data_total_lengths[key] = 0
-#            elif dtype != existing_dtype:
-#                raise TypeError(
-#                    "category={}, key={}, dtype={}, existing_dtype={}".format(
-#                        category, key, dtype, existing_dtype
-#                    )
-#                )
-#
-#            index_total_lengths[key] += len(index)
-#            data_total_lengths[key] += len(data)
-#
-#    # Concatenate arrays from all categories for each key
-#
-#    arrays = OrderedDict()
-#    for key, dtype in key_dtypes.items():
-#        if outdir is not None:
-#            dpath = join(outdir, key)
-#            mkdir(dpath)
-#            index = np.lib.format.open_memmap(
-#                join(dpath, "index.npy"),
-#                mode="w+",
-#                dtype=rt.START_STOP_T,
-#                shape=(index_total_lengths[key],),
-#            )
-#            data = np.lib.format.open_memmap(
-#                join(dpath, "data.npy"),
-#                mode="w+",
-#                dtype=dtype,
-#                shape=(data_total_lengths[key],),
-#            )
-#        else:
-#            index = np.empty(shape=(index_total_lengths[key],), dtype=rt.START_STOP_T)
-#            data = np.empty(shape=(data_total_lengths[key],), dtype=dtype)
-#
-#        index_start = 0
-#        data_start = 0
-#        for category, array_dicts in category_array_map.items():
-#            array_d = array_dicts.get(key, None)
-#            if array_d is None:
-#                raise NotImplementedError("TODO")
-#
-#            array_d = load_contained_paths(array_d, **load_contained_paths_kw)
-#
-#            index_ = array_d["index"]
-#            data_ = array_d["data"]
-#
-#            data_length = len(data_)
-#            data_stop = data_start + data_length
-#            data[data_start:data_stop] = data_
-#
-#            index_length = len(index_)
-#            index_stop = index_start + index_length
-#            index[index_start:index_stop] = index_[:]
-#
-#            if data_start != 0:
-#                index[index_start:index_stop]["start"] += data_start
-#                index[index_start:index_stop]["stop"] += data_start
-#
-#            data_start = data_stop
-#            index_start = index_stop
-#
-#        arrays[key] = dict(data=data, index=index)
-#
-#    return arrays
-
-
-def run_icetray_converter():
+def run_icetray_converter(paths, outdir, keys):
     """Function to be called by subprocesses (i.e., run in parallel)"""
-    # TODO
+    from I3Tray import I3Tray
+
+    converter = ConvertI3ToNumpy()
+
+    tray = I3Tray()
+    tray.AddModule(_type="I3Reader", _name="reader", FilenameList=paths)
+    tray.Add(_type=converter, _name="ConvertI3ToNumpy", keys=keys)
+    tray.Execute()
+    tray.Finish()
+
+    arrays = converter.finalize_icetray(outdir=outdir)
+
+    del tray, I3Tray
+
+    return arrays
 
 
 class ConvertI3ToNumpy(object):
@@ -1788,8 +1771,8 @@ class ConvertI3ToNumpy(object):
         return vals, rt.I3DOMCALIBRATION_T
 
 
-def main_i3():
-    """Run via icetray"""
+def main():
+    """Command line interface"""
     # pylint: disable=line-too-long
 
     from processing.samples.oscNext.verification.general_mc_data_harvest_and_plot import (
@@ -1798,21 +1781,45 @@ def main_i3():
 
     mykeys = """L5_SPEFit11 LineFit_DC I3TriggerHierarchy SRTTWOfflinePulsesDC
     SRTTWOfflinePulsesDCTimeRange SplitInIcePulses SplitInIcePulsesTimeRange
-    L5_oscNext_bool I3EventHeader I3TriggerHierarchy I3GenieResultDict
-    I3MCTree""".split()
+    L5_oscNext_bool I3EventHeader I3MCWeightDict I3TriggerHierarchy
+    I3GENIEResultDict I3MCTree""".split()
     keys = sorted(set([k.split(".")[0] for k in ALL_OSCNEXT_VARIABLES.keys()] + mykeys))
     # keys = mykeys
 
     parser = ArgumentParser()
-    parser.add_argument("--outdir", required=True)
-    parser.add_argument("--path", required=True)
-    parser.add_argument("--gcd-path", default=None)
-    parser.add_argument("--keys", nargs="+", default=keys)
-    parser.add_argument("--overwrite", action="store_true")
-    kwargs = vars(parser.parse_args())
+    subparsers = parser.add_subparsers()
 
-    extract_run(**kwargs)
+    parser_extract = subparsers.add_parser("extract")
+    parser_extract.add_argument("--path", required=True)
+    parser_extract.add_argument("--gcd", default=None)
+    parser_extract.add_argument("--outdir", required=True)
+    parser_extract.add_argument("--tempdir", default="/tmp")
+    parser_extract.add_argument("--keys", nargs="+", default=keys)
+    parser_extract.add_argument("--overwrite", action="store_true")
+    parser_extract.add_argument("--no-mmap", action="store_true")
+    parser_extract.add_argument("--keep-tempfiles-on-fail", action="store_true")
+    parser_extract.add_argument("--procs", type=int, default=cpu_count())
+    parser_extract.set_defaults(func=extract_run)
+
+    parser_extract = subparsers.add_parser("combine_season_runs")
+    parser_extract.add_argument("--path", required=True)
+    parser_extract.add_argument("--outdir", required=True)
+    parser_extract.add_argument("--keys", nargs="+", default=keys)
+    parser_extract.add_argument("--no-mmap", action="store_true")
+    parser_extract.set_defaults(func=combine_season_runs)
+
+    parser_extract = subparsers.add_parser("compress")
+    parser_extract.add_argument("--path", required=True)
+    parser_extract.add_argument("--keep", action="store_true")
+    parser_extract.add_argument("--keys", default=None)
+    parser_extract.set_defaults(func=compress)
+
+    kwargs = vars(parser.parse_args())
+    func = kwargs.pop("func")
+    if "no_mmap" in kwargs:
+        kwargs["mmap"] = not kwargs.pop("no_mmap")
+    func(**kwargs)
 
 
 if __name__ == "__main__":
-    main_i3()
+    main()
