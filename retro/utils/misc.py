@@ -65,11 +65,12 @@ try:
     from collections import Iterable, Mapping, Sequence
 except ImportError:
     from collections.abc import Iterable, Mapping, Sequence
+from copy import deepcopy
 import errno
 import hashlib
 from numbers import Number
-from os import makedirs
-from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
+from os import makedirs, path
+from os.path import abspath, dirname, expanduser, expandvars, isdir, isfile, splitext
 import pickle
 import re
 import struct
@@ -170,12 +171,29 @@ def mkdir(d, mode=0o0770):
     warn : bool
         Whether to warn if directory already exists.
 
+    Returns
+    -------
+    first_created_dir : str or None
+
     """
+    d = expand(d)
+
+    # Work up in the full path to find first dir that needs to be created
+    first_created_dir = None
+    d_copy = deepcopy(d)
+    while d_copy:
+        if isdir(d_copy):
+            break
+        first_created_dir = d_copy
+        d_copy, _ = path.split(d_copy)
+
     try:
         makedirs(d, mode=mode)
     except OSError as err:
         if err.errno != errno.EEXIST:
             raise
+
+    return first_created_dir
 
 
 # TODO: add other compression algos (esp. bz2 and gz)
