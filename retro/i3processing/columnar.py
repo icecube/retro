@@ -73,7 +73,15 @@ from retro.i3processing.extract_common import (
     maptype2np,
 )
 
-# TODO: optional npz compression of key dirs
+
+# TODO: optional npz compression/decompression of key dirs built-in to functions
+# TODO: optional versioning on write and read
+#   If version specified, write to that or read from that. On read, if version
+#   specified but only "bare" key, load the bare key (assume it is valid across
+#   versions).
+# TODO: optional masking arrays
+#   Per-scalar (i.e., per-event) that live in directory like category__index.npy files.
+#   Per-key alongside "data", "index", and "valid" arrays within key dir?
 
 
 RUN_DIR_RE = re.compile(r"(?P<pfx>Run)?(?P<run>[0-9]+)", flags=re.IGNORECASE)
@@ -411,7 +419,7 @@ def find_array_paths(path):
                     for array_name in LEGAL_ARRAY_NAMES:
                         if array_name in contents:
                             array_d[array_name] = npz[array_name]
-                        contents.remove(array_name)
+                            contents.remove(array_name)
                 finally:
                     npz.close()
 
@@ -419,7 +427,8 @@ def find_array_paths(path):
                     unrecognized.append(subpath + "/" + array_name)
 
                 if array_d:
-                    arrays[name] = array_d
+                    key = name[:-4]  # remove ext -> key as in i3 frame
+                    arrays[key] = array_d
                 else:
                     unrecognized.append(subpath)
 
