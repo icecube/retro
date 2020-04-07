@@ -53,9 +53,10 @@ try:
     from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 except ImportError:
     from collections import Mapping, MutableMapping, MutableSequence, Sequence
+from copy import deepcopy
 from glob import glob
 from multiprocessing import Pool, cpu_count
-from os import listdir, walk
+from os import listdir, remove, walk
 from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
 import re
 from shutil import rmtree
@@ -95,7 +96,8 @@ RUN_DIR_RE = re.compile(r"(?P<pfx>Run)?(?P<run>[0-9]+)", flags=re.IGNORECASE)
 """Matches MC "run" dirs, e.g. '140000' & data run dirs, e.g. 'Run00125177'"""
 
 IC_SEASON_DIR_RE = re.compile(
-    r"((IC)?(?P<detector>[0-9]+)\.)?(?P<year>[0-9]+)", flags=re.IGNORECASE
+    r"((?P<detector>IC)(?P<configuration>[0-9]+)\.)(?P<year>(20)?[0-9]{2})",
+    flags=re.IGNORECASE,
 )
 """Matches data season dirs, e.g. 'IC86.11' or 'IC86.2011'"""
 
@@ -105,6 +107,8 @@ CATEGORY_INDEX_POSTFIX = "__scalar_index.npy"
 LEGAL_ARRAY_NAMES = ("data", "index", "valid")
 """Array names produced / read as data containers within "items" (the items
 extracted from an I3 file)"""
+
+ARRAY_FNAMES = {n: "{}.npy".format(n) for n in LEGAL_ARRAY_NAMES}
 
 MC_ONLY_KEYS = set(["I3MCWeightDict", "I3MCTree", "I3GENIEResultDict"])
 
@@ -117,7 +121,7 @@ def load(path, mmap=True):
     return arrays, category_indexes
 
 
-def compress(path, keep=False, keys=None):
+def compress(path, keys=None, recurse=True, keep=False, procs=cpu_count()):
     """Compress any key directories found within `path` (including `path`, if
     it is a key directory) using Numpy's `savez_compressed` to produce
     "{key}.npz" files.
@@ -138,86 +142,212 @@ def compress(path, keep=False, keys=None):
     elif keys is not None:
         keys = set(keys)
 
-    array_fnames = {n: "{}.npy".format(n) for n in LEGAL_ARRAY_NAMES}
+    pool = None
+    if procs > 1:
+        pool = Pool(procs)
+    try:
+        for dirpath, dirs, files in walk(path):
+            if recurse:
+                dirs.sort(key=nsort_key_func)
+            else:
+                del dirs[:]
+            if (
+                "data.npy" not in files
+                or len(dirs) > 0  # subdirectories
+                or len(set(files).difference(ARRAY_FNAMES.values())) > 0  # extra files
+                or keys is not None
+                and basename(dirpath) not in keys
+            ):
+                continue
 
-    for dirpath, dirs, files in walk(path):
-        dirs.sort(key=nsort_key_func)
-        if (
-            "data.npy" not in files
-            or dirs
-            or set(files).difference(array_fnames.values())
-        ):
-            continue
+            args = (dirpath, deepcopy(files), keep)
+            if procs == 1:
+                _compress(*args)
+            else:
+                pool.apply_async(_compress, args)
 
-        if keys is not None and basename(dirpath) not in keys:
-            continue
-
-        print("compressing {}".format(dirpath))
-        array_d = OrderedDict()
-        for array_name, array_fname in array_fnames.items():
-            if array_fname in files:
-                array_d[array_name] = np.load(join(dirpath, array_fname))
-        np.savez_compressed(dirpath + ".npz", **array_d)
-        del dirs[:]
-        del files[:]
-        if not keep:
+            del dirs[:]
+            del files[:]
+    finally:
+        if pool is not None:
             try:
-                rmtree(dirpath)
+                pool.close()
+                pool.join()
             except Exception as err:
-                print("unable to remove dir {}".format(dirpath))
                 print(err)
 
 
-def decompress(path, keep=False, keys=None):
+def _compress(dirpath, files, keep):
+    print('compressing "{}"'.format(dirpath))
+    array_d = OrderedDict()
+    for array_name, array_fname in ARRAY_FNAMES.items():
+        if array_fname in files:
+            array_d[array_name] = np.load(join(dirpath, array_fname))
+    if not array_d:
+        return
+    archivepath = join(dirpath.rstrip("/") + ".npz")
+    np.savez_compressed(archivepath, **array_d)
+    if not keep:
+        try:
+            rmtree(dirpath)
+        except Exception as err:
+            print("unable to remove dir {}".format(dirpath))
+            print(err)
+
+
+def decompress(path, keys=None, recurse=True, keep=False, procs=cpu_count()):
     """Decompress any key archive files (end in .npz and contain "data" and
     possibly other arrays) found within `path` (including `path`, if it is a
     key archive).
 
+
     Parameters
     ----------
-    keep : bool, optional
-        Keep the original key directory even after successfully compressing it
-
     keys : str, iterable thereof, or None; optional
         Only look to decompress keys by these names (ignore others)
 
+    recurse : bool
+        If `path` is a directory, whether to recurse into subdirectories to
+        look for archive files to decompress
+
+    keep : bool, optional
+        Keep the original key directory even after successfully compressing it
+
     """
-    raise NotImplementedError()
     path = expand(path)
-    assert isdir(path)
     if isinstance(keys, string_types):
         keys = set([keys])
     elif keys is not None:
         keys = set(keys)
 
-    array_fnames = {n: "{}.npy".format(n) for n in LEGAL_ARRAY_NAMES}
+    if isfile(path) and path.endswith(".npz") and (keys is None or path[:-4] in keys):
+        _decompress(dirpath=dirname(path), filename=basename(path), keep=keep)
 
-    for dirpath, dirs, files in walk(path):
-        dirs.sort(key=nsort_key_func)
-        if (
-            "data.npy" not in files
-            or dirs
-            or set(files).difference(array_fnames.values())
-        ):
-            continue
+    # else: is directory
 
-        if keys is not None and basename(dirpath) not in keys:
-            continue
+    pool = None
+    if procs > 1:
+        pool = Pool(procs)
+    try:
+        for dirpath, dirnames, filenames in walk(path):
+            if recurse:
+                dirnames.sort(key=nsort_key_func)
+            else:
+                del dirnames[:]
 
-        print("compressing {}".format(dirpath))
-        array_d = OrderedDict()
-        for array_name, array_fname in array_fnames.items():
-            if array_fname in files:
-                array_d[array_name] = np.load(join(dirpath, array_fname))
-        np.savez_compressed(dirpath + ".npz", **array_d)
-        del dirs[:]
-        del files[:]
-        if not keep:
+            for filename in filenames:
+                if filename.endswith(".npz"):
+                    if keys is not None:
+                        if filename[:-4] not in keys:
+                            continue
+                    args = (dirpath, filename, keep)
+                    if procs == 1:
+                        _decompress(*args)
+                    else:
+                        pool.apply_async(_decompress, args)
+    finally:
+        if pool is not None:
             try:
-                rmtree(dirpath)
+                pool.close()
+                pool.join()
             except Exception as err:
-                print("unable to remove dir {}".format(dirpath))
                 print(err)
+
+
+def _decompress(dirpath, filename, keep):
+    """Decompress legal columnar arrays in a "<dirpath>/basename.npz" archive
+    to "<dirpath>/basename/<array_name>.npy". If successful and not `keep`,
+    remove the original archive file.
+
+    Parameters
+    ----------
+    dirpath : str
+        Path up to but not including `filename`
+
+    filename : str
+        E.g., I3EventHeder.npz
+
+    keep : bool
+        Keep original archive file after successfully decompressing
+
+    Returns
+    -------
+    is_columnar_archive : bool
+
+    """
+    key = filename[:-4]
+
+    filepath = join(dirpath, filename)
+    keydirpath = join(dirpath, key)
+    array_d = OrderedDict()
+
+    npz = np.load(filepath)
+    try:
+        contents = set(npz.keys())
+        if len(contents.difference(LEGAL_ARRAY_NAMES)) > 0:
+            return False
+
+        for array_name in LEGAL_ARRAY_NAMES:
+            if array_name in npz:
+                array_d[array_name] = npz[array_name]
+
+    finally:
+        npz.close()
+
+    print('decompressing "{}"'.format(filepath))
+    subfilepaths_created = []
+    parent_dir_created = mkdir(keydirpath)
+    try:
+        for array_name, array in array_d.items():
+            arraypath = join(keydirpath, array_name + ".npy")
+            np.save(arraypath, array)
+            subfilepaths_created.append(arraypath)
+    except:  # pylint: disable=bare-except
+        if parent_dir_created is not None:
+            try:
+                rmtree(parent_dir_created)
+            except Exception as err:
+                print(err)
+        else:
+            for subfilepath in subfilepaths_created:
+                try:
+                    remove(subfilepath)
+                except Exception as err:
+                    print(err)
+
+    if not keep:
+        remove(filepath)
+
+    return True
+
+
+def extract(path, **kwargs):
+    """Dispatch proper extraction function based on `path`"""
+    path = expand(path)
+    if isfile(path):
+        converter = ConvertI3ToNumpy()
+        converter.extract_file(path=path, **kwargs)
+
+    assert isdir(path), path
+    match = IC_SEASON_DIR_RE.match(basename(path))
+    if match:
+        print(
+            "Will extract IceCube season dir {}; filename metadata={}".format(
+                path, match.groupdict()
+            )
+        )
+        extract_season(path=path, **kwargs)
+
+    match = RUN_DIR_RE.match(basename(path))
+    if match:
+        print(
+            "Will extract data or MC run dir {}; metadata={}".format(
+                path, match.groupdict()
+            )
+        )
+        extract_run(path=path, **kwargs)
+
+    raise ValueError('Do not know what to do with path "{}"'.format(path))
 
 
 def extract_season(
@@ -344,9 +474,7 @@ def extract_season(
             if procs == 1:
                 extract_run(**kw)
             else:
-                pool.apply_async(
-                    extract_run, tuple(), kw,  # func  # args  # kwds
-                )
+                pool.apply_async(extract_run, tuple(), kw)
         if procs > 1:
             pool.close()
             pool.join()
@@ -520,7 +648,7 @@ def extract_run(
                     arrays[subrun] = run_icetray_converter(**kw)
                 else:
                     requests[subrun] = pool.apply_async(
-                        run_icetray_converter, tuple(), kw,  # func  # args  # kwds
+                        run_icetray_converter, tuple(), kw
                     )
             if procs > 1:
                 for key, result in requests.items():
@@ -1571,7 +1699,7 @@ class ConvertI3ToNumpy(object):
 
         return construct_arrays(extracted_data)
 
-    def extract_file(self, path, keys=None):
+    def extract_file(self, path, outdir=None, keys=None):
         """Extract info from one or more i3 file(s)
 
         Parameters
@@ -2127,7 +2255,10 @@ def main():
     parser = ArgumentParser()
     subparsers = parser.add_subparsers()
 
-    # Extract season and run have similar arguments
+    # Extract season and run have similar arguments; can use generic `extract` for these, too
+
+    parser_extract = subparsers.add_parser("extract")
+    parser_extract.set_defaults(func=extract)
 
     parser_extract_season = subparsers.add_parser("extract_season")
     parser_extract_season.set_defaults(func=extract_season)
@@ -2135,8 +2266,8 @@ def main():
     parser_extract_run = subparsers.add_parser("extract_run")
     parser_extract_run.set_defaults(func=extract_run)
 
-    for subparser in [parser_extract_season, parser_extract_run]:
-        subparser.add_argument("--path", required=True)
+    for subparser in [parser_extract, parser_extract_season, parser_extract_run]:
+        subparser.add_argument("path")
         subparser.add_argument("--gcd", default=None)
         subparser.add_argument("--outdir", required=True)
         subparser.add_argument("--tempdir", default="/tmp")
@@ -2145,15 +2276,24 @@ def main():
         subparser.add_argument("--keep-tempfiles-on-fail", action="store_true")
         subparser.add_argument("--procs", type=int, default=cpu_count())
 
+    parser_extract.add_argument("--keys", nargs="+", default=keys)
     parser_extract_run.add_argument("--keys", nargs="+", default=keys)
     parser_extract_season.add_argument(
         "--keys", nargs="+", default=[k for k in keys if k not in MC_ONLY_KEYS]
     )
 
+    # Extracting a single file has unique kwargs
+
+    parser_extract_file = subparsers.add_parser("extract_file")
+    parser_extract_file.set_defaults(func=extract)
+    parser_extract_file.add_argument("path")
+    parser_extract_file.add_argument("--outdir", required=True)
+    parser_extract_file.add_argument("--keys", nargs="+", default=None)
+
     # Combine runs is unique
 
     parser_combine_runs = subparsers.add_parser("combine_runs")
-    parser_combine_runs.add_argument("--path", required=True)
+    parser_combine_runs.add_argument("path")
     parser_combine_runs.add_argument("--outdir", required=True)
     parser_combine_runs.add_argument("--keys", nargs="+", default=keys)
     parser_combine_runs.add_argument("--no-mmap", action="store_true")
@@ -2168,9 +2308,11 @@ def main():
     parser_decompress.set_defaults(func=decompress)
 
     for subparser in [parser_compress, parser_decompress]:
-        subparser.add_argument("--path", required=True)
-        subparser.add_argument("--keep", action="store_true")
+        subparser.add_argument("path")
         subparser.add_argument("--keys", nargs="+", default=None)
+        subparser.add_argument("-k", "--keep", action="store_true")
+        subparser.add_argument("-r", "--recurse", action="store_true")
+        subparser.add_argument("--procs", type=int, default=cpu_count())
 
     # Parse command line
 
