@@ -379,6 +379,7 @@ def main(description=__doc__):
             failed_i3_files.append(extract_events_kwargs["i3_files"])
 
     pool.close()
+    pool.join()
 
     if failed_i3_files:
         for failure in chain(*failed_i3_files):
