@@ -1318,7 +1318,8 @@ I3GENIERESULTDICT_SCALARS_T = np.dtype(
         ("tgtmass", np.float64),
     ]
 )
-"""genie-icetray/private/genie-icetray/ConvertToGST.cxx"""
+"""genie-icetray/private/genie-icetray/ConvertToGST.cxx
+Reading in Python requires `from icecube imoprt genie-icetray`"""
 
 
 I3LINEFITPARAMS_T = np.dtype(
