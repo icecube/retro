@@ -67,34 +67,6 @@ if __name__ == "__main__" and __package__ is None:
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
 from retro import retro_types as rt
-#import (
-#    TRACK_T,
-#    CASCADE_T,
-#    I3TIME_T,
-#    FitStatus,
-#    InteractionType,
-#    LocationType,
-#    ParticleType,
-#    EM_CASCADE_PTYPES,
-#    HADR_CASCADE_PTYPES,
-#    TRACK_PTYPES,
-#    INVISIBLE_PTYPES,
-#    ELECTRONS,
-#    MUONS,
-#    TAUS,
-#    NUES,
-#    NUMUS,
-#    NUTAUS,
-#    NEUTRINOS,
-#    ParticleShape,
-#    ExtractionError,
-#    NO_TRACK,
-#    INVALID_TRACK,
-#    NO_CASCADE,
-#    INVALID_CASCADE,
-#    dict2struct,
-#    set_explicit_dtype,
-#)
 from retro.i3processing.extract_common import dict2struct, set_explicit_dtype
 from retro.utils.cascade_energy_conversion import em2hadr, hadr2em
 from retro.utils.misc import expand, get_file_md5, mkdir

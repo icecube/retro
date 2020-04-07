@@ -69,6 +69,49 @@ __all__ = [
     'FLAT_PARTICLE_T',
     'SRC_T',
     'TRACK_T',
+    'CRAMERRAOPARAMS_T',
+    'CramerRaoStatus',
+    'DOMCALVERSION_T',
+    'DSTPOSITION_T',
+    'FLAT_I3DOMCALIBRATION_T',
+    'FLAT_I3VEMCALIBRATION_T',
+    'FLAT_PULSE_T',
+    'FLAT_TRIGGER_T',
+    'I3CLASTFITPARAMS_T',
+    'I3CSCDLLHFITPARAMS_T',
+    'I3DIPOLEFITPARAMS_T',
+    'I3DIRECTHITSVALUES_T',
+    'I3DOMSTATUS_T',
+    'I3DST16_T',
+    'I3EVENTHEADER_T',
+    'I3FILLRATIOINFO_T',
+    'I3FILTERRESULT_T',
+    'I3FINITECUTS_T',
+    'I3GENIERESULTDICT_SCALARS_T',
+    'I3HITMULTIPLICITYVALUES_T',
+    'I3HITSTATISTICSVALUES_T',
+    'I3LINEFITPARAMS_T',
+    'I3LOGLIKELIHOODFITPARAMS_T',
+    'I3PORTIAEVENT_T',
+    'I3RUSAGE_T',
+    'I3SANTAFITPARAMS_T',
+    'I3STARTSTOPPARAMS_T',
+    'I3SUPERDSTTRIGGER_T',
+    'I3TENSOROFINERTIAFITPARAMS_T',
+    'I3TIMECHARACTERISTICSVALUES_T',
+    'I3TIMEWINDOW_T',
+    'I3TRACKCHARACTERISTICSVALUES_T',
+    'I3VEMCALIBRATION_T',
+    'I3VETO_T',
+    'InteractionType',
+    'LINEARFIT_T',
+    'NEUTRINO_T',
+    'OnOff',
+    'PulseFlags',
+    'SPECHARGEDISTRIBUTION_T',
+    'START_AND_LENGTH_T',
+    'START_STOP_T',
+    'TAUPARAM_T',
     'INVALID_TRACK',
     'NO_TRACK',
     'CASCADE_T',
@@ -235,14 +278,14 @@ LINEARFIT_T = np.dtype(
 """dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
 
 
-#QUADRATICFIT_T = np.dtype(
+# TODO: QUADRATICFIT_T = np.dtype(
 #    [
 #        ('quadFitA', np.float64),
 #        ('quadFitB', np.float64),
 #        ('quadFitC', np.float64),
 #    ]
-#)
-#"""dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
+# )
+# """dataclasses/public/dataclasses/calibration/I3DOMCalibration.h"""
 
 
 SPECHARGEDISTRIBUTION_T = np.dtype(
@@ -352,8 +395,7 @@ FLAT_I3VEMCALIBRATION_T = np.dtype(
 )
 
 
-# TODO
-# I3CALIBRATION_T = np.dtype(
+# TODO: I3CALIBRATION_T = np.dtype(
 #     [
 #         ('start_time', I3TIME_T),
 #         ('end_time', I3TIME_T),
