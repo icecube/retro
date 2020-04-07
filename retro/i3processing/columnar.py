@@ -324,11 +324,14 @@ def _decompress(dirpath, filename, keep):
 def extract(path, **kwargs):
     """Dispatch proper extraction function based on `path`"""
     path = expand(path)
+
     if isfile(path):
         converter = ConvertI3ToNumpy()
         converter.extract_file(path=path, **kwargs)
+        return
 
     assert isdir(path), path
+
     match = IC_SEASON_DIR_RE.match(basename(path))
     if match:
         print(
@@ -337,6 +340,7 @@ def extract(path, **kwargs):
             )
         )
         extract_season(path=path, **kwargs)
+        return
 
     match = RUN_DIR_RE.match(basename(path))
     if match:
@@ -346,6 +350,7 @@ def extract(path, **kwargs):
             )
         )
         extract_run(path=path, **kwargs)
+        return
 
     raise ValueError('Do not know what to do with path "{}"'.format(path))
 
