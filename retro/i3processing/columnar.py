@@ -872,7 +872,7 @@ def construct_arrays(data, delete_while_filling=False, outdir=None):
 
     Parameters
     ----------
-    data : dict or sequence thereof
+    data : dict or iterable thereof
     delete_while_filling : bool
     outdir : str
 
@@ -883,6 +883,7 @@ def construct_arrays(data, delete_while_filling=False, outdir=None):
     """
     if isinstance(data, Mapping):
         data = [data]
+    data = list(data)
 
     parent_out_dir_created = None
     if isinstance(outdir, string_types):
@@ -1411,16 +1412,7 @@ def load_contained_paths(obj, inplace=False, mmap=False):
         else:
             out_d = OrderedDict()
         for key in obj.keys():
-            # key = load_contained_paths(key)
-            # if isinstance(key, string_types):
             out_d[key] = load_contained_paths(obj[key], **my_kwargs)
-            # elif isinstance(key, Mapping):
-            #    val = obj[key]
-            #    assert val is None
-            #    out_d.update(key)
-            # else:
-            #    raise TypeError(str(type(key)))
-
         obj = out_d
 
     elif isinstance(obj, Sequence):  # numpy ndarrays evaluate False
@@ -1732,7 +1724,7 @@ class ConvertI3ToNumpy(object):
         finally:
             i3file.close()
 
-        return construct_arrays(extracted_data)
+        return construct_arrays(extracted_data, outdir=outdir)
 
     def extract_frame(self, frame, keys=None):
         """Extract icetray frame objects to numpy typed objects
