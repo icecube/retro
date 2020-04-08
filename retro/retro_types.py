@@ -1341,7 +1341,7 @@ I3GENIERESULTDICT_SCALARS_T = np.dtype(
         ("_zenmax", np.float64),
         ("_zenmin", np.float64),
 
-        # Following exclusively contain 4 elements, ergo still "scalars"
+        # GENIE systmatics exclusively contain 4 elements, ergo still "scalars"
 
         ("rw_AhtBY", (np.float64, 4)),
         ("rw_BhtBY", (np.float64, 4)),
