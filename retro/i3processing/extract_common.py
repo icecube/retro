@@ -258,7 +258,14 @@ def maptype2np(mapping, dtype, to_numpy=True):
     mapscalarattrs2np
 
     """
-    out_vals = tuple(mapping[name] for name in dtype.names)
+    out_vals = []
+    for name in dtype.names:
+        val = mapping[name]
+        if np.isscalar(val):
+            out_vals.append(val)
+        else:
+            out_vals.append(tuple(val))
+    out_vals = tuple(out_vals)
     if to_numpy:
         return np.array([out_vals], dtype=dtype)[0]
     return out_vals, dtype

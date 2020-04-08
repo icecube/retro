@@ -1294,19 +1294,27 @@ I3GENIERESULTDICT_SCALARS_T = np.dtype(
         ("niem", np.int32),
         ("niother", np.int32),
         ("ni", np.int32),
+
+        # Variable-length arrays are omitted
+
         #("pdgi", <class 'icecube.dataclasses.ListInt'>),
         #("resc", <class 'icecube.dataclasses.ListInt'>),
         #("Ei", <class 'icecube.dataclasses.ListDouble'>),
         #("pxi", <class 'icecube.dataclasses.ListDouble'>),
         #("pyi", <class 'icecube.dataclasses.ListDouble'>),
         #("pzi", <class 'icecube.dataclasses.ListDouble'>),
+
         ("nf", np.int32),
+
+        # More variable-length arrays
+
         #("pdgf", <class 'icecube.dataclasses.ListInt'>),
         #("Ef", <class 'icecube.dataclasses.ListDouble'>),
         #("KEf", <class 'icecube.dataclasses.ListDouble'>),
         #("pxf", <class 'icecube.dataclasses.ListDouble'>),
         #("pyf", <class 'icecube.dataclasses.ListDouble'>),
         #("pzf", <class 'icecube.dataclasses.ListDouble'>),
+
         ("vtxx", np.float64),
         ("vtxy", np.float64),
         ("vtxz", np.float64),
@@ -1316,10 +1324,38 @@ I3GENIERESULTDICT_SCALARS_T = np.dtype(
         ("diffxsec", np.float64),
         ("prob", np.float64),
         ("tgtmass", np.float64),
+
+        # All remaining items ("_*" and "rw_*") appear in L5, L7 sim I3 files
+        # but I can't find them in ConvertToGST.cxx...
+
+        ("_azimax", np.float64),
+        ("_azimin", np.float64),
+        ("_elogmax", np.float64),
+        ("_elogmin", np.float64),
+        ("_glbprbscale", np.float64),
+        ("_gvold", np.float64),
+        ("_gvoll", np.float64),
+        ("_gvolr", np.float64),
+        ("_ngennu", np.float64),
+        ("_plawind", np.float64),
+        ("_zenmax", np.float64),
+        ("_zenmin", np.float64),
+
+        # Following exclusively contain 4 elements, ergo still "scalars"
+
+        ("rw_AhtBY", (np.float64, 4)),
+        ("rw_BhtBY", (np.float64, 4)),
+        ("rw_CV1uBY", (np.float64, 4)),
+        ("rw_CV2uBY", (np.float64, 4)),
+        ("rw_MaCCQE", (np.float64, 4)),
+        ("rw_MaCCRES", (np.float64, 4)),
+        ("rw_MaCOHpi", (np.float64, 4)),
+        ("rw_MaNCEL", (np.float64, 4)),
+        ("rw_MaNCRES", (np.float64, 4)),
     ]
 )
 """genie-icetray/private/genie-icetray/ConvertToGST.cxx
-Reading in Python requires `from icecube imoprt genie-icetray`"""
+Reading from I3 files Python requires ``from icecube imoprt genie_icetray``"""
 
 
 I3LINEFITPARAMS_T = np.dtype(
