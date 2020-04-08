@@ -44,7 +44,7 @@ __all__ = [
     "index_and_concatenate_arrays",
     "run_icetray_converter",
     "ConvertI3ToNumpy",
-    "add_genie_rw_systematics",
+    "fit_genie_rw_syst",
     "add_weights",
     "add_coszen_column",
     "main",
@@ -139,6 +139,18 @@ def load(path, keys=None, mmap=True):
 
 
 def save_item(path, key, data, valid=None, index=None):
+    """Save a single item (1 data array and possibly one valid arrya and one
+    index array) to disk.
+
+    Parameters
+    ----------
+    path : str
+    key : str
+    data : numpy ndarray
+    valid : numpy ndarray or None, optional if all `data` are valid
+    index : numpy ndarray or None, only specify if `data` is scalar
+
+    """
     path = expand(path)
     assert isdir(path)
     outdirpath = join(path, key)
@@ -147,6 +159,8 @@ def save_item(path, key, data, valid=None, index=None):
     parent_out_dir_created = mkdir(outdirpath)
     try:
         for name, array in [("data", data), ("valid", valid), ("index", index)]:
+            if array is None:
+                continue
             outfpath = join(outdirpath, name + ".npy")
             np.save(outfpath, array)
             outfpaths_saved.append(outfpath)
@@ -838,7 +852,10 @@ def find_array_paths(path, keys=None):
     assert isdir(path), str(path)
 
     if keys is not None:
-        keys = set(keys)
+        if isinstance(keys, string_types):
+            keys = set([keys])
+        else:
+            keys = set(keys)
 
     arrays = OrderedDict()
     category_indexes = OrderedDict()
@@ -2281,10 +2298,48 @@ class ConvertI3ToNumpy(object):
         return vals, rt.I3DOMCALIBRATION_T
 
 
-def add_genie_rw_systematics(obj, outdir=None, overwrite=False):
+def fit_genie_rw_syst(obj, outdir=None, overwrite=False):
+    """Fit 2nd-order polynomial to GENIE reweighting systematics, optionally
+    saving the array to disk.
+
+    Parameters
+    ----------
+    obj : str, mapping, or numpy ndarray
+    outdir : str or None, optional
+    overwrite : bool, optional
+
+    Returns
+    -------
+    fit_coeffs : numpy ndarray
+        Structured dtype .. ::
+
+            (syst name, (linear, quadratic))
+
+
+    Examples
+    --------
+    E.g., obtain the rw_AhtBY fit coeff arrays by
+
+    >>> lin_ary = fit_coeffs["rw_AhtBY"]["linear"]
+    >>> quad_ary = fit_coeffs["rw_AhtBY"]["quadratic"]
+
+    or for a single event, implicitly (i.e., you have to get the order of the
+    dtype correct)
+
+    >>> lin, quad = fit_coeffs[idx]["rw_AhtBY"]
+
+    or, more explicitly and independent of dtype order,
+
+    >>> lin, quad = fit_coeffs[idx]["rw_AhtBY"][["linear", "quadratic"]]
+
+    """
+    # TODO: if a `valid` array exists, make sure to skip invalid events!
+    # TODO: parallelize (but must write to shared memory & probably chunk data
+    #   up into larger blocks than per-event, or else multiprocessing overhead
+    #   is too slow)
     if isinstance(obj, string_types):
-        path = expand(obj)
-        arrays, _ = load(path, keys="I3GENIEResultDict", mmap=True)
+        obj = expand(obj)
+        arrays, _ = load(obj, keys="I3GENIEResultDict", mmap=True)
         grd_array = arrays["I3GENIEResultDict"]["data"]
     elif isinstance(obj, Mapping):
         grd_array = obj["I3GENIEResultDict"]["data"]
@@ -2295,53 +2350,46 @@ def add_genie_rw_systematics(obj, outdir=None, overwrite=False):
         outdir = expand(outdir)
         assert isdir(outdir)
 
-    path = expand(path)
-    if outdir is not None:
-        outdir = path
+    outname = "GENIE_rw_syst_fit_coeffs"
 
-    out_pfx = "GENIE_"
-    fit_coeff_t = np.dtype([("linear_fit", np.float64), ("quad_fit", np.float64)])
+    rw_syst_names = sorted(n for n in grd_array.dtype.names if n.startswith("rw_"))
 
-    rw_syst_names = sorted(n for n in grd_array.dtype.names if n.startwith("rw_"))
+    # Only storing linear and quadratic fit coefficients
+    coeff_t = np.dtype([("linear", np.float64), ("quadratic", np.float64)])
 
-    # x values used for all polynomial fits...
+    # Super-dtype used for output array composed of one coeff_t per systematic
+    syst_fits_coeff_t = np.dtype([(n, coeff_t) for n in rw_syst_names])
+
+    # x values used in all polynomial fits...
     # TODO: are these the number of std. devs.?
     x = np.array([-2, -1, 0, 1, 2], dtype=np.float64)
 
-    # Establish output file paths and ensure they don't exist if overwrite is False
+    # Establish we won't overwrite anything unless we want to before doing the
+    # work
 
-    out_names = {}
-    if outdir is not None:
-        if isdir(outdir):
-            outarrays, _ = find_array_paths(outdir)
-        else:
-            outarrays = None
-
-        for rw_syst_name in rw_syst_names:
-            this_syst_names = {}
-            for coeff_name in fit_coeff_t.names:
-                # Note that the rw_ prefix is stripped here
-                name = "{}{}_{}".format(out_pfx, coeff_name, rw_syst_name[3:])
-                if not overwrite and outarrays is not None and name in outarrays:
-                    raise IOError(
-                        'Name "{}" exists in `outdir` "{}" and `overwrite` is'
-                        ' False'.format(name, outdir)
-                    )
-                this_syst_names[coeff_name] = name
-            out_names[rw_syst_name] = this_syst_names
+    if outdir is not None and isdir(outdir):
+        outarrays, _ = find_array_paths(outdir)
+        if not overwrite and outname in outarrays:
+            raise IOError(
+                '"{}" exists in `outdir` "{}" and `overwrite` is False'.format(
+                    outname, outdir
+                )
+            )
 
     # Extract info and find fit coefficients
 
-    all_fit_coeffs = {}
+    fit_coeffs = np.empty(shape=len(grd_array), dtype=syst_fits_coeff_t)
+
     for rw_syst_name in rw_syst_names:
         in_yvalues = grd_array[rw_syst_name]
-        fit_coeffs = np.empty(shape=len(grd_array), dtype=fit_coeff_t)
 
-        # Fit for all-1's: slope (linear) and curvature (quadratic) both = 0
+        this_coeffs = fit_coeffs[rw_syst_name]
+
+        # Fit to all-1's: slope (linear) and curvature (quadratic) both = 0
         all_ones_mask = np.all(in_yvalues == 1, axis=1)
-        fit_coeffs[all_ones_mask] = 0
+        this_coeffs[all_ones_mask] = 0
 
-        for idx in np.argwhere(~all_ones_mask):
+        for idx in np.argwhere(~all_ones_mask).flat:
             in_y = in_yvalues[idx]
             inv_wght_i = 1 / grd_array[idx]["wght"]
             y = (
@@ -2354,24 +2402,16 @@ def add_genie_rw_systematics(obj, outdir=None, overwrite=False):
 
             # Note that np.polynomial.polynomial.polyfit returns the
             # coefficients from low to high order (as opposed to np.polyfit)
-            _, fit_coeffs[idx]["linear_fit"], fit_coeffs[idx]["quad_fit"] = (
+            _, this_coeffs[idx]["linear"], this_coeffs[idx]["quadratic"] = (
                 np.polynomial.polynomial.polyfit(x, y, deg=2)
             )
 
-        all_fit_coeffs[rw_syst_name] = fit_coeffs
-
-    # Once all fits are successful, save to disk
+    # Save array to disk
 
     if outdir is not None:
-        for rw_syst_name, fit_coeffs in all_fit_coeffs.items():
-            for coeff_name in fit_coeff_t.names:
-                save_item(
-                    path=path,
-                    key=out_names[rw_syst_name][coeff_name],
-                    data=all_fit_coeffs[rw_syst_name][coeff_name],
-                )
+        save_item(path=outdir, key=outname, data=fit_coeffs)
 
-    return all_fit_coeffs
+    return fit_coeffs
 
 
 def add_weights(path, kind):
@@ -2458,6 +2498,16 @@ def main():
         subparser.add_argument("-k", "--keep", action="store_true")
         subparser.add_argument("-r", "--recurse", action="store_true")
         subparser.add_argument("--procs", type=int, default=cpu_count())
+
+    # Add fits to GENIE systematics
+
+    def fit_genie_rw_syst_wrapper(path, overwrite):
+        fit_genie_rw_syst(obj=path, outdir=path, overwrite=overwrite)
+
+    parser_fit_genie_rw_syst = subparsers.add_parser("fit_genie_rw_syst")
+    parser_fit_genie_rw_syst.set_defaults(func=fit_genie_rw_syst_wrapper)
+    parser_fit_genie_rw_syst.add_argument("path")
+    parser_fit_genie_rw_syst.add_argument("--overwrite", action="store_true")
 
     # Parse command line
 
