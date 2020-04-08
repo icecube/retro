@@ -32,17 +32,21 @@ __all__ = [
     "LEGAL_ARRAY_NAMES",
     "MC_ONLY_KEYS",
     "load",
+    "save_item",
     "compress",
     "decompress",
     "extract_season",
     "extract_run",
     "combine_runs",
+    "load_contained_paths",
     "find_array_paths",
     "construct_arrays",
     "index_and_concatenate_arrays",
-    "load_contained_paths",
     "run_icetray_converter",
     "ConvertI3ToNumpy",
+    "add_genie_rw_systematics",
+    "add_weights",
+    "add_coszen_column",
     "main",
 ]
 
@@ -113,12 +117,52 @@ ARRAY_FNAMES = {n: "{}.npy".format(n) for n in LEGAL_ARRAY_NAMES}
 MC_ONLY_KEYS = set(["I3MCWeightDict", "I3MCTree", "I3GENIEResultDict"])
 
 
-def load(path, mmap=True):
-    """Load all arrays found within `path`."""
-    arrays, category_indexes = find_array_paths(path)
+def load(path, keys=None, mmap=True):
+    """Find and load arrays within `path`.
+
+    Parameters
+    ----------
+    path : str
+    keys : str, iterable thereof, or None; optional
+    mmap : bool, optional
+
+    Returns
+    -------
+    arrays
+    category_indexes
+
+    """
+    arrays, category_indexes = find_array_paths(path, keys=keys)
     load_contained_paths(arrays, inplace=True, mmap=mmap)
     load_contained_paths(category_indexes, inplace=True, mmap=mmap)
     return arrays, category_indexes
+
+
+def save_item(path, key, data, valid=None, index=None):
+    path = expand(path)
+    assert isdir(path)
+    outdirpath = join(path, key)
+
+    outfpaths_saved = []
+    parent_out_dir_created = mkdir(outdirpath)
+    try:
+        for name, array in [("data", data), ("valid", valid), ("index", index)]:
+            outfpath = join(outdirpath, name + ".npy")
+            np.save(outfpath, array)
+            outfpaths_saved.append(outfpath)
+    except:
+        if parent_out_dir_created is not None:
+            try:
+                rmtree(parent_out_dir_created)
+            except Exception as err:
+                print(err)
+        else:
+            for outfpath in outfpaths_saved:
+                try:
+                    remove(outfpath)
+                except Exception as err:
+                    print(err)
+        raise
 
 
 def compress(path, keys=None, recurse=True, keep=False, procs=cpu_count()):
@@ -145,6 +189,7 @@ def compress(path, keys=None, recurse=True, keep=False, procs=cpu_count()):
     pool = None
     if procs > 1:
         pool = Pool(procs)
+
     try:
         for dirpath, dirs, files in walk(path):
             if recurse:
@@ -168,6 +213,7 @@ def compress(path, keys=None, recurse=True, keep=False, procs=cpu_count()):
 
             del dirs[:]
             del files[:]
+
     finally:
         if pool is not None:
             try:
@@ -191,7 +237,7 @@ def _compress(dirpath, files, keep):
         try:
             rmtree(dirpath)
         except Exception as err:
-            print("unable to remove dir {}".format(dirpath))
+            print("WARNING: unable to remove dir {}".format(dirpath))
             print(err)
 
 
@@ -302,7 +348,7 @@ def _decompress(dirpath, filename, keep):
             arraypath = join(keydirpath, array_name + ".npy")
             np.save(arraypath, array)
             subfilepaths_created.append(arraypath)
-    except:  # pylint: disable=bare-except
+    except:
         if parent_dir_created is not None:
             try:
                 rmtree(parent_dir_created)
@@ -314,7 +360,7 @@ def _decompress(dirpath, filename, keep):
                     remove(subfilepath)
                 except Exception as err:
                     print(err)
-
+        raise
     if not keep:
         remove(filepath)
 
@@ -486,7 +532,7 @@ def extract_season(
 
         combine_runs(path=full_tempdir, outdir=outdir, keys=keys, mmap=mmap)
 
-    except Exception:
+    except:
         if not keep_tempfiles_on_fail and parent_temp_dir_created is not None:
             try:
                 rmtree(parent_temp_dir_created)
@@ -498,6 +544,7 @@ def extract_season(
             except Exception as err:
                 print(err)
         raise
+
     else:
         if parent_temp_dir_created is not None:
             try:
@@ -2232,6 +2279,107 @@ class ConvertI3ToNumpy(object):
             return np.array([vals], dtype=rt.I3DOMCALIBRATION_T)[0]
 
         return vals, rt.I3DOMCALIBRATION_T
+
+
+def add_genie_rw_systematics(obj, outdir=None, overwrite=False):
+    if isinstance(obj, string_types):
+        path = expand(obj)
+        arrays, _ = load(path, keys="I3GENIEResultDict", mmap=True)
+        grd_array = arrays["I3GENIEResultDict"]["data"]
+    elif isinstance(obj, Mapping):
+        grd_array = obj["I3GENIEResultDict"]["data"]
+    elif isinstance(obj, np.ndarray):
+        grd_array = obj
+
+    if outdir is not None:
+        outdir = expand(outdir)
+        assert isdir(outdir)
+
+    path = expand(path)
+    if outdir is not None:
+        outdir = path
+
+    out_pfx = "GENIE_"
+    fit_coeff_t = np.dtype([("linear_fit", np.float64), ("quad_fit", np.float64)])
+
+    rw_syst_names = sorted(n for n in grd_array.dtype.names if n.startwith("rw_"))
+
+    # x values used for all polynomial fits...
+    # TODO: are these the number of std. devs.?
+    x = np.array([-2, -1, 0, 1, 2], dtype=np.float64)
+
+    # Establish output file paths and ensure they don't exist if overwrite is False
+
+    out_names = {}
+    if outdir is not None:
+        if isdir(outdir):
+            outarrays, _ = find_array_paths(outdir)
+        else:
+            outarrays = None
+
+        for rw_syst_name in rw_syst_names:
+            this_syst_names = {}
+            for coeff_name in fit_coeff_t.names:
+                # Note that the rw_ prefix is stripped here
+                name = "{}{}_{}".format(out_pfx, coeff_name, rw_syst_name[3:])
+                if not overwrite and outarrays is not None and name in outarrays:
+                    raise IOError(
+                        'Name "{}" exists in `outdir` "{}" and `overwrite` is'
+                        ' False'.format(name, outdir)
+                    )
+                this_syst_names[coeff_name] = name
+            out_names[rw_syst_name] = this_syst_names
+
+    # Extract info and find fit coefficients
+
+    all_fit_coeffs = {}
+    for rw_syst_name in rw_syst_names:
+        in_yvalues = grd_array[rw_syst_name]
+        fit_coeffs = np.empty(shape=len(grd_array), dtype=fit_coeff_t)
+
+        # Fit for all-1's: slope (linear) and curvature (quadratic) both = 0
+        all_ones_mask = np.all(in_yvalues == 1, axis=1)
+        fit_coeffs[all_ones_mask] = 0
+
+        for idx in np.argwhere(~all_ones_mask):
+            in_y = in_yvalues[idx]
+            inv_wght_i = 1 / grd_array[idx]["wght"]
+            y = (
+                in_y[0] * inv_wght_i,
+                in_y[1] * inv_wght_i,
+                1,
+                in_y[2] * inv_wght_i,
+                in_y[3] * inv_wght_i,
+            )
+
+            # Note that np.polynomial.polynomial.polyfit returns the
+            # coefficients from low to high order (as opposed to np.polyfit)
+            _, fit_coeffs[idx]["linear_fit"], fit_coeffs[idx]["quad_fit"] = (
+                np.polynomial.polynomial.polyfit(x, y, deg=2)
+            )
+
+        all_fit_coeffs[rw_syst_name] = fit_coeffs
+
+    # Once all fits are successful, save to disk
+
+    if outdir is not None:
+        for rw_syst_name, fit_coeffs in all_fit_coeffs.items():
+            for coeff_name in fit_coeff_t.names:
+                save_item(
+                    path=path,
+                    key=out_names[rw_syst_name][coeff_name],
+                    data=all_fit_coeffs[rw_syst_name][coeff_name],
+                )
+
+    return all_fit_coeffs
+
+
+def add_weights(path, kind):
+    pass
+
+
+def add_coszen_column(path, key_path):
+    pass
 
 
 def main():
