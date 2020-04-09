@@ -44,9 +44,15 @@ __all__ = [
     "index_and_concatenate_arrays",
     "run_icetray_converter",
     "ConvertI3ToNumpy",
+    "calc_genie_weighted_aeff",
     "fit_genie_rw_syst",
-    "add_weights",
-    "add_coszen_column",
+    "get_most_energetic_primary",
+    "get_most_energetic_primary_neutrino",
+    "get_most_energetic_primary_muon",
+    "apply",
+    "apply_numba",
+    "coszen_key_from_zen_key_path",
+    "compute_coszen",
     "main",
 ]
 
@@ -54,20 +60,28 @@ from argparse import ArgumentParser
 from collections import OrderedDict
 
 try:
-    from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+    from collections.abc import (
+        Iterable,
+        Mapping,
+        MutableMapping,
+        MutableSequence,
+        Sequence,
+    )
 except ImportError:
-    from collections import Mapping, MutableMapping, MutableSequence, Sequence
+    from collections import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
 from copy import deepcopy
+from functools import partial
 from glob import glob
 from multiprocessing import Pool, cpu_count
 from os import listdir, remove, walk
-from os.path import abspath, basename, dirname, isdir, isfile, join, splitext
+from os.path import abspath, basename, dirname, exists, isdir, isfile, join, splitext
 import re
 from shutil import rmtree
 import sys
 from tempfile import mkdtemp
 import time
 
+import numba
 import numpy as np
 from six import string_types
 
@@ -138,7 +152,7 @@ def load(path, keys=None, mmap=True):
     return arrays, category_indexes
 
 
-def save_item(path, key, data, valid=None, index=None):
+def save_item(path, key, data, valid=None, index=None, overwrite=False):
     """Save a single item (1 data array and possibly one valid arrya and one
     index array) to disk.
 
@@ -149,25 +163,30 @@ def save_item(path, key, data, valid=None, index=None):
     data : numpy ndarray
     valid : numpy ndarray or None, optional if all `data` are valid
     index : numpy ndarray or None, only specify if `data` is scalar
+    overwrite : bool, optional
 
     """
     path = expand(path)
-    assert isdir(path)
+    if exists(path):
+        assert isdir(path)
+
     outdirpath = join(path, key)
 
     outfpaths_saved = []
-    parent_out_dir_created = mkdir(outdirpath)
+    parent_outdir_created = mkdir(outdirpath)
     try:
         for name, array in [("data", data), ("valid", valid), ("index", index)]:
             if array is None:
                 continue
             outfpath = join(outdirpath, name + ".npy")
+            if not overwrite and isfile(outfpath):
+                raise IOError('file exists at "{}"'.format(outfpath))
             np.save(outfpath, array)
             outfpaths_saved.append(outfpath)
     except:
-        if parent_out_dir_created is not None:
+        if parent_outdir_created is not None:
             try:
-                rmtree(parent_out_dir_created)
+                rmtree(parent_outdir_created)
             except Exception as err:
                 print(err)
         else:
@@ -451,14 +470,14 @@ def extract_season(
         tempdir = expand(tempdir)
 
     pool = None
-    parent_temp_dir_created = None
-    parent_out_dir_created = mkdir(outdir)
+    parent_tempdir_created = None
+    parent_outdir_created = mkdir(outdir)
     try:
         if tempdir is not None:
-            parent_temp_dir_created = mkdir(tempdir)
+            parent_tempdir_created = mkdir(tempdir)
         full_tempdir = mkdtemp(dir=tempdir)
-        if parent_temp_dir_created is None:
-            parent_temp_dir_created = full_tempdir
+        if parent_tempdir_created is None:
+            parent_tempdir_created = full_tempdir
 
         if gcd is None:
             gcd = path
@@ -478,8 +497,8 @@ def extract_season(
 
         print("outdir:", outdir)
         print("full_tempdir:", full_tempdir)
-        print("parent_temp_dir_created:", parent_temp_dir_created)
-        print("parent_out_dir_created:", parent_out_dir_created)
+        print("parent_tempdir_created:", parent_tempdir_created)
+        print("parent_outdir_created:", parent_outdir_created)
 
         if keys is None:
             print("extracting all keys in all files")
@@ -547,22 +566,22 @@ def extract_season(
         combine_runs(path=full_tempdir, outdir=outdir, keys=keys, mmap=mmap)
 
     except:
-        if not keep_tempfiles_on_fail and parent_temp_dir_created is not None:
+        if not keep_tempfiles_on_fail and parent_tempdir_created is not None:
             try:
-                rmtree(parent_temp_dir_created)
+                rmtree(parent_tempdir_created)
             except Exception as err:
                 print(err)
-        if parent_out_dir_created is not None:
+        if parent_outdir_created is not None:
             try:
-                rmtree(parent_out_dir_created)
+                rmtree(parent_outdir_created)
             except Exception as err:
                 print(err)
         raise
 
     else:
-        if parent_temp_dir_created is not None:
+        if parent_tempdir_created is not None:
             try:
-                rmtree(parent_temp_dir_created)
+                rmtree(parent_tempdir_created)
             except Exception as err:
                 print(err)
 
@@ -621,14 +640,14 @@ def extract_run(
         tempdir = expand(tempdir)
 
     pool = None
-    parent_temp_dir_created = None
-    parent_out_dir_created = mkdir(outdir)
+    parent_tempdir_created = None
+    parent_outdir_created = mkdir(outdir)
     try:
         if tempdir is not None:
-            parent_temp_dir_created = mkdir(tempdir)
+            parent_tempdir_created = mkdir(tempdir)
         full_tempdir = mkdtemp(dir=tempdir)
-        if parent_temp_dir_created is None:
-            parent_temp_dir_created = full_tempdir
+        if parent_tempdir_created is None:
+            parent_tempdir_created = full_tempdir
 
         if isinstance(keys, string_types):
             keys = [keys]
@@ -729,22 +748,22 @@ def extract_run(
             run_icetray_converter(paths=paths, outdir=outdir, keys=keys)
 
     except Exception:
-        if not keep_tempfiles_on_fail and parent_temp_dir_created is not None:
+        if not keep_tempfiles_on_fail and parent_tempdir_created is not None:
             try:
-                rmtree(parent_temp_dir_created)
+                rmtree(parent_tempdir_created)
             except Exception as err:
                 print(err)
-        if parent_out_dir_created is not None:
+        if parent_outdir_created is not None:
             try:
-                rmtree(parent_out_dir_created)
+                rmtree(parent_outdir_created)
             except Exception as err:
                 print(err)
         raise
 
     else:
-        if parent_temp_dir_created is not None:
+        if parent_tempdir_created is not None:
             try:
-                rmtree(parent_temp_dir_created)
+                rmtree(parent_tempdir_created)
             except Exception as err:
                 print(err)
 
@@ -810,7 +829,7 @@ def combine_runs(path, outdir, keys=None, mmap=True):
         if csi:
             existing_category_indexes[run_int] = csi
 
-    parent_out_dir_created = mkdir(outdir)
+    parent_outdir_created = mkdir(outdir)
     try:
         index_and_concatenate_arrays(
             category_array_map=array_map,
@@ -821,9 +840,9 @@ def combine_runs(path, outdir, keys=None, mmap=True):
             mmap=mmap,
         )
     except Exception:
-        if parent_out_dir_created is not None:
+        if parent_outdir_created is not None:
             try:
-                rmtree(parent_out_dir_created)
+                rmtree(parent_outdir_created)
             except Exception as err:
                 print(err)
         raise
@@ -949,10 +968,10 @@ def construct_arrays(data, delete_while_filling=False, outdir=None):
         data = [data]
     data = list(data)
 
-    parent_out_dir_created = None
+    parent_outdir_created = None
     if isinstance(outdir, string_types):
         outdir = expand(outdir)
-        parent_out_dir_created = mkdir(outdir)
+        parent_outdir_created = mkdir(outdir)
 
     try:
 
@@ -1084,9 +1103,9 @@ def construct_arrays(data, delete_while_filling=False, outdir=None):
         arrays_paths.update(vector_arrays_paths)
 
     except Exception:
-        if parent_out_dir_created is not None:
+        if parent_outdir_created is not None:
             try:
-                rmtree(parent_out_dir_created)
+                rmtree(parent_outdir_created)
             except Exception as err:
                 print(err)
         raise
@@ -1156,10 +1175,10 @@ def index_and_concatenate_arrays(
     if category_name is None:
         category_name = "category"
 
-    parent_out_dir_created = None
+    parent_outdir_created = None
     if outdir is not None:
         outdir = expand(outdir)
-        parent_out_dir_created = mkdir(outdir)
+        parent_outdir_created = mkdir(outdir)
 
     try:
 
@@ -1414,9 +1433,9 @@ def index_and_concatenate_arrays(
         # TODO: put concatenated existing_category_indexes here, too
 
     except Exception:
-        if parent_out_dir_created is not None:
+        if parent_outdir_created is not None:
             try:
-                rmtree(parent_out_dir_created)
+                rmtree(parent_outdir_created)
             except Exception as err:
                 print(err)
         raise
@@ -1476,14 +1495,22 @@ def load_contained_paths(obj, inplace=False, mmap=False):
         else:
             out_d = OrderedDict()
         for key in obj.keys():
-            out_d[key] = load_contained_paths(obj[key], **my_kwargs)
+            try:
+                out_d[key] = load_contained_paths(obj[key], **my_kwargs)
+            except:
+                print("key '{}' failed to load".format(key))
+                raise
         obj = out_d
 
     elif isinstance(obj, Sequence):  # numpy ndarrays evaluate False
         if inplace:
             assert isinstance(obj, MutableSequence)
             for i, val in enumerate(obj):
-                obj[i] = load_contained_paths(val, **my_kwargs)
+                try:
+                    obj[i] = load_contained_paths(val, **my_kwargs)
+                except:
+                    print("index={}, obj {} failed to load".format(i, val))
+                    raise
         else:
             obj = type(obj)(load_contained_paths(val, **my_kwargs) for val in obj)
 
@@ -2298,7 +2325,355 @@ class ConvertI3ToNumpy(object):
         return vals, rt.I3DOMCALIBRATION_T
 
 
-def fit_genie_rw_syst(obj, outdir=None, overwrite=False):
+@numba.njit(fastmath=True, cache=True, error_model="numpy")
+def get_most_energetic_primary(flat_particles, class_abs_pdg_codes):
+    """Get most energetic primary particle, regardless of PDG code"""
+    most_energetic_primary = np.empty(shape=1, dtype=rt.I3PARTICLE_T)[0]
+    most_energetic_primary["energy"] = -np.inf
+
+    for flat_particle in flat_particles:
+        if flat_particle["level"] > np.float32(0):
+            continue
+
+        particle = flat_particle["particle"]
+        if abs(particle["pdg_encoding"]) not in class_abs_pdg_codes:
+            continue
+
+        if most_energetic_primary is None:
+            most_energetic_primary = particle
+        elif particle["energy"] > most_energetic_primary["energy"]:
+            most_energetic_primary = particle
+
+    assert most_energetic_primary["energy"] >= np.float32(0)
+
+    return most_energetic_primary
+
+
+@numba.njit(fastmath=True, cache=True, error_model="numpy")
+def get_most_energetic_primary_neutrino(flat_particles):
+    """Get most energetic primary neutrino"""
+    return get_most_energetic_primary(flat_particles, (12, 14, 16))
+
+
+@numba.njit(fastmath=True, cache=True, error_model="numpy")
+def get_most_energetic_primary_muon(flat_particles):
+    """Get most energetic primary muon"""
+    return get_most_energetic_primary(flat_particles, (13,))
+
+
+def apply(func, data, out_dtype=None, valid=None, index=None, **kwargs):
+    """Apply a function to scalar or vector data on an event-by-event basis,
+    returning an array with one element per event.
+
+    Parameters
+    ----------
+    func : callable
+        If numba-compiled (numba CPUDispatcher) and no kwargs, call in
+        numba-compiled loop
+    out_dtype : numpy dtype or None, optional
+        dtype of output numpy ndarray; if None, `out_dtype` is set to be same
+        as dtype of `data`
+    data : numpy ndarray
+        If `data` is scalar (one entry per event), then the input length is
+        num_events; if the data is vecotr (any number of entries per event),
+        then `data` can have any length
+    valid : None or shape-(num_events,) numpy ndarray, optional
+    index : None or shape-(num_events,) numpy ndarray of dtype retro_types.START_STOP_T
+        Required for chunking up vector `data` by event
+    **kwargs
+        Passed to `func` via ``func(x, **kwargs)``
+
+    Returns
+    -------
+    out : shape-(num_events,) numpy ndarray of dtype `out_dtype`
+
+    Notes
+    -----
+    If `valid` is provided, the output for events where ``bool(valid)`` is
+    False will be present but is undefined (the `out` array is initialized via
+    `np.empty()` and is not filled for these cases).
+
+    Also, if `func` is a numba-compiled callable, it will be run from a
+    numba-compiled loop to minimize looping in Python.
+
+    """
+    # pylint: disable=no-else-return
+
+    # TODO: allow behavior for dynamically figuring out `out_type` (populate a
+    #   list or a numba.typed.List, and convert the returned list to a ndarray)
+
+    if out_dtype is None:
+        out_dtype = data.dtype
+
+    if isinstance(func, numba.targets.registry.CPUDispatcher):
+        if not kwargs:
+            return apply_numba(
+                func=func, out_dtype=out_dtype, data=data, valid=valid, index=index,
+            )
+        else:
+            print(
+                "WARNING: cannot run numba functions within a numba loop"
+                " since non-empty `**kwargs` were passed; will call in a"
+                " Python loop instead."
+            )
+
+    # No `valid` array
+    if valid is None:
+        if index is None:
+            out = np.empty(shape=len(data), dtype=out_dtype)
+            for i, data_ in enumerate(data):
+                out[i] = func(data_, **kwargs)
+            return out
+
+        else:
+            out = np.empty(shape=len(index), dtype=out_dtype)
+            for i, index_ in enumerate(index):
+                out[i] = func(data[index_["start"] : index_["stop"]], **kwargs)
+            return out
+
+    # Has `valid` array
+    else:
+
+        if index is None:
+            out = np.empty(shape=len(data), dtype=out_dtype)
+            out_valid = out[valid]
+            for i, data_ in enumerate(data[valid]):
+                out_valid[i] = func(data_, **kwargs)
+            return out
+
+        else:
+            out = np.empty(shape=len(index), dtype=out_dtype)
+            out_valid = out[valid]
+            for i, index_ in enumerate(index[valid]):
+                out_valid[i] = func(data[index_["start"] : index_["stop"]], **kwargs)
+            return out
+
+
+@numba.generated_jit(nopython=True, error_model="numpy")
+def apply_numba(func, out_dtype, data, valid, index):
+    """Apply a numba-compiled function to scalar or vector data on an
+    event-by-event basis, returning an array with one element per event.
+
+    See docs for `apply` for full documentation; but note that `apply_numba`
+    does not support **kwargs.
+
+    """
+    # pylint: disable=function-redefined, unused-argument, no-else-return
+
+    # No `valid` array
+    if isinstance(valid, numba.types.NoneType):
+
+        if isinstance(index, numba.types.NoneType):
+
+            def apply_impl(func, out_dtype, data, valid, index):
+                out = np.empty(shape=len(data), dtype=out_dtype)
+                for i, data_ in enumerate(data):
+                    out[i] = func(data_)
+                return out
+
+            return apply_impl
+
+        else:
+
+            def apply_impl(func, out_dtype, data, valid, index):
+                out = np.empty(shape=len(index), dtype=out_dtype)
+                for i, index_ in enumerate(index):
+                    out[i] = func(data[index_["start"] : index_["stop"]])
+                return out
+
+            return apply_impl
+
+    # Has `valid` array
+    else:
+
+        if isinstance(index, numba.types.NoneType):
+
+            def apply_impl(func, out_dtype, data, valid, index):
+                out = np.empty(shape=len(data), dtype=out_dtype)
+                for i, (valid_, data_) in enumerate(zip(valid, data)):
+                    if valid_:
+                        out[i] = func(data_)
+                return out
+
+            return apply_impl
+
+        else:
+
+            def apply_impl(func, out_dtype, data, valid, index):
+                out = np.empty(shape=len(index), dtype=out_dtype)
+                for i, (valid_, index_) in enumerate(zip(valid, index)):
+                    if valid_:
+                        out[i] = func(data[index_["start"] : index_["stop"]])
+                return out
+
+            return apply_impl
+
+
+# TODO
+# def create_new_columns(
+#     func, srcpath, srckeys=None, outdir=None, outkeys=None, overwrite=False, **kwargs
+# ):
+#     if outdir is not None:
+#         outdir = expand(outdir)
+#         assert isdir(outdir)
+#         assert outkeys is not None
+#
+#     if not overwrite and outdir is not None and outkeys:
+#         outarrays, _ = find_array_paths(outdir, keys=outkeys)
+#         existing_keys = sorted(set(outkeys).intersection(outarrays.keys()))
+#         if existing_keys:
+#             raise IOError(
+#                 'keys {} already exist in outdir "{}"'.format(existing_keys, outdir)
+#             )
+#
+#     if isinstance(srcobj, string_types):
+#         srcobj = expand(srcobj)
+#         arrays, scalar_ci = load(srcobj, keys=srckeys, mmap=True)
+#     elif isinstance(srcobj, Mapping):
+#         arrays = srcobj
+#         scalar_ci = None
+
+
+def _check_outdir_and_keys(outdir=None, outkeys=None, overwrite=False):
+    if outdir is not None:
+        outdir = expand(outdir)
+        if exists(outdir):
+            assert isdir(outdir)
+
+    if not overwrite and outdir is not None and outkeys:
+        outarrays, _ = find_array_paths(outdir, keys=outkeys)
+        existing_keys = sorted(set(outkeys).intersection(outarrays.keys()))
+        if existing_keys:
+            raise IOError(
+                'keys {} already exist in outdir "{}"'.format(existing_keys, outdir)
+            )
+
+    return outdir
+
+
+def calc_normed_weights(path, outdtype=None, outdir=None, overwrite=False):
+    """Normalize Monte Carlo weights by dividing by the number of i3 files that
+    comprise this MC set.
+
+    """
+    outkey = "normed_weight"
+    outdir = _check_outdir_and_keys(
+        outdir=outdir, outkeys=[outkey], overwrite=overwrite
+    )
+
+    arrays, scalar_ci = load(path, keys=["I3MCWeightDict"], mmap=True)
+    num_files = len(scalar_ci["subrun"])
+    weight = arrays["I3MCWeightDict"]["data"]["weight"]
+
+    if outdtype is None:
+        outdtype = get_widest_float_dtype(weight.dtype)
+
+    normed_weight = (weight / num_files).astype(outdtype)
+
+    if outdir is not None:
+        save_item(path=outdir, key=outkey, data=normed_weight, overwrite=overwrite)
+
+    return normed_weight
+
+
+def get_widest_float_dtype(dtypes):
+    """Among `dtypes` select the widest floating point type; if no floating
+    point types in `dtypes`, default to numpy.float64.
+
+    Parameters
+    ----------
+    dtypes : numpy dtype or iterable thereof
+
+    Returns
+    -------
+    widest_float_dtype : numpy dtype
+
+    """
+    float_dtypes = [np.float128, np.float64, np.float32, np.float16]
+    if isinstance(dtypes, type):
+        return dtypes
+
+    if isinstance(dtypes, Iterable):
+        dtypes = set(dtypes)
+
+    if len(dtypes) == 1:
+        return next(iter(dtypes))
+
+    for dtype in float_dtypes:
+        if dtype in dtypes:
+            return dtype
+
+    return np.float64
+
+
+def calc_genie_weighted_aeff(path, outdtype=None, outdir=None, overwrite=False):
+    """Calculate weighted effective area in [GeV cm**2 sr] for GENIE events
+    This EXCLUDES flux/osc, e.g. weight = weighted_aeff * flux * osc
+
+    Parameters
+    ----------
+    path : str
+    outdtype : None or numpy dtype, optional
+        If not specified, defaults to widest floating point dtype in input
+        columns
+    outdir : str, optional
+    overwrite : bool
+
+    Returns
+    -------
+    weighted_aeff
+
+    """
+    if outdir is not None:
+        outdir = expand(outdir)
+        assert isdir(outdir)
+
+    arrays, scalar_ci = load(path, keys=["I3MCWeightDict"], mmap=True)
+
+    if not overwrite and outdir is not None:
+        outarrays, _ = find_array_paths(outdir, keys="weighted_aeff")
+        if "weighted_aeff" in outarrays:
+            raise IOError("key 'weighted_aeff' already exists")
+
+    i3mcwd = arrays["I3MCWeightDict"]["data"]
+    num_files = len(scalar_ci["subrun"])
+
+    # Calculate weighted effective area
+    # Normalise by number of input files that have been processed into this
+    # output file
+    # Note that if you combine mutliple output files in your analysis you will
+    # need to normalise by that number still
+    #
+    # Notes:
+    #   * the 1e-4 conversion factor goes from cm^2 to m^2 (PISA flux tables
+    #       are stored in # m^2)
+    #   * num_files = number of "originally-formatted" (i.e. 1:1 with
+    #       simulation i3 files, not split or combined in any way) I3 files
+    #       combined to make this MC set
+    #   * gen_ratio = nu/nubar ratio in simulation
+
+    one_weight = i3mcwd["OneWeight"]
+    n_events = i3mcwd["NEvents"]
+    gen_ratio = i3mcwd["gen_ratio"]
+
+    if outdtype is None:
+        outdtype = get_widest_float_dtype(
+            [x.dtype for x in [one_weight, n_events, gen_ratio]]
+        )
+
+    weighted_aeff = (1e-4 * one_weight / (num_files * n_events * gen_ratio)).astype(
+        outdtype
+    )
+
+    if outdir is not None:
+        save_item(
+            path=path, key="weighted_aeff", data=weighted_aeff, overwrite=overwrite
+        )
+
+    return weighted_aeff
+
+
+def fit_genie_rw_syst(obj, outdtype=None, outdir=None, overwrite=False):
     """Fit 2nd-order polynomial to GENIE reweighting systematics, optionally
     saving the array to disk.
 
@@ -2314,7 +2689,6 @@ def fit_genie_rw_syst(obj, outdir=None, overwrite=False):
         Structured dtype .. ::
 
             (syst name, (linear, quadratic))
-
 
     Examples
     --------
@@ -2346,16 +2720,19 @@ def fit_genie_rw_syst(obj, outdir=None, overwrite=False):
     elif isinstance(obj, np.ndarray):
         grd_array = obj
 
-    if outdir is not None:
-        outdir = expand(outdir)
-        assert isdir(outdir)
+    outkey = "GENIE_rw_syst_fit_coeffs"
 
-    outname = "GENIE_rw_syst_fit_coeffs"
+    outdir = _check_outdir_and_keys(outdir, outkeys=outkey, overwrite=overwrite)
 
     rw_syst_names = sorted(n for n in grd_array.dtype.names if n.startswith("rw_"))
 
+    if outdtype is None:
+        outdtype = get_widest_float_dtype(
+            dtypes=[grd_array[n].dtype for n in rw_syst_names]
+        )
+
     # Only storing linear and quadratic fit coefficients
-    coeff_t = np.dtype([("linear", np.float64), ("quadratic", np.float64)])
+    coeff_t = np.dtype([("linear", outdtype), ("quadratic", outdtype)])
 
     # Super-dtype used for output array composed of one coeff_t per systematic
     syst_fits_coeff_t = np.dtype([(n, coeff_t) for n in rw_syst_names])
@@ -2366,15 +2743,6 @@ def fit_genie_rw_syst(obj, outdir=None, overwrite=False):
 
     # Establish we won't overwrite anything unless we want to before doing the
     # work
-
-    if outdir is not None and isdir(outdir):
-        outarrays, _ = find_array_paths(outdir)
-        if not overwrite and outname in outarrays:
-            raise IOError(
-                '"{}" exists in `outdir` "{}" and `overwrite` is False'.format(
-                    outname, outdir
-                )
-            )
 
     # Extract info and find fit coefficients
 
@@ -2402,24 +2770,119 @@ def fit_genie_rw_syst(obj, outdir=None, overwrite=False):
 
             # Note that np.polynomial.polynomial.polyfit returns the
             # coefficients from low to high order (as opposed to np.polyfit)
-            _, this_coeffs[idx]["linear"], this_coeffs[idx]["quadratic"] = (
-                np.polynomial.polynomial.polyfit(x, y, deg=2)
-            )
+            (
+                _,
+                this_coeffs[idx]["linear"],
+                this_coeffs[idx]["quadratic"],
+            ) = np.polynomial.polynomial.polyfit(x, y, deg=2)
 
     # Save array to disk
 
     if outdir is not None:
-        save_item(path=outdir, key=outname, data=fit_coeffs)
+        save_item(path=outdir, key=outkey, data=fit_coeffs, overwrite=overwrite)
 
     return fit_coeffs
 
 
-def add_weights(path, kind):
-    pass
+def coszen_key_from_zen_key_path(key_path):
+    """Create a reasonable key name for a "cosine(zenith)" field that is
+    derived from a "zenith" field at key path `key_path`
+
+    Renaming rules:
+        * If final path element contains word "zenith" or "zen", replace this
+            word with "coszen"
+        * Otherwise, add the word "coszen" as a final part
+        * Finally, join all parts with double-underscores: "__"
+
+    Parameters
+    ----------
+    key_path : str or iterable thereof
+
+    Returns
+    -------
+    outkey
+
+    """
+    if isinstance(key_path, string_types):
+        key_path = [key_path]
+    key_path = list(key_path)
+
+    outkey_parts = deepcopy(key_path)
+    if "zenith" in outkey_parts[-1]:
+        outkey_parts[-1] = outkey_parts[-1].replace("zenith", "coszen")
+    elif "zen" in outkey_parts[-1]:
+        outkey_parts[-1] = key_path[-1].replace("zen", "coszen")
+    else:
+        outkey_parts.append("coszen")
+    outkey = "__".join(outkey_parts)
+
+    return outkey
 
 
-def add_coszen_column(path, key_path):
-    pass
+def compute_coszen(
+    path, key_path, outkey=None, outdtype=None, outdir=None, overwrite=False
+):
+    """Compute cosine of a zenith field.
+
+    Parameters
+    ----------
+    path : str
+        Path to the key directory
+    key_path : str or sequence thereof
+        Path to traverse to get to the zenith field. E.g. .. ::
+
+            key_path = ["L4_iLineFit", "dir", "zenith"]
+
+        will traverse the `arrays` at `path` via .. ::
+
+            arrays["L4_iLineFit"]["data"]["dir"]["zenith"]
+
+    outkey : None or str, optional
+        Name of key to save coszen values to; if None provided, will use
+        `coszen_key_from_zen_key_path` function to derive a reasonable name based on
+        the `key_path`
+    outdtype : None or numpy dtype, optional
+        Data type to convert results to (_after_ applying `numpy.cos` to the
+        input zenith values, regardless of what dtype those are). If not
+        specified, defaults to the dtype of the input data
+    outdir : None or str, optional
+        Output key directory. If None is provided, no file is written
+    overwrite : bool
+        Whether to overwrite `outkey` in `outdir` if it alrady exists
+
+    Returns
+    -------
+    coszen : shape-(len(data),) numpy ndarray of dtype `outdtype`
+
+    """
+    # TODO: make generic not just to cos: numpy ufuncs can be fast & don't
+    #   require all the machinery of `apply`
+    # TODO: use a `valid` array if it exists at `path[..key_path..]`
+
+    if isinstance(key_path, string_types):
+        key_path = [key_path]
+
+    if outkey is None:
+        outkey = coszen_key_from_zen_key_path(key_path)
+
+    outdir = _check_outdir_and_keys(outdir, outkeys=outkey, overwrite=overwrite)
+
+    arrays, _ = load(path, keys=key_path[0], mmap=True)
+
+    data = arrays[key_path[0]]["data"]
+
+    for key in key_path[1:]:
+        data = data[key]
+
+    if outdtype is None:
+        outdtype = get_widest_float_dtype(data.dtype)
+
+    out = np.cos(data).astype(outdtype)
+
+    if outdir is not None:
+        save_item(path=outdir, key=outkey, data=out, overwrite=overwrite)
+
+    return out
 
 
 def main():
@@ -2440,7 +2903,8 @@ def main():
     parser = ArgumentParser()
     subparsers = parser.add_subparsers()
 
-    # Extract season and run have similar arguments; can use generic `extract` for these, too
+    # Extract season and run have similar arguments; can use generic `extract`
+    # for these, too
 
     parser_extract = subparsers.add_parser("extract")
     parser_extract.set_defaults(func=extract)
@@ -2499,15 +2963,55 @@ def main():
         subparser.add_argument("-r", "--recurse", action="store_true")
         subparser.add_argument("--procs", type=int, default=cpu_count())
 
-    # Add fits to GENIE systematics
+    # Simple functions that add columns derived from existing columns (post-proc)
 
-    def fit_genie_rw_syst_wrapper(path, overwrite):
-        fit_genie_rw_syst(obj=path, outdir=path, overwrite=overwrite)
+    def func_wrapper(func, path, outdir, outdtype, overwrite):
+        if outdir is None:
+            outdir = path
+        func(path, outdir=outdir, outdtype=outdtype, overwrite=overwrite)
 
-    parser_fit_genie_rw_syst = subparsers.add_parser("fit_genie_rw_syst")
-    parser_fit_genie_rw_syst.set_defaults(func=fit_genie_rw_syst_wrapper)
-    parser_fit_genie_rw_syst.add_argument("path")
-    parser_fit_genie_rw_syst.add_argument("--overwrite", action="store_true")
+    for funcname in [
+        "fit_genie_rw_syst",
+        "calc_genie_weighted_aeff",
+        "calc_normed_weights",
+    ]:
+        subparser = subparsers.add_parser(funcname)
+        subparser.set_defaults(func=partial(func_wrapper, func=eval(funcname)))
+        subparser.add_argument("path")
+        subparser.add_argument("--outdtype", required=False)
+        subparser.add_argument("--outdir", required=False)
+        subparser.add_argument("--overwrite", action="store_true")
+
+    # More complicated add-column post-processing functions
+
+    def compute_coszen_wrapper(
+        path, key_path, outdir, outkey=None, outdtype=None, overwrite=False
+    ):
+        if outdir is None:
+            outdir = path
+
+        if isinstance(outdtype, string_types):
+            if hasattr(np, outdtype):
+                outdtype = getattr(np, outdtype)
+            else:
+                outdtype = np.dtype(outdtype)
+
+        compute_coszen(
+            path=path,
+            key_path=key_path,
+            outkey=outkey,
+            outdtype=outdtype,
+            outdir=outdir,
+            overwrite=overwrite,
+        )
+
+    parser_compute_coszen = subparsers.add_parser("compute_coszen")
+    parser_compute_coszen.set_defaults(func=compute_coszen_wrapper)
+    parser_compute_coszen.add_argument("path")
+    parser_compute_coszen.add_argument("--key-path", nargs="+", required=True)
+    parser_compute_coszen.add_argument("--outdtype", required=False)
+    parser_compute_coszen.add_argument("--outdir", required=False)
+    parser_compute_coszen.add_argument("--overwrite", action="store_true")
 
     # Parse command line
 
