@@ -81,6 +81,8 @@ METHODS = set(
         "crs",
         "crs_prefit",
         "mn8d",
+        "emily_ref",
+        "emily_test",
         "stopping_atm_muon_crs",
         "dn8d",
         "nlopt",
