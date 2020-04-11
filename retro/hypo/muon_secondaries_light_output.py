@@ -21,7 +21,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License."""
 
-from os.path import abspath, dirname
+from os.path import abspath, dirname, join
 import sys
 
 import numpy as np
@@ -54,8 +54,8 @@ class MuonSecondariesLightOutput(object):
 
     def __init__(
         self,
-        energy_bins_file="../../data/muon_secondaries_light_output/energy_bins.npy",
-        histograms_file="../../data/muon_secondaries_light_output/histograms.npy",
+        energy_bins_file=join(RETRO_DIR, "data", "muon_secondaries_light_output/energy_bins.npy"),
+        histograms_file=join(RETRO_DIR, "data", "muon_secondaries_light_output/histograms.npy"),
     ):
         self.interpolators = []
         """linear interpolation function for each curve in histarray"""
