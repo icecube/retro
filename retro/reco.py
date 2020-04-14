@@ -83,6 +83,7 @@ METHODS = set(
         "mn8d",
         "emily_ref",
         "emily_test",
+        "emily_crs_prefit",
         "stopping_atm_muon_crs",
         "dn8d",
         "nlopt",
@@ -646,6 +647,54 @@ class Reco(object):
             self.setup_hypo(
                 cascade_kernel="scaling_aligned_point_ckv",
                 track_kernel="pegleg",
+                track_time_step=3.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_crs(
+                n_live=160,
+                max_iter=10000,
+                max_noimprovement=1000,
+                min_llh_std=0.5,
+                min_vertex_std=dict(x=5, y=5, z=4, time=20),
+                use_sobol=True,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=False,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=save_estimate,
+            )
+
+        elif method == "emily_crs_prefit":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="table_energy_loss_secondary_light",
                 track_time_step=3.0,
             )
 
