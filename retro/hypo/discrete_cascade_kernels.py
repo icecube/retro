@@ -153,7 +153,7 @@ def aligned_point_ckv_cascade(time, x, y, z, cascade_energy, track_azimuth, trac
     )
 
 def scaling_aligned_point_ckv_cascade(time, x, y, z, track_azimuth, track_zenith):
-    """Fixed 1 GeV cascade kernel"""
+    """Cascade as a point Cherenkov emitter aligned with the (muon) track."""
     return aligned_point_ckv_cascade(
         time=time,
         x=x,
@@ -358,9 +358,9 @@ def scaling_aligned_one_dim_cascade(
     z,
     track_azimuth,
     track_zenith,
-    **kwargs
 ):
-    """Fixed 1 GeV cascade kernel"""
+    """Cascade with topology defined by a cascade at `SCALING_CASCADE_ENERGY`,
+    and changing energy only modifies number of photons produced"""
     return aligned_one_dim_cascade(
         time=time,
         x=x,
@@ -370,10 +370,9 @@ def scaling_aligned_one_dim_cascade(
         track_zenith=track_zenith,
         cascade_energy=SCALING_CASCADE_ENERGY,
         num_samples=100,
-        **kwargs
     )
 
-def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith, **kwargs):
+def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith):
     """Fixed cascade kernel at a single energy (`SCALING_CASCADE_ENERGY`)"""
     return one_dim_cascade(
         time=time,
@@ -384,7 +383,6 @@ def scaling_one_dim_cascade(time, x, y, z, cascade_azimuth, cascade_zenith, **kw
         cascade_zenith=cascade_zenith,
         cascade_energy=SCALING_CASCADE_ENERGY,
         num_samples=100,
-        **kwargs
     )
 
 def one_dim_delta_cascade(
@@ -428,7 +426,8 @@ def scaling_one_dim_delta_cascade(
     cascade_d_zenith,
     **kwargs
 ):
-    """Scaling cascade 1 GeV prototype defined as rotation off of track angle"""
+    """Scaling cascade prototype, topology derived from a fixed energy and
+    defined as rotation off of track angle"""
     return one_dim_delta_cascade(
         time=time,
         x=x,

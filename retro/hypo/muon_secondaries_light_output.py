@@ -105,7 +105,12 @@ class MuonSecondariesLightOutput(object):
 
         """
         # tells us the index of histarray to find the correct curve to use
-        index = np.digitize(muon_starting_energy, self.energy_bins, right=False) - 1
+        if muon_starting_energy <= self.energy_bins[0]:
+            index = 0
+        elif muon_starting_energy >= self.energy_bins[-1]:
+            index = len(self.energy_bins) - 1
+        else:
+            index = np.digitize(muon_starting_energy, self.energy_bins, right=False) - 1
         ourtracklen = self.average_track_lengths[index]
 
         # so that we don't alter the original segment_positions array
