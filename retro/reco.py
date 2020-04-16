@@ -110,6 +110,16 @@ REPORT_AFTER = 100
 
 CART_DIMS = ("x", "y", "z", "time")
 
+EMILY_CRS_SETTINGS = dict(
+    n_live=250,
+    max_iter=100000,
+    max_noimprovement=1000,
+    min_llh_std=0.5,
+    stdthresh=dict(x=2.5, y=2.5, z=2, time=10),
+    use_sobol=True,
+    seed=0,
+)
+
 
 class StandaloneEvents(object):
     """
@@ -714,15 +724,7 @@ class Reco(object):
                 t_start=t_start,
             )
 
-            run_info, fit_meta = self.run_crs(
-                n_live=250,
-                max_iter=100000,
-                max_noimprovement=1000,
-                min_llh_std=0.5,
-                stdthresh=dict(x=2.5, y=2.5, z=2, time=10),
-                use_sobol=True,
-                seed=0,
-            )
+            run_info, fit_meta = self.run_crs(**EMILY_CRS_SETTINGS)
 
             llhp = self.make_llhp(
                 method=method,
@@ -762,15 +764,7 @@ class Reco(object):
                 t_start=t_start,
             )
 
-            run_info, fit_meta = self.run_crs(
-                n_live=250,
-                max_iter=100000,
-                max_noimprovement=1000,
-                min_llh_std=0.5,
-                stdthresh=dict(x=2.5, y=2.5, z=2, time=10),
-                use_sobol=True,
-                seed=0,
-            )
+            run_info, fit_meta = self.run_crs(**EMILY_CRS_SETTINGS)
 
             llhp = self.make_llhp(
                 method=method,
