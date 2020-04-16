@@ -710,7 +710,7 @@ class Reco(object):
                 track_time_step=1.0,
             )
 
-            self.generate_prior_method(**PRISPEC_OSCNEXT_CRS)
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
 
             param_values = []
             log_likelihoods = []
@@ -750,7 +750,7 @@ class Reco(object):
                 track_time_step=1.0,
             )
 
-            self.generate_prior_method(**PRISPEC_OSCNEXT_CRS)
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
 
             param_values = []
             log_likelihoods = []
