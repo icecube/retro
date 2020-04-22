@@ -4,6 +4,8 @@ timestamp="$( date +%Y-%m-%dT%H%M%z )"
 
 scripts_dir="$( dirname $0 )"
 retro_dir="$( dirname $scripts_dir )"
+METHOD="$1"
+shift
 START="$1"
 shift
 STEP="$1"
@@ -112,7 +114,7 @@ fi
 #python -m cProfile  \
 #kernprof -l -v \
 $retro_dir/retro/reco.py \
-    --method crs_prefit \
+    --method $METHOD \
     --filter 'event["header"]["L5_oscNext_bool"] and len(event["hits"]) >= 8' \
     \
     --gcd $gcd \
