@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals, try-except-raise
+# pylint: disable=wrong-import-position, redefined-outer-name, range-builtin-not-iterating, too-many-locals, try-except-raise, import-outside-toplevel, line-too-long
 
 """
 Reco class for performing reconstructions
@@ -59,6 +59,7 @@ from retro.priors import (
     PRI_TIME_RANGE,
     PRI_UNIFORM,
     PRISPEC_OSCNEXT_PREFIT_TIGHT,
+    PRISPEC_OSCNEXT_CRS,
     PRISPEC_OSCNEXT_CRS_MN,
     Bound,
     get_prior_func,
@@ -81,6 +82,10 @@ METHODS = set(
         "crs",
         "crs_prefit",
         "mn8d",
+        "emily_ref",
+        "emily_test",
+        "emily_crs_ref",
+        "emily_crs_test",
         "stopping_atm_muon_crs",
         "dn8d",
         "nlopt",
@@ -97,13 +102,23 @@ CRS_STOP_FLAGS = {
     0: "max iterations reached",
     1: "llh stddev below threshold",
     2: "no improvement",
-    3: "vertex stddev below threshold",
+    3: "all parameter stddevs below thresholds",
 }
 
 # TODO: make following args to `__init__` or `run`
 REPORT_AFTER = 100
 
 CART_DIMS = ("x", "y", "z", "time")
+
+EMILY_CRS_SETTINGS = dict(
+    n_live=250,
+    max_iter=100000,
+    max_noimprovement=1000,
+    min_llh_std=0.5,
+    stdthresh=dict(x=2.5, y=2.5, z=2, time=10),
+    use_sobol=True,
+    seed=0,
+)
 
 
 class StandaloneEvents(object):
@@ -498,7 +513,7 @@ class Reco(object):
                     max_iter=20000,
                     max_noimprovement=5000,
                     min_llh_std=0.1,
-                    min_vertex_std=dict(x=1, y=1, z=1, time=3),
+                    stdthresh=dict(x=1, y=1, z=1, time=3),
                     use_sobol=True,
                     seed=0,
                 )
@@ -564,7 +579,7 @@ class Reco(object):
                 max_iter=10000,
                 max_noimprovement=1000,
                 min_llh_std=0.5,
-                min_vertex_std=dict(x=5, y=5, z=5, time=15),
+                stdthresh=dict(x=5, y=5, z=5, time=15),
                 use_sobol=True,
                 seed=0,
             )
@@ -618,7 +633,7 @@ class Reco(object):
                 max_iter=10000,
                 max_noimprovement=1000,
                 min_llh_std=0.,
-                min_vertex_std=dict(x=5, y=5, z=4, time=20),
+                stdthresh=dict(x=5, y=5, z=4, time=20),
                 use_sobol=True,
                 seed=0,
             )
@@ -666,10 +681,90 @@ class Reco(object):
                 max_iter=10000,
                 max_noimprovement=1000,
                 min_llh_std=0.5,
-                min_vertex_std=dict(x=5, y=5, z=4, time=20),
+                stdthresh=dict(x=5, y=5, z=4, time=20),
                 use_sobol=True,
                 seed=0,
             )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=False,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=save_estimate,
+            )
+
+        elif method == "emily_crs_ref":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="table_energy_loss",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_crs(**EMILY_CRS_SETTINGS)
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=False,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=save_estimate,
+            )
+
+        elif method == "emily_crs_test":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="table_energy_loss_secondary_light",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_PREFIT_TIGHT)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_crs(**EMILY_CRS_SETTINGS)
 
             llhp = self.make_llhp(
                 method=method,
@@ -692,6 +787,104 @@ class Reco(object):
             self.setup_hypo(
                 cascade_kernel="scaling_aligned_one_dim",
                 track_kernel="pegleg",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_CRS_MN)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_multinest(
+                importance_sampling=True,
+                max_modes=1,
+                const_eff=True,
+                n_live=250,
+                evidence_tol=0.02,
+                sampling_eff=0.5,
+                max_iter=10000,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=save_estimate,
+            )
+
+        elif method == "emily_ref":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="table_energy_loss",
+                track_time_step=1.0,
+            )
+
+            self.generate_prior_method(**PRISPEC_OSCNEXT_CRS_MN)
+
+            param_values = []
+            log_likelihoods = []
+            aux_values = []
+            t_start = []
+
+            self.generate_loglike_method(
+                param_values=param_values,
+                log_likelihoods=log_likelihoods,
+                aux_values=aux_values,
+                t_start=t_start,
+            )
+
+            run_info, fit_meta = self.run_multinest(
+                importance_sampling=True,
+                max_modes=1,
+                const_eff=True,
+                n_live=250,
+                evidence_tol=0.02,
+                sampling_eff=0.5,
+                max_iter=10000,
+                seed=0,
+            )
+
+            llhp = self.make_llhp(
+                method=method,
+                log_likelihoods=log_likelihoods,
+                param_values=param_values,
+                aux_values=aux_values,
+                save=save_llhp,
+            )
+
+            self.make_estimate(
+                method=method,
+                llhp=llhp,
+                remove_priors=True,
+                run_info=run_info,
+                fit_meta=fit_meta,
+                save=save_estimate,
+            )
+
+        elif method == "emily_test":
+            self.setup_hypo(
+                cascade_kernel="scaling_aligned_one_dim",
+                track_kernel="table_energy_loss_secondary_light",
                 track_time_step=1.0,
             )
 
@@ -1607,7 +1800,7 @@ class Reco(object):
         max_iter,
         max_noimprovement,
         min_llh_std,
-        min_vertex_std,
+        stdthresh,
         use_sobol,
         seed,
     ):
@@ -1629,11 +1822,13 @@ class Reco(object):
         min_llh_std : float
             Break if stddev of llh values across all livepoints drops below
             this threshold
-        min_vertex_std : mapping
-            Break condition on stddev of Cartesian dimension(s) (x, y, z, and
-            time). Keys are dimension names and values are the standard
-            deviations for each dimension. All specified dimensions must drop
-            below the specified stddevs for this break condition to be met.
+        stdthresh : mapping
+            Break condition on stddev of Cartesian dimension(s), i.e.,
+            non-spherical dimensions (x, y, z, time, length, energies, etc.).
+            Specify -1 to set no condition on a dimension. Keys are dimension
+            names and values are the standard deviations for each dimension.
+            All specified dimensions must drop below the specified stddevs for
+            this break condition to be met.
         use_sobol : bool
             Use a Sobol sequence instead of numpy pseudo-random numbers. Seems
             to do slightly better (but only small differences observed in tests
@@ -1667,15 +1862,59 @@ class Reco(object):
             ]
         )
 
-        vertex_std = np.full(
+        spherical_pairs = []
+        cstdthresh = []
+        opt_param_properties = OrderedDict()
+        for idx, pname in enumerate(self.hypo_handler.opt_param_names):
+            if "azimuth" in pname:
+                opt_param_properties[pname] = dict(
+                    is_cartesian=False, stdthresh_defined=False
+                )
+                p_zen = pname.replace("azimuth", "zenith")
+                assert self.hypo_handler.opt_param_names[idx + 1] == p_zen
+                assert pname not in stdthresh, "threshold on sph params not implemented yet"
+                spherical_pairs.append(
+                    [
+                        self.hypo_handler.all_param_names.index(pname),
+                        self.hypo_handler.all_param_names.index(p_zen),
+                    ]
+                )
+            elif "zenith" in pname:
+                # The (azimuth, zenith) pair is treted atomically within
+                # `spherical_opt`, so ignore "zenith" since we already recorded
+                # "azimuth"
+                assert pname not in stdthresh, "threshold on sph params not implemented yet"
+            else:
+                if pname in stdthresh:
+                    thresh = stdthresh[pname]
+                    cstdthresh.append(thresh)
+                    opt_param_properties[pname] = dict(
+                        is_cartesian=True, stdthresh_defined=thresh > 0
+                    )
+                else:
+                    cstdthresh.append(-1)
+                    opt_param_properties[pname] = dict(
+                        is_cartesian=True, stdthresh_defined=False
+                    )
+
+        # Note we only kept "azimuth" part of spherical pairs above
+        params_std = np.full(
             shape=1,
             fill_value=np.nan,
-            dtype=[(d, np.float32) for d in min_vertex_std.keys()],
+            dtype=[
+                (pname.replace("azimuth", "sph"), np.float32)
+                for pname in self.hypo_handler.opt_param_names
+            ],
         )
-        vertex_std_met_at_iter = np.full(
+
+        stdthresh_met_at_iter = np.full(
             shape=1,
             fill_value=-1,
-            dtype=[(d, np.int32) for d in min_vertex_std.keys()],
+            dtype=[
+                (pname, np.int32)
+                for pname, ppties in opt_param_properties.items()
+                if ppties["stdthresh_defined"]
+            ],
         )
 
         fit_meta = OrderedDict(
@@ -1685,35 +1924,14 @@ class Reco(object):
                 ("stopping_flag", np.int8(-1)),
                 ("llh_std", np.float32(np.nan)),
                 ("no_improvement_counter", np.int32(-1)),
-                ("vertex_std", vertex_std),
-                ("vertex_std_met_at_iter", vertex_std_met_at_iter),
+                ("params_std", params_std),
+                ("stdthresh_met_at_iter", stdthresh_met_at_iter),
                 ("num_simplex_successes", np.int32(-1)),
                 ("num_mutation_successes", np.int32(-1)),
                 ("num_failures", np.int32(-1)),
                 ("run_time", np.float32(np.nan)),
             ]
         )
-
-        spherical_pairs = []
-        cstd = []
-        for pname in self.hypo_handler.opt_param_names:
-            if "azimuth" in pname:
-                p_zen = pname.replace("azimuth", "zenith")
-                assert p_zen in self.hypo_handler.all_param_names, \
-                        "Mising dimesnion %s in %s" % (
-                            p_zen, self.hypo_handler.all_param_names
-                        )
-                spherical_pairs.append(
-                    [
-                        self.hypo_handler.all_param_names.index(pname),
-                        self.hypo_handler.all_param_names.index(p_zen),
-                    ]
-                )
-            elif "zenith" not in pname:
-                if pname in min_vertex_std.keys():
-                    cstd.append(min_vertex_std[pname])
-                else:
-                    cstd.append(-1)
 
         def func(x):
             return -self.loglike(x)
@@ -1751,21 +1969,40 @@ class Reco(object):
                 spherical_indices=spherical_pairs,
                 max_iter=max_iter,
                 max_noimprovement=max_noimprovement,
-                fstd=min_llh_std,
-                cstd=cstd,
+                fstdthresh=min_llh_std,
+                cstdthresh=cstdthresh,
                 meta=True,
                 rand=rand,
             )
 
-            idx = 0
-            for pname in self.hypo_handler.opt_param_names:
-                if "zenith" not in pname or "azimuth" in pname:
-                    if pname in min_vertex_std.keys():
-                        vertex_std[pname] = fit["meta"]["cstd"][idx]
-                        vertex_std_met_at_iter[pname] = fit["meta"]["cstd_met_at_iter"][idx]
-                    else:
-                        cstd.append(-1)
-                    idx += 1
+            # Populate the meaningful stats about cartesian stddevs to our
+            # output dict from the meta dict returned by spherical_opt.
+            cartesian_param_idx = 0
+            spherical_param_idx = 0
+            for pname, ppties in opt_param_properties.items():
+                if ppties["is_cartesian"]:
+                    c_or_s_idx = cartesian_param_idx
+                    cartesian_param_idx += 1
+                    std_name = "cstd"
+                else:
+                    # Only one spherical param to represent both "azimuth" is
+                    if "zenith" in pname:
+                        continue
+                    c_or_s_idx = spherical_param_idx
+                    spherical_param_idx += 1
+                    std_name = "sstd"
+                    pname = pname.replace("azimuth", "sph")
+
+                # Record stds of all params, whether or not a threshold is
+                # defined
+                if std_name in fit["meta"]:
+                    params_std[pname] = fit["meta"][std_name][c_or_s_idx]
+
+                # Only meaningful to record if a std threshold has been
+                # defined for the param
+                met_at_iter_name = "{}thresh_met_at_iter".format(std_name)
+                if ppties["stdthresh_defined"] and met_at_iter_name in fit["meta"]:
+                    stdthresh_met_at_iter[pname] = fit["meta"][met_at_iter_name][c_or_s_idx]
 
             fit_meta["fit_status"] = np.int8(
                 FitStatus.OK if fit["success"] else FitStatus.FailedToConverge
@@ -1774,8 +2011,8 @@ class Reco(object):
             fit_meta["stopping_flag"] = np.int8(fit["stopping_flag"])
             fit_meta["llh_std"] = np.float32(fit["meta"]["fstd"])
             fit_meta["no_improvement_counter"] = np.int32(fit["meta"]["no_improvement_counter"])
-            fit_meta["vertex_std"] = vertex_std
-            fit_meta["vertex_std_met_at_iter"] = vertex_std_met_at_iter
+            fit_meta["params_std"] = params_std
+            fit_meta["stdthresh_met_at_iter"] = stdthresh_met_at_iter
             fit_meta["num_simplex_successes"] = np.int32(fit["meta"]["num_simplex_successes"])
             fit_meta["num_mutation_successes"] = np.int32(fit["meta"]["num_mutation_successes"])
             fit_meta["num_failures"] = np.int32(fit["meta"]["num_failures"])
