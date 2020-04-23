@@ -1010,11 +1010,13 @@ def dict2struct(d, set_explicit_dtype=set_explicit_dtype):
     array : numpy.array of struct dtype
 
     """
-    dt_spec = OrderedDict()
+    dt_spec = []
+    values = []
     for key, val in d.items():
-        d[key] = typed_val = set_explicit_dtype(val)
-        dt_spec[key] = typed_val.dtype
-    array = np.array(tuple(d.values()), dtype=dt_spec.items())
+        typed_val = set_explicit_dtype(val)
+        dt_spec.append((key, typed_val.dtype))
+        values.append(typed_val)
+    array = np.array(tuple(values), dtype=dt_spec)
     return array
 
 
