@@ -828,15 +828,21 @@ def get_hits(event, path, hit_charge_quant, min_hit_charge, angsens_model=None):
         time_window_start = np.inf
         time_window_stop = -np.inf
         for trigger in trigger_hierarchy:
-            source = trigger['source']
+            if 'key' in trigger.dtype.names:  # New (more correct) TRIGGER_T struct
+                trigger_key = trigger['key']
+                source = trigger_key['source']
+                tr_type = trigger_key['type']
+                config_id = trigger_key['config_id']
+            else:  # old TRIGGER_T had triggerkey fields at same level as trigger
+                source = trigger['source']
+                tr_type = trigger['type']
+                config_id = trigger['config_id']
 
             # Do not expand the in-ice window based on GLOBAL triggers (of
             # any TriggerTypeID)
             if source == TriggerSourceID.GLOBAL:
                 continue
 
-            tr_type = trigger['type']
-            config_id = trigger['config_id']
             tr_time = trigger['time']
 
             # TODO: rework to _only_ use TriggerConfigID?

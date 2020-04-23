@@ -52,6 +52,10 @@ __all__ = [
 from argparse import ArgumentParser
 from ast import literal_eval
 from collections import OrderedDict
+try:
+    from collections.abc import Sequence
+except ImportError:
+    from collections import Sequence
 from copy import deepcopy
 import inspect
 import numbers
@@ -102,50 +106,105 @@ JIT_KW = dict(
 )
 
 DATA_DIR_INFOS = OrderedDict(
-    [
-        ((12, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.12")),
-        ((13, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.13")),
-        ((14, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.14")),
-        ((15, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.15")),
-        ((16, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.16")),
-        ((17, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.17")),
-        ((18, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.18")),
-
-        ((13, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.13")),
-        ((14, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.14")),
-        ((17, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.17")),
-        ((18, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.18")),
+    [ # L5 v01.03
+        (
+            (yr, 5, (1, 3)),
+            dict(path="ana/LE/oscNext/pass2/data/level5_v01.03/IC86.{}".format(yr))
+        )
+        for yr in range(12, 18+1)
+    ]
+    + [ # L5 v01.04
+        (
+            (yr, 5, (1, 4)),
+            dict(path="ana/LE/oscNext/pass2/data/level5_v01.04/IC86.{}".format(yr))
+        )
+        for yr in [12, 13, 14, 17, 18]
+    ]
+    # L6 v01.00
+    + [
+        (
+            (yr, 6, (1, 0)),
+            dict(path="ana/LE/oscNext/pass2/data/level6_v01.00/IC86.{}".format(yr))
+        )
+        for yr in [11, 12, 14, 16, 18]
+    ]
+    + [ # L7 v01.04
+        (
+            (yr, 7, (1, 4)),
+            dict(path="ana/LE/oscNext/pass2/data/level7_v01.04/IC86.{}".format(yr))
+        )
+        for yr in [12, 14, 16, 18]
     ]
 )
 
 MC_DIR_INFOS = OrderedDict(
     [
+        #
+        # L5 v01.03
+        #
         # GENIE nue
         ((120000, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120000", num_files=601)),
         ((120001, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120001", num_files=602)),
         ((120002, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120002", num_files=602)),
         ((120003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120003", num_files=602)),
         ((120004, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/120004", num_files=602)),
-        ((120000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/120000", num_files=624)),
         # GENIE numu
         ((140000, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140000", num_files=1494)),
         ((140001, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140001", num_files=1520)),
         ((140002, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140002", num_files=1520)),
         ((140003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140003", num_files=1520)),
         ((140004, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/140004", num_files=1520)),
-        ((140000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/140000", num_files=1495)),
         # GENIE nutau
         ((160000, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160000", num_files=335)),
         ((160001, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160001", num_files=350)),
         ((160002, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160002", num_files=345)),
         ((160003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.03/160003", num_files=345)),
-        ((160000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/160000", num_files=324)),
         # muongun sets
         ((139011, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/muongun/level5_v01.03/139011", num_files=2996)),
+        # Noise sets
+        ((888003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/noise/level5_v01.03/888003", num_files=5000)),
+
+        #
+        # L5 v01.04
+        #
+        # GENIE nue
+        ((120000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/120000", num_files=624)),
+        # GENIE numu
+        ((140000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/140000", num_files=1495)),
+        # GENIE nutau
+        ((160000, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level5_v01.04/160000", num_files=324)),
+        # muongun sets
         ((139011, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/muongun/level5_v01.04/139011", num_files=19989)),
         # Noise sets
-        ((888003, 5, (1, 3)), dict(path="ana/LE/oscNext/pass2/noise/level5_v01.03/888003/", num_files=5000)),
-        ((888003, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/noise/level5_v01.04/888003/", num_files=5000)),
+        ((888003, 5, (1, 4)), dict(path="ana/LE/oscNext/pass2/noise/level5_v01.04/888003", num_files=5000)),
+
+        #
+        # L6 v01.00
+        #
+        # GENIE nue
+        ((120000, 6, (1, 0)), dict(path="ana/LE/oscNext/pass2/genie/level6_v01.00/120000", num_files=602)),
+        # GENIE numu
+        ((140000, 6, (1, 0)), dict(path="ana/LE/oscNext/pass2/genie/level6_v01.00/140000", num_files=1494)),
+        # GENIE nutau
+        ((160000, 6, (1, 0)), dict(path="ana/LE/oscNext/pass2/genie/level6_v01.00/160000", num_files=324)),
+        # muongun sets
+        ((139011, 6, (1, 0)), dict(path="ana/LE/oscNext/pass2/muongun/level6_v01.00/139011", num_files=19989)),
+        # Noise sets
+        ((888003, 6, (1, 0)), dict(path="ana/LE/oscNext/pass2/noise/level6_v01.00/888003", num_files=5000)),
+
+        #
+        # L7 v01.04
+        #
+        # GENIE nue
+        ((120000, 7, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level7_v01.04/120000", num_files=602)),
+        # GENIE numu
+        ((140000, 7, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level7_v01.04/140000", num_files=1495)),
+        # GENIE nutau
+        ((160000, 7, (1, 4)), dict(path="ana/LE/oscNext/pass2/genie/level7_v01.04/160000", num_files=324)),
+        # muongun sets
+        ((139011, 7, (1, 4)), dict(path="ana/LE/oscNext/pass2/muongun/level7_v01.04/139011", num_files=19989)),
+        # Noise sets
+        ((888003, 7, (1, 4)), dict(path="ana/LE/oscNext/pass2/noise/level7_v01.04/888003", num_files=5000)),
     ]
 )
 
@@ -159,26 +218,21 @@ MC_SET_SPECS = OrderedDict(
                 noise=(888003, 5, (1, 3)),
             )
         ),
+    ] + [
         (
-            "l5v1.3_baseline",
+            "l{lvl}v{major}.{minor}_baseline".format(lvl=lvl, major=major, minor=minor),
             dict(
-                nue=(120000, 5, (1, 3)),
-                numu=(140000, 5, (1, 3)),
-                nutau=(160000, 5, (1, 3)),
-                mu=(139011, 5, (1, 3)),
-                noise=(888003, 5, (1, 3)),
+                nue=(120000, lvl, (major, minor)),
+                numu=(140000, lvl, (major, minor)),
+                nutau=(160000, lvl, (major, minor)),
+                mu=(139011, lvl, (major, minor)),
+                noise=(888003, lvl, (major, minor)),
             ),
-        ),
-        (
-            "l5v1.4_baseline",
-            dict(
-                nue=(120000, 5, (1, 4)),
-                numu=(140000, 5, (1, 4)),
-                nutau=(160000, 5, (1, 4)),
-                mu=(139011, 5, (1, 4)),
-                noise=(888003, 5, (1, 4)),
-            ),
-        ),
+        )
+        for (lvl, (major, minor))
+        in [(5, (1, 3)), (5, (1, 4)), (6, (1, 0)), (7, (1, 4))]
+    ]
+    + [
         (
             "l5v1.3_dom_eff_0.9",
             dict(
@@ -222,7 +276,6 @@ MC_SET_SPECS = OrderedDict(
     ]
 )
 
-
 NUM_BINS = 80
 
 _HIST_EDGES = OrderedDict(
@@ -233,10 +286,10 @@ _HIST_EDGES = OrderedDict(
         ("charge_per_dom", np.logspace(np.log10(0.05), np.log10(3200), NUM_BINS + 1)),
         ("pulses_per_dom", np.logspace(np.log10(1), np.log10(225), NUM_BINS + 1)),
         ("charge_per_pulse", np.logspace(np.log10(1e-2), np.log10(2200), NUM_BINS + 1)),
-        ("time_diffs_within_event", np.linspace(0, 13000, NUM_BINS + 1)),
-        ("time_diffs_within_dom", np.linspace(0, 13000, NUM_BINS + 1)),
-        #("time_diffs_within_event", np.linspace(0, 1000, NUM_BINS + 1)),
-        #("time_diffs_within_dom", np.linspace(0, 1000, NUM_BINS + 1)),
+        #("time_diffs_within_event", np.linspace(0, 13000, NUM_BINS + 1)),
+        #("time_diffs_within_dom", np.linspace(0, 13000, NUM_BINS + 1)),
+        ("time_diffs_within_event", np.linspace(0, 1000, NUM_BINS + 1)),
+        ("time_diffs_within_dom", np.linspace(0, 500, NUM_BINS + 1)),
     ]
 )
 HIST_EDGES = numba.typed.Dict.empty(
@@ -1367,7 +1420,7 @@ def plot(
     mc_set_spec = MC_SET_SPECS[mc_set]
     if only_seasons is None:
         only_seasons = list(DATA_DIR_INFOS.keys())
-    elif only_seasons in DATA_DIR_INFOS:
+    elif not isinstance(only_seasons[0], Sequence):
         only_seasons = [only_seasons]
 
     histo_data_dir = expand(histo_data_dir)
@@ -1675,6 +1728,7 @@ def parse_args(description=__doc__):
     plot_vtx_sp = subparsers.add_parser("plot_vtx_t_dists")
 
     populate_sp.add_argument("--set-key", type=str, required=True)
+    populate_sp.add_argument("--overwrite", action="store_true")
 
     plot_sp.add_argument("--only-seasons", type=str, default=None, required=False)
 
@@ -1693,9 +1747,9 @@ def parse_args(description=__doc__):
     for subp in [populate_sp, plot_sp, plot_vtx_sp]:
         subp.add_argument("--pulse-series", type=str, required=True)
         #subp.add_argument("--fixed-pulse-q", type=float, default=0)
-        subp.add_argument("--qntm", type=float, default=0)
-        subp.add_argument("--min-pulse-q", type=float, default=0)
-        subp.add_argument("--min-evt-p", type=int, default=1)
+        subp.add_argument("--qntm", type=float, default=0, required=False)
+        subp.add_argument("--min-pulse-q", type=float, default=0, required=False)
+        subp.add_argument("--min-evt-p", type=int, default=1, required=False)
         #subp.add_argument("--min-evt-dt", type=float, default=0)
         #subp.add_argument("--max-evt-dt", type=float, default=0)
         # subp.add_argument("--min-evt-t-fract", type=float, default=0)
@@ -1703,15 +1757,15 @@ def parse_args(description=__doc__):
         # subp.add_argument("--t-fract-window", type=float, default=0)
         # subp.add_argument("--min-evt-q-t-qtl", type=float, default=0)
         # subp.add_argument("--max-evt-q-t-qtl", type=float, default=1)
-        subp.add_argument("--min-dom-p", type=int, default=1)
+        subp.add_argument("--min-dom-p", type=int, default=1, required=False)
         # subp.add_argument("--min-dom-dt", type=float, default=0)
         #subp.add_argument("--max-dom-dt", type=float, default=0)
         #subp.add_argument("--integ-t", type=float, default=0)
         #subp.add_argument("--no-i3", action="store_true")
         #subp.add_argument("--no-dc", action="store_true")
-        subp.add_argument("--no-hlc", action="store_true")
-        subp.add_argument("--no-slc", action="store_true")
-        subp.add_argument("--z-regions", nargs="+", type=int)
+        subp.add_argument("--no-hlc", action="store_true", required=False)
+        subp.add_argument("--no-slc", action="store_true", required=False)
+        subp.add_argument("--z-regions", nargs="+", type=int, default=[0, 1, 2], required=False)
 
     args = parser.parse_args()
     kwargs = vars(args)
@@ -1751,8 +1805,12 @@ def main():
         assert kwargs["set_key"] in DATA_DIR_INFOS or kwargs["set_key"] in MC_DIR_INFOS
 
     if "only_seasons" in kwargs:
-        kwargs["only_seasons"] = literal_eval(kwargs["only_seasons"])
-        assert kwargs["only_seasons"] in DATA_DIR_INFOS
+        only_seasons = literal_eval(kwargs["only_seasons"])
+        if not isinstance(only_seasons[0], Sequence):
+            only_seasons = [only_seasons]
+        for season in only_seasons:
+            assert season in DATA_DIR_INFOS, str(season)
+        kwargs["only_seasons"] = only_seasons
 
     processing_kw = OrderedDict(
         (k, kwargs.pop(k)) for k in inspect.getfullargspec(generate_filter_func).args
@@ -1792,7 +1850,7 @@ def main():
         get_weight_func = get_data_weight_func
 
     histo_fpath = join(histo_data_dir, histo_fname)
-    if isfile(histo_fpath):
+    if not kwargs["overwrite"] and isfile(histo_fpath):
         print('{} : Loading from file "{}"'.format(set_key, histo_fpath))
         print("{} : load_pickle     : {:.3f} sec".format(set_key, time.time() - t0))
         return load_pickle(histo_fpath)
