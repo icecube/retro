@@ -41,8 +41,6 @@ __all__ = [
     'join_struct_arrays',
     'NSORT_RE',
     'nsort_key_func',
-    'set_explicit_dtype',
-    'dict2struct',
     'quantize',
 ]
 
@@ -67,11 +65,12 @@ try:
     from collections import Iterable, Mapping, Sequence
 except ImportError:
     from collections.abc import Iterable, Mapping, Sequence
+from copy import deepcopy
 import errno
 import hashlib
-from numbers import Integral, Number
-from os import makedirs
-from os.path import abspath, dirname, expanduser, expandvars, isfile, splitext
+from numbers import Number
+from os import makedirs, path
+from os.path import abspath, dirname, expanduser, expandvars, isdir, isfile, splitext
 import pickle
 import re
 import struct
@@ -87,7 +86,7 @@ if __name__ == '__main__' and __package__ is None:
     RETRO_DIR = dirname(dirname(dirname(abspath(__file__))))
     if RETRO_DIR not in sys.path:
         sys.path.append(RETRO_DIR)
-from retro import const, load_pickle
+from retro import const
 
 
 ZSTD_EXTENSIONS = ('zstd', 'zstandard', 'zst')
@@ -172,12 +171,29 @@ def mkdir(d, mode=0o0770):
     warn : bool
         Whether to warn if directory already exists.
 
+    Returns
+    -------
+    first_created_dir : str or None
+
     """
+    d = expand(d)
+
+    # Work up in the full path to find first dir that needs to be created
+    first_created_dir = None
+    d_copy = deepcopy(d)
+    while d_copy:
+        if isdir(d_copy):
+            break
+        first_created_dir = d_copy
+        d_copy, _ = path.split(d_copy)
+
     try:
         makedirs(d, mode=mode)
     except OSError as err:
         if err.errno != errno.EEXIST:
             raise
+
+    return first_created_dir
 
 
 # TODO: add other compression algos (esp. bz2 and gz)
@@ -930,92 +946,6 @@ def nsort_key_func(s):
         key.append(non_number)
         key.append(int(number))
     return key
-
-
-def set_explicit_dtype(x):
-    """Force `x` to have a numpy type if it doesn't already have one.
-
-    Parameters
-    ----------
-    x : numpy-typed object, bool, integer, float
-        If not numpy-typed, type is attempted to be inferred. Currently only
-        bool, int, and float are supported, where bool is converted to
-        np.bool8, integer is converted to np.int64, and float is converted to
-        np.float64. This ensures that full precision for all but the most
-        extreme cases is maintained for inferred types.
-
-    Returns
-    -------
-    x : numpy-typed object
-
-    Raises
-    ------
-    TypeError
-        In case the type of `x` is not already set or is not a valid inferred
-        type. As type inference can yield different results for different
-        inputs, rather than deal with everything, explicitly failing helps to
-        avoid inferring the different instances of the same object differently
-        (which will cause a failure later on when trying to concatenate the
-        types in a larger array).
-
-    """
-    if hasattr(x, "dtype"):
-        return x
-
-    # "value" attribute is found in basic icecube.{dataclasses,icetray} dtypes
-    # such as I3Bool, I3Double, I3Int, and I3String
-    if hasattr(x, "value"):
-        x = x.value
-
-    # bools are numbers.Integral, so test for bool first
-    if isinstance(x, bool):
-        return np.bool8(x)
-
-    if isinstance(x, Integral):
-        x_new = np.int64(x)
-        assert x_new == x
-        return x_new
-
-    if isinstance(x, Number):
-        x_new = np.float64(x)
-        assert x_new == x
-        return x_new
-
-    if isinstance(x, string_types):
-        x_new = np.string0(x)
-        assert x_new == x
-        return x_new
-
-    raise TypeError("Type of argument ({}) is invalid: {}".format(x, type(x)))
-
-
-def dict2struct(d, set_explicit_dtype=set_explicit_dtype):
-    """Convert a dict with string keys and numpy-typed values into a numpy
-    array with struct dtype.
-
-    Parameters
-    ----------
-    d : OrderedMapping
-        The dict's keys are the names of the fields (strings) and the dict's
-        values are numpy-typed objects.
-
-    set_explicit_dtype : callable with one positional argument, optional
-        Provide a function for setting the numpy dtype of the value. Useful,
-        e.g., for icecube/icetray usage where special software must be present
-        (not required by this module) to do the work. If no specified,
-        the `set_explicit_dtype` function defined in this module is used.
-
-    Returns
-    -------
-    array : numpy.array of struct dtype
-
-    """
-    dt_spec = OrderedDict()
-    for key, val in d.items():
-        d[key] = typed_val = set_explicit_dtype(val)
-        dt_spec[key] = typed_val.dtype
-    array = np.array(tuple(d.values()), dtype=dt_spec.items())
-    return array
 
 
 def quantize(x, qntm):

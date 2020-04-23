@@ -66,10 +66,10 @@ function runit () {
         --retro-gcd-dir $retro_gcd_dir \
         --gcd $gcd \
         --additional-keys "L5_oscNext_bool" \
+        --pulses SplitInIcePulses SRTTWOfflinePulsesDC \
         --triggers I3TriggerHierarchy \
         --recos LineFit_DC L5_SPEFit11 \
         $truth_flag \
-        --pulses SRTTWOfflinePulsesDC \
         &
         #    SplitInIcePulses \
         #    SRTInIcePulses \
