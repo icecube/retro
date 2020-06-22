@@ -685,6 +685,8 @@ def retro_recos_to_i3files(
         input_i3file = I3File(input_i3filepath, "r")
         output_i3file = I3File(output_i3filepath, "w")
 
+        id_fields = ["run_id", "sub_run_id", "event_id", "sub_event_id", "sub_event_stream"]
+
         frame_buffer = []
         chain_has_daq_frame = False
         chain_has_physics_frame = False
@@ -733,6 +735,25 @@ def retro_recos_to_i3files(
 
                         if chain_has_physics_frame:
                             event_index += 1
+
+                            # Make sure event headers match
+                            pframe = None
+                            for frame in frame_buffer[::-1]:
+                                if frame.Stop == I3Frame.Physics:
+                                    pframe = frame
+                            assert pframe is not None
+                            i3hdr = pframe["I3EventHeader"]
+                            i3hdr_id = tuple(
+                                getattr(i3hdr, field) for field in id_fields
+                            )
+                            retro_event_id = tuple(events[event_index][id_fields])
+                            if retro_event_id != i3hdr_id:
+                                raise ValueError(
+                                    "retro event {} != frame event {}".format(
+                                        retro_event_id, i3hdr_id
+                                    )
+                                )
+
                             populate_pframe(
                                 event_index=event_index,
                                 frame_buffer=frame_buffer,
