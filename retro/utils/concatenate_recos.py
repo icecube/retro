@@ -57,9 +57,9 @@ EVENT_ID_FIELDS = [
     "start_time",
     "end_time",
 ]
-"""Note that "start_time" and "end_time" are only necessary because poeple are
-inconsiderate assholes, overwriting the *_id fields and making them no longer
-unique (at least in MC)"""
+"""Note that "start_time" and "end_time" are only necessary because poeple
+sometimes overwrite the *_id fields, making them no longer unique (at least in
+MC)"""
 
 
 @numba.jit(
