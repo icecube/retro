@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=wrong-import-position
+# pylint: disable=wrong-import-position, wrong-import-order
 
 """
 Populate Retro recos and metadata to I3 files.
@@ -298,7 +298,9 @@ def particle_from_reco(reco, kind, point_estimator, field_format="{field}"):
     return particle, consumed_fields
 
 
-def setitem_pframe(frame, key, val, event_index=None, overwrite=False):
+def setitem_pframe(
+    frame, key, val, event_index=None, replace_existing_frame_items=False
+):
     """Put value in frame, with wrapper for warn or error if the key is already
     present.
 
@@ -309,11 +311,11 @@ def setitem_pframe(frame, key, val, event_index=None, overwrite=False):
     val
     event_index : print-able object, optional
         Some form of event identifier
-    overwrite : bool, optional
+    replace_existing_frame_items : bool, optional
 
     """
     if key in frame:
-        if not overwrite:
+        if not replace_existing_frame_items:
             raise KeyError(
                 "frame for event index {} has key '{}' already".format(event_index, key)
             )
@@ -380,13 +382,15 @@ def make_i3_particles(reco, point_estimator):
     return particles_identifiers
 
 
-def extract_all_reco_info(reco, reco_name):
+def extract_all_reco_info(reco, reco_name, reco_suffix):
     """Populate ALL Retro reco information to simple I3-typed fields in the
     frame.
 
     Parameters
     ----------
     reco
+    reco_name : str
+    reco_suffix : str
 
     Returns
     -------
@@ -396,7 +400,7 @@ def extract_all_reco_info(reco, reco_name):
     all_reco_info = OrderedDict()
 
     for field in reco.dtype.names:
-        key = "{}__{}".format(reco_name, field)
+        key = "{}{}__{}".format(reco_name, reco_suffix, field)
         val = reco[field]
         if hasattr(val, "dtype") and len(val.dtype) > 0:
             # TODO: handle I3MapStringBool, I3MapStringInt?
@@ -458,7 +462,14 @@ def extract_all_reco_info(reco, reco_name):
     return all_reco_info
 
 
-def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
+def populate_pframe(
+    event_index,
+    frame_buffer,
+    recos_d,
+    reco_suffix,
+    point_estimator,
+    replace_existing_frame_items,
+):
     """Create I3Particles from the major components of the reco; all other
     info, populate opportunistically with dict-like I3 objects, by type.
 
@@ -468,9 +479,12 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
 
     Parameters
     ----------
-    event_index
-    frame_buffer
-    recos_d
+    event_index : int
+    frame_buffer : sequence
+    recos_d : mapping
+    reco_suffix : str
+    point_estimator : str in {"max", "mean", "median"}
+    replace_existing_frame_items : bool
 
     Notes
     -----
@@ -498,17 +512,35 @@ def populate_pframe(event_index, frame_buffer, recos_d, point_estimator):
         particles_identifiers = make_i3_particles(reco, point_estimator)
 
         for particle, identifier in particles_identifiers:
-            key = "__".join([reco_name, point_estimator, identifier])
-            setitem_pframe(pframe, key, particle, event_index, overwrite=False)
+            key = "__".join([reco_name + reco_suffix, point_estimator, identifier])
+            setitem_pframe(
+                pframe,
+                key,
+                particle,
+                event_index,
+                replace_existing_frame_items=replace_existing_frame_items,
+            )
 
-        all_reco_info = extract_all_reco_info(reco, reco_name)
+        all_reco_info = extract_all_reco_info(reco, reco_name, reco_suffix)
 
         for key, val in all_reco_info.items():
-            setitem_pframe(pframe, key, val, event_index, overwrite=False)
+            setitem_pframe(
+                pframe,
+                key,
+                val,
+                event_index,
+                replace_existing_frame_items=replace_existing_frame_items,
+            )
 
 
 def retro_recos_to_i3files(
-    eventsdir, point_estimator, recos=None, i3dir=None, overwrite=False
+    eventsdir,
+    point_estimator,
+    recos=None,
+    reco_suffix=None,
+    i3dir=None,
+    overwrite=False,
+    replace_existing_frame_items=False,
 ):
     """Take retro recos found in .npy files / retro directory structure and
     corresponding i3 files and generate new i3 files like the original but
@@ -520,9 +552,11 @@ def retro_recos_to_i3files(
     point_estimator : str in {"mean", "median", "max"}
     recos : str or iterable thereof, optional
         If not specified, all "retro_*" recos found will be populated
+    reco_suffix : str or None, optional
     i3dir : str, optional
         If None or not specified, defaults to `eventsdir`
-    overwrite : bool
+    overwrite : bool, optional
+    replace_existing_frame_items : bool, optional
 
     """
     eventsdir = abspath(expanduser(expandvars(eventsdir)))
@@ -545,6 +579,8 @@ def retro_recos_to_i3files(
             raise ValueError(
                 'Can only populate "retro_*" recos; "{}" is invalid'.format(reco)
             )
+
+    reco_suffix = reco_suffix if reco_suffix else ""
 
     if i3dir is None:
         i3dir = eventsdir
@@ -597,7 +633,9 @@ def retro_recos_to_i3files(
             )
         print("input_i3filepath:", input_i3filepath)
 
-        suffix = "__" + "__".join(sorted(reco_filepaths.keys()))
+        suffix = "__" + "__".join(
+            sorted((r + reco_suffix) for r in reco_filepaths.keys())
+        )
         output_i3filepath = join(
             i3filedir,
             "{base}{suffix}{extensions}".format(
@@ -647,6 +685,8 @@ def retro_recos_to_i3files(
         input_i3file = I3File(input_i3filepath, "r")
         output_i3file = I3File(output_i3filepath, "w")
 
+        id_fields = ["run_id", "sub_run_id", "event_id", "sub_event_id", "sub_event_stream"]
+
         frame_buffer = []
         chain_has_daq_frame = False
         chain_has_physics_frame = False
@@ -695,11 +735,32 @@ def retro_recos_to_i3files(
 
                         if chain_has_physics_frame:
                             event_index += 1
+
+                            # Make sure event headers match
+                            pframe = None
+                            for frame in frame_buffer[::-1]:
+                                if frame.Stop == I3Frame.Physics:
+                                    pframe = frame
+                            assert pframe is not None
+                            i3hdr = pframe["I3EventHeader"]
+                            i3hdr_id = tuple(
+                                getattr(i3hdr, field) for field in id_fields
+                            )
+                            retro_event_id = tuple(events[event_index][id_fields])
+                            if retro_event_id != i3hdr_id:
+                                raise ValueError(
+                                    "retro event {} != frame event {}".format(
+                                        retro_event_id, i3hdr_id
+                                    )
+                                )
+
                             populate_pframe(
                                 event_index=event_index,
                                 frame_buffer=frame_buffer,
                                 recos_d=recos_d,
+                                reco_suffix=reco_suffix,
                                 point_estimator=point_estimator,
+                                replace_existing_frame_items=replace_existing_frame_items,
                             )
 
                         # Regardless if there was an event identified in the
@@ -750,6 +811,11 @@ def main(description=__doc__):
         help="""Reco names to populate to the i3 file(s)""",
     )
     parser.add_argument(
+        "--reco-suffix",
+        default=None,
+        help="Add a suffix to all reco names for output to i3 files",
+    )
+    parser.add_argument(
         "--eventsdir",
         required=True,
         help="""Parent directory in which to look for Retro events / reconstructions""",
@@ -774,6 +840,11 @@ def main(description=__doc__):
         "--overwrite",
         action="store_true",
         help="""Overwrite existing output file(s) if they exist""",
+    )
+    parser.add_argument(
+        "--replace-existing-frame-items",
+        action="store_true",
+        help="""Overwrite existing frame items (otherwise, exception is raised)""",
     )
     kwargs = vars(parser.parse_args())
     retro_recos_to_i3files(**kwargs)
